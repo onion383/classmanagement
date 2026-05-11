@@ -50,6 +50,54 @@
       :items="contextMenu.items"
     />
 
+    <!-- 收据管理弹窗 -->
+    <div v-if="receiptDialog.visible" class="fixed inset-0 bg-black/50 flex items-center justify-center z-[10001] pointer-events-auto" @click.self="closeReceiptDialog">
+      <div class="bg-white p-5 rounded-lg min-w-[400px] max-w-xl">
+        <h3 class="text-lg font-bold mb-3">管理收据</h3>
+        <div class="flex flex-wrap gap-2 mb-4">
+          <div v-for="(img, idx) in receiptDialog.images" :key="idx" class="relative group w-20 h-20 border rounded overflow-hidden">
+            <img
+              :src="getFullUrl(img)"
+              @click="previewImage(img)"
+              class="w-full h-full object-cover cursor-pointer"
+              @error="$event.target.style.display='none'; $event.target.nextElementSibling.style.display='flex'"
+            />
+            <div class="w-full h-full items-center justify-center bg-gray-200 text-gray-400 text-xs" style="display:none;">
+              加载失败
+            </div>
+            <button
+              @click.stop="removeReceiptImage(idx)"
+              class="absolute top-0 right-0 bg-red-500 text-white text-xs rounded-bl px-1 opacity-0 group-hover:opacity-100 transition"
+            >×</button>
+          </div>
+          <div v-if="receiptDialog.images.length === 0" class="text-gray-400 text-sm">暂无收据图片</div>
+        </div>
+        <div class="flex items-center gap-2 mb-4">
+          <input
+            type="file"
+            multiple
+            accept="image/*"
+            @change="handleReceiptFilesUpload"
+            class="text-sm"
+          />
+          <span class="text-sm text-gray-500">可多选图片</span>
+        </div>
+        <div class="text-right">
+          <button @click="saveReceiptImages" class="bg-blue-500 text-white border-none px-4 py-1.5 rounded mr-2 cursor-pointer">确定</button>
+          <button @click="closeReceiptDialog" class="bg-gray-300 border-none px-4 py-1.5 rounded cursor-pointer">取消</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- 全屏图片预览 -->
+    <div
+      v-if="previewImageUrl"
+      class="fixed inset-0 bg-black/80 z-[10002] flex items-center justify-center cursor-pointer"
+      @click="previewImageUrl = null"
+    >
+      <img :src="getFullUrl(previewImageUrl)" class="max-w-[90vw] max-h-[90vh] object-contain" />
+    </div>
+
     <DynamicTable
       :fields="visibleFields"
       :rows="displayRows"
@@ -68,6 +116,9 @@
       @deleteRow="deleteRecord"
       @addNewRowAtBottom="addNewRowAtBottom"
       @updateNewRow="onUpdateNewRow"
+      @manageReceipt="handleManageReceipt"
+      @swapRows="onSwapRows"
+      @swapColumns="onSwapColumns"
     />
   </div>
 </template>
@@ -79,12 +130,12 @@ import ContextMenu from '../components/ContextMenu.vue';
 import SearchBar from '../components/SearchBar.vue';
 import DynamicTable from '../components/DynamicTable.vue';
 
-const API_BASE = 'http://localhost:3000';
+const API_BASE = 'https://localhost:3000';   // 根据实际协议调整
 const DEFAULT_FIELDS = [
   { name: 'id', type: '整数' },
   { name: 'position', type: '整数' },
   { name: '收支编码', type: '文字' },
-  { name: '收支类型', type: '文字' },
+  { name: '收支类型', type: '文字', control: 'select', options: ['收入', '支出'] },
   { name: '收支金额', type: '小数' },
   { name: '收支时间', type: '日期' },
   { name: '备注', type: '文字' },
@@ -108,14 +159,19 @@ export default {
       searchField: null,
       searchKeyword: '',
       dialogCallback: null,
+      receiptDialog: {
+        visible: false,
+        row: null,
+        isNew: false,
+        images: [],
+      },
+      previewImageUrl: null,
     };
   },
   computed: {
-    // 余额 = 所有收支金额的代数和
     balance() {
       return this.feeRecords.reduce((sum, r) => sum + (parseFloat(r['收支金额']) || 0), 0).toFixed(2);
     },
-    // 本月收入 = 本月正金额之和
     monthlyIncome() {
       const now = new Date();
       const year = now.getFullYear();
@@ -133,7 +189,6 @@ export default {
         }, 0)
         .toFixed(2);
     },
-    // 本月支出 = 本月负金额绝对值之和
     monthlyExpense() {
       const now = new Date();
       const year = now.getFullYear();
@@ -217,9 +272,16 @@ export default {
         const result = res.data;
         if (Array.isArray(result.data)) {
           this.feeRecords = result.data;
-          if (result.fields?.length) this.fields = result.fields;
+          if (result.fields && result.fields.length > 0) {
+            this.fields = result.fields.map(f => {
+              const defaultField = DEFAULT_FIELDS.find(df => df.name === f.name);
+              return { ...f, ...defaultField };
+            });
+          }
         }
-        if (!this.fields?.length) this.fields = [...DEFAULT_FIELDS];
+        if (!this.fields || this.fields.length === 0) {
+          this.fields = [...DEFAULT_FIELDS];
+        }
       } catch (err) {
         console.error(err);
         if (!this.feeRecords.length) this.showAlert('无法加载数据');
@@ -234,6 +296,7 @@ export default {
       }
       try {
         await axios.put(`${API_BASE}/fee-records/${row.id}`, { [field.name]: row[field.name] });
+        await this.fetchRecords();
       } catch { this.showAlert('修改失败'); }
       this.editingCell = null;
     },
@@ -244,6 +307,7 @@ export default {
       if (type === '日期') return !isNaN(Date.parse(val));
       return true;
     },
+
     addNewRowAtBottom() { if (!this.newRow) this.createNewRow(null); },
     insertRowAbove(target) { if (!this.newRow) this.createNewRow(target.position); },
     insertRowBelow(target) { if (!this.newRow) this.createNewRow(target.position + 1); },
@@ -261,7 +325,10 @@ export default {
         return;
       }
       const data = {};
-      this.fields.forEach(f => { if (f.name !== 'id' && f.name !== 'position') data[f.name] = this.newRow[f.name] || ''; });
+      for (const f of this.fields) {
+        if (f.name === 'id' || f.name === 'position') continue;
+        data[f.name] = this.newRow[f.name] || '';
+      }
       if (this.newRow.atPosition != null) data.atPosition = this.newRow.atPosition;
       try {
         await axios.post(`${API_BASE}/fee-records`, data);
@@ -289,6 +356,7 @@ export default {
         this.showAlert(err.response?.data?.error || '移动失败');
       }
     },
+
     deleteColumn(field) {
       if (field.name === 'id' || field.name === 'position') return this.showAlert('不能删除保留字段');
       this.showConfirm(`确定删除字段“${field.name}”吗？`, async () => {
@@ -331,9 +399,11 @@ export default {
     toggleSort(field) {
       if (this.sortField === field) this.sortOrder = this.sortOrder === 'asc' ? 'desc' : 'asc';
       else { this.sortField = field; this.sortOrder = 'asc'; }
+      this.saveCurrentOrder();
     },
     openSearch(field) { this.searchField = field; this.searchKeyword = ''; },
     closeSearch() { this.searchField = null; this.searchKeyword = ''; },
+
     openContextMenu(event, type, payload) {
       event.preventDefault();
       this.contextMenu = { visible: false, x: 0, y: 0, items: [] };
@@ -357,6 +427,119 @@ export default {
     },
     onUpdateNewRow(fieldName, value) {
       if (this.newRow) this.newRow[fieldName] = value;
+    },
+
+    handleManageReceipt({ row, isNew }) {
+      let images = [];
+      try {
+        const parsed = JSON.parse(row['收据'] || '[]');
+        if (Array.isArray(parsed)) images = parsed;
+      } catch { images = []; }
+      this.receiptDialog = {
+        visible: true,
+        row: row,
+        isNew: isNew,
+        images: [...images],
+      };
+    },
+    closeReceiptDialog() { this.receiptDialog.visible = false; },
+    removeReceiptImage(index) {
+      this.showConfirm('确定删除该图片吗？', () => {
+        this.receiptDialog.images.splice(index, 1);
+      });
+    },
+    async handleReceiptFilesUpload(event) {
+      const files = event.target.files;
+      if (!files.length) return;
+      const formData = new FormData();
+      for (let i = 0; i < files.length; i++) {
+        formData.append('receipts', files[i]);
+      }
+      try {
+        const res = await axios.post(`${API_BASE}/fee-records/upload-receipt`, formData, {
+          headers: { 'Content-Type': 'multipart/form-data' }
+        });
+        this.receiptDialog.images.push(...res.data.urls);
+      } catch (err) {
+        this.showAlert('图片上传失败');
+      }
+    },
+    async saveReceiptImages() {
+      const imagesJson = JSON.stringify(this.receiptDialog.images);
+      if (this.receiptDialog.isNew && this.newRow) {
+        this.newRow['收据'] = imagesJson;
+        this.closeReceiptDialog();
+        return;
+      }
+      if (!this.receiptDialog.row) return;
+      try {
+        await axios.put(`${API_BASE}/fee-records/${this.receiptDialog.row.id}`, {
+          '收据': imagesJson
+        });
+        this.receiptDialog.row['收据'] = imagesJson;
+        this.closeReceiptDialog();
+      } catch (err) {
+        this.showAlert('保存收据失败');
+      }
+    },
+
+    getFullUrl(img) {
+      if (!img) return '';
+      if (img.startsWith('http')) return img;
+      return `${API_BASE}${img}`;
+    },
+    previewImage(img) {
+      this.previewImageUrl = img;
+    },
+
+    async onSwapRows(fromIndex, toIndex) {
+      const records = [...this.feeRecords];
+      const [moved] = records.splice(fromIndex, 1);
+      records.splice(toIndex, 0, moved);
+      this.feeRecords = records;
+      const ids = records.map(r => r.id);
+      try {
+        await axios.post(`${API_BASE}/fee-records/reorder`, { ids });
+      } catch (err) {
+        this.showAlert('排序更新失败');
+        await this.fetchRecords();
+      }
+    },
+
+    async onSwapColumns(fromIndex, toIndex) {
+      const visibleFields = this.visibleFields;
+      const moved = visibleFields[fromIndex];
+
+      let targetName = null;
+      let position = 'first';
+      if (toIndex > 0) {
+        targetName = visibleFields[toIndex - 1]?.name;
+        position = 'after';
+      }
+
+      if (position === 'after' && targetName === moved.name) return;
+
+      try {
+        await axios.post(`${API_BASE}/fee-records/move-column`, {
+          columnName: moved.name,
+          targetColumnName: position === 'first' ? null : targetName,
+          position
+        });
+      } catch (err) {
+        this.showAlert('列移动失败');
+      } finally {
+        await this.fetchRecords();
+      }
+    },
+
+    saveCurrentOrder() {
+      const rows = this.displayRows.filter(r => !r._isNew);
+      const ids = rows.map(r => r.id);
+      if (ids.length > 0) {
+        axios.post(`${API_BASE}/fee-records/reorder`, { ids }).catch(err => {
+          console.error('自动保存排序顺序失败:', err);
+        });
+      }
     },
   },
   mounted() {
