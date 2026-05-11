@@ -344,19 +344,25 @@ export default {
         await this.fetchStudents();
       }
     },
+    
     async onSwapColumns(fromIndex, toIndex) {
-      const visibleFields = this.visibleFields;   // 班级页面的可见字段，不含 id、position
+      const visibleFields = this.visibleFields;
       const moved = visibleFields[fromIndex];
 
-      // 计算目标列
-      let targetName = null;
-      let position = 'first';
+      // 模拟新顺序
+      const reordered = [...visibleFields];
+      reordered.splice(fromIndex, 1);
+      reordered.splice(toIndex, 0, moved);
+
+      let targetName = null, position = 'first';
       if (toIndex > 0) {
-        targetName = visibleFields[toIndex - 1]?.name;
+        targetName = reordered[toIndex - 1]?.name;
         position = 'after';
       }
-
       if (position === 'after' && targetName === moved.name) return;
+
+      const originalFields = [...this.fields];   // 备份，用于失败时恢复
+      this.fields = reordered;                   // 乐观更新
 
       try {
         await axios.post(`${API_BASE}/students/move-column`, {
@@ -364,19 +370,10 @@ export default {
           targetColumnName: position === 'first' ? null : targetName,
           position
         });
-        // 成功：乐观更新 fields，让 UI 立刻变化
-        const reordered = [...visibleFields];
-        reordered.splice(fromIndex, 1);
-        reordered.splice(toIndex, 0, moved);
-        this.fields = reordered;
+        await this.fetchStudents();   // 成功：刷新数据，保持同步
       } catch (err) {
-      console.error('列移动失败:', err);
-      this.showAlert('列移动失败');   // ← 添加这一行
-
-        // 失败时不做乐观更新，静默恢复，可弹窗提示（可选）
-      } finally {
-        // 最后从后端拉取最新数据，确保数据库与前端彻底一致
-        await this.fetchStudents();
+        this.fields = originalFields; // 失败：立刻回退表头
+        this.showAlert('列移动失败');
       }
     },
     saveCurrentOrder() {

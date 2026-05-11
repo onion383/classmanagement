@@ -260,9 +260,9 @@ export default {
     },
 
     initColSortable() {
-      const theadRow = this.$refs.theadRow
-      if (!theadRow) return
-      if (this.colSortable) this.colSortable.destroy()
+      const theadRow = this.$refs.theadRow;
+      if (!theadRow) return;
+      if (this.colSortable) this.colSortable.destroy();
 
       this.colSortable = new Sortable(theadRow, {
         animation: 200,
@@ -270,33 +270,25 @@ export default {
         dragClass: 'sortable-drag',
         handle: '.drag-handle',
         direction: 'horizontal',
-        draggable: 'th',
-        filter: '.col-op',           // 只禁止操作列
+        draggable: 'th:not(.col-op)',
+        filter: '.col-op',
         onMove: (evt) => {
-          if (
-            evt.dragged.classList.contains('col-op') ||
-            evt.related.classList.contains('col-op')
-          ) return false
-          return true
+          if (evt.dragged.classList.contains('col-op')) return false;
+          if (evt.related.classList.contains('col-op')) {
+            return !evt.willInsertAfter;
+          }
+          return true;
         },
         onEnd: (evt) => {
-          const oldIndex = evt.oldIndex
-          const newIndex = evt.newIndex
-          if (oldIndex === newIndex) return
-
-          // 🔧 关键：把被拖拽的列马上放回原位，不让 SortableJS 真正移动表头
-          const parent = evt.item.parentNode
-          const children = Array.from(parent.children)
-          if (evt.item && children[oldIndex]) {
-            parent.insertBefore(evt.item, children[oldIndex])
-          }
-
-          // 然后通知父组件发送 API 请求
-          this.$nextTick(() => {
-            this.$emit('swapColumns', oldIndex, newIndex)
-          })
+          let from = evt.oldIndex;
+          let to = evt.newIndex;
+          const maxDataIndex = this.fields.length - 1;
+          from = Math.min(from, maxDataIndex);
+          to = Math.min(to, maxDataIndex);
+          if (from === to) return;
+          this.$emit('swapColumns', from, to);
         },
-      })
+      });
     },
     // ========== 编辑状态与格子点击 ==========
     isEditing(row, fieldName) {
