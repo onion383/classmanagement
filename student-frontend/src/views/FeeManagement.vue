@@ -510,14 +510,19 @@ export default {
       const visibleFields = this.visibleFields;
       const moved = visibleFields[fromIndex];
 
-      let targetName = null;
-      let position = 'first';
+      const reordered = [...visibleFields];
+      reordered.splice(fromIndex, 1);
+      reordered.splice(toIndex, 0, moved);
+
+      let targetName = null, position = 'first';
       if (toIndex > 0) {
-        targetName = visibleFields[toIndex - 1]?.name;
+        targetName = reordered[toIndex - 1]?.name;
         position = 'after';
       }
-
       if (position === 'after' && targetName === moved.name) return;
+
+      const originalFields = [...this.fields];
+      this.fields = reordered;
 
       try {
         await axios.post(`${API_BASE}/fee-records/move-column`, {
@@ -525,10 +530,10 @@ export default {
           targetColumnName: position === 'first' ? null : targetName,
           position
         });
-      } catch (err) {
-        this.showAlert('列移动失败');
-      } finally {
         await this.fetchRecords();
+      } catch (err) {
+        this.fields = originalFields;
+        this.showAlert('列移动失败');
       }
     },
 
