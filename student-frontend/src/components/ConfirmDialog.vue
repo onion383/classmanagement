@@ -1,5 +1,7 @@
+
+
 <template>
-  <div v-if="visible" class="fixed inset-0 bg-black/50 flex items-center justify-center z-[10000] pointer-events-auto" @click.self="handleOverlayClick">
+  <div v-if="visible" class="fixed inset-0 bg-black/50 flex items-center justify-center z-[10003] pointer-events-auto" @click.self="handleOverlayClick">
     <div class="bg-white p-5 rounded-lg min-w-[300px] text-center">
       <p v-if="message" class="mb-3">{{ message }}</p>
 

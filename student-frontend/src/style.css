@@ -1,1 +1,11 @@
 @import "tailwindcss";
+/* sortablejs 拖拽动画 */
+.sortable-ghost {
+  opacity: 0.4;
+  background-color: #c6f6d5;
+  border: 2px dashed #38a169;
+}
+.sortable-drag {
+  opacity: 0.9;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+}

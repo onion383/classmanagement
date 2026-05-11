@@ -52,6 +52,8 @@
       @deleteRow="deleteStudent"
       @addNewRowAtBottom="addNewRowAtBottom"
       @updateNewRow="onUpdateNewRow"
+      @swapRows="onSwapRows"
+      @swapColumns="onSwapColumns"
     />
   </div>
 </template>
@@ -63,15 +65,15 @@ import ContextMenu from '../components/ContextMenu.vue';
 import SearchBar from '../components/SearchBar.vue';
 import DynamicTable from '../components/DynamicTable.vue';
 
-const API_BASE = 'http://localhost:3000';
+const API_BASE = 'https://localhost:3000';   // 如果实际使用 HTTP，请改为 http://localhost:3000
 const DEFAULT_FIELDS = [
   { name: 'id', type: '整数' },
   { name: 'position', type: '整数' },
   { name: '学号', type: '文字' },
-  { name: '姓名', type: '文字' },
-  { name: '性别', type: '文字' },
-  { name: '年龄', type: '整数' },
   { name: '年级', type: '文字' },
+  { name: '班级', type: '文字' },
+  { name: '姓名', type: '文字' },
+  { name: '年龄', type: '整数' },
   { name: '备注', type: '文字' }
 ];
 
@@ -239,7 +241,7 @@ export default {
     },
     async moveRow(row, direction) {
       try {
-        await axios.post(`${API_BASE}/move-row`, { id: row.id, direction });
+        await axios.post(`${API_BASE}/students/move-row`, { id: row.id, direction });
         await this.fetchStudents();
       } catch (err) {
         this.showAlert(err.response?.data?.error || '移动失败');
@@ -247,9 +249,10 @@ export default {
     },
     deleteColumn(field) {
       if (field.name === 'id' || field.name === 'position') return this.showAlert('不能删除保留字段');
+      if (field.name === '学号' || field.name === '姓名') return this.showAlert('该字段受保护，无法删除');
       this.showConfirm(`确定删除字段“${field.name}”吗？`, async () => {
         try {
-          await axios.delete(`${API_BASE}/columns/${field.name}`);
+          await axios.delete(`${API_BASE}/students/columns/${field.name}`);
           await this.fetchStudents();
         } catch (err) {
           this.showAlert(err.response?.data?.error || '删除失败');
@@ -273,7 +276,7 @@ export default {
         return;
       }
       try {
-        await axios.post(`${API_BASE}/add-column`, {
+        await axios.post(`${API_BASE}/students/add-column`, {
           columnName: this.columnForm.name,
           dataType: this.columnForm.dataType,
           after: this.columnForm.after,
@@ -287,6 +290,7 @@ export default {
     toggleSort(field) {
       if (this.sortField === field) this.sortOrder = this.sortOrder === 'asc' ? 'desc' : 'asc';
       else { this.sortField = field; this.sortOrder = 'asc'; }
+      this.saveCurrentOrder();
     },
     openSearch(field) { this.searchField = field; this.searchKeyword = ''; },
     closeSearch() { this.searchField = null; this.searchKeyword = ''; },
@@ -295,10 +299,18 @@ export default {
       this.contextMenu = { visible: false, x: 0, y: 0, items: [] };
       const items = [];
       if (type === 'header') {
-        if (payload.name !== 'id' && payload.name !== 'position') {
-          items.push({ label: '在左侧插入列', action: () => this.startAddColumn('left', payload) });
-          items.push({ label: '在右侧插入列', action: () => this.startAddColumn('right', payload) });
-          items.push({ label: '删除本列', action: () => this.deleteColumn(payload) });
+        const field = payload;
+        if (field.name !== 'id' && field.name !== 'position') {
+          items.push({ label: '在左侧插入列', action: () => this.startAddColumn('left', field) });
+          items.push({ label: '在右侧插入列', action: () => this.startAddColumn('right', field) });
+          if (field.name === '学号' || field.name === '姓名') {
+            items.push({
+              label: '删除本列（受保护）',
+              action: () => this.showAlert('“' + field.name + '”是核心字段，删除可能导致系统异常，禁止删除。')
+            });
+          } else {
+            items.push({ label: '删除本列', action: () => this.deleteColumn(field) });
+          }
         }
       } else if (type === 'row') {
         items.push({ label: '在上面插入行', action: () => this.insertRowAbove(payload) });
@@ -316,6 +328,64 @@ export default {
     onUpdateNewRow(fieldName, value) {
       if (this.newRow) {
         this.newRow[fieldName] = value;
+      }
+    },
+
+    async onSwapRows(fromIndex, toIndex) {
+      const students = [...this.students];
+      const [moved] = students.splice(fromIndex, 1);
+      students.splice(toIndex, 0, moved);
+      this.students = students;
+      const ids = students.map(s => s.id);
+      try {
+        await axios.post(`${API_BASE}/students/reorder`, { ids });
+      } catch (err) {
+        this.showAlert('排序更新失败');
+        await this.fetchStudents();
+      }
+    },
+    async onSwapColumns(fromIndex, toIndex) {
+      const visibleFields = this.visibleFields;   // 班级页面的可见字段，不含 id、position
+      const moved = visibleFields[fromIndex];
+
+      // 计算目标列
+      let targetName = null;
+      let position = 'first';
+      if (toIndex > 0) {
+        targetName = visibleFields[toIndex - 1]?.name;
+        position = 'after';
+      }
+
+      if (position === 'after' && targetName === moved.name) return;
+
+      try {
+        await axios.post(`${API_BASE}/students/move-column`, {
+          columnName: moved.name,
+          targetColumnName: position === 'first' ? null : targetName,
+          position
+        });
+        // 成功：乐观更新 fields，让 UI 立刻变化
+        const reordered = [...visibleFields];
+        reordered.splice(fromIndex, 1);
+        reordered.splice(toIndex, 0, moved);
+        this.fields = reordered;
+      } catch (err) {
+      console.error('列移动失败:', err);
+      this.showAlert('列移动失败');   // ← 添加这一行
+
+        // 失败时不做乐观更新，静默恢复，可弹窗提示（可选）
+      } finally {
+        // 最后从后端拉取最新数据，确保数据库与前端彻底一致
+        await this.fetchStudents();
+      }
+    },
+    saveCurrentOrder() {
+      const rows = this.displayRows.filter(r => !r._isNew);
+      const ids = rows.map(r => r.id);
+      if (ids.length > 0) {
+        axios.post(`${API_BASE}/students/reorder`, { ids }).catch(err => {
+          console.error('自动保存排序顺序失败:', err);
+        });
       }
     },
   },
