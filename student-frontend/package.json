@@ -10,6 +10,7 @@
   },
   "dependencies": {
     "axios": "^1.16.0",
+    "better-sqlite3": "^12.10.0",
     "sortablejs": "^1.15.7",
     "vue": "^3.5.32",
     "vue-router": "^5.0.6"
