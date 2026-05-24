@@ -18,7 +18,7 @@
       </div>
     </div>
 
-    <!-- 工具栏按钮（与班级管理保持一致） -->
+    <!-- 工具栏按钮 -->
     <div class="mb-4 flex items-center gap-3">
       <button @click="addNewRowAtBottom" class="bg-green-500 hover:bg-green-600 text-white px-5 py-2 rounded">
         ＋ 添加记录
@@ -32,6 +32,18 @@
         class="bg-red-500 hover:bg-red-600 text-white px-4 py-2 rounded disabled:opacity-50 disabled:cursor-not-allowed"
       >
         🗑️ 批量删除 ({{ selectedCount }})
+      </button>
+      <button @click="importDialogVisible = true" class="bg-orange-500 hover:bg-orange-600 text-white px-4 py-2 rounded">
+        📥 从 Excel 导入
+      </button>
+      <button
+        @click="$refs.exportDialog.open()"
+        class="bg-yellow-500 hover:bg-yellow-600 text-white px-4 py-2 rounded"
+      >
+        📥 导出 Excel
+      </button>
+      <button @click="dedupeDialogVisible = true" class="bg-pink-500 hover:bg-pink-600 text-white px-4 py-2 rounded">
+        🔍 去除重复数据
       </button>
     </div>
 
@@ -134,6 +146,29 @@
       @selectionChange="onSelectionChange"
       @moveSelectedRows="onMoveSelectedRows"
     />
+    <ExportExcel
+      ref="exportDialog"
+      :rows="feeRecords"
+      :fields="visibleFields"
+      :selectedRowKeys="selectedRowKeys"
+      :tableElement="tableElement"
+      defaultFilename="班费记录"
+      @export-finish="onExportFinish"
+    />
+    <ImportExcel
+      :visible="importDialogVisible"
+      :existingFields="visibleFields"
+      :requiredFields="['收支编码']"
+      @import-data="onImportData"
+      @cancel="importDialogVisible = false"
+    />
+    <DeduplicateDialog
+      :visible="dedupeDialogVisible"
+      :rows="feeRecords"
+      :fields="allBusinessFields"
+      @delete-rows="onDeleteDuplicates"
+      @cancel="dedupeDialogVisible = false"
+    />
   </div>
 </template>
 
@@ -143,8 +178,11 @@ import ConfirmDialog from '../components/ConfirmDialog.vue';
 import ContextMenu from '../components/ContextMenu.vue';
 import SearchBar from '../components/SearchBar.vue';
 import DynamicTable from '../components/DynamicTable.vue';
+import ExportExcel from '../components/ExportExcel.vue';
+import ImportExcel from '../components/ImportExcel.vue';
+import DeduplicateDialog from '../components/DeduplicateDialog.vue';
 
-const API_BASE = '/api';  // 请根据实际情况调整协议
+const API_BASE = '/api';
 const DEFAULT_FIELDS = [
   { name: 'id', type: '整数' },
   { name: 'position', type: '整数' },
@@ -158,7 +196,7 @@ const DEFAULT_FIELDS = [
 
 export default {
   name: 'FeeManagement',
-  components: { ConfirmDialog, ContextMenu, SearchBar, DynamicTable },
+  components: { ConfirmDialog, ContextMenu, SearchBar, DynamicTable, ExportExcel, ImportExcel, DeduplicateDialog },
   data() {
     return {
       feeRecords: [],
@@ -168,6 +206,7 @@ export default {
       contextMenu: { visible: false, x: 0, y: 0, items: [] },
       dialog: { visible: false, message: '', type: 'alert', showCancel: false },
       columnForm: { name: '', dataType: '文字', after: '', error: '' },
+      renameOldName: '',   // 重命名时暂存旧列名
       sortField: '',
       sortOrder: 'asc',
       searchField: null,
@@ -180,8 +219,11 @@ export default {
         images: [],
       },
       previewImageUrl: null,
-      selectedCount: 0,           // 新增
-      clipboard: null,            // 新增
+      clipboard: null,
+      selectedRowKeys: [],
+      selectedCount: 0,
+      importDialogVisible: false,
+      dedupeDialogVisible: false,
     };
   },
   computed: {
@@ -221,6 +263,9 @@ export default {
           return sum + (amount < 0 ? Math.abs(amount) : 0);
         }, 0)
         .toFixed(2);
+    },
+    tableElement() {
+      return this.$refs.dynamicTable?.$el || null;
     },
     displayRows() {
       let filtered = this.feeRecords;
@@ -264,6 +309,9 @@ export default {
     visibleFields() {
       return this.fields.filter(f => f.name !== 'id' && f.name !== 'position');
     },
+    allBusinessFields() {
+      return this.fields.filter(f => f.name !== 'id' && f.name !== 'position');
+    },
   },
   methods: {
     // ============= 弹窗 =============
@@ -272,6 +320,7 @@ export default {
     onDialogConfirm() {
       this.dialog.visible = false;
       if (this.dialog.type === 'columnAdd') this.confirmAddColumn();
+      else if (this.dialog.type === 'columnRename') this.confirmRenameColumn();
       else if (typeof this.dialogCallback === 'function') this.dialogCallback();
       else if (this.dialogCallback?.confirm) this.dialogCallback.confirm();
     },
@@ -383,6 +432,32 @@ export default {
       } catch (err) { this.columnForm.error = err.response?.data?.error || '添加失败'; }
     },
 
+    // ---- 新增：重命名列 ----
+    startRenameColumn(field) {
+      this.renameOldName = field.name;
+      this.columnForm = { name: field.name, dataType: '', after: '', error: '' };
+      this.dialog = { visible: true, type: 'columnRename', showCancel: true, message: `请输入新列名（当前：${field.name}）` };
+    },
+    async confirmRenameColumn() {
+      const newName = this.columnForm.name.trim();
+      if (!newName || !/^[a-zA-Z0-9_\u4e00-\u9fa5]+$/.test(newName)) {
+        this.showAlert('列名不合法');
+        return;
+      }
+      try {
+        await axios.post(`${API_BASE}/fee-records/rename-column`, {
+          oldName: this.renameOldName,
+          newName
+        });
+        this.showAlert(`列名已改为“${newName}”`);
+        await this.fetchRecords();
+      } catch (err) {
+        this.showAlert(err.response?.data?.error || '重命名失败');
+      } finally {
+        this.renameOldName = '';
+      }
+    },
+
     // ============= 排序 / 搜索 =============
     toggleSort(field) {
       if (this.sortField === field) this.sortOrder = this.sortOrder === 'asc' ? 'desc' : 'asc';
@@ -392,7 +467,7 @@ export default {
     openSearch(field) { this.searchField = field; this.searchKeyword = ''; },
     closeSearch() { this.searchField = null; this.searchKeyword = ''; },
 
-    // ============= 右键菜单（与班级管理完全一致） =============
+    // ============= 右键菜单 =============
     openContextMenu(event, type, payload) {
       event.preventDefault();
       this.contextMenu = { visible: false, x: 0, y: 0, items: [] };
@@ -400,31 +475,27 @@ export default {
       if (type === 'header') {
         const field = payload;
         if (field.name !== 'id' && field.name !== 'position') {
+          items.push({ label: '修改列名', action: () => this.startRenameColumn(field) });
           items.push({ label: '在左侧插入列', action: () => this.startAddColumn('left', field) });
           items.push({ label: '在右侧插入列', action: () => this.startAddColumn('right', field) });
           items.push({ label: '删除本列', action: () => this.deleteColumn(field) });
         }
       } else if (type === 'row') {
-        // 上移、下移
         items.push({ label: '上移', action: () => this.moveRow(payload, 'up') });
         items.push({ label: '下移', action: () => this.moveRow(payload, 'down') });
 
-        // 粘贴（如果剪贴板有内容）
         if (this.clipboard && this.clipboard.ids.length > 0) {
           const pasteCount = this.clipboard.ids.length;
           items.push({ label: `📋 粘贴到上方 (${pasteCount})`, action: () => this.pasteRows('above', payload) });
           items.push({ label: `📋 粘贴到下方 (${pasteCount})`, action: () => this.pasteRows('below', payload) });
         }
 
-        // 插入行
         items.push({ label: '在上面插入行', action: () => this.insertRowAbove(payload) });
         items.push({ label: '在下面插入行', action: () => this.insertRowBelow(payload) });
 
-        // 剪切（根据选中数量显示）
         const cutCount = this.selectedCount > 1 ? this.selectedCount : 1;
         items.push({ label: `✂️ 剪切 (${cutCount})`, action: () => this.cutRows(payload) });
 
-        // 删除（根据选中数量显示）
         const delCount = this.selectedCount > 1 ? this.selectedCount : 1;
         items.push({ label: `🗑️ 删除 (${delCount})`, action: () => this.deleteRows(payload) });
       } else if (type === 'newRow') {
@@ -436,7 +507,7 @@ export default {
     },
     onUpdateNewRow(fieldName, value) { if (this.newRow) this.newRow[fieldName] = value; },
 
-    // ============= 剪切 / 粘贴 / 删除（适配班费数据） =============
+    // ============= 剪切 / 粘贴 / 删除 =============
     cutRows(targetRow) {
       if (this.selectedCount > 1) {
         this.cutSelectedRows();
@@ -556,6 +627,10 @@ export default {
     },
     previewImage(img) { this.previewImageUrl = img; },
 
+    onExportFinish() {
+      this.$root.toast?.show('导出成功', 'success');
+    },
+
     // ============= 行/列拖拽 =============
     async onSwapRows(fromIndex, toIndex) {
       const records = [...this.feeRecords];
@@ -582,12 +657,54 @@ export default {
         await this.fetchRecords();
       } catch (err) { this.fields = originalFields; this.showAlert('列移动失败'); }
     },
-    onSelectionChange(count) { this.selectedCount = count; },
+    onSelectionChange({ count, keys }) {
+      this.selectedCount = count;
+      this.selectedRowKeys = keys;
+    },
 
+    deleteRecord(id) {
+      if (this.selectedCount > 1) {
+        this.onBatchDelete();
+      } else {
+        this.showConfirm('确定删除该记录吗？', async () => {
+          try {
+            await axios.delete(`${API_BASE}/fee-records/${id}`);
+            await this.fetchRecords();
+            this.selectedCount = 0;
+          } catch (err) { this.showAlert('删除失败'); }
+        });
+      }
+    },
     saveCurrentOrder() {
       const rows = this.displayRows.filter(r => !r._isNew);
       const ids = rows.map(r => r.id);
       if (ids.length > 0) axios.post(`${API_BASE}/fee-records/reorder`, { ids }).catch(() => {});
+    },
+
+    async onImportData({ fields, rows }) {
+      this.importDialogVisible = false;
+      try {
+        const res = await axios.post(`${API_BASE}/fee-records/import`, { fields, rows });
+        this.showAlert(res.data.message);
+        await this.fetchRecords();
+      } catch (err) {
+        this.showAlert(err.response?.data?.error || '导入失败');
+      }
+    },
+    async onDeleteDuplicates(ids) {
+      if (!ids || ids.length === 0) return;
+      this.showConfirm(`确定删除选中的 ${ids.length} 条重复记录吗？`, async () => {
+        try {
+          for (const id of ids) {
+            await axios.delete(`${API_BASE}/fee-records/${id}`);
+          }
+          await this.fetchRecords();
+          this.dedupeDialogVisible = false;
+          this.showAlert('已成功删除所选重复数据');
+        } catch (err) {
+          this.showAlert('删除重复数据失败');
+        }
+      });
     },
   },
   mounted() {

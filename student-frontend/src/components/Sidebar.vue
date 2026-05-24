@@ -16,6 +16,21 @@
       >
         💰 班费管理
       </router-link>
+      <router-link
+        to="/account"
+        class="block px-3 py-2 rounded hover:bg-gray-700 transition-colors"
+        active-class="bg-gray-700"
+      >
+        👤 账号管理
+      </router-link>
+      <!-- 课程表入口 -->
+      <router-link
+        to="/schedule"
+        class="block px-3 py-2 rounded hover:bg-gray-700 transition-colors"
+        active-class="bg-gray-700"
+      >
+        📅 课程表
+      </router-link>
     </nav>
   </div>
 </template>

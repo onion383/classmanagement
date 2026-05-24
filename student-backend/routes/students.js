@@ -240,4 +240,89 @@ router.post('/move-column', (req, res) => {
   }
 });
 
+// 批量导入（自动处理新列、缺失列）
+router.post('/import', (req, res) => {
+  try {
+    const { fields, rows } = req.body;   // fields: 列名数组（顺序）, rows: 二维数组（每行数据）
+    if (!fields || !rows) return res.status(400).json({ error: '缺少字段或数据' });
+
+    // 1. 获取现有字段（从 table_meta）
+    const existingFields = getFields('fee_records').map(f => f.name);
+
+    // 2. 按导入顺序，如果字段不存在则自动添加
+    for (const f of fields) {
+      if (!existingFields.includes(f)) {
+        // 新字段默认类型为“文字”
+        db.prepare(`ALTER TABLE fee_records ADD COLUMN "${f}" TEXT`).run();
+        // 写入 table_meta
+        const maxSort = db.prepare(`SELECT MAX(sort_order) AS max FROM table_meta WHERE table_name = ?`).get('fee_records').max || 0;
+        db.prepare(`INSERT INTO table_meta (table_name, column_name, data_type, sort_order) VALUES (?, ?, '文字', ?)`)
+          .run('fee_records', f, maxSort + 1);
+      }
+    }
+
+    // 3. 插入数据行，全部加到末尾
+    const insertStmt = db.prepare(`INSERT INTO fee_records (${fields.map(f => `"${f}"`).join(',')}) VALUES (${fields.map(() => '?').join(',')})`);
+    const insertMany = db.transaction((dataRows) => {
+      for (const row of dataRows) {
+        insertStmt.run(...row);
+      }
+    });
+    insertMany(rows);
+
+    // 4. 重新编号 position
+    renumber('fee_records');
+
+    res.json({ message: `成功导入 ${rows.length} 条记录` });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// 批量导入（学生表）
+router.post('/import', (req, res) => {
+  try {
+    const { fields, rows } = req.body;
+    if (!fields || !rows || !Array.isArray(fields) || !Array.isArray(rows)) {
+      return res.status(400).json({ error: '缺少有效的字段或数据' });
+    }
+
+    // 获取现有字段（从 table_meta）
+    const existingFields = getFields('students').map(f => f.name);
+
+    // 自动添加新列
+    for (const f of fields) {
+      if (!existingFields.includes(f)) {
+        db.prepare(`ALTER TABLE students ADD COLUMN "${f}" TEXT`).run();
+        const maxSort = db.prepare(`SELECT MAX(sort_order) AS max FROM table_meta WHERE table_name = ?`).get('students').max || 0;
+        db.prepare(`INSERT INTO table_meta (table_name, column_name, data_type, sort_order) VALUES (?, ?, '文字', ?)`)
+          .run('students', f, maxSort + 1);
+        existingFields.push(f);
+      }
+    }
+
+    // 批量插入数据
+    const placeholders = fields.map(() => '?').join(',');
+    const columnNames = fields.map(f => `"${f}"`).join(',');
+    const insertStmt = db.prepare(`INSERT INTO students (${columnNames}) VALUES (${placeholders})`);
+
+    const insertMany = db.transaction((dataRows) => {
+      for (const row of dataRows) {
+        const filledRow = fields.map((_, idx) => (row[idx] !== undefined ? row[idx] : ''));
+        insertStmt.run(...filledRow);
+      }
+    });
+
+    insertMany(rows);
+
+    // 重新编号 position
+    renumber('students');
+
+    res.json({ message: `成功导入 ${rows.length} 条记录` });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+
 module.exports = router;

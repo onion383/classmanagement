@@ -128,8 +128,12 @@ router.post('/move', (req, res) => {
     else if (direction === 'down') target = cur + 1;
     else return res.status(400).json({ error: '无效方向' });
 
-    if (target < 1 || target > maxPos) return res.status(400).json({ error: '已到边界' });
-
+    if (direction === 'up' && target < 1) {
+      return res.status(400).json({ error: '已经是第一个，无法上移' });
+    }
+    if (direction === 'down' && target > maxPos) {
+      return res.status(400).json({ error: '已经是最后一个，无法下移' });
+    }
     const targetRow = db.prepare('SELECT id FROM fee_records WHERE position = ?').get(target);
     if (!targetRow) return res.status(400).json({ error: '目标行异常' });
 
@@ -249,6 +253,75 @@ router.post('/move-column', (req, res) => {
     const stmt = db.prepare('UPDATE table_meta SET sort_order = ? WHERE table_name = ? AND column_name = ?');
     newOrder.forEach((m, i) => stmt.run(i + 1, 'fee_records', m.column_name));
     res.json({ message: '列顺序已更新' });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// 批量导入（自动处理新列、受保护字段缺失过滤等已在导入组件完成，这里直接插入）
+router.post('/import', (req, res) => {
+  try {
+    const { fields, rows } = req.body;
+    if (!fields || !rows || !Array.isArray(fields) || !Array.isArray(rows)) {
+      return res.status(400).json({ error: '缺少有效的字段或数据' });
+    }
+
+    // 1. 获取现有字段
+    const existingFields = getFields('fee_records').map(f => f.name);
+
+    // 2. 自动创建不存在的字段
+    for (const f of fields) {
+      if (!existingFields.includes(f)) {
+        db.prepare(`ALTER TABLE fee_records ADD COLUMN "${f}" TEXT`).run();
+        const maxSort = db.prepare(`SELECT MAX(sort_order) AS max FROM table_meta WHERE table_name = ?`).get('fee_records').max || 0;
+        db.prepare(`INSERT INTO table_meta (table_name, column_name, data_type, sort_order) VALUES (?, ?, '文字', ?)`)
+          .run('fee_records', f, maxSort + 1);
+        existingFields.push(f);
+      }
+    }
+
+    // 3. 批量插入数据
+    const placeholders = fields.map(() => '?').join(',');
+    const columnNames = fields.map(f => `"${f}"`).join(',');
+    const insertStmt = db.prepare(`INSERT INTO fee_records (${columnNames}) VALUES (${placeholders})`);
+
+    const insertMany = db.transaction((dataRows) => {
+      for (const row of dataRows) {
+        const filledRow = fields.map((_, idx) => (row[idx] !== undefined ? row[idx] : ''));
+        insertStmt.run(...filledRow);
+      }
+    });
+
+    insertMany(rows);
+
+    // 4. 重新编号 position
+    renumber('fee_records');
+
+    res.json({ message: `成功导入 ${rows.length} 条记录` });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// 重命名列 POST /fee-records/rename-column
+router.post('/rename-column', (req, res) => {
+  try {
+    const { oldName, newName } = req.body;
+    if (!oldName || !newName) return res.status(400).json({ error: '缺少参数' });
+    if (!/^[a-zA-Z0-9_\u4e00-\u9fa5]+$/.test(newName)) return res.status(400).json({ error: '列名不合法' });
+    if (oldName === newName) return res.status(400).json({ error: '新列名与旧列名相同' });
+
+    // 检查新列名是否已存在
+    const existing = db.prepare('SELECT column_name FROM table_meta WHERE table_name = ? AND column_name = ?').get('fee_records', newName);
+    if (existing) return res.status(400).json({ error: '该列名已存在' });
+
+    // 修改物理表列名
+    db.prepare(`ALTER TABLE fee_records RENAME COLUMN "${oldName}" TO "${newName}"`).run();
+
+    // 更新元数据表中的列名
+    db.prepare('UPDATE table_meta SET column_name = ? WHERE table_name = ? AND column_name = ?').run(newName, 'fee_records', oldName);
+
+    res.json({ message: `列名已从“${oldName}”改为“${newName}”` });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
