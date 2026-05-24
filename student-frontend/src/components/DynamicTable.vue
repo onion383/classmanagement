@@ -7,12 +7,13 @@
     <table class="w-full border-collapse mt-0">
       <thead class="sticky top-0 z-10">
         <tr ref="theadRow">
-          <!-- 全选复选框（固定列，不参与拖拽） -->
+          <!-- 全选复选框（可通过 hideSelectAll 隐藏，但列始终存在） -->
           <th
             key="col-checkbox"
             class="bg-green-500 text-white border border-gray-300 px-1 py-1 text-center w-8 col-static"
           >
             <input
+              v-if="!hideSelectAll"
               type="checkbox"
               :checked="isAllSelected"
               :indeterminate.prop="isIndeterminate"
@@ -67,7 +68,7 @@
           <tr
             v-for="(row, rowIndex) in rows"
             :key="row._rowKey"
-            :draggable="!row._isNew && !editingCell && !hasNewRow"
+            :draggable="!row._isNew && !editingCell && !hasNewRow && !row._isSeparator"
             @dragstart="onRowDragStart($event, row, rowIndex)"
             @dragover.prevent="onRowDragOver($event, rowIndex)"
             @dragleave="onRowDragLeave($event, rowIndex)"
@@ -78,89 +79,114 @@
               'data-drag-item',
               { 'opacity-30': dragIndex === rowIndex },
               rowDropIndicatorClass(rowIndex),
-              { 'bg-gray-100': isRowSelected(row._rowKey) && !editingCell }
+              { 'bg-gray-100': isRowSelected(row._rowKey) && !editingCell },
+              row._isSeparator ? 'h-4 bg-gray-200' : ''
             ]"
             class="transition-all duration-200 ease-in-out"
           >
-            <td class="border border-gray-300 px-1 text-center align-middle w-8" @click.stop>
-              <input
-                type="checkbox"
-                :checked="isRowSelected(row._rowKey)"
-                @change="toggleRowSelect(row._rowKey)"
-                :disabled="!!editingCell"
-                class="cursor-pointer"
-              />
-            </td>
-            <td
-              v-for="(field, fieldIndex) in fields"
-              :key="field.name"
-              class="border border-gray-300 px-2 py-1 text-center relative pl-6"
-              :class="{
-                'cell-active':
-                  !isEditing(row, field.name) &&
-                  activeCell &&
-                  activeCell.rowKey === row._rowKey &&
-                  activeCell.field === field.name
-              }"
-              @click="onCellClick(row, field)"
-            >
-              <span
-                v-if="fieldIndex === 0"
-                class="absolute left-1 top-1/2 -translate-y-1/2 drag-handle cursor-grab select-none text-gray-400 hover:text-gray-600"
-                @mousedown.stop
-              >⠿</span>
+            <!-- 分隔行：只显示一个跨列的空单元格 -->
+            <td v-if="row._isSeparator" :colspan="(fields ? fields.length : 0) + 2"></td>
 
-              <template v-if="field.name === 'id'">{{ row._isNew ? '自动' : row.id }}</template>
-              <template v-else-if="field.name === 'position'">{{ row._isNew ? '-' : row._displayIndex }}</template>
-              <template v-else-if="field.name === '收据'">
-                <button @click="$emit('manageReceipt', { row, isNew: row._isNew })" class="bg-purple-500 text-white border-none py-1 px-2 rounded text-xs cursor-pointer">管理收据{{ row._isNew ? '' : ' (' + getReceiptCount(row) + ')' }}</button>
-              </template>
-              <template v-else-if="field.control === 'select'">
-                <select
-                  v-if="row._isNew || isEditing(row, field.name)"
-                  v-model="row[field.name]"
-                  @change="row._isNew ? $emit('updateNewRow', field.name, $event.target.value) : $emit('saveCell', row, field)"
-                  @blur="row._isNew ? null : $emit('saveCell', row, field)"
-                  class="w-full min-h-[24px] leading-6 px-1 py-0.5 border border-gray-300 bg-white focus:outline-none focus:border-green-400"
-                >
-                  <option value=""></option>
-                  <option v-for="opt in field.options" :key="opt" :value="opt">{{ opt }}</option>
-                </select>
-                <span v-else @dblclick="$emit('startEdit', row, field)" class="block w-full min-h-[24px] leading-6 px-1 cursor-default">{{ row[field.name] || '' }}</span>
-              </template>
-              <template v-else-if="field.type === '日期' || field.control === 'datepicker'">
-                <input type="date" v-if="row._isNew || isEditing(row, field.name)" v-model="row[field.name]" @blur="row._isNew ? null : $emit('saveCell', row, field)" class="w-full min-h-[24px] leading-6 px-1 py-0.5 border border-transparent bg-yellow-50 focus:outline-none focus:border-green-400 box-border" />
-                <span v-else @dblclick="$emit('startEdit', row, field)" class="block w-full min-h-[24px] leading-6 px-1 cursor-default">{{ row[field.name] || '' }}</span>
-              </template>
-              <template v-else>
+            <!-- 普通行 -->
+            <template v-else>
+              <!-- 复选框 -->
+              <td class="border border-gray-300 px-1 text-center align-middle w-8" @click.stop>
                 <input
-                  v-if="row._isNew || isEditing(row, field.name)"
-                  v-model="row[field.name]"
-                  @blur="row._isNew ? null : $emit('saveCell', row, field)"
-                  @keyup.enter="row._isNew ? null : $emit('saveCell', row, field)"
-                  class="w-full min-h-[24px] leading-6 px-1 py-0.5 border border-transparent bg-yellow-50 focus:outline-none focus:border-green-400 box-border"
-                  :placeholder="field.name"
-                  :ref="row._isNew ? 'newRowInput' : 'editInput-' + row._rowKey + '-' + field.name"
+                  type="checkbox"
+                  :checked="isRowSelected(row._rowKey)"
+                  @change="toggleRowSelect(row._rowKey)"
+                  :disabled="!!editingCell"
+                  class="cursor-pointer"
                 />
-                <span v-else @dblclick="$emit('startEdit', row, field)" class="block w-full min-h-[24px] leading-6 px-1 cursor-default">{{ row[field.name] != null ? row[field.name] : '' }}</span>
-              </template>
-            </td>
-            <td class="border border-gray-300 px-2 py-1 text-center whitespace-nowrap">
-              <template v-if="row._isNew">
-                <button @click="$emit('saveNewRow')" class="bg-blue-500 text-white border-none py-0.5 px-2 mr-1 cursor-pointer rounded">保存</button>
-                <button @click="$emit('cancelNewRow')" class="bg-gray-400 text-white border-none py-0.5 px-2 cursor-pointer rounded">取消</button>
-              </template>
-              <template v-else>
-                <button @click="$emit('moveRow', row, 'up')" class="bg-gray-400 text-white border-none py-0.5 px-1.5 mr-0.5 cursor-pointer rounded" title="上移">↑</button>
-                <button @click="$emit('moveRow', row, 'down')" class="bg-gray-400 text-white border-none py-0.5 px-1.5 mr-0.5 cursor-pointer rounded" title="下移">↓</button>
-                <button @click="$emit('deleteRow', row.id)" class="bg-red-500 text-white border-none py-0.5 px-2 cursor-pointer rounded">删除</button>
-              </template>
-            </td>
+              </td>
+
+              <!-- 数据列 -->
+              <td
+                v-for="(field, fieldIndex) in fields"
+                :key="field.name"
+                class="border border-gray-300 px-2 py-1 text-center relative pl-6"
+                :class="{
+                  'cell-active':
+                    !isEditing(row, field.name) &&
+                    activeCell &&
+                    activeCell.rowKey === row._rowKey &&
+                    activeCell.field === field.name
+                }"
+                @click="onCellClick(row, field)"
+              >
+                <!-- 拖拽手柄（仅在非去重模式或允许移动时显示） -->
+                <span
+                  v-if="fieldIndex === 0 && !hideMoveButtons"
+                  class="absolute left-1 top-1/2 -translate-y-1/2 drag-handle cursor-grab select-none text-gray-400 hover:text-gray-600"
+                  @mousedown.stop
+                >⠿</span>
+
+                <template v-if="field.name === 'id'">{{ row._isNew ? '自动' : row.id }}</template>
+                <template v-else-if="field.name === 'position'">{{ row._isNew ? '-' : row._displayIndex }}</template>
+                <template v-else-if="field.name === '收据'">
+                  <button @click="$emit('manageReceipt', { row, isNew: row._isNew })" class="bg-purple-500 text-white border-none py-1 px-2 rounded text-xs cursor-pointer">管理收据{{ row._isNew ? '' : ' (' + getReceiptCount(row) + ')' }}</button>
+                </template>
+                <template v-else-if="field.control === 'select'">
+                  <select
+                    v-if="row._isNew || isEditing(row, field.name)"
+                    v-model="row[field.name]"
+                    @change="row._isNew ? $emit('updateNewRow', field.name, $event.target.value) : $emit('saveCell', row, field)"
+                    @blur="row._isNew ? null : $emit('saveCell', row, field)"
+                    class="w-full min-h-[24px] leading-6 px-1 py-0.5 border border-gray-300 bg-white focus:outline-none focus:border-green-400"
+                  >
+                    <option value=""></option>
+                    <option v-for="opt in field.options" :key="opt" :value="opt">{{ opt }}</option>
+                  </select>
+                  <span v-else @dblclick="$emit('startEdit', row, field)" class="block w-full min-h-[24px] leading-6 px-1 cursor-default">{{ row[field.name] || '' }}</span>
+                </template>
+                <template v-else-if="field.type === '日期' || field.control === 'datepicker'">
+                  <input type="date" v-if="row._isNew || isEditing(row, field.name)" v-model="row[field.name]" @blur="row._isNew ? null : $emit('saveCell', row, field)" class="w-full min-h-[24px] leading-6 px-1 py-0.5 border border-transparent bg-yellow-50 focus:outline-none focus:border-green-400 box-border" />
+                  <span v-else @dblclick="$emit('startEdit', row, field)" class="block w-full min-h-[24px] leading-6 px-1 cursor-default">{{ row[field.name] || '' }}</span>
+                </template>
+                <template v-else>
+                  <input
+                    v-if="row._isNew || isEditing(row, field.name)"
+                    v-model="row[field.name]"
+                    @blur="row._isNew ? null : $emit('saveCell', row, field)"
+                    @keyup.enter="row._isNew ? null : $emit('saveCell', row, field)"
+                    class="w-full min-h-[24px] leading-6 px-1 py-0.5 border border-transparent bg-yellow-50 focus:outline-none focus:border-green-400 box-border"
+                    :placeholder="field.name"
+                    :ref="row._isNew ? 'newRowInput' : 'editInput-' + row._rowKey + '-' + field.name"
+                  />
+                  <span v-else @dblclick="$emit('startEdit', row, field)" class="block w-full min-h-[24px] leading-6 px-1 cursor-default">{{ row[field.name] != null ? row[field.name] : '' }}</span>
+                </template>
+              </td>
+
+              <!-- 操作列 -->
+              <td class="border border-gray-300 px-2 py-1 text-center whitespace-nowrap">
+                <template v-if="row._isNew">
+                  <button @click="$emit('saveNewRow')" class="bg-blue-500 text-white border-none py-0.5 px-2 mr-1 cursor-pointer rounded">保存</button>
+                  <button @click="$emit('cancelNewRow')" class="bg-gray-400 text-white border-none py-0.5 px-2 cursor-pointer rounded">取消</button>
+                </template>
+                <template v-else>
+                  <!-- 上移 / 下移（仅在非去重模式显示） -->
+                  <button
+                    v-if="!hideMoveButtons"
+                    @click="$emit('moveRow', row, 'up')"
+                    class="bg-gray-400 text-white border-none py-0.5 px-1.5 mr-0.5 cursor-pointer rounded"
+                    title="上移"
+                  >↑</button>
+                  <button
+                    v-if="!hideMoveButtons"
+                    @click="$emit('moveRow', row, 'down')"
+                    class="bg-gray-400 text-white border-none py-0.5 px-1.5 mr-0.5 cursor-pointer rounded"
+                    title="下移"
+                  >↓</button>
+                  <!-- 删除按钮始终保留 -->
+                  <button @click="$emit('deleteRow', row.id)" class="bg-red-500 text-white border-none py-0.5 px-2 cursor-pointer rounded">删除</button>
+                </template>
+              </td>
+            </template>
           </tr>
         </TransitionGroup>
 
         <tr v-if="!hasNewRow" class="bg-gray-50 cursor-pointer" @click="$emit('addNewRowAtBottom')">
-          <td :colspan="fields.length + 2" class="text-center py-2 text-green-500 font-medium">
+          <td :colspan="(fields ? fields.length : 0) + 2" class="text-center py-2 text-green-500 font-medium">
             ＋ 点击添加一行
           </td>
         </tr>
@@ -180,6 +206,8 @@ export default {
     sortOrder: { type: String, default: 'asc' },
     editingCell: { type: Object, default: null },
     maxRows: { type: Number, default: 10 },
+    hideSelectAll: { type: Boolean, default: false },
+    hideMoveButtons: { type: Boolean, default: false }   // 新增：控制移动按钮和拖拽手柄的显示
   },
   emits: [
     'contextmenu', 'search', 'toggleSort', 'saveNewRow', 'cancelNewRow',
@@ -202,8 +230,15 @@ export default {
   computed: {
     hasNewRow() { return this.rows && this.rows.some(r => r._isNew); },
     enableVerticalScroll() { return (this.rows || []).length > this.maxRows; },
-    isAllSelected() { return this.rows && this.rows.length > 0 && this.rows.every(r => this.selectedRowKeys.includes(r._rowKey)); },
-    isIndeterminate() { const len = (this.rows || []).length; const s = this.selectedRowKeys.length; return s > 0 && s < len; },
+    isAllSelected() {
+      const normalRows = (this.rows || []).filter(r => !r._isSeparator);
+      return normalRows.length > 0 && normalRows.every(r => this.selectedRowKeys.includes(r._rowKey));
+    },
+    isIndeterminate() {
+      const normalRows = (this.rows || []).filter(r => !r._isSeparator);
+      const s = this.selectedRowKeys.length;
+      return s > 0 && s < normalRows.length;
+    },
   },
   watch: {
     'rows.length'() { this.$nextTick(() => this.focusOnNewRow()); },
@@ -223,11 +258,18 @@ export default {
       immediate: true,
     },
     rows: {
-      handler(newVal) { this.selectedRowKeys = this.selectedRowKeys.filter(key => newVal.some(r => r._rowKey === key)); },
+      handler(newVal) {
+        this.selectedRowKeys = this.selectedRowKeys.filter(key => newVal.some(r => r._rowKey === key));
+      },
       immediate: true,
     },
     selectedRowKeys: {
-      handler() { this.$emit('selectionChange', this.selectedRowKeys.length); },
+      handler() {
+        this.$emit('selectionChange', {
+          count: this.selectedRowKeys.length,
+          keys: [...this.selectedRowKeys]
+        });
+      },
       deep: true,
       immediate: true,
     },
@@ -241,18 +283,14 @@ export default {
     if (this._colDragGhost) this._colDragGhost.remove();
   },
   methods: {
-    // 行拖拽指示（上方/下方）
     rowDropIndicatorClass(rowIndex) {
       if (this.dragIndex === null || this.dragOverIndex === null) return '';
       if (rowIndex !== this.dragOverIndex) return '';
-      // 向下拖拽 → 插入到目标行之后 → 底部加线
       if (this.dragOverIndex > this.dragIndex) {
         return 'border-b-2 border-blue-500';
       }
-      // 向上拖拽 → 插入到目标行之前 → 顶部加线
       return 'border-t-2 border-blue-500';
     },
-    // 列拖拽指示（左侧/右侧）
     colDropIndicatorClass(colIndex) {
       if (this.colDragIndex === null || this.colDragOverIndex === null) return '';
       if (colIndex !== this.colDragOverIndex) return '';
@@ -262,9 +300,8 @@ export default {
       return 'border-l-2 border-blue-500';
     },
 
-    // ========== 行拖拽 ==========
     onRowDragStart(event, row, index) {
-      if (row._isNew) { event.preventDefault(); return; }
+      if (row._isNew || row._isSeparator) { event.preventDefault(); return; }
       if (this.selectedRowKeys.length > 1 && !this.selectedRowKeys.includes(row._rowKey)) {
         event.preventDefault();
         return;
@@ -272,7 +309,7 @@ export default {
       this.dragIndex = index;
       event.dataTransfer.effectAllowed = 'move';
       if (this.selectedRowKeys.length > 1) {
-        const selectedRows = this.rows.filter(r => this.selectedRowKeys.includes(r._rowKey) && !r._isNew);
+        const selectedRows = this.rows.filter(r => this.selectedRowKeys.includes(r._rowKey) && !r._isNew && !r._isSeparator);
         const ghost = document.createElement('div');
         ghost.style.cssText = 'position:absolute;top:-9999px;padding:8px 12px;background:rgba(219,234,254,0.95);border:2px solid #3b82f6;border-radius:8px;color:#1e3a8a;font-weight:bold;font-size:14px;z-index:10000;box-shadow:0 4px 12px rgba(0,0,0,0.15);';
         const names = selectedRows.slice(0, 2).map(r => r['姓名'] || r['收支编码'] || '项目');
@@ -299,7 +336,7 @@ export default {
       }
       const movedRow = this.rows[this.dragIndex];
       if (this.selectedRowKeys.length > 1 && this.selectedRowKeys.includes(movedRow._rowKey)) {
-        const selectedKeys = this.selectedRowKeys.filter(key => this.rows.some(r => r._rowKey === key));
+        const selectedKeys = this.selectedRowKeys.filter(key => this.rows.some(r => r._rowKey === key && !r._isSeparator));
         this.$emit('moveSelectedRows', { selectedKeys, oldIndex: this.dragIndex, newIndex: targetIndex, isDownward: targetIndex > this.dragIndex });
       } else {
         this.$emit('swapRows', this.dragIndex, targetIndex);
@@ -313,7 +350,6 @@ export default {
       if (this._dragGhost) { this._dragGhost.remove(); this._dragGhost = null; }
     },
 
-    // ========== 列拖拽 ==========
     onColDragStart(event, colIndex) {
       this.colDragIndex = colIndex;
       event.dataTransfer.effectAllowed = 'move';
@@ -346,7 +382,6 @@ export default {
       if (this._colDragGhost) { this._colDragGhost.remove(); this._colDragGhost = null; }
     },
 
-    // ========== 编辑、复选框、辅助 ==========
     isEditing(row, fieldName) { return this.editingCell?.rowKey === row._rowKey && this.editingCell?.field === fieldName; },
     onCellClick(row, field) { if (!this.isEditing(row, field.name)) this.activeCell = { rowKey: row._rowKey, field: field.name }; },
     handleClickOutside(event) {
@@ -367,7 +402,10 @@ export default {
       idx === -1 ? this.selectedRowKeys.push(rowKey) : this.selectedRowKeys.splice(idx, 1);
     },
     toggleAllSelect() {
-      this.isAllSelected ? this.selectedRowKeys = [] : this.selectedRowKeys = (this.rows || []).filter(r => !r._isNew).map(r => r._rowKey);
+      const normalRows = (this.rows || []).filter(r => !r._isSeparator && !r._isNew);
+      this.isAllSelected
+        ? (this.selectedRowKeys = [])
+        : (this.selectedRowKeys = normalRows.map(r => r._rowKey));
     },
     clearSelection() { this.selectedRowKeys = []; },
     getReceiptCount(row) { try { return JSON.parse(row['收据'] || '[]').length; } catch { return 0; } },
