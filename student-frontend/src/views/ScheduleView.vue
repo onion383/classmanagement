@@ -1,94 +1,139 @@
 <template>
   <div>
-    <!-- ========== 实行课表（临时） ========== -->
-    <section>
-      <h1 class="text-2xl font-bold mb-4">📅 一周实行课表</h1>
+    <!-- 顶部标题栏 -->
+    <div class="w-full bg-gradient-to-r from-blue-80 to-blue-100 shadow-md rounded-xl mb-6  px-6 py-5 ">
+      <h1 class="text-2xl font-bold text-gray-800">📅 课程表</h1>
+    </div>
 
-      <div class="mb-4 flex items-center gap-3">
-        <button @click="activeSettingsVisible = true" class="bg-purple-500 text-white px-4 py-2 rounded">⚙️ 设置</button>
-        <button @click="loadActive" class="bg-gray-500 text-white px-4 py-2 rounded">🔄 刷新</button>
-        <button @click="applyMasterToActive" class="bg-green-500 text-white px-4 py-2 rounded">📥 从一般课表导入</button>
-        <button @click="$refs.activeExportDialog.open()" class="bg-yellow-500 text-white px-4 py-2 rounded">📥 导出 Excel</button>
-      </div>
+    <!-- 标签切换 -->
+    <Tabs :tabs="tabItems" v-model="activeTab">
+      <template #default="{ activeTab }">
+        <!-- ==================== 课程表管理标签页 ==================== -->
+        <div v-if="activeTab === 'schedule'">
+          <!-- 实行课表（临时） -->
+          <section class="mb-10">
+            <h2 class="text-xl font-semibold mb-4">📅 实行课表（临时）</h2>
+            <div class="mb-4 flex items-center gap-3">
+              <button @click="activeSettingsVisible = true" class="bg-purple-500 text-white px-4 py-2 rounded">⚙️ 设置</button>
+              <button @click="loadActive" class="bg-gray-500 text-white px-4 py-2 rounded">🔄 刷新</button>
+              <button @click="applyMasterToActive" class="bg-green-500 text-white px-4 py-2 rounded">📥 从一般课表导入</button>
+              <button @click="$refs.activeExportDialog.open()" class="bg-yellow-500 text-white px-4 py-2 rounded">📥 导出 Excel</button>
+            </div>
 
-      <GridView
-        :colHeaders="activeColHeaders"
-        :rows="activeDisplayRows"
-        :showPeriodColumn="true"
-        @update:cells="onActiveCellsUpdate"
-        @swapRows="onActiveSwapRows"
-        @swapColumns="onActiveSwapColumns"
-        @update:row-meta="onActiveRowMeta"
-      />
+            <GridView
+              :title="activeTitle"    
+              :colHeaders="activeColHeaders"
+              :rows="activeDisplayRows"
+              :showPeriodColumn="true"
+              @update:cells="onActiveCellsUpdate"
+              @swapRows="onActiveSwapRows"
+              @swapColumns="onActiveSwapColumns"
+              @update:row-meta="onActiveRowMeta"
+              
 
-      <SettingsDialog
-        :visible="activeSettingsVisible"
-        :settings="activeSettings"
-        :semesterStart="semesterStart"
-        @save="saveActiveSettings"
-        @cancel="activeSettingsVisible = false"
-        @update:semesterStart="semesterStart = $event"
-      />
+            />
 
-      <ExportExcel
-        ref="activeExportDialog"
-        :rows="activeExportRows"
-        :fields="activeExportFields"
-        defaultFilename="实行课表"
-        @export-finish="() => {}"
-      />
-    </section>
-    
-    <div class="mb-8"></div>
-    <!-- ========== 一般课表 ========== -->
-    <section class="mb-10">
+            <SettingsDialog
+              :visible="activeSettingsVisible"
+              :settings="activeSettings"
+              :semesterStart="semesterStart"
+              :showSemesterStart="true"
+              @save="saveActiveSettings"
+              @cancel="activeSettingsVisible = false"
+              @update:semesterStart="semesterStart = $event"
+            />
 
-      <h1 class="text-2xl font-bold mb-4">📋 学期全局课表</h1>
+            <ExportExcel
+              ref="activeExportDialog"
+              :rows="activeExportRows"
+              :fields="activeExportFields"
+              defaultFilename="实行课表"
+              @export-finish="() => {}"
+            />
+          </section>
 
-      <div class="mb-4 flex items-center gap-3">
-        <button @click="masterSettingsVisible = true" class="bg-purple-500 text-white px-4 py-2 rounded">⚙️ 设置</button>
-        <button @click="loadMaster" class="bg-gray-500 text-white px-4 py-2 rounded">🔄 刷新</button>
-        <button @click="applyMasterToActive" class="bg-green-500 text-white px-4 py-2 rounded">📥 应用到实行课表</button>
-        <button @click="$refs.masterExportDialog.open()" class="bg-yellow-500 text-white px-4 py-2 rounded">📥 导出 Excel</button>
-      </div>
+          <!-- 分隔 -->
+          <div class="mb-8"></div>
 
-      <GridView
-        :colHeaders="masterColHeaders"
-        :rows="masterDisplayRows"
-        :showPeriodColumn="true"
-        @update:cells="onMasterCellsUpdate"
-        @swapRows="onMasterSwapRows"
-        @swapColumns="onMasterSwapColumns"
-        @update:row-meta="onMasterRowMeta"
-      />
+          <!-- 一般课表（模板） -->
+          <section>
+            <h2 class="text-xl font-semibold mb-4">📋 一般课表（模板）</h2>
+            <div class="mb-4 flex items-center gap-3">
+              <button @click="masterSettingsVisible = true" class="bg-purple-500 text-white px-4 py-2 rounded">⚙️ 设置</button>
+              <button @click="loadMaster" class="bg-gray-500 text-white px-4 py-2 rounded">🔄 刷新</button>
+              <button @click="$refs.masterExportDialog.open()" class="bg-yellow-500 text-white px-4 py-2 rounded">📥 导出 Excel</button>
+            </div>
 
-      <SettingsDialog
-        :visible="masterSettingsVisible"
-        :settings="masterSettings"
-        :semesterStart="''"
-        @save="saveMasterSettings"
-        @cancel="masterSettingsVisible = false"
-        @update:semesterStart="() => {}"
-      />
+            <GridView
+              :colHeaders="masterColHeaders"
+              :rows="masterDisplayRows"
+              :showPeriodColumn="true"
+              @update:cells="onMasterCellsUpdate"
+              @swapRows="onMasterSwapRows"
+              @swapColumns="onMasterSwapColumns"
+              @update:row-meta="onMasterRowMeta"
+            />
 
-      <ExportExcel
-        ref="masterExportDialog"
-        :rows="masterExportRows"
-        :fields="masterExportFields"
-        defaultFilename="一般课表"
-        @export-finish="() => {}"
-      />
-    </section>
+            <SettingsDialog
+              :visible="masterSettingsVisible"
+              :settings="masterSettings"
+              :semesterStart="''"
+              :showSemesterStart="false"
+              @save="saveMasterSettings"
+              @cancel="masterSettingsVisible = false"
+              @update:semesterStart="() => {}"
+            />
 
-    
+            <ExportExcel
+              ref="masterExportDialog"
+              :rows="masterExportRows"
+              :fields="masterExportFields"
+              defaultFilename="一般课表"
+              @export-finish="() => {}"
+            />
+          </section>
+        </div>
+
+        <!-- ==================== 历史课程表记录标签页（占位） ==================== -->
+        <div v-else-if="activeTab === 'history'">
+          
+          <div v-if="historyLoading" class="text-center py-10">加载中...</div>
+          <div v-else-if="!historySnapshot" class="text-center py-10 text-gray-500">该周暂无快照</div>
+          <GridView
+            v-else
+            :colHeaders="historyColHeaders"
+            :title="activeTitle"
+            :rows="historyDisplayRows"
+            :showPeriodColumn="true"
+            @update:cells="() => {}"
+            @swapRows="() => {}"
+            @swapColumns="() => {}"
+            @update:row-meta="() => {}"
+          />
+          <WeekSwitcher
+            v-model:currentWeek="historyCurrentWeek"
+            :weeks="historyWeeks"
+            @update:currentWeek="loadHistorySnapshot"
+          />
+          <div class="text-center mt-4">
+            <button @click="captureHistorySnapshot" class="bg-green-500 text-white px-4 py-2 rounded">
+              📸 保存本周快照
+            </button>
+          </div>
+        </div>
+      </template>
+    </Tabs>
   </div>
 </template>
+
 
 <script>
 import axios from 'axios';
 import GridView from '../components/GridView.vue';
 import SettingsDialog from '../components/SettingsDialog.vue';
 import ExportExcel from '../components/ExportExcel.vue';
+import Tabs from '../components/Tabs.vue';
+import WeekSwitcher from '../components/WeekSwitcher.vue';
 
 const API_BASE = '/api';
 
@@ -126,7 +171,7 @@ const SECTION_NAMES = {
 
 export default {
   name: 'ScheduleView',
-  components: { GridView, SettingsDialog, ExportExcel },
+  components: { GridView, SettingsDialog, ExportExcel,Tabs,WeekSwitcher },
   data() {
     return {
       // ========== 一般课表 ==========
@@ -151,8 +196,37 @@ export default {
 
       // ========== 全局 ==========
       semesterStart: '',
-      loaded: false
+      loaded: false,
+      activeTab: 'schedule',
+      tabItems: [
+        { label: '课程表管理', value: 'schedule' },
+        { label: '历史课程表记录', value: 'history' }
+      ],
+      historyWeeks: [],
+      historyCurrentWeek: '',
+      historySnapshot: null,
+      historyCells: [],
+      historySettings: { sections: null, periods: [], days: ['周一','周二','周三','周四','周五'] },
+      historyColHeaders: ['周一','周二','周三','周四','周五'],
+      historyLoading: false,
     };
+  },
+  watch: {
+    activeTab(newTab) {
+      if (newTab === 'history') {
+        if (this.historyWeeks.length === 0) {
+          this.fetchHistoryWeeks();
+        } else {
+          // 确保当前周存在，若不存在则重载
+          if (!this.historyCurrentWeek || !this.historyWeeks.some(w => w.week_start === this.historyCurrentWeek)) {
+            if (this.historyWeeks.length > 0) {
+              this.historyCurrentWeek = this.historyWeeks[0].week_start;
+            }
+            this.loadHistorySnapshot();
+          }
+        }
+      }
+    }
   },
   computed: {
     // ---- 一般课表显示行 ----
@@ -170,13 +244,9 @@ export default {
 
     // ---- 实行课表显示行（顶部自动添加周数标题行） ----
     activeDisplayRows() {
-      const rows = this.buildDisplayRows(this.activeCells, this.activeSettings);
-      if (this.semesterStart) {
-        const weekLabel = `第 ${this.weekNumber} 周 课程表`;
-        rows.unshift({ _rowKey: 'week_title', _isSeparator: true, label: weekLabel });
-      }
-      return rows;
+      return this.buildDisplayRows(this.activeCells, this.activeSettings);
     },
+
     activeExportFields() {
       const fields = [{ name: '时段' }, { name: '节次' }, { name: '时间' }];
       this.activeColHeaders.forEach(d => fields.push({ name: d }));
@@ -185,6 +255,10 @@ export default {
     activeExportRows() {
       return this.buildExportRows(this.activeCells, this.activeSettings);
     },
+    historyDisplayRows() {
+      const rows = this.buildDisplayRows(this.historyCells, this.historySettings);
+      return rows.map(row => ({ ...row, _isReadonly: true }));
+    },
     weekNumber() {
       if (!this.semesterStart) return '';
       const start = new Date(this.semesterStart);
@@ -192,7 +266,10 @@ export default {
       const diff = now - start;
       if (diff < 0) return '未开始';
       return Math.floor(diff / (7 * 24 * 60 * 60 * 1000)) + 1;
-    }
+    },
+    activeTitle() {
+      return this.semesterStart ? `第 ${this.weekNumber} 周 课程表` : '课程表';
+    },
   },
   methods: {
     // ============= 公共：构建显示行 =============
@@ -558,6 +635,80 @@ export default {
         this.saveActive();
       }
     },
+    // 获取所有快照周列表
+    async fetchHistoryWeeks() {
+      try {
+        const res = await axios.get(`${API_BASE}/schedule/history`);
+        this.historyWeeks = res.data || [];
+
+        // 如果已有选中的周，检查是否仍在列表中
+        if (this.historyCurrentWeek) {
+          const stillExists = this.historyWeeks.some(w => w.week_start === this.historyCurrentWeek);
+          if (!stillExists) this.historyCurrentWeek = '';
+        }
+
+        // 如果没有选中，自动选第一周
+        if (!this.historyCurrentWeek && this.historyWeeks.length > 0) {
+          this.historyCurrentWeek = this.historyWeeks[0].week_start;
+        }
+
+        // 如果有选中的周，加载其快照
+        if (this.historyCurrentWeek) {
+          await this.loadHistorySnapshot();
+        }
+      } catch (e) {
+        console.error('获取历史周列表失败', e);
+      }
+    },
+
+    // 加载当前周的课表快照
+    async loadHistorySnapshot() {
+      if (!this.historyCurrentWeek) return;
+      this.historyLoading = true;
+      try {
+        const res = await axios.get(`${API_BASE}/schedule/history/${this.historyCurrentWeek}`);
+        this.historySnapshot = res.data;
+        if (this.historySnapshot) {
+          this.historyCells = Array.isArray(this.historySnapshot.cells) ? this.historySnapshot.cells : [];
+          const settings = this.historySnapshot.settings || {};
+          this.historySettings = {
+            sections: settings.sections || null,
+            periods: settings.periods || [],
+            days: settings.days || ['周一','周二','周三','周四','周五']
+          };
+          this.historyColHeaders = this.historySettings.days;
+        } else {
+          this.historyCells = [];
+          this.historySettings = { sections: null, periods: [], days: ['周一','周二','周三','周四','周五'] };
+          this.historyColHeaders = ['周一','周二','周三','周四','周五'];
+        }
+      } catch (e) { console.error(e); }
+      finally { this.historyLoading = false; }
+    },
+
+    // 获取本周一的日期
+    getMonday(date) {
+      const d = new Date(date);
+      const day = d.getDay();
+      const diff = d.getDate() - day + (day === 0 ? -6 : 1);
+      return new Date(d.setDate(diff));
+    },
+
+    // 保存当前实行课表为本周快照
+    async captureHistorySnapshot() {
+      try {
+        const activeRes = await axios.get(`${API_BASE}/schedule`);
+        const { cells, settings } = activeRes.data;
+        const weekStart = this.getMonday(new Date()).toISOString().slice(0, 10);
+        await axios.post(`${API_BASE}/schedule/snapshot`, {
+          week_start: weekStart,
+          cells,
+          settings
+        });
+        alert('本周快照已保存');
+        await this.fetchHistoryWeeks();
+      } catch (e) { alert('保存失败'); }
+    },
     async saveActiveSettings(settings) {
       this.activeSettings = {
         sections: settings.sections,
@@ -578,6 +729,7 @@ export default {
   mounted() {
     this.loadMaster();
     this.loadActive();
+    this.fetchHistoryWeeks();
   }
 };
 </script>

@@ -84,4 +84,52 @@ router.put('/settings', (req, res) => {
   }
 });
 
+// ======================== 历史快照 ========================
+// 获取所有已保存的快照周列表
+router.get('/history', (req, res) => {
+  try {
+    const rows = db.prepare('SELECT week_start, created_at FROM schedule_history ORDER BY week_start DESC').all();
+    res.json(rows);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// 获取特定周的快照
+router.get('/history/:weekStart', (req, res) => {
+  try {
+    const { weekStart } = req.params;
+    const row = db.prepare('SELECT * FROM schedule_history WHERE week_start = ?').get(weekStart);
+    if (!row) return res.json(null);
+    res.json({
+      id: row.id,
+      week_start: row.week_start,
+      cells: JSON.parse(row.cells),
+      settings: JSON.parse(row.settings),
+      created_at: row.created_at
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// 保存当前周快照（自动或手动）
+router.post('/snapshot', (req, res) => {
+  try {
+    const { week_start, cells, settings } = req.body;
+    if (!week_start) return res.status(400).json({ error: '缺少周开始日期' });
+    const exists = db.prepare('SELECT id FROM schedule_history WHERE week_start = ?').get(week_start);
+    if (exists) {
+      db.prepare('UPDATE schedule_history SET cells = ?, settings = ? WHERE week_start = ?')
+        .run(JSON.stringify(cells), JSON.stringify(settings), week_start);
+    } else {
+      db.prepare('INSERT INTO schedule_history (week_start, cells, settings) VALUES (?, ?, ?)')
+        .run(week_start, JSON.stringify(cells), JSON.stringify(settings));
+    }
+    res.json({ message: '快照已保存' });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 module.exports = router;

@@ -1,8 +1,10 @@
 <template>
   <div>
-    <h1 class="text-2xl font-bold mb-4">📚 班级管理</h1>
+    <div class="w-full bg-gradient-to-r from-blue-80 to-blue-100 shadow-md rounded-xl mb-6  px-6 py-5 ">
+      <h1 class="text-2xl font-bold text-gray-800">📚 班级管理</h1>
+    </div>
 
-    <!-- 工具栏按钮 -->
+    <!-- 工具栏按钮 --> 
     <div class="mb-4 flex items-center gap-3">
       <button @click="addNewRowAtBottom" class="bg-green-500 hover:bg-green-600 text-white px-5 py-2 rounded">
         ＋ 添加学生
@@ -105,7 +107,7 @@
       @delete-rows="onDeleteDuplicates"
       @cancel="dedupeDialogVisible = false"
     />
-  </div>
+   </div>
 </template>
 
 <script>
