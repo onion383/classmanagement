@@ -1,6 +1,8 @@
 <template>
   <div>
-    <h1 class="text-2xl font-bold mb-4">💰 班费管理</h1>
+    <div class="w-full bg-gradient-to-r from-blue-80 to-blue-100 shadow-md rounded-xl mb-6  px-6 py-5 ">
+      <h1 class="text-2xl font-bold text-gray-800">💰 班费管理</h1>
+    </div>
 
     <!-- 看板 -->
     <div class="grid grid-cols-3 gap-4 mb-6">

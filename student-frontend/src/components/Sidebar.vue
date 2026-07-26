@@ -31,6 +31,14 @@
       >
         📅 课程表
       </router-link>
+
+      <router-link
+        to="/seats"
+        class="block px-3 py-2 rounded hover:bg-gray-700 transition-colors"
+        active-class="bg-gray-700"
+      >
+        🪑 座位管理
+      </router-link>
     </nav>
   </div>
 </template>

@@ -4,7 +4,7 @@
       <h3 class="text-lg font-bold mb-4">⏱️ 作息时间设置</h3>
 
       <!-- 学期开始日期 -->
-      <div class="mb-4">
+      <div v-if="showSemesterStart" class="mb-4">
         <span class="font-semibold">学期开始日期</span>
         <input
           type="date"
@@ -140,7 +140,8 @@ export default {
   props: {
     visible: Boolean,
     settings: { type: Object, default: () => ({}) },
-    semesterStart: { type: String, default: '' }   // 新增
+    semesterStart: { type: String, default: '' } ,
+    showSemesterStart: { type: Boolean, default: true }   // 补上这一行  // 新增
   },
   emits: ['save', 'cancel', 'update:semesterStart'],  // 新增
   data() {

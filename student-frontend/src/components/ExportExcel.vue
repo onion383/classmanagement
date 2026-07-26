@@ -1,4 +1,5 @@
 <template>
+  <!-- 导出表格组件 -->
   <div v-if="visible" class="fixed inset-0 bg-black/50 flex items-center justify-center z-[10001]">
     <div class="bg-white p-5 rounded-lg min-w-[400px] max-w-xl">
       <h3 class="text-lg font-bold mb-3">导出选项</h3>
