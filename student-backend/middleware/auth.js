@@ -1,5 +1,5 @@
 const jwt = require('jsonwebtoken');
-const SECRET = 'class-system-secret-2024';
+const SECRET = process.env.JWT_SECRET || 'class-system-secret-2024';
 
 function auth(requiredRoles = []) {
   return (req, res, next) => {

@@ -126,23 +126,34 @@ export default {
       return SECTION_NAMES[key] || '';
     },
 
-    // 判断数据是否为课程表类型
     isScheduleData(rows) {
       if (!rows || rows.length === 0) return false;
       return rows.some(r => r.type === 'lesson' || r.type === 'globalRest' || r.type === 'innerRest');
     },
 
-    // 获取单元格值（支持普通表格和课程表）
     getCellValue(row, headerName, headers) {
       if (headerName === '时段') return this.getSectionName(row.section);
       if (headerName === '节次') return row.label || '';
       if (headerName === '时间') return row.time || '';
-      // 普通表格：直接读取属性
       if (row[headerName] !== undefined) return row[headerName];
-      // 课程表：从 cells 数组读取
       const idx = headers.indexOf(headerName) - 3;
       if (idx >= 0 && row.cells && row.cells[idx]) return row.cells[idx].course || '';
       return '';
+    },
+
+    // 判断是否为讲台行，并且有行号列
+    isPodiumRowWithRowNum(row, headers) {
+      return row._isPodium && headers.length > 1 && headers[0] === '行号';
+    },
+
+    // 检查某列是否为行号列（表头为“行号”）
+    isRowNumColumn(headerName) {
+      return headerName === '行号';
+    },
+
+    // 检查某列是否为走廊列（表头为“走廊”）
+    isAisleColumn(headerName) {
+      return headerName === '走廊';
     },
 
     // ==================== XLSX ====================
@@ -151,7 +162,7 @@ export default {
       const sheet = workbook.addWorksheet('Sheet1');
       const headers = fields.map(f => f.name);
       const isSchedule = this.isScheduleData(rows);
-      const periodCol = headers.indexOf('时段') + 1; // 1-based, 0 if not found
+      const periodCol = headers.indexOf('时段') + 1;
 
       // 标题行
       const titleRow = sheet.addRow([filename]);
@@ -178,8 +189,53 @@ export default {
       for (let i = 0; i < rows.length; i++) {
         const row = rows[i];
 
+        // ---------- 讲台行处理 ----------
+        if (row._isPodium) {
+          const isRowNumTable = this.isPodiumRowWithRowNum(row, headers);
+          const rowData = new Array(headers.length).fill('');
+          if (isRowNumTable) {
+            rowData[0] = '讲台';
+          } else {
+            rowData[0] = '讲  台';
+          }
+          const podiumRow = sheet.addRow(rowData);
+          podiumRow.height = 20;
+
+          if (isRowNumTable && headers.length > 1) {
+            // 第一列（行号）：绿色背景白色文字
+            const numCell = sheet.getCell(currentRow, 1);
+            numCell.font = { bold: true, color: { argb: 'FFFFFFFF' } };
+            numCell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF4CAF50' } };
+            numCell.alignment = { horizontal: 'center', vertical: 'middle' };
+            numCell.border = { top: { style: 'thin' }, left: { style: 'thin' }, bottom: { style: 'thin' }, right: { style: 'thin' } };
+            // 合并其余列
+            sheet.mergeCells(currentRow, 2, currentRow, headers.length);
+            const mergedCell = sheet.getCell(currentRow, 2);
+            mergedCell.value = '讲  台';
+            mergedCell.font = { bold: true, color: { argb: 'FF000000' } };
+            mergedCell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFFFF9C4' } };
+            mergedCell.alignment = { horizontal: 'center', vertical: 'middle' };
+            for (let col = 2; col <= headers.length; col++) {
+              const cell = sheet.getCell(currentRow, col);
+              cell.border = { top: { style: 'thin' }, left: { style: 'thin' }, bottom: { style: 'thin' }, right: { style: 'thin' } };
+            }
+          } else {
+            // 整行合并
+            sheet.mergeCells(currentRow, 1, currentRow, headers.length);
+            const cell = sheet.getCell(currentRow, 1);
+            cell.value = '讲  台';
+            cell.font = { bold: true, color: { argb: 'FF000000' } };
+            cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFFFF9C4' } };
+            cell.alignment = { horizontal: 'center', vertical: 'middle' };
+            podiumRow.eachCell(c => {
+              c.border = { top: { style: 'thin' }, left: { style: 'thin' }, bottom: { style: 'thin' }, right: { style: 'thin' } };
+            });
+          }
+          currentRow++;
+          continue;
+        }
+
         if (row.type === 'globalRest') {
-          // 全局休息：整行合并
           const displayText = row.label ? `${row.label} ${row.time}` : '';
           const data = new Array(headers.length).fill('');
           const mergeRow = sheet.addRow(data);
@@ -195,28 +251,22 @@ export default {
           });
           currentRow++;
         } else if (row.type === 'innerRest') {
-          // 内部休息：时段列保持被合并状态（不写入值），右侧合并显示休息文字
           const displayText = row.label ? `${row.label} ${row.time}` : '';
           const data = new Array(headers.length).fill('');
           const mergeRow = sheet.addRow(data);
           mergeRow.height = 20;
-
           if (periodCol > 1) {
-            // 时段列存在：时段列留空（保持竖向合并），从节次列开始合并到末尾
-            const startCol = periodCol + 1; // 节次列
+            const startCol = periodCol + 1;
             sheet.mergeCells(currentRow, startCol, currentRow, headers.length);
             const cell = sheet.getCell(currentRow, startCol);
             cell.value = displayText;
           } else {
-            // 无时段列：整行合并
             sheet.mergeCells(currentRow, 1, currentRow, headers.length);
             const cell = mergeRow.getCell(1);
             cell.value = displayText;
           }
-
           mergeRow.eachCell((cell, colNumber) => {
             if (periodCol > 1 && colNumber === periodCol) {
-              // 时段列：加边框和浅绿色背景，与被合并的时段列保持一致
               cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFE8F5E9' } };
               cell.border = { top: { style: 'thin' }, left: { style: 'thin' }, bottom: { style: 'thin' }, right: { style: 'thin' } };
               return;
@@ -228,18 +278,33 @@ export default {
           });
           currentRow++;
         } else {
-          // 普通行或正课行
-          const rowData = headers.map(h => this.getCellValue(row, h, headers));
+          // 普通行或座位行
+          const rowData = headers.map((h, colIdx) => {
+            const val = row[h] !== undefined ? row[h] : '';
+            return val;
+          });
           const dataRow = sheet.addRow(rowData);
-          dataRow.eachCell(cell => {
+          dataRow.eachCell((cell, colNumber) => {
+            const headerName = headers[colNumber - 1];
+            // 设置边框和对齐
             cell.border = { top: { style: 'thin' }, left: { style: 'thin' }, bottom: { style: 'thin' }, right: { style: 'thin' } };
-            cell.alignment = { horizontal: 'center' };
+            cell.alignment = { horizontal: 'center', vertical: 'middle' };
+            // 行号列样式
+            if (this.isRowNumColumn(headerName)) {
+              cell.font = { bold: true, color: { argb: 'FFFFFFFF' } };
+              cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF4CAF50' } };
+            } else if (this.isAisleColumn(headerName)) {
+              cell.font = { color: { argb: 'FF000000' } };
+              cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFD9D9D9' } }; // 灰色
+            } else {
+              // 普通单元格保持默认白色背景
+              cell.font = { color: { argb: 'FF000000' } };
+            }
           });
 
-          // 竖向合并时段列（只合并连续正课行）
+          // 课程表时段列竖向合并（如果是课程表数据）
           if (isSchedule && periodCol > 1 && row._rowSpan > 1 && row._isFirstInBlock) {
             sheet.mergeCells(currentRow, periodCol, currentRow + row._rowSpan - 1, periodCol);
-            // 为被合并的单元格加边框（后续行）
             for (let j = 1; j < row._rowSpan; j++) {
               sheet.getCell(currentRow + j, periodCol).border = {
                 top: { style: 'thin' }, left: { style: 'thin' }, bottom: { style: 'thin' }, right: { style: 'thin' }
@@ -250,12 +315,13 @@ export default {
         }
       }
 
-      // 自动调整列宽
+      // 列宽
       for (let i = 1; i <= headers.length; i++) {
         let maxLen = headers[i - 1].length;
         rows.forEach(row => {
+          if (row._isPodium) return;
           if (row.type !== 'globalRest' && row.type !== 'innerRest') {
-            const val = this.getCellValue(row, headers[i - 1], headers) || '';
+            const val = row[headers[i - 1]] || '';
             let charLen = 0;
             for (const ch of String(val)) charLen += /[\u4e00-\u9fa5]/.test(ch) ? 2.2 : 1;
             if (charLen > maxLen) maxLen = charLen;
@@ -278,7 +344,7 @@ export default {
     exportHTMLTable(rows, fields, filename) {
       const headers = fields.map(f => f.name);
       const isSchedule = this.isScheduleData(rows);
-      const periodColIdx = headers.indexOf('时段'); // 0-based, -1 if not found
+      const periodColIdx = headers.indexOf('时段');
 
       let html = `<!DOCTYPE html><html><head><meta charset="UTF-8"><title>${filename}</title></head><body>
         <h2 style="text-align:center;">${filename}</h2>
@@ -286,16 +352,29 @@ export default {
           <thead><tr>${headers.map(h => `<th>${h}</th>`).join('')}</tr></thead><tbody>`;
 
       for (const row of rows) {
+        // ---------- 讲台行 ----------
+        if (row._isPodium) {
+          const isRowNumTable = this.isPodiumRowWithRowNum(row, headers);
+          html += '<tr>';
+          if (isRowNumTable) {
+            html += '<td style="text-align:center; font-weight:bold; background-color:#4CAF50; color:white;">讲台</td>';
+            if (headers.length > 1) {
+              html += `<td colspan="${headers.length - 1}" style="text-align:center; font-weight:bold; background-color:#FFF9C4;">讲  台</td>`;
+            }
+          } else {
+            html += `<td colspan="${headers.length}" style="text-align:center; font-weight:bold; background-color:#FFF9C4;">讲  台</td>`;
+          }
+          html += '</tr>';
+          continue;
+        }
+
         if (row.type === 'globalRest') {
-          // 全局休息：整行合并
           const displayText = row.label ? `${row.label} ${row.time}` : '';
           html += `<tr><td colspan="${headers.length}" style="text-align:center; font-weight:bold; background-color:#D9D9D9;">${displayText}</td></tr>`;
         } else if (row.type === 'innerRest') {
-          // 内部休息：时段列被正课行的rowspan占用，不输出时段列td，从节次列开始合并
           const displayText = row.label ? `${row.label} ${row.time}` : '';
           html += '<tr>';
           if (periodColIdx >= 0) {
-            // 时段列被rowspan占用，跳过；从节次列开始合并到末尾
             const remainingCols = headers.length - periodColIdx - 1;
             html += `<td colspan="${remainingCols}" style="text-align:center; font-weight:bold; background-color:#D9D9D9;">${displayText}</td>`;
           } else {
@@ -303,21 +382,19 @@ export default {
           }
           html += '</tr>';
         } else {
-          // 普通行或正课行
           html += '<tr>';
           for (let i = 0; i < headers.length; i++) {
             const h = headers[i];
-            if (isSchedule && h === '时段') {
-              if (row._rowSpan > 1 && row._isFirstInBlock) {
-                html += `<td rowspan="${row._rowSpan}" style="text-align:center; vertical-align:middle; font-weight:bold; background-color:#E8F5E9;">${SECTION_NAMES[row.section] || ''}</td>`;
-              } else if (row._rowSpan === 0) {
-                // 被合并的单元格：跳过不输出（rowspan由第一行处理）
-              } else {
-                html += `<td style="text-align:center;">${this.getCellValue(row, h, headers) || ''}</td>`;
-              }
+            const cellVal = row[h] !== undefined ? row[h] : '';
+            let style = '';
+            if (h === '行号') {
+              style = 'text-align:center; font-weight:bold; background-color:#4CAF50; color:white;';
+            } else if (h === '走廊') {
+              style = 'text-align:center; background-color:#D9D9D9;';
             } else {
-              html += `<td style="text-align:center;">${this.getCellValue(row, h, headers) || ''}</td>`;
+              style = 'text-align:center;';
             }
+            html += `<td style="${style}">${cellVal}</td>`;
           }
           html += '</tr>';
         }
@@ -336,11 +413,20 @@ export default {
     // ==================== CSV ====================
     exportCSV(rows, fields, filename) {
       const headers = fields.map(f => f.name);
-      let csv = '\uFEFF' + headers.join(',') + '\n'; // BOM for Excel UTF-8
+      let csv = '\uFEFF' + headers.join(',') + '\n';
       rows.forEach(row => {
+        if (row._isPodium) {
+          const isRowNumTable = this.isPodiumRowWithRowNum(row, headers);
+          if (isRowNumTable) {
+            csv += '讲台,讲  台,'.repeat(headers.length - 1).slice(0, -1) + '\n';
+          } else {
+            csv += '讲台,'.repeat(headers.length).slice(0, -1) + '\n';
+          }
+          return;
+        }
         if (row.type === 'globalRest' || row.type === 'innerRest') return;
         const line = headers.map(h => {
-          const v = this.getCellValue(row, h, headers);
+          const v = row[h] !== undefined ? row[h] : '';
           const str = v == null ? '' : String(v);
           if (str.includes(',') || str.includes('"') || str.includes('\n')) {
             return `"${str.replace(/"/g, '""')}"`;
@@ -397,6 +483,22 @@ export default {
           </tr></thead><tbody>`;
 
       for (const row of rows) {
+        // ---------- 讲台行 ----------
+        if (row._isPodium) {
+          const isRowNumTable = this.isPodiumRowWithRowNum(row, headers);
+          html += '<tr>';
+          if (isRowNumTable) {
+            html += '<td style="border:1px solid #ccc; padding:6px 12px; text-align:center; font-weight:bold; background-color:#4CAF50; color:white;">讲台</td>';
+            if (headers.length > 1) {
+              html += `<td colspan="${headers.length - 1}" style="border:1px solid #ccc; padding:6px 12px; text-align:center; font-weight:bold; background-color:#FFF9C4;">讲  台</td>`;
+            }
+          } else {
+            html += `<td colspan="${headers.length}" style="border:1px solid #ccc; padding:6px 12px; text-align:center; font-weight:bold; background-color:#FFF9C4;">讲  台</td>`;
+          }
+          html += '</tr>';
+          continue;
+        }
+
         if (row.type === 'globalRest') {
           const displayText = row.label ? `${row.label} ${row.time}` : '';
           html += `<tr><td colspan="${headers.length}" style="border:1px solid #ccc; padding:6px 12px; text-align:center; vertical-align:middle; font-weight:bold; background-color:#D9D9D9;">${displayText}</td></tr>`;
@@ -404,7 +506,6 @@ export default {
           const displayText = row.label ? `${row.label} ${row.time}` : '';
           html += '<tr>';
           if (periodColIdx >= 0) {
-            // 时段列被rowspan占用，跳过；从节次列开始合并到末尾
             const remainingCols = headers.length - periodColIdx - 1;
             html += `<td colspan="${remainingCols}" style="border:1px solid #ccc; padding:6px 12px; text-align:center; vertical-align:middle; font-weight:bold; background-color:#D9D9D9;">${displayText}</td>`;
           } else {
@@ -415,17 +516,14 @@ export default {
           html += '<tr>';
           for (let i = 0; i < headers.length; i++) {
             const h = headers[i];
-            if (isSchedule && h === '时段') {
-              if (row._rowSpan > 1 && row._isFirstInBlock) {
-                html += `<td rowspan="${row._rowSpan}" style="border:1px solid #ccc; padding:6px 12px; text-align:center; vertical-align:middle; font-weight:bold; background-color:#E8F5E9;">${SECTION_NAMES[row.section] || ''}</td>`;
-              } else if (row._rowSpan === 0) {
-                // skip
-              } else {
-                html += `<td style="border:1px solid #ccc; padding:6px 12px; text-align:center; vertical-align:middle;">${this.getCellValue(row, h, headers) || ''}</td>`;
-              }
-            } else {
-              html += `<td style="border:1px solid #ccc; padding:6px 12px; text-align:center; vertical-align:middle;">${this.getCellValue(row, h, headers) || ''}</td>`;
+            const cellVal = row[h] !== undefined ? row[h] : '';
+            let style = 'border:1px solid #ccc; padding:6px 12px; text-align:center; vertical-align:middle;';
+            if (h === '行号') {
+              style += ' background-color:#4CAF50; color:white; font-weight:bold;';
+            } else if (h === '走廊') {
+              style += ' background-color:#D9D9D9;';
             }
+            html += `<td style="${style}">${cellVal}</td>`;
           }
           html += '</tr>';
         }
@@ -459,7 +557,6 @@ export default {
       }
 
       const pdfFont = fontLoaded ? 'NotoSansSC' : 'helvetica';
-
       const pageWidth = doc.internal.pageSize.getWidth();
       doc.setFontSize(16);
       doc.setFont(pdfFont, 'normal');
@@ -469,11 +566,30 @@ export default {
       const isSchedule = this.isScheduleData(rows);
       const periodColIdx = headers.indexOf('时段');
 
-      // 构建 body：每行是一个数组，与 headers 一一对应
       const body = [];
       for (const row of rows) {
+        // ---------- 讲台行 ----------
+        if (row._isPodium) {
+          const isRowNumTable = this.isPodiumRowWithRowNum(row, headers);
+          const arr = new Array(headers.length).fill('');
+          if (isRowNumTable) {
+            arr[0] = '讲台';
+            arr._rowNumStyle = true;
+            if (headers.length > 1) arr[1] = '讲  台';
+            arr._merge = true;
+            arr._mergeType = 'podium';
+            arr._startIdx = 1;
+          } else {
+            arr[0] = '讲  台';
+            arr._merge = true;
+            arr._mergeType = 'podium';
+            arr._startIdx = 0;
+          }
+          body.push(arr);
+          continue;
+        }
+
         if (row.type === 'globalRest') {
-          // 全局休息：第一列显示文字，其余为空，通过 didParseCell 合并
           const displayText = row.label ? `${row.label} ${row.time}` : '';
           const arr = new Array(headers.length).fill('');
           arr[0] = displayText;
@@ -481,11 +597,9 @@ export default {
           arr._mergeType = 'global';
           body.push(arr);
         } else if (row.type === 'innerRest') {
-          // 内部休息
           const displayText = row.label ? `${row.label} ${row.time}` : '';
           const arr = new Array(headers.length).fill('');
           if (periodColIdx >= 0) {
-            // 时段列留空（保持合并），从节次列开始显示
             const startIdx = periodColIdx + 1;
             arr[startIdx] = displayText;
             arr._merge = true;
@@ -498,20 +612,18 @@ export default {
           }
           body.push(arr);
         } else {
-          // 普通行或正课行
           const arr = headers.map(h => {
             if (isSchedule && h === '时段') {
               if (row._rowSpan > 1 && row._isFirstInBlock) {
                 return SECTION_NAMES[row.section] || '';
               } else if (row._rowSpan === 0) {
-                return ''; // 被合并的单元格
+                return '';
               }
             }
-            return this.getCellValue(row, h, headers) || '';
+            return row[h] !== undefined ? row[h] : '';
           });
-          arr._rowSpan = row._rowSpan;
-          arr._isFirstInBlock = row._isFirstInBlock;
-          arr._section = row.section;
+          arr._rowNumStyle = true; // 用于标记行号列样式
+          arr._schedule = isSchedule; // 课程表标记
           body.push(arr);
         }
       }
@@ -542,12 +654,38 @@ export default {
           const rowArr = data.row.raw;
           if (!rowArr) return;
 
-          // 确保所有单元格使用正确的中文字体，并强制水平和垂直居中
           data.cell.styles.font = pdfFont;
           data.cell.styles.halign = 'center';
           data.cell.styles.valign = 'middle';
 
-          // 处理合并行（globalRest / innerRest）
+          // 讲台行
+          if (rowArr._mergeType === 'podium') {
+            if (rowArr._rowNumStyle && data.column.index === 0) {
+              data.cell.styles.fillColor = [76, 175, 80];
+              data.cell.styles.textColor = 255;
+              data.cell.styles.fontStyle = 'bold';
+              return;
+            }
+            data.cell.styles.fillColor = [255, 249, 196];
+            data.cell.styles.fontStyle = 'bold';
+            data.cell.styles.textColor = [0, 0, 0];
+            if (rowArr._startIdx === 0) {
+              if (data.column.index === 0) {
+                data.cell.colSpan = headers.length;
+              } else {
+                data.cell.text = [''];
+              }
+            } else {
+              if (data.column.index === rowArr._startIdx) {
+                data.cell.colSpan = headers.length - rowArr._startIdx;
+              } else if (data.column.index > rowArr._startIdx) {
+                data.cell.text = [''];
+              }
+            }
+            return;
+          }
+
+          // 全局/内部休息行
           if (rowArr._merge) {
             data.cell.styles.fillColor = [217, 217, 217];
             data.cell.styles.fontStyle = 'bold';
@@ -563,13 +701,24 @@ export default {
               } else if (data.column.index > rowArr._startIdx) {
                 data.cell.text = [''];
               }
-              // periodColIdx 的单元格保持原样（空）
             }
             return;
           }
 
-          // 处理时段列的竖向合并
-          if (isSchedule && periodColIdx >= 0 && data.column.index === periodColIdx) {
+          // 普通行：根据列头设置样式
+          const headerName = headers[data.column.index];
+          if (headerName === '行号') {
+            data.cell.styles.fillColor = [76, 175, 80];
+            data.cell.styles.textColor = 255;
+            data.cell.styles.fontStyle = 'bold';
+          } else if (headerName === '走廊') {
+            data.cell.styles.fillColor = [217, 217, 217];
+          } else {
+            data.cell.styles.textColor = [0, 0, 0];
+          }
+
+          // 课程表时段列竖向合并
+          if (rowArr._schedule && periodColIdx >= 0 && data.column.index === periodColIdx) {
             if (rowArr._rowSpan > 1 && rowArr._isFirstInBlock) {
               data.cell.rowSpan = rowArr._rowSpan;
               data.cell.styles.fillColor = [232, 245, 233];

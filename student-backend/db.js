@@ -9,6 +9,22 @@ const dbPath = path.join(dataDir, 'database.db');
 const db = new Database(dbPath);
 db.pragma('journal_mode = WAL');
 
+// ======================== 迁移工具函数 ========================
+function ensureTableWithMigration(tableName, createSQL, insertSQL, migrations) {
+  const exists = db.prepare(`SELECT name FROM sqlite_master WHERE type='table' AND name=?`).get(tableName);
+  if (!exists) {
+    db.exec(createSQL);
+    if (insertSQL) db.exec(insertSQL);
+  } else if (migrations && migrations.length > 0) {
+    const cols = db.prepare(`PRAGMA table_info(${tableName})`).all().map(c => c.name);
+    for (const { column, sql } of migrations) {
+      if (!cols.includes(column)) {
+        db.prepare(`ALTER TABLE ${tableName} ADD COLUMN ${sql}`).run();
+      }
+    }
+  }
+}
+
 // ======================== 原有建表 ========================
 db.exec(`
   CREATE TABLE IF NOT EXISTS students (
@@ -79,7 +95,7 @@ db.exec(`
     settings TEXT NOT NULL DEFAULT '{}'
   );
   INSERT OR IGNORE INTO schedule (id, cells, settings) VALUES (1, '[]', '{}');
-  
+
   CREATE TABLE IF NOT EXISTS schedule_history (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     week_start TEXT NOT NULL,
@@ -108,76 +124,55 @@ const insertUser = db.prepare('INSERT OR IGNORE INTO users (username, password, 
 const hashedPassword = bcrypt.hashSync('123456', 10);
 insertUser.run('admin', hashedPassword, 'teacher');
 
-// ======================== 座位表相关迁移 ========================
-// 座位布局表（当前座位）
-const seatLayoutExists = db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='seat_layout'").get();
-if (!seatLayoutExists) {
-  db.exec(`
-    CREATE TABLE seat_layout (
-      id INTEGER PRIMARY KEY CHECK (id = 1),
-      mode TEXT NOT NULL DEFAULT 'single',
-      rows INTEGER NOT NULL DEFAULT 6,
-      cols INTEGER NOT NULL DEFAULT 7,
-      seats TEXT NOT NULL DEFAULT '[]',
-      aisle_cols TEXT NOT NULL DEFAULT '[]',
-      groups_config TEXT NOT NULL DEFAULT '[]',
-      settings TEXT NOT NULL DEFAULT '{}'
-    );
-    INSERT INTO seat_layout (id) VALUES (1);
-  `);
-} else {
-  const cols = db.prepare("PRAGMA table_info(seat_layout)").all().map(c => c.name);
-  if (!cols.includes('mode')) db.prepare("ALTER TABLE seat_layout ADD COLUMN mode TEXT NOT NULL DEFAULT 'single'").run();
-  if (!cols.includes('aisle_cols')) db.prepare("ALTER TABLE seat_layout ADD COLUMN aisle_cols TEXT NOT NULL DEFAULT '[]'").run();
-  if (!cols.includes('groups_config')) db.prepare("ALTER TABLE seat_layout ADD COLUMN groups_config TEXT NOT NULL DEFAULT '[]'").run();
-}
+// ======================== 座位表迁移（抽象复用） ========================
+const seatMigrations = [
+  { column: 'mode', sql: "mode TEXT NOT NULL DEFAULT 'single'" },
+  { column: 'aisle_cols', sql: "aisle_cols TEXT NOT NULL DEFAULT '[]'" },
+  { column: 'groups_config', sql: "groups_config TEXT NOT NULL DEFAULT '[]'" }
+];
 
-// 座位模板表
-const seatTemplateExists = db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='seat_template'").get();
-if (!seatTemplateExists) {
-  db.exec(`
-    CREATE TABLE seat_template (
-      id INTEGER PRIMARY KEY CHECK (id = 1),
-      mode TEXT NOT NULL DEFAULT 'single',
-      rows INTEGER NOT NULL DEFAULT 6,
-      cols INTEGER NOT NULL DEFAULT 7,
-      seats TEXT NOT NULL DEFAULT '[]',
-      aisle_cols TEXT NOT NULL DEFAULT '[]',
-      groups_config TEXT NOT NULL DEFAULT '[]',
-      settings TEXT NOT NULL DEFAULT '{}'
-    );
-    INSERT INTO seat_template (id) VALUES (1);
-  `);
-} else {
-  const cols = db.prepare("PRAGMA table_info(seat_template)").all().map(c => c.name);
-  if (!cols.includes('mode')) db.prepare("ALTER TABLE seat_template ADD COLUMN mode TEXT NOT NULL DEFAULT 'single'").run();
-  if (!cols.includes('aisle_cols')) db.prepare("ALTER TABLE seat_template ADD COLUMN aisle_cols TEXT NOT NULL DEFAULT '[]'").run();
-  if (!cols.includes('groups_config')) db.prepare("ALTER TABLE seat_template ADD COLUMN groups_config TEXT NOT NULL DEFAULT '[]'").run();
-}
+ensureTableWithMigration('seat_layout', `
+  CREATE TABLE seat_layout (
+    id INTEGER PRIMARY KEY CHECK (id = 1),
+    mode TEXT NOT NULL DEFAULT 'single',
+    rows INTEGER NOT NULL DEFAULT 6,
+    cols INTEGER NOT NULL DEFAULT 7,
+    seats TEXT NOT NULL DEFAULT '[]',
+    aisle_cols TEXT NOT NULL DEFAULT '[]',
+    groups_config TEXT NOT NULL DEFAULT '[]',
+    settings TEXT NOT NULL DEFAULT '{}'
+  );
+  INSERT INTO seat_layout (id) VALUES (1);
+`, null, seatMigrations);
 
-// 座位历史快照表
-const seatHistoryExists = db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='seat_history'").get();
-if (!seatHistoryExists) {
-  db.exec(`
-    CREATE TABLE seat_history (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      week_start TEXT NOT NULL,
-      mode TEXT NOT NULL DEFAULT 'single',
-      rows INTEGER NOT NULL,
-      cols INTEGER NOT NULL,
-      seats TEXT NOT NULL DEFAULT '[]',
-      aisle_cols TEXT NOT NULL DEFAULT '[]',
-      groups_config TEXT NOT NULL DEFAULT '[]',
-      settings TEXT NOT NULL DEFAULT '{}',
-      created_at DATETIME DEFAULT CURRENT_TIMESTAMP
-    );
-  `);
-} else {
-  const cols = db.prepare("PRAGMA table_info(seat_history)").all().map(c => c.name);
-  if (!cols.includes('mode')) db.prepare("ALTER TABLE seat_history ADD COLUMN mode TEXT NOT NULL DEFAULT 'single'").run();
-  if (!cols.includes('aisle_cols')) db.prepare("ALTER TABLE seat_history ADD COLUMN aisle_cols TEXT NOT NULL DEFAULT '[]'").run();
-  if (!cols.includes('groups_config')) db.prepare("ALTER TABLE seat_history ADD COLUMN groups_config TEXT NOT NULL DEFAULT '[]'").run();
-}
+ensureTableWithMigration('seat_template', `
+  CREATE TABLE seat_template (
+    id INTEGER PRIMARY KEY CHECK (id = 1),
+    mode TEXT NOT NULL DEFAULT 'single',
+    rows INTEGER NOT NULL DEFAULT 6,
+    cols INTEGER NOT NULL DEFAULT 7,
+    seats TEXT NOT NULL DEFAULT '[]',
+    aisle_cols TEXT NOT NULL DEFAULT '[]',
+    groups_config TEXT NOT NULL DEFAULT '[]',
+    settings TEXT NOT NULL DEFAULT '{}'
+  );
+  INSERT INTO seat_template (id) VALUES (1);
+`, null, seatMigrations);
+
+ensureTableWithMigration('seat_history', `
+  CREATE TABLE seat_history (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    week_start TEXT NOT NULL,
+    mode TEXT NOT NULL DEFAULT 'single',
+    rows INTEGER NOT NULL,
+    cols INTEGER NOT NULL,
+    seats TEXT NOT NULL DEFAULT '[]',
+    aisle_cols TEXT NOT NULL DEFAULT '[]',
+    groups_config TEXT NOT NULL DEFAULT '[]',
+    settings TEXT NOT NULL DEFAULT '{}',
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+  );
+`, null, seatMigrations);
 
 // ======================== 工具函数 ========================
 function getFields(tableName) {
