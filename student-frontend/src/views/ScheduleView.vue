@@ -53,7 +53,7 @@
           </section>
 
           <!-- 分隔 -->
-          <div class="mb-8"></div>
+          <div class="mb-4"></div>
 
           <!-- 一般课表（模板） -->
           <section>
@@ -234,12 +234,35 @@ export default {
       return this.buildDisplayRows(this.masterCells, this.masterSettings);
     },
     masterExportFields() {
-      const fields = [{ name: '时段' }, { name: '节次' }, { name: '时间' }];
-      this.masterColHeaders.forEach(d => fields.push({ name: d }));
+      const fields = [{ name: '行号' }];
+      this.masterColHeaders.forEach(h => fields.push({ name: h }));
       return fields;
     },
     masterExportRows() {
-      return this.buildExportRows(this.masterCells, this.masterSettings);
+      const headers = this.masterColHeaders;
+      const rows = this.masterDisplayRows;
+      return rows.map(row => {
+        if (row._isPodium) {
+          return {
+            '行号': '讲台',
+            _isPodium: true,
+            label: '讲  台'
+          };
+        }
+        const obj = { '行号': row.label };
+        row.cells.forEach((cell, idx) => {
+          const headerName = headers[idx] || `列${idx+1}`;
+          if (cell._isAisle) {
+            obj[headerName] = '走廊';
+            obj._aisleCell = true;
+          } else if (cell._isAisleHidden) {
+            obj[headerName] = '';
+          } else {
+            obj[headerName] = cell.course || '';
+          }
+        });
+        return obj;
+      });
     },
 
     // ---- 实行课表显示行（顶部自动添加周数标题行） ----
@@ -248,12 +271,37 @@ export default {
     },
 
     activeExportFields() {
-      const fields = [{ name: '时段' }, { name: '节次' }, { name: '时间' }];
-      this.activeColHeaders.forEach(d => fields.push({ name: d }));
+      const fields = [{ name: '行号' }];
+      // 将当前显示的列头（包括“走廊”）都作为导出列
+      this.activeColHeaders.forEach(h => fields.push({ name: h }));
       return fields;
     },
     activeExportRows() {
-      return this.buildExportRows(this.activeCells, this.activeSettings);
+      const headers = this.activeColHeaders; // 包含“走廊”的列头数组
+      const rows = this.activeDisplayRows;   // 包含讲台行和普通行
+      return rows.map(row => {
+        if (row._isPodium) {
+          return {
+            '行号': '讲台',
+            _isPodium: true,
+            label: '讲  台'
+          };
+        }
+        // 普通行：行号列是 row.label（例如“第1行”），其他列按 cells 顺序填充
+        const obj = { '行号': row.label };
+        row.cells.forEach((cell, idx) => {
+          const headerName = headers[idx] || `列${idx+1}`;
+          if (cell._isAisle) {
+            obj[headerName] = '走廊';
+            obj._aisleCell = true; // 标记为走廊单元格
+          } else if (cell._isAisleHidden) {
+            obj[headerName] = ''; // 隐藏的占位列
+          } else {
+            obj[headerName] = cell.course || '';
+          }
+        });
+        return obj;
+      });
     },
     historyDisplayRows() {
       const rows = this.buildDisplayRows(this.historyCells, this.historySettings);

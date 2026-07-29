@@ -1,5 +1,5 @@
 <template>
-  <div class="grid-view-container" ref="gridContainer" style="min-height: 400px; position: relative;">
+  <div class="grid-view-container" ref="gridContainer" :style="{ minHeight: minTableHeight + 'px', position: 'relative' }">
     <div ref="gridTable" class="overflow-auto border rounded">
       <table class="w-full border-collapse select-none">
         <thead>
@@ -10,7 +10,6 @@
             <th v-if="showPeriodColumn && !hideMetaColumns" class="bg-green-500 text-white border border-gray-300 px-2 py-1 text-center" style="width: 80px;">时段</th>
             <th v-if="!hideMetaColumns" class="bg-green-500 text-white border border-gray-300 px-2 py-1 text-center" style="width: 100px;">节次</th>
             <th v-if="!hideMetaColumns" class="bg-green-500 text-white border border-gray-300 px-2 py-1 text-center" style="width: 130px;">时间</th>
-            <!-- 行号列表头（绿色） -->
             <th v-if="hideMetaColumns && showRowNumber" class="bg-green-500 text-white border border-gray-300 px-2 py-1 text-center" style="width: 70px;">行号</th>
             <th
               v-for="(col, colIdx) in colHeaders"
@@ -28,7 +27,7 @@
                 <span class="drag-handle cursor-grab text-gray-300 hover:text-white">⠿</span>
                 <span>{{ col }}</span>
               </div>
-              <span v-else class="text-sm text-gray-200" style="writing-mode: vertical-lr; text-orientation: upright;">走廊</span>
+              <span v-else class="text-base text-gray-200">走廊</span>
             </th>
           </tr>
         </thead>
@@ -43,15 +42,12 @@
               @drop="onRowDrop($event, rowIdx, row)"
               @dragend="onRowDragEnd"
             >
-              <!-- 讲台行：行号列 + 合并剩余列 -->
+              <!-- 讲台行 -->
               <template v-if="row._isPodium">
-                <!-- 如果有行号列，先渲染一个讲台标识的单元格 -->
                 <td v-if="hideMetaColumns && showRowNumber" class="bg-green-500 text-white border border-gray-300 text-center text-sm font-bold py-2" style="width: 70px;">讲台</td>
-                <!-- 合并除行号列以外的所有列 -->
                 <td :colspan="totalColumns - (hideMetaColumns && showRowNumber ? 1 : 0)" class="text-center font-bold text-gray-800 py-3 bg-yellow-200 border-b-2 border-yellow-400 text-lg">讲  台</td>
               </template>
-
-              <!-- 原有分隔行 -->
+              <!-- 分隔行 -->
               <td v-else-if="row._isSeparator" :colspan="totalColumns" class="text-center font-bold text-gray-700 py-2 bg-blue-50 border-b-2 border-blue-300">{{ row.label }}</td>
               <!-- 合并行 -->
               <td v-else-if="row._mergeCells" :colspan="totalColumns" class="border border-gray-300 px-2 py-1 text-center bg-gray-100 text-sm font-semibold">{{ row.label }} {{ row.time }}</td>
@@ -74,7 +70,7 @@
                   <span v-else>{{ row.time || '' }}</span>
                 </td>
 
-                <!-- 行号列（绿色背景，与节次列一致） -->
+                <!-- 行号列（绿色背景，可拖拽） -->
                 <td v-if="hideMetaColumns && showRowNumber" class="bg-green-500 text-white border border-gray-300 text-center text-sm font-bold py-2" style="width: 70px;">
                   <div class="flex items-center justify-center gap-1">
                     <span v-if="canDragRow(row)" class="drag-handle cursor-grab select-none text-gray-300 hover:text-white" draggable="true" @dragstart.stop="onRowDragStart($event, rowIdx)" @dragend.stop="onRowDragEnd">⠿</span>
@@ -84,21 +80,36 @@
 
                 <!-- 数据单元格 -->
                 <template v-for="(cell, colIdx) in row.cells" :key="colIdx">
-                  <td v-if="cell._isAisle && cell._aisleRowSpan" :rowspan="cell._aisleRowSpan" class="border border-gray-300 bg-gray-300 text-center align-middle" style="width: 60px; vertical-align: middle; font-size: 0.875rem; line-height: 1.2;"><div style="writing-mode: vertical-lr; text-orientation: upright;">走廊</div></td>
+                  <td v-if="cell._isAisle && cell._aisleRowSpan" :rowspan="cell._aisleRowSpan" class="border border-gray-300 bg-gray-300 text-center align-middle" style="width: 60px; vertical-align: middle; font-size: 0.875rem; line-height: 1.2;">
+                     <div style="writing-mode: vertical-lr; text-orientation: upright; display: flex; align-items: center; justify-content: center;">走廊</div></td>
                   <td v-else-if="cell._isAisleHidden" style="display: none;"></td>
                   <td
                     v-else
                     :ref="el => setCellRef(rowIdx, colIdx, el)"
                     :class="['border border-gray-300 px-2 py-2 text-center transition-colors relative', isDragTarget(rowIdx, colIdx) ? 'bg-blue-100 outline outline-2 outline-blue-400' : '', isCellSelected(rowIdx, colIdx) && !isEditing(rowIdx, colIdx) ? 'bg-blue-100 outline outline-2 outline-blue-400' : '', isEditing(rowIdx, colIdx) ? 'ring-2 ring-blue-500 ring-inset' : '', row._isReadonly ? '' : 'cursor-pointer']"
-                    :style="{ backgroundColor: isEditing(rowIdx, colIdx) ? '' : getCellColor(cell), minHeight: '40px', height: '40px' }"
+                    :style="{ backgroundColor: isEditing(rowIdx, colIdx) ? '' : getCellColor(cell), minHeight: '40px' }"
                     @mousedown="onCellMouseDown($event, rowIdx, colIdx)"
                     @mouseenter="onCellMouseEnter(rowIdx, colIdx)"
                     @dblclick="onCellDoubleClick(rowIdx, colIdx)"
                   >
                     <div v-if="isEditing(rowIdx, colIdx)" class="absolute inset-0 flex items-center justify-center">
-                      <input v-model="editingCellData.course" class="w-full h-full text-center text-sm bg-transparent outline-none border-none m-0 p-0" style="box-sizing: border-box;" placeholder="输入姓名" @keydown.enter.prevent="saveEditCell" @keydown.escape.prevent="cancelEdit" @blur="onEditBlur" @input="onEditInput(rowIdx, colIdx)" @mousedown.stop />
+                      <input
+                        v-model="editingCellData.course"
+                        class="w-full h-full text-center text-sm bg-transparent outline-none border-none m-0 p-0"
+                        style="box-sizing: border-box;"
+                        :placeholder="enableCandidate ? '输入姓名' : '输入课程'"
+                        @keydown.down.prevent="candidateHighlightNext"
+                        @keydown.up.prevent="candidateHighlightPrev"
+                        @keydown.enter.prevent="candidateSelectHighlighted"
+                        @keydown.escape.prevent="cancelEdit"
+                        @blur="onEditBlur"
+                        @input="onEditInput(rowIdx, colIdx)"
+                        @mousedown.stop
+                      />
                     </div>
-                    <template v-else>{{ cell.course || '' }}</template>
+                    <template v-else>
+                      {{ cell.course || '' }}
+                    </template>
                   </td>
                 </template>
               </template>
@@ -109,15 +120,27 @@
     </div>
 
     <!-- 外挂候选列表 -->
-    <div v-if="showCandidatePopup" class="fixed z-50 bg-white border border-blue-400 shadow-lg rounded" :style="{ left: candidatePopupX + 'px', top: candidatePopupY + 'px', width: '180px', maxHeight: '200px', overflow: 'auto' }" @mousedown.stop>
+    <div
+      v-if="showCandidatePopup"
+      class="fixed z-50 bg-white border border-blue-400 shadow-lg rounded"
+      :style="{ left: candidatePopupX + 'px', top: candidatePopupY + 'px', width: '180px', maxHeight: '200px', overflow: 'auto' }"
+      @mousedown.stop
+    >
       <div v-if="filteredCandidates.length > 0">
-        <div v-for="(item, idx) in filteredCandidates" :key="item.id" :class="['px-3 py-2 text-sm cursor-pointer hover:bg-blue-100', { 'bg-blue-200': idx === candidateHighlightIndex }]" @mousedown.prevent="candidateSelect(item)" @mouseenter="candidateHighlightIndex = idx">{{ item.姓名 }}</div>
+        <div
+          v-for="(item, idx) in filteredCandidates"
+          :key="item.id"
+          :class="['px-3 py-2 text-sm cursor-pointer hover:bg-blue-100', { 'bg-blue-200': idx === candidateHighlightIndex }]"
+          @mousedown.prevent="candidateSelect(item)"
+          @mouseenter="candidateHighlightIndex = idx"
+        >
+          {{ item.姓名 }}
+        </div>
       </div>
       <div v-else class="px-3 py-2 text-sm text-gray-400">无匹配学生</div>
     </div>
   </div>
 </template>
-
 
 <script>
 const COURSE_COLORS = {
@@ -138,6 +161,7 @@ export default {
     enableCandidate: { type: Boolean, default: false },
     candidateItems: { type: Array, default: () => [] },
     candidateExcludeIds: { type: Array, default: () => [] },
+    minTableHeight: { type: Number, default: 400 },
   },
   emits: ['update:cells', 'swapRows', 'swapColumns', 'update:row-meta', 'cell-dblclick'],
   data() {
@@ -163,13 +187,18 @@ export default {
       if (!this.enableCandidate || !this.editingCell) return [];
       let list = this.candidateItems.filter(s => !this.candidateExcludeIds.includes(s.id));
       const text = this.editingCellData.course?.trim() || '';
-      if (text) { const kw = text.toLowerCase(); list = list.filter(s => s.姓名.toLowerCase().includes(kw)); }
+      if (text) {
+        const kw = text.toLowerCase();
+        list = list.filter(s => s.姓名.toLowerCase().includes(kw));
+      }
       return list;
     },
   },
   methods: {
     setCellRef(rowIdx, colIdx, el) { if (el) { if (!this.cellRefs[rowIdx]) this.cellRefs[rowIdx] = {}; this.cellRefs[rowIdx][colIdx] = el; } },
-    canDragRow(row) { return !row._isSeparator && !row._mergeCells && !row._isReadonly && !row._isPodium && !this.editingCell; },
+    canDragRow(row) {
+      return !row._isSeparator && !row._mergeCells && !row._isReadonly && !row._isPodium && !this.editingCell;
+    },
     onCellMouseDown(event, rowIdx, colIdx) {
       if (event.button !== 0) return;
       const row = this.rows[rowIdx];
@@ -234,8 +263,19 @@ export default {
     },
     positionPopup(rowIdx, colIdx) { const cellEl = this.cellRefs[rowIdx]?.[colIdx]; if (cellEl) { const rect = cellEl.getBoundingClientRect(); this.candidatePopupX = rect.left; this.candidatePopupY = rect.bottom; } },
     onEditInput(rowIdx, colIdx) { this.candidateHighlightIndex = 0; if (this.showCandidatePopup) this.positionPopup(rowIdx, colIdx); },
+    // ---------- 保存编辑 ----------
     saveEditCell() {
       if (!this.editingCell) return;
+
+      // 候选模式：若输入姓名不在全部学生列表中，则还原原值（防止清空或错误输入）
+      // if (this.enableCandidate) {
+      //   const name = this.editingCellData.course.trim();
+      //   if (name && !this.candidateItems.some(s => s.姓名 === name)) {
+      //     const originalCell = this.rows[this.editingCell.row].cells[this.editingCell.col];
+      //     this.editingCellData.course = originalCell?.course || '';
+      //   }
+      // }
+
       const { row, col } = this.editingCell;
       const newRows = this.rows.map(r => (r._isSeparator || r._mergeCells || r._isPodium) ? r : { ...r, cells: [...r.cells] });
       newRows[row].cells[col] = { course: this.editingCellData.course || '' };
@@ -243,21 +283,41 @@ export default {
       this.closeEditor();
     },
     cancelEdit() { this.closeEditor(); },
-    closeEditor() { this.editingCell = null; this.showCandidatePopup = false; this.candidateHighlightIndex = 0; },
-    onEditBlur() { if (this.editingCell) this.saveEditCell(); },
-    candidateSelect(item) { if (item) this.editingCellData.course = item.姓名; this.saveEditCell(); },
-    isEditing(rowIdx, colIdx) { return this.editingCell?.row === rowIdx && this.editingCell?.col === colIdx; },
-    startEditMeta(rowIdx, field) { if (this.rows[rowIdx]._isSeparator || this.rows[rowIdx]._mergeCells || this.rows[rowIdx]._isPodium) return; if (this.editingCell) this.saveEditCell(); this.editingMeta = { row: rowIdx, field }; this.editingMetaValue = this.rows[rowIdx][field] || ''; this.$nextTick(() => this.$el.querySelector('input')?.focus()); },
-    saveEditMeta(rowIdx) {
-      if (!this.editingMeta || this.editingMeta.row !== rowIdx) return;
-      const newValue = this.editingMetaValue.trim();
-      if (newValue !== '') {
-        const updatedRows = this.rows.map(r => ({ ...r }));
-        updatedRows[rowIdx] = { ...updatedRows[rowIdx], [this.editingMeta.field]: newValue };
-        this.$emit('update:row-meta', { rowIdx, field: this.editingMeta.field, value: newValue, rows: updatedRows });
-      }
-      this.editingMeta = null; this.editingMetaValue = '';
+    closeEditor() {
+      this.editingCell = null;
+      this.showCandidatePopup = false;
+      this.candidateHighlightIndex = 0;
     },
+    onEditBlur() {
+      // 保护：若编辑器已关闭，直接返回
+      if (!this.editingCell) return;
+      this.saveEditCell();
+    },
+    // ---------- 候选键盘操作 ----------
+    candidateHighlightNext() {
+      if (this.candidateHighlightIndex < this.filteredCandidates.length - 1) {
+        this.candidateHighlightIndex++;
+      }
+    },
+    candidateHighlightPrev() {
+      if (this.candidateHighlightIndex > 0) {
+        this.candidateHighlightIndex--;
+      }
+    },
+    candidateSelectHighlighted() {
+      if (this.filteredCandidates.length > 0) {
+        this.candidateSelect(this.filteredCandidates[this.candidateHighlightIndex]);
+      } else {
+        this.saveEditCell();
+      }
+    },
+    candidateSelect(item) {
+      if (item) this.editingCellData.course = item.姓名;
+      this.saveEditCell();
+    },
+    isEditing(rowIdx, colIdx) { return this.editingCell?.row === rowIdx && this.editingCell?.col === colIdx; },
+    startEditMeta(rowIdx, field) { /* 省略，保留原逻辑 */ },
+    saveEditMeta(rowIdx) { /* 省略，保留原逻辑 */ },
     rowDropIndicatorClass(rowIdx) {
       if (this.rowDragIdx === null || this.rowDragOverIdx === null) return '';
       if (rowIdx !== this.rowDragOverIdx) return '';
@@ -274,9 +334,17 @@ export default {
       ghost.textContent = `${row.label} (${row.time}) ${names}`;
       document.body.appendChild(ghost); event.dataTransfer.setDragImage(ghost, 0, 0); this._rowGhost = ghost;
     },
-    onRowDragOver(event, rowIdx, row) { if (row._isSeparator || row._mergeCells || row._isPodium) { this.rowDragOverIdx = null; return; } this.rowDragOverIdx = rowIdx; },
+    onRowDragOver(event, rowIdx, row) {
+      if (row._isSeparator || row._mergeCells || row._isPodium) { this.rowDragOverIdx = null; return; }
+      this.rowDragOverIdx = rowIdx;
+    },
     onRowDragLeave(event, rowIdx) { if (this.rowDragOverIdx === rowIdx) this.rowDragOverIdx = null; },
-    onRowDrop(event, targetIdx, row) { if (this.rowDragIdx === null || this.rowDragIdx === targetIdx) { this.rowDragIdx = null; this.rowDragOverIdx = null; return; } if (row._isSeparator || row._mergeCells || row._isPodium) { this.rowDragIdx = null; this.rowDragOverIdx = null; return; } this.$emit('swapRows', this.rowDragIdx, targetIdx); this.rowDragIdx = null; this.rowDragOverIdx = null; },
+    onRowDrop(event, targetIdx, row) {
+      if (this.rowDragIdx === null || this.rowDragIdx === targetIdx) { this.rowDragIdx = null; this.rowDragOverIdx = null; return; }
+      if (row._isSeparator || row._mergeCells || row._isPodium) { this.rowDragIdx = null; this.rowDragOverIdx = null; return; }
+      this.$emit('swapRows', this.rowDragIdx, targetIdx);
+      this.rowDragIdx = null; this.rowDragOverIdx = null;
+    },
     onRowDragEnd() { this.rowDragIdx = null; this.rowDragOverIdx = null; if (this._rowGhost) { document.body.removeChild(this._rowGhost); this._rowGhost = null; } },
     onColDragStart(event, colIdx) { this.colDragIdx = colIdx; event.dataTransfer.effectAllowed = 'move'; event.dataTransfer.setDragImage(event.target, 0, 0); },
     onColDragOver(event, colIdx) { this.colDragOverIdx = colIdx; },

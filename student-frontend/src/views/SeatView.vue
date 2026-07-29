@@ -7,7 +7,7 @@
     <Tabs :tabs="tabItems" v-model="activeTab">
       <template #default="{ activeTab }">
         <div v-if="activeTab === 'seat'">
-          <section class="mb-10">
+          <section class="mb-4">
             <h2 class="text-xl font-semibold mb-4">🪑 当前座位</h2>
             <div class="mb-4 flex flex-wrap items-center gap-3">
               <button @click="openSettings('active')" class="bg-purple-500 text-white px-4 py-2 rounded">⚙️ 设置</button>
@@ -19,7 +19,7 @@
             <div v-if="!activeLoaded" class="text-center py-10 text-gray-500">加载中...</div>
             <GridView
               v-else
-              ref="activeGrid"
+              ref="activeGridRef"
               :colHeaders="activeColHeaders"
               :rows="activeDisplayRows"
               :hideMetaColumns="true"
@@ -27,51 +27,17 @@
               :enableCandidate="true"
               :candidateItems="allStudents"
               :candidateExcludeIds="currentEditExcludeIds"
+              :minTableHeight="200"
               @cell-dblclick="onActiveCellDblClick"
               @update:cells="onActiveCellsUpdate"
               @swapRows="onActiveSwapRows"
               @swapColumns="onActiveSwapColumns"
             />
 
-            <div v-if="showSettingsDialog" class="fixed inset-0 bg-black bg-opacity-30 z-50 flex items-center justify-center">
-              <div class="bg-white rounded-lg p-6 w-80">
-                <h3 class="text-lg font-bold mb-4">{{ settingsTarget === 'active' ? '当前座位' : '座位模板' }} 设置</h3>
-                <div class="mb-3">
-                  <label class="block text-sm font-medium">行数</label>
-                  <input v-model.number="tempRows" type="number" min="1" class="w-full border px-3 py-2 rounded" />
-                </div>
-                <div class="mb-3">
-                  <label class="block text-sm font-medium">列数（实际座位列数）</label>
-                  <input v-model.number="tempCols" type="number" min="1" class="w-full border px-3 py-2 rounded" />
-                </div>
-                <div class="mb-3">
-                  <label class="block text-sm font-medium mb-1">座位模式</label>
-                  <div class="flex gap-4">
-                    <label class="flex items-center gap-1 cursor-pointer">
-                      <input type="radio" v-model="tempMode" value="single" /> 单桌
-                    </label>
-                    <label class="flex items-center gap-1 cursor-pointer">
-                      <input type="radio" v-model="tempMode" value="double" /> 同桌
-                    </label>
-                  </div>
-                </div>
-                <div class="mb-4">
-                  <label class="flex items-center gap-2 cursor-pointer">
-                    <input type="checkbox" v-model="tempShowAisle" /> 显示走廊
-                  </label>
-                  <p class="text-xs text-gray-500 mt-1">单桌：每列间有走廊；同桌：每两列为一组，组间有走廊。</p>
-                </div>
-                <div class="flex justify-end gap-2">
-                  <button @click="showSettingsDialog = false" class="bg-gray-300 px-4 py-2 rounded">取消</button>
-                  <button @click="saveSettings" class="bg-blue-500 text-white px-4 py-2 rounded">保存</button>
-                </div>
-              </div>
-            </div>
-
             <ExportExcel ref="activeExportDialog" :rows="activeExportRows" :fields="activeExportFields" defaultFilename="当前座位表" />
           </section>
 
-          <div class="mb-8"></div>
+          <div class="mb-2"></div>
 
           <section>
             <h2 class="text-xl font-semibold mb-4">📋 座位模板</h2>
@@ -84,7 +50,7 @@
             <div v-if="!masterLoaded" class="text-center py-10 text-gray-500">加载中...</div>
             <GridView
               v-else
-              ref="masterGrid"
+              ref="masterGridRef"
               :colHeaders="masterColHeaders"
               :rows="masterDisplayRows"
               :hideMetaColumns="true"
@@ -92,6 +58,7 @@
               :enableCandidate="true"
               :candidateItems="allStudents"
               :candidateExcludeIds="currentMasterEditExcludeIds"
+              :minTableHeight="200"
               @cell-dblclick="onMasterCellDblClick"
               @update:cells="onMasterCellsUpdate"
               @swapRows="onMasterSwapRows"
@@ -112,358 +79,243 @@
         </div>
       </template>
     </Tabs>
+
+    <!-- 当前座位设置弹窗 -->
+    <SeatSettingsDialog
+      :visible="activeSettingsVisible"
+      :rows="activeRows"
+      :cols="activeCols"
+      :mode="activeMode"
+      :showAisle="activeShowAisle"
+      @save="saveActiveSettings"
+      @cancel="activeSettingsVisible = false"
+    />
+
+    <!-- 座位模板设置弹窗 -->
+    <SeatSettingsDialog
+      :visible="masterSettingsVisible"
+      :rows="masterRows"
+      :cols="masterCols"
+      :mode="masterMode"
+      :showAisle="masterShowAisle"
+      @save="saveMasterSettings"
+      @cancel="masterSettingsVisible = false"
+    />
   </div>
 </template>
 
-<script>
+<script setup>
+import { ref, computed, watch, onMounted } from 'vue'
 import axios from 'axios'
 import GridView from '../components/GridView.vue'
 import ExportExcel from '../components/ExportExcel.vue'
 import Tabs from '../components/Tabs.vue'
 import WeekSwitcher from '../components/WeekSwitcher.vue'
+import SeatSettingsDialog from '../components/SeatSettingsDialog.vue'
+import { useSeatGrid } from '../composables/useSeatGrid.js'
 
 const API_BASE = '/api'
 
-export default {
-  name: 'SeatView',
-  components: { GridView, ExportExcel, Tabs, WeekSwitcher },
-  data() {
-    return {
-      activeTab: 'seat',
-      tabItems: [
-        { label: '座位管理', value: 'seat' },
-        { label: '历史记录', value: 'history' }
-      ],
-      activeLoaded: false,
-      masterLoaded: false,
-      activeRows: 6,
-      activeCols: 7,
-      activeSeats: [],
-      activeMode: 'single',
-      activeShowAisle: true,
-      activeSettings: {},
-      currentEditExcludeIds: [],
-      masterRows: 6,
-      masterCols: 7,
-      masterSeats: [],
-      masterMode: 'single',
-      masterShowAisle: true,
-      masterSettings: {},
-      currentMasterEditExcludeIds: [],
-      allStudents: [],
-      studentMap: {},
-      showSettingsDialog: false,
-      settingsTarget: 'active',
-      tempRows: 6,
-      tempCols: 7,
-      tempMode: 'single',
-      tempShowAisle: true,
-      historyWeeks: [],
-      historyCurrentWeek: '',
-      historySnapshot: null,
-      historyData: { mode: 'single', rows: 0, cols: 0, seats: [], showAisle: true },
-      historyLoading: false
-    }
-  },
-  computed: {
-    activeColHeaders() { return this.generateColHeaders(this.activeCols, this.activeMode, this.activeShowAisle) },
-    masterColHeaders() { return this.generateColHeaders(this.masterCols, this.masterMode, this.masterShowAisle) },
-    historyColHeaders() { const { cols, mode, showAisle } = this.historyData; return this.generateColHeaders(cols, mode, showAisle) },
-    activeDisplayRows() { return this.buildDisplayRows('active') },
-    masterDisplayRows() { return this.buildDisplayRows('master') },
-    historyDisplayRows() { return this.buildDisplayRows('history') },
-    activeExportFields() {
-      const fields = [{ name: '行号' }]
-      for (let i = 0; i < this.activeCols; i++) fields.push({ name: `列${i + 1}` })
-      return fields
-    },
-    activeExportRows() {
-      if (!Array.isArray(this.activeSeats)) return []
-      return this.activeSeats.map((row, rIdx) => {
-        const obj = { '行号': `第${rIdx + 1}行` }
-        if (Array.isArray(row)) {
-          row.forEach((id, cIdx) => { obj[`列${cIdx + 1}`] = id ? (this.studentMap[id]?.姓名 || '') : '' })
-        }
-        return obj
-      })
-    },
-    masterExportFields() {
-      const fields = [{ name: '行号' }]
-      for (let i = 0; i < this.masterCols; i++) fields.push({ name: `列${i + 1}` })
-      return fields
-    },
-    masterExportRows() {
-      if (!Array.isArray(this.masterSeats)) return []
-      return this.masterSeats.map((row, rIdx) => {
-        const obj = { '行号': `第${rIdx + 1}行` }
-        if (Array.isArray(row)) {
-          row.forEach((id, cIdx) => { obj[`列${cIdx + 1}`] = id ? (this.studentMap[id]?.姓名 || '') : '' })
-        }
-        return obj
-      })
-    }
-  },
-  methods: {
-    async fetchAllStudents() {
-      try {
-        const res = await axios.get(`${API_BASE}/students`)
-        this.allStudents = res.data.data || res.data
-        this.studentMap = {}
-        this.allStudents.forEach(s => { this.studentMap[s.id] = s })
-      } catch (e) { console.error(e) }
-    },
-    generateColHeaders(cols, mode, showAisle) {
-      const headers = []
-      if (!showAisle) { for (let i = 0; i < cols; i++) headers.push(`列${i + 1}`); return headers }
-      if (mode === 'single') {
-        for (let i = 0; i < cols; i++) { headers.push(`列${i + 1}`); if (i < cols - 1) headers.push('走廊') }
-      } else {
-        for (let i = 0; i < cols; i++) { headers.push(`列${i + 1}`); if ((i + 1) % 2 === 0 && i < cols - 1) headers.push('走廊') }
-      }
-      return headers
-    },
-    getDisplayColCount(cols, mode, showAisle) {
-      if (!showAisle) return cols
-      if (mode === 'single') return cols + (cols - 1)
-      else return cols + Math.floor((cols - 1) / 2)
-    },
-    isAisleCol(displayIdx, cols, mode, showAisle) {
-      if (!showAisle) return false
-      const totalDisplay = this.getDisplayColCount(cols, mode, showAisle)
-      if (mode === 'single') return displayIdx % 2 === 1
-      else return displayIdx >= 2 && (displayIdx - 2) % 3 === 0 && displayIdx < totalDisplay
-    },
-    buildDisplayRows(target) {
-      let seats, rows, cols, mode, showAisle, readonly = false
-      if (target === 'active') {
-        seats = this.activeSeats; rows = this.activeRows; cols = this.activeCols; mode = this.activeMode; showAisle = this.activeShowAisle
-      } else if (target === 'master') {
-        seats = this.masterSeats; rows = this.masterRows; cols = this.masterCols; mode = this.masterMode; showAisle = this.masterShowAisle
-      } else {
-        const d = this.historyData
-        seats = d.seats; rows = d.rows; cols = d.cols; mode = d.mode; showAisle = d.showAisle; readonly = true
-      }
-      const displayCols = this.getDisplayColCount(cols, mode, showAisle)
-      const result = []
-      if (!readonly) {
-        result.push({ _rowKey: 'podium', label: '讲  台', _isPodium: true, _isSeparator: false, _mergeCells: false, _isReadonly: true, cells: [] })
-      }
-      for (let r = 0; r < rows; r++) {
-        const rowCells = []
-        let realCol = 0
-        for (let d = 0; d < displayCols; d++) {
-          if (this.isAisleCol(d, cols, mode, showAisle)) {
-            if (r === 0) {
-              rowCells.push({ course: '走廊', _isAisle: true, _aisleRowSpan: rows, _isAisleHidden: false })
-            } else {
-              rowCells.push({ course: '', _isAisle: false, _isAisleHidden: true })
-            }
-          } else {
-            const studentId = seats[r]?.[realCol] || null
-            rowCells.push({ course: studentId ? (this.studentMap[studentId]?.姓名 || '') : '', _isAisle: false, _isAisleHidden: false, _studentId: studentId })
-            realCol++
-          }
-        }
-        result.push({ _rowKey: `row_${r}`, label: `第${r + 1}行`, cells: rowCells, _isReadonly: readonly, _lessonIdx: r, _periodRowSpan: 0, periodLabel: '' })
-      }
-      return result
-    },
-    syncCellsToSeats(newRows, target) {
-      let cols, mode, showAisle
-      if (target === 'active') { cols = this.activeCols; mode = this.activeMode; showAisle = this.activeShowAisle }
-      else { cols = this.masterCols; mode = this.masterMode; showAisle = this.masterShowAisle }
-      const newSeats = []
-      for (let r = 0; r < newRows.length; r++) {
-        const row = newRows[r]
-        if (row._isPodium) continue
-        const seatRow = []
-        let realCol = 0
-        for (let d = 0; d < row.cells.length; d++) {
-          if (this.isAisleCol(d, cols, mode, showAisle)) continue
-          const cell = row.cells[d]
-          const name = cell?.course || ''
-          const student = this.allStudents.find(s => s.姓名 === name)
-          seatRow.push(student ? student.id : null)
-          realCol++
-        }
-        newSeats.push(seatRow)
-      }
-      if (target === 'active') this.activeSeats = newSeats
-      else this.masterSeats = newSeats
-    },
-    async loadActive() {
-      await this.fetchAllStudents()
-      try {
-        const res = await axios.get(`${API_BASE}/seats`)
-        this.activeRows = res.data.rows
-        this.activeCols = res.data.cols
-        this.activeSeats = res.data.seats || []
-        this.activeMode = res.data.mode || 'single'
-        this.activeSettings = res.data.settings || {}
-        this.activeShowAisle = this.activeSettings.showAisle !== false
-        this.activeLoaded = true
-      } catch (e) { console.error(e) }
-    },
-    async saveActive() {
-      await axios.put(`${API_BASE}/seats`, { rows: this.activeRows, cols: this.activeCols, seats: this.activeSeats, mode: this.activeMode, settings: { showAisle: this.activeShowAisle } })
-    },
-    onActiveCellsUpdate(newRows) { this.syncCellsToSeats(newRows, 'active'); this.saveActive() },
-    // ===== 行交换修正 =====
-    onActiveSwapRows(fromIdx, toIdx) {
-      if (fromIdx === 0 || toIdx === 0) return // 讲台行不可拖动
-      const seatFrom = fromIdx - 1
-      const seatTo = toIdx - 1
-      if (seatFrom < 0 || seatTo < 0 || seatFrom >= this.activeSeats.length || seatTo >= this.activeSeats.length) return
-      const s = [...this.activeSeats]
-      ;[s[seatFrom], s[seatTo]] = [s[seatTo], s[seatFrom]]
-      this.activeSeats = s
-      this.saveActive()
-    },
-    onActiveSwapColumns(fromDisplayIdx, toDisplayIdx) {
-      const cols = this.activeCols, mode = this.activeMode, showAisle = this.activeShowAisle
-      const map = []; let real = 0; const total = this.getDisplayColCount(cols, mode, showAisle)
-      for (let d = 0; d < total; d++) { if (!this.isAisleCol(d, cols, mode, showAisle)) map[d] = real++; else map[d] = -1 }
-      const from = map[fromDisplayIdx], to = map[toDisplayIdx]
-      if (from === -1 || to === -1) return
-      const newSeats = this.activeSeats.map(r => { const nr = [...r]; [nr[from], nr[to]] = [nr[to], nr[from]]; return nr })
-      this.activeSeats = newSeats; this.saveActive()
-    },
-    // ===== 双击编辑修正 =====
-    onActiveCellDblClick({ rowIdx, colIdx: displayColIdx }) {
-      const row = this.activeDisplayRows[rowIdx]
-      if (!row || row._isReadonly || row._isPodium) return
-      const cell = row.cells[displayColIdx]
-      if (cell._isAisle || cell._isAisleHidden) return
+const activeTab = ref('seat')
+const tabItems = [
+  { label: '座位管理', value: 'seat' },
+  { label: '历史记录', value: 'history' }
+]
 
-      const seatRowIdx = rowIdx - 1
-      if (seatRowIdx < 0 || seatRowIdx >= this.activeSeats.length) return
+// ==================== 学生数据 ====================
+const allStudents = ref([])
+const studentMap = ref({})
 
-      let realCol = 0
-      for (let d = 0; d < displayColIdx; d++) { if (!this.isAisleCol(d, this.activeCols, this.activeMode, this.activeShowAisle)) realCol++ }
-      const occupied = new Set()
-      this.activeSeats.forEach((r, ri) => {
-        r.forEach((id, ci) => {
-          if (id && !(ri === seatRowIdx && ci === realCol)) occupied.add(id)
-        })
-      })
-      this.currentEditExcludeIds = Array.from(occupied)
-    },
-    async loadMaster() {
-      try {
-        const res = await axios.get(`${API_BASE}/seats/master`)
-        this.masterRows = res.data.rows; this.masterCols = res.data.cols; this.masterSeats = res.data.seats || []; this.masterMode = res.data.mode || 'single'
-        this.masterSettings = res.data.settings || {}; this.masterShowAisle = this.masterSettings.showAisle !== false; this.masterLoaded = true
-      } catch (e) { console.error(e) }
-    },
-    async saveMaster() {
-      await axios.put(`${API_BASE}/seats/master`, { rows: this.masterRows, cols: this.masterCols, seats: this.masterSeats, mode: this.masterMode, settings: { showAisle: this.masterShowAisle } })
-    },
-    onMasterCellsUpdate(newRows) { this.syncCellsToSeats(newRows, 'master'); this.saveMaster() },
-    // ===== 模板行交换修正 =====
-    onMasterSwapRows(fromIdx, toIdx) {
-      if (fromIdx === 0 || toIdx === 0) return
-      const seatFrom = fromIdx - 1
-      const seatTo = toIdx - 1
-      if (seatFrom < 0 || seatTo < 0 || seatFrom >= this.masterSeats.length || seatTo >= this.masterSeats.length) return
-      const s = [...this.masterSeats]
-      ;[s[seatFrom], s[seatTo]] = [s[seatTo], s[seatFrom]]
-      this.masterSeats = s
-      this.saveMaster()
-    },
-    onMasterSwapColumns(fromDisplayIdx, toDisplayIdx) {
-      const cols = this.masterCols, mode = this.masterMode, showAisle = this.masterShowAisle
-      const map = []; let real = 0; const total = this.getDisplayColCount(cols, mode, showAisle)
-      for (let d = 0; d < total; d++) { if (!this.isAisleCol(d, cols, mode, showAisle)) map[d] = real++; else map[d] = -1 }
-      const from = map[fromDisplayIdx], to = map[toDisplayIdx]
-      if (from === -1 || to === -1) return
-      const newSeats = this.masterSeats.map(r => { const nr = [...r]; [nr[from], nr[to]] = [nr[to], nr[from]]; return nr })
-      this.masterSeats = newSeats; this.saveMaster()
-    },
-    // ===== 模板双击编辑修正 =====
-    onMasterCellDblClick({ rowIdx, colIdx: displayColIdx }) {
-      const row = this.masterDisplayRows[rowIdx]
-      if (!row || row._isReadonly || row._isPodium) return
-      const cell = row.cells[displayColIdx]
-      if (cell._isAisle || cell._isAisleHidden) return
-
-      const seatRowIdx = rowIdx - 1
-      if (seatRowIdx < 0 || seatRowIdx >= this.masterSeats.length) return
-
-      let realCol = 0
-      for (let d = 0; d < displayColIdx; d++) { if (!this.isAisleCol(d, this.masterCols, this.masterMode, this.masterShowAisle)) realCol++ }
-      const occupied = new Set()
-      this.masterSeats.forEach((r, ri) => {
-        r.forEach((id, ci) => {
-          if (id && !(ri === seatRowIdx && ci === realCol)) occupied.add(id)
-        })
-      })
-      this.currentMasterEditExcludeIds = Array.from(occupied)
-    },
-    openSettings(target) {
-      this.settingsTarget = target
-      if (target === 'active') {
-        this.tempRows = this.activeRows; this.tempCols = this.activeCols; this.tempMode = this.activeMode; this.tempShowAisle = this.activeShowAisle
-      } else {
-        this.tempRows = this.masterRows; this.tempCols = this.masterCols; this.tempMode = this.masterMode; this.tempShowAisle = this.masterShowAisle
-      }
-      this.showSettingsDialog = true
-    },
-    async saveSettings() {
-      const target = this.settingsTarget
-      if (this.tempRows <= 0 || this.tempCols <= 0) return
-      if (target === 'active') {
-        this.activeRows = this.tempRows; this.activeCols = this.tempCols; this.activeMode = this.tempMode; this.activeShowAisle = this.tempShowAisle
-        const ns = []; for (let r = 0; r < this.activeRows; r++) { const row = this.activeSeats[r] ? [...this.activeSeats[r]].slice(0, this.activeCols) : []; while (row.length < this.activeCols) row.push(null); ns.push(row) }
-        this.activeSeats = ns; await this.saveActive()
-      } else {
-        this.masterRows = this.tempRows; this.masterCols = this.tempCols; this.masterMode = this.tempMode; this.masterShowAisle = this.tempShowAisle
-        const ns = []; for (let r = 0; r < this.masterRows; r++) { const row = this.masterSeats[r] ? [...this.masterSeats[r]].slice(0, this.masterCols) : []; while (row.length < this.masterCols) row.push(null); ns.push(row) }
-        this.masterSeats = ns; await this.saveMaster()
-      }
-      this.showSettingsDialog = false
-    },
-    applyMasterToActive() {
-      if (!confirm('确定用模板覆盖当前座位吗？')) return
-      axios.post(`${API_BASE}/seats/apply-master`).then(() => this.loadActive()).catch(e => alert('应用失败'))
-    },
-    async fetchHistoryWeeks() {
-      try {
-        const res = await axios.get(`${API_BASE}/seats/history`)
-        this.historyWeeks = res.data || []
-        if (this.historyCurrentWeek && !this.historyWeeks.some(w => w.week_start === this.historyCurrentWeek)) this.historyCurrentWeek = ''
-        if (!this.historyCurrentWeek && this.historyWeeks.length > 0) this.historyCurrentWeek = this.historyWeeks[0].week_start
-        if (this.historyCurrentWeek) await this.loadHistorySnapshot()
-      } catch (e) { console.error(e) }
-    },
-    async loadHistorySnapshot() {
-      if (!this.historyCurrentWeek) return
-      this.historyLoading = true
-      try {
-        const res = await axios.get(`${API_BASE}/seats/history/${this.historyCurrentWeek}`)
-        this.historySnapshot = res.data
-        if (res.data) {
-          this.historyData = { mode: res.data.mode || 'single', rows: res.data.rows, cols: res.data.cols, seats: res.data.seats, showAisle: (res.data.settings && res.data.settings.showAisle) || false }
-        } else {
-          this.historyData = { mode: 'single', rows: 0, cols: 0, seats: [], showAisle: false }
-        }
-      } catch (e) { console.error(e) } finally { this.historyLoading = false }
-    },
-    getMonday(date) {
-      const d = new Date(date)
-      const day = d.getDay()
-      const diff = d.getDate() - day + (day === 0 ? -6 : 1)
-      return new Date(d.setDate(diff))
-    },
-    async captureHistorySnapshot() {
-      try {
-        const weekStart = this.getMonday(new Date()).toISOString().slice(0, 10)
-        await axios.post(`${API_BASE}/seats/snapshot`, { week_start: weekStart, mode: this.activeMode, rows: this.activeRows, cols: this.activeCols, seats: this.activeSeats, settings: { showAisle: this.activeShowAisle } })
-        alert('本周快照已保存')
-        await this.fetchHistoryWeeks()
-      } catch (e) { alert('保存失败') }
-    }
-  },
-  watch: { activeTab(newTab) { if (newTab === 'history') this.fetchHistoryWeeks() } },
-  mounted() { this.loadActive(); this.loadMaster(); this.fetchAllStudents() }
+function getStudentName(id) {
+  return studentMap.value[id]?.姓名 || ''
 }
+
+function getStudentId(name) {
+  if (!name) return null
+  const student = allStudents.value.find(s => s.姓名 === name)
+  return student ? student.id : null
+}
+
+async function fetchAllStudents() {
+  try {
+    const res = await axios.get(`${API_BASE}/students`)
+    allStudents.value = res.data.data || res.data
+    studentMap.value = {}
+    allStudents.value.forEach(s => { studentMap.value[s.id] = s })
+  } catch (e) { console.error(e) }
+}
+
+// ==================== 座位网格 ====================
+const activeGrid = useSeatGrid(`${API_BASE}/seats`, { getStudentName, getStudentId })
+const masterGrid = useSeatGrid(`${API_BASE}/seats/master`, { getStudentName, getStudentId })
+
+// 保持模板兼容的别名
+const activeLoaded = activeGrid.loaded
+const activeRows = activeGrid.rows
+const activeCols = activeGrid.cols
+const activeSeats = activeGrid.seats
+const activeMode = activeGrid.mode
+const activeShowAisle = activeGrid.showAisle
+const activeSettings = activeGrid.settings
+const activeSettingsVisible = activeGrid.settingsVisible
+const currentEditExcludeIds = activeGrid.currentEditExcludeIds
+const activeColHeaders = activeGrid.colHeaders
+const activeDisplayRows = activeGrid.displayRows
+const activeExportFields = activeGrid.exportFields
+const activeExportRows = activeGrid.exportRows
+
+const masterLoaded = masterGrid.loaded
+const masterRows = masterGrid.rows
+const masterCols = masterGrid.cols
+const masterSeats = masterGrid.seats
+const masterMode = masterGrid.mode
+const masterShowAisle = masterGrid.showAisle
+const masterSettings = masterGrid.settings
+const masterSettingsVisible = masterGrid.settingsVisible
+const currentMasterEditExcludeIds = masterGrid.currentEditExcludeIds
+const masterColHeaders = masterGrid.colHeaders
+const masterDisplayRows = masterGrid.displayRows
+const masterExportFields = masterGrid.exportFields
+const masterExportRows = masterGrid.exportRows
+
+// ==================== 方法别名 ====================
+const loadActive = activeGrid.load
+const onActiveCellsUpdate = activeGrid.onCellsUpdate
+const onActiveSwapRows = activeGrid.onSwapRows
+const onActiveSwapColumns = activeGrid.onSwapColumns
+const onActiveCellDblClick = activeGrid.onCellDblClick
+const saveActiveSettings = activeGrid.saveSettings
+
+const loadMaster = masterGrid.load
+const onMasterCellsUpdate = masterGrid.onCellsUpdate
+const onMasterSwapRows = masterGrid.onSwapRows
+const onMasterSwapColumns = masterGrid.onSwapColumns
+const onMasterCellDblClick = masterGrid.onCellDblClick
+const saveMasterSettings = masterGrid.saveSettings
+
+function openSettings(target) {
+  if (target === 'active') {
+    activeSettingsVisible.value = true
+  } else {
+    masterSettingsVisible.value = true
+  }
+}
+
+async function applyMasterToActive() {
+  if (!confirm('确定用模板覆盖当前座位吗？')) return
+  try {
+    await axios.post(`${API_BASE}/seats/apply-master`)
+    await loadActive()
+  } catch (e) { alert('应用失败') }
+}
+
+// ==================== 历史记录 ====================
+const historyWeeks = ref([])
+const historyCurrentWeek = ref('')
+const historySnapshot = ref(null)
+const historyData = ref({ mode: 'single', rows: 0, cols: 0, seats: [], showAisle: true })
+const historyLoading = ref(false)
+
+const historyColHeaders = computed(() => {
+  const { cols: c, mode: m, showAisle: sa } = historyData.value
+  return activeGrid.generateColHeaders(c, m, sa)
+})
+
+const historyDisplayRows = computed(() => {
+  const { seats: hSeats, rows: r, cols: c, mode: m, showAisle: sa } = historyData.value
+  const displayCols = activeGrid.getDisplayColCount(c, m, sa)
+  const result = []
+  for (let row = 0; row < r; row++) {
+    const rowCells = []
+    let realCol = 0
+    for (let d = 0; d < displayCols; d++) {
+      if (activeGrid.isAisleCol(d, c, m, sa)) {
+        if (row === 0) {
+          rowCells.push({ course: '走廊', _isAisle: true, _aisleRowSpan: r, _isAisleHidden: false })
+        } else {
+          rowCells.push({ course: '', _isAisle: false, _isAisleHidden: true })
+        }
+      } else {
+        const seatVal = hSeats[row]?.[realCol]
+        let displayName = ''
+        if (seatVal === null || seatVal === undefined) {
+          displayName = ''
+        } else if (typeof seatVal === 'number') {
+          displayName = getStudentName(seatVal) || ''
+        } else {
+          displayName = seatVal
+        }
+        rowCells.push({ course: displayName, _isAisle: false, _isAisleHidden: false, _studentId: seatVal })
+        realCol++
+      }
+    }
+    result.push({ _rowKey: `row_${row}`, label: `第${row + 1}行`, cells: rowCells, _isReadonly: true, _lessonIdx: row, _periodRowSpan: 0, periodLabel: '' })
+  }
+  return result
+})
+
+async function fetchHistoryWeeks() {
+  try {
+    const res = await axios.get(`${API_BASE}/seats/history`)
+    historyWeeks.value = res.data || []
+    if (historyCurrentWeek.value && !historyWeeks.value.some(w => w.week_start === historyCurrentWeek.value)) {
+      historyCurrentWeek.value = ''
+    }
+    if (!historyCurrentWeek.value && historyWeeks.value.length > 0) {
+      historyCurrentWeek.value = historyWeeks.value[0].week_start
+    }
+    if (historyCurrentWeek.value) await loadHistorySnapshot()
+  } catch (e) { console.error(e) }
+}
+
+async function loadHistorySnapshot() {
+  if (!historyCurrentWeek.value) return
+  historyLoading.value = true
+  try {
+    const res = await axios.get(`${API_BASE}/seats/history/${historyCurrentWeek.value}`)
+    historySnapshot.value = res.data
+    if (res.data) {
+      historyData.value = {
+        mode: res.data.mode || 'single',
+        rows: res.data.rows,
+        cols: res.data.cols,
+        seats: res.data.seats,
+        showAisle: (res.data.settings && res.data.settings.showAisle) || false
+      }
+    } else {
+      historyData.value = { mode: 'single', rows: 0, cols: 0, seats: [], showAisle: false }
+    }
+  } catch (e) { console.error(e) } finally { historyLoading.value = false }
+}
+
+function getMonday(date) {
+  const d = new Date(date)
+  const day = d.getDay()
+  const diff = d.getDate() - day + (day === 0 ? -6 : 1)
+  return new Date(d.setDate(diff))
+}
+
+async function captureHistorySnapshot() {
+  try {
+    const weekStart = getMonday(new Date()).toISOString().slice(0, 10)
+    await axios.post(`${API_BASE}/seats/snapshot`, {
+      week_start: weekStart,
+      mode: activeMode.value,
+      rows: activeRows.value,
+      cols: activeCols.value,
+      seats: activeSeats.value,
+      settings: { showAisle: activeShowAisle.value }
+    })
+    alert('本周快照已保存')
+    await fetchHistoryWeeks()
+  } catch (e) { alert('保存失败') }
+}
+
+watch(activeTab, (newTab) => { if (newTab === 'history') fetchHistoryWeeks() })
+
+onMounted(() => {
+  loadActive()
+  loadMaster()
+  fetchAllStudents()
+})
 </script>
