@@ -1,6 +1,24 @@
 {
+  "name": "campus-assistant",
+  "version": "1.0.0",
+  "description": "校园助手桌面应用",
+  "main": "electron/main.js",
+  "scripts": {
+    "dev": "cd student-frontend && npm run dev",
+    "electron": "electron .",
+    "electron:dev": "concurrently --names \"Vite,Electron\" --prefix-colors \"blue,green\" --kill-others \"npm run dev\" \"electron .\"",
+    "build": "cd student-frontend && vite build",
+    "electron:build": "npm run build && electron-builder",
+    "postinstall": "cd student-backend && npm install"
+  },
   "dependencies": {
     "multer": "^2.1.1",
     "sortablejs": "^1.15.7"
+  },
+  "devDependencies": {
+    "concurrently": "^10.0.4",
+    "electron": "^31.0.0",
+    "electron-builder": "^24.13.0",
+    "wait-on": "^9.1.0"
   }
 }

@@ -1,0 +1,39 @@
+/* ==================== 毛玻璃主题 ==================== */
+
+:root[data-theme="glass"] {
+  /* 品牌主色 */
+  --color-primary: #3b82f6;
+  --color-primary-hover: #2563eb;
+  --color-primary-active: #1d4ed8;
+  --color-primary-light: rgba(59, 130, 246, 0.15);
+
+  /* 背景色：半透明 */
+  --color-bg: linear-gradient(135deg, #e0f2fe 0%, #f0f9ff 100%);
+  --color-surface: rgba(255, 255, 255, 0.7);
+  --color-surface-hover: rgba(255, 255, 255, 0.85);
+  --color-sidebar: rgba(17, 24, 39, 0.85);
+  --color-sidebar-hover: rgba(31, 41, 55, 0.9);
+  --color-sidebar-active: rgba(55, 65, 81, 0.95);
+
+  /* 文字色 */
+  --color-text: #1e293b;
+  --color-text-secondary: #475569;
+  --color-text-muted: #64748b;
+  --color-text-inverse: #ffffff;
+
+  /* 边框色：半透明白 */
+  --color-border: rgba(255, 255, 255, 0.4);
+  --color-border-strong: rgba(255, 255, 255, 0.6);
+
+  /* 阴影：更大更柔和 */
+  --shadow-sm: 0 2px 8px rgba(31, 38, 135, 0.08);
+  --shadow-md: 0 8px 24px rgba(31, 38, 135, 0.12);
+  --shadow-lg: 0 16px 40px rgba(31, 38, 135, 0.16);
+  --shadow-card: 0 8px 32px rgba(31, 38, 135, 0.12);
+
+  /* 圆角：更圆润 */
+  --radius-sm: 6px;
+  --radius-md: 12px;
+  --radius-lg: 18px;
+  --radius-card: 16px;
+}

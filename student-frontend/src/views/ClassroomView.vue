@@ -1,34 +1,34 @@
 <template>
   <div>
-    <div class="w-full bg-gradient-to-r from-blue-80 to-blue-100 shadow-md rounded-xl mb-6  px-6 py-5 ">
-      <h1 class="text-2xl font-bold text-gray-800">📚 班级管理</h1>
+    <div class="w-full bg-surface shadow-md rounded-xl mb-6 px-6 py-5 border border-border">
+      <h1 class="text-2xl font-bold text-text">📚 班级管理</h1>
     </div>
 
     <!-- 工具栏按钮 -->
     <div class="mb-4 flex items-center gap-3">
-      <button @click="addNewRowAtBottom" class="bg-green-500 hover:bg-green-600 text-white px-5 py-2 rounded">
+      <button @click="addNewRowAtBottom" class="bg-primary hover:bg-primary-hover text-text-inverse px-5 py-2 rounded">
         ＋ 添加学生
       </button>
-      <button @click="fetchStudents" class="bg-gray-500 hover:bg-gray-600 text-white px-4 py-2 rounded flex items-center gap-1" title="刷新表格">
+      <button @click="fetchStudents" class="bg-text-muted hover:bg-text-secondary text-text-inverse px-4 py-2 rounded flex items-center gap-1" title="刷新表格">
         🔄 刷新
       </button>
       <button
         @click="onBatchDelete"
         :disabled="selectedCount === 0"
-        class="bg-red-500 hover:bg-red-600 text-white px-4 py-2 rounded disabled:opacity-50 disabled:cursor-not-allowed"
+        class="bg-danger hover:bg-danger-hover text-text-inverse px-4 py-2 rounded disabled:opacity-50 disabled:cursor-not-allowed"
       >
         🗑️ 批量删除 ({{ selectedCount }})
       </button>
-      <button @click="importDialogVisible = true" class="bg-orange-500 hover:bg-orange-600 text-white px-4 py-2 rounded">
+      <button @click="importDialogVisible = true" class="bg-warning hover:bg-warning-hover text-text-inverse px-4 py-2 rounded">
         📥 从 Excel 导入
       </button>
       <button
         @click="$refs.exportDialog.open()"
-        class="bg-yellow-500 hover:bg-yellow-600 text-white px-4 py-2 rounded"
+        class="bg-warning hover:bg-warning-hover text-text-inverse px-4 py-2 rounded"
       >
         📥 导出 Excel
       </button>
-      <button @click="dedupeDialogVisible = true" class="bg-pink-500 hover:bg-pink-600 text-white px-4 py-2 rounded">
+      <button @click="dedupeDialogVisible = true" class="bg-danger hover:bg-danger-hover text-text-inverse px-4 py-2 rounded">
         🔍 去除重复数据
       </button>
     </div>

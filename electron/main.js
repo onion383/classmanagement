@@ -1,0 +1,365 @@
+const { app, BrowserWindow, ipcMain, desktopCapturer, screen } = require('electron')
+const path = require('path')
+const fs = require('fs')
+const { fork } = require('child_process')
+
+let mainWindow
+let widgetWindow
+let backendProcess
+
+const isDev = !app.isPackaged
+
+// 开发模式：忽略自签名 HTTPS 证书错误
+app.on('certificate-error', (event, webContents, url, error, certificate, callback) => {
+  if (isDev) {
+    event.preventDefault()
+    callback(true)
+  } else {
+    callback(false)
+  }
+})
+
+// 禁用控制台安全警告（仅开发模式）
+if (isDev) {
+  process.env.ELECTRON_DISABLE_SECURITY_WARNINGS = 'true'
+}
+
+function loadUrlWithRetry(win, url, retries = 30) {
+  win.loadURL(url).catch((err) => {
+    if (retries > 0) {
+      console.log(`[Electron] 等待 ${url} 就绪，剩余重试 ${retries}...`)
+      setTimeout(() => loadUrlWithRetry(win, url, retries - 1), 1000)
+    } else {
+      console.error(`[Electron] 无法加载 ${url}:`, err.message)
+    }
+  })
+}
+
+function createMainWindow() {
+  mainWindow = new BrowserWindow({
+    width: 1280,
+    height: 800,
+    minWidth: 900,
+    minHeight: 600,
+    title: '校园助手',
+    webPreferences: {
+      preload: path.join(__dirname, 'preload.js'),
+      contextIsolation: true,
+      nodeIntegration: false,
+      webSecurity: !isDev,
+    }
+  })
+
+  if (isDev) {
+    loadUrlWithRetry(mainWindow, 'https://127.0.0.1:5173/')
+    mainWindow.webContents.openDevTools()
+  } else {
+    mainWindow.loadFile(path.join(__dirname, '../student-frontend/dist/index.html'))
+  }
+
+  mainWindow.on('closed', () => {
+    mainWindow = null
+  })
+}
+
+function createWidgetWindow() {
+  widgetWindow = new BrowserWindow({
+    width: 48,
+    height: 48,
+    frame: false,
+    transparent: true,
+    alwaysOnTop: true,
+    skipTaskbar: true,
+    resizable: false,
+    hasShadow: false,
+    maximizable: false,
+    minimizable: false,
+    fullscreenable: false,
+    webPreferences: {
+      preload: path.join(__dirname, 'preload.js'),
+      contextIsolation: true,
+      nodeIntegration: false,
+      webSecurity: !isDev,
+    }
+  })
+
+  // 初始位置：屏幕左边缘中间
+  const { height: screenH } = require('electron').screen.getPrimaryDisplay().workAreaSize
+  widgetWindow.setPosition(0, Math.round(screenH / 2 - 24))
+
+  if (process.platform === 'darwin') {
+    widgetWindow.setWindowButtonVisibility(false)
+  }
+
+  if (isDev) {
+    loadUrlWithRetry(widgetWindow, 'https://127.0.0.1:5173/widget.html')
+  } else {
+    widgetWindow.loadFile(path.join(__dirname, '../student-frontend/dist/widget.html'))
+  }
+
+  widgetWindow.on('blur', () => {
+    if (widgetWindow && !widgetWindow.isDestroyed()) {
+      widgetWindow.webContents.send('from-main', { type: 'blur' })
+    }
+  })
+
+  // 窗口被拖动后做边界保护（防止完全拖出屏幕）
+  widgetWindow.on('moved', () => {
+    if (widgetWindow && !widgetWindow.isDestroyed()) {
+      const [x, y] = widgetWindow.getPosition()
+      const [width, height] = currentWidgetSize
+      const { width: screenW, height: screenH } = require('electron').screen.getPrimaryDisplay().workAreaSize
+
+      let newX = x
+      let newY = y
+      const minVisible = 50
+      newX = Math.max(-width + minVisible, Math.min(newX, screenW - minVisible))
+      newY = Math.max(-height + minVisible, Math.min(newY, screenH - minVisible))
+
+      if (newX !== x || newY !== y) {
+        widgetWindow.setPosition(newX, newY)
+      }
+    }
+  })
+
+  widgetWindow.on('closed', () => {
+    widgetWindow = null
+  })
+}
+
+function startBackend() {
+  const backendPath = path.join(__dirname, '../student-backend/app.js')
+  const backendCwd = path.join(__dirname, '../student-backend')
+
+  // execPath: 'node' 强制使用系统安装的 Node.js，而非 Electron 内置的 Node
+  backendProcess = fork(backendPath, [], {
+    cwd: backendCwd,
+    execPath: 'node',
+    silent: false,
+  })
+
+  backendProcess.on('error', (err) => {
+    console.error('后端启动失败:', err)
+  })
+
+  backendProcess.on('exit', (code) => {
+    console.log(`后端进程退出，码: ${code}`)
+  })
+}
+
+app.whenReady().then(() => {
+  startBackend()
+
+  // 等待后端启动后再创建窗口（简单延迟）
+  setTimeout(() => {
+    createMainWindow()
+    createWidgetWindow()
+  }, 1500)
+})
+
+// 调整小组件窗口大小（带边界保护，防止超出屏幕）
+ipcMain.on('widget-resize', (event, [width, height]) => {
+  if (widgetWindow && !widgetWindow.isDestroyed()) {
+    widgetWindow.setContentSize(width, height)
+    const [actualW, actualH] = widgetWindow.getContentSize()
+    currentWidgetSize = [actualW, actualH]
+
+    // 边界保护：确保窗口不超出屏幕
+    const [x, y] = widgetWindow.getPosition()
+    const { width: screenW, height: screenH } = require('electron').screen.getPrimaryDisplay().workAreaSize
+
+    let newX = x
+    let newY = y
+
+    // 右边界保护
+    if (newX + width > screenW) {
+      newX = screenW - width
+    }
+    // 左边界保护
+    if (newX < 0) {
+      newX = 0
+    }
+    // 下边界保护
+    if (newY + height > screenH) {
+      newY = screenH - height
+    }
+    // 上边界保护
+    if (newY < 0) {
+      newY = 0
+    }
+
+    if (newX !== x || newY !== y) {
+      widgetWindow.setPosition(newX, newY)
+    }
+  }
+})
+
+// 将窗口移动到指定位置
+ipcMain.on('widget-move-to', (event, position) => {
+  if (widgetWindow && !widgetWindow.isDestroyed()) {
+    const { height: screenH } = require('electron').screen.getPrimaryDisplay().workAreaSize
+    const [winWidth, winHeight] = widgetWindow.getSize()
+    if (position === 'left-middle') {
+      const x = 0
+      const y = Math.round((screenH - winHeight) / 2)
+      widgetWindow.setPosition(x, y)
+    }
+  }
+})
+
+let lastIconPosition = null
+let currentWidgetSize = [48, 48] // 记录预期窗口尺寸，防止拖动时漂移
+let dragStartWindowPos = null
+let dragStartMousePos = null
+let dragStartWindowSize = null
+
+// 将窗口居中显示（同时保存居中前的位置，以便关闭工具后恢复）
+ipcMain.on('widget-center', () => {
+  if (widgetWindow && !widgetWindow.isDestroyed()) {
+    lastIconPosition = widgetWindow.getPosition()
+    widgetWindow.center()
+  }
+})
+
+// 恢复图标之前保存的位置
+ipcMain.on('widget-restore-position', () => {
+  if (widgetWindow && !widgetWindow.isDestroyed() && lastIconPosition) {
+    widgetWindow.setPosition(lastIconPosition[0], lastIconPosition[1])
+  }
+})
+
+// 设置窗口是否忽略鼠标事件（true=透明区域穿透，false=正常接收）
+ipcMain.on('widget-set-ignore-mouse', (event, ignore) => {
+  if (widgetWindow && !widgetWindow.isDestroyed()) {
+    widgetWindow.setIgnoreMouseEvents(ignore, { forward: true })
+  }
+})
+
+// 拖动开始：记录窗口初始位置、尺寸和鼠标初始位置
+ipcMain.on('widget-drag-start', (event, { screenX, screenY }) => {
+  if (widgetWindow && !widgetWindow.isDestroyed()) {
+    dragStartWindowPos = widgetWindow.getPosition()
+    dragStartWindowSize = widgetWindow.getSize()
+    dragStartMousePos = [screenX, screenY]
+  }
+})
+
+// 拖动中：使用 setContentBounds 与 setContentSize 保持一致，避免 setBounds/setSize 边界计算差异
+ipcMain.on('widget-drag-move', (event, { screenX, screenY }) => {
+  if (widgetWindow && !widgetWindow.isDestroyed() && dragStartWindowPos && dragStartMousePos && dragStartWindowSize) {
+    const dx = screenX - dragStartMousePos[0]
+    const dy = screenY - dragStartMousePos[1]
+    let newX = Math.round(dragStartWindowPos[0] + dx)
+    let newY = Math.round(dragStartWindowPos[1] + dy)
+
+    const [width, height] = dragStartWindowSize
+    const { width: screenW, height: screenH } = require('electron').screen.getPrimaryDisplay().workAreaSize
+
+    const minVisible = 50
+    newX = Math.max(-width + minVisible, Math.min(newX, screenW - minVisible))
+    newY = Math.max(-height + minVisible, Math.min(newY, screenH - minVisible))
+
+    widgetWindow.setContentBounds({ x: newX, y: newY, width, height })
+  }
+})
+
+// 拖动结束：确保尺寸正确
+ipcMain.on('widget-drag-end', () => {
+  if (widgetWindow && !widgetWindow.isDestroyed()) {
+    const w = currentWidgetSize[0]
+    const h = currentWidgetSize[1]
+    widgetWindow.setContentSize(w, h)
+  }
+})
+
+// 主应用 -> 小组件
+ipcMain.on('to-widget', (event, data) => {
+  if (widgetWindow && !widgetWindow.isDestroyed()) {
+    widgetWindow.webContents.send('from-main', data)
+  }
+})
+
+// 小组件 -> 主应用
+ipcMain.on('to-main', (event, data) => {
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    mainWindow.webContents.send('from-widget', data)
+  }
+})
+
+// 一键截屏：截取整个屏幕并保存到本地
+ipcMain.handle('screenshot-capture', async () => {
+  // 截图前隐藏 widget 窗口，避免出现在截图中
+  let wasVisible = false
+  if (widgetWindow && !widgetWindow.isDestroyed()) {
+    wasVisible = widgetWindow.isVisible()
+    if (wasVisible) widgetWindow.hide()
+    // 等待一帧确保窗口已隐藏
+    await new Promise(resolve => setTimeout(resolve, 100))
+  }
+
+  try {
+    const primaryDisplay = screen.getPrimaryDisplay()
+    const { width, height } = primaryDisplay.size
+
+    const sources = await desktopCapturer.getSources({
+      types: ['screen'],
+      thumbnailSize: { width, height }
+    })
+
+    const primarySource = sources.find(s => s.display_id === String(primaryDisplay.id)) || sources[0]
+    const image = primarySource.thumbnail.toPNG()
+
+    const saveDir = path.join(app.getPath('pictures'), 'screenshots')
+    if (!fs.existsSync(saveDir)) {
+      fs.mkdirSync(saveDir, { recursive: true })
+    }
+
+    const timestamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19)
+    const filePath = path.join(saveDir, `screenshot_${timestamp}.png`)
+    fs.writeFileSync(filePath, image)
+
+    return { success: true, filePath }
+  } finally {
+    // 恢复 widget 窗口
+    if (wasVisible && widgetWindow && !widgetWindow.isDestroyed()) {
+      widgetWindow.show()
+    }
+  }
+})
+
+// 保存注释后的截图
+ipcMain.handle('note-save', async (event, uint8Array) => {
+  const buffer = Buffer.from(uint8Array)
+  const saveDir = path.join(app.getPath('pictures'), 'screenshots')
+  if (!fs.existsSync(saveDir)) {
+    fs.mkdirSync(saveDir, { recursive: true })
+  }
+  const timestamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19)
+  const filePath = path.join(saveDir, `note_${timestamp}.png`)
+  fs.writeFileSync(filePath, buffer)
+  return { success: true, filePath }
+})
+
+app.on('window-all-closed', () => {
+  if (backendProcess) {
+    backendProcess.kill()
+    backendProcess = null
+  }
+  if (process.platform !== 'darwin') {
+    app.quit()
+  }
+})
+
+app.on('activate', () => {
+  if (BrowserWindow.getAllWindows().length === 0) {
+    createMainWindow()
+    createWidgetWindow()
+  }
+})
+
+app.on('before-quit', () => {
+  if (backendProcess) {
+    backendProcess.kill()
+    backendProcess = null
+  }
+})

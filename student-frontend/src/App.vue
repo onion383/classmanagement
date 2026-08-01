@@ -7,7 +7,7 @@
   <!-- 其他页面：带侧边栏布局 -->
   <div v-else class="flex h-screen">
     <Sidebar />
-    <main class="flex-1 p-6 bg-gray-50 overflow-auto">
+    <main class="flex-1 p-6 bg-bg overflow-auto">
       <router-view />
     </main>
   </div>

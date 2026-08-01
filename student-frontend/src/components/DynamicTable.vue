@@ -10,7 +10,7 @@
           <!-- 全选复选框（可通过 hideSelectAll 隐藏，但列始终存在） -->
           <th
             key="col-checkbox"
-            class="bg-green-500 text-white border border-gray-300 px-1 py-1 text-center w-8 col-static"
+            class="bg-primary text-text-inverse border border-border px-1 py-1 text-center w-8 col-static"
           >
             <input
               v-if="!hideSelectAll"
@@ -35,20 +35,20 @@
             @dragend="onColDragEnd"
             @contextmenu.prevent="$emit('contextmenu', $event, 'header', field)"
             :class="[
-              'bg-green-500 text-white border border-gray-300 px-2 py-1 text-center cursor-context-menu select-none',
+              'bg-primary text-text-inverse border border-border px-2 py-1 text-center cursor-context-menu select-none',
               { 'opacity-30': colDragIndex === colIndex },
               colDropIndicatorClass(colIndex)
             ]"
             class="col-header"
           >
             <div class="flex items-center justify-center gap-1">
-              <span class="drag-handle cursor-grab text-gray-300 hover:text-white select-none">⠿</span>
+              <span class="drag-handle cursor-grab text-text-inverse/70 hover:text-text-inverse select-none">⠿</span>
               <span @click.stop="$emit('search', field.name)" class="cursor-pointer">
                 {{ field.name === 'id' ? 'ID' : field.name }}
               </span>
               <span class="flex flex-col text-xs cursor-pointer" @click.stop="$emit('toggleSort', field.name)">
-                <span :class="sortField === field.name && sortOrder === 'asc' ? 'text-yellow-300' : 'text-gray-300'">▲</span>
-                <span :class="sortField === field.name && sortOrder === 'desc' ? 'text-yellow-300' : 'text-gray-300'">▼</span>
+                <span :class="sortField === field.name && sortOrder === 'asc' ? 'text-warning' : 'text-text-inverse/70'">▲</span>
+                <span :class="sortField === field.name && sortOrder === 'desc' ? 'text-warning' : 'text-text-inverse/70'">▼</span>
               </span>
             </div>
           </th>
@@ -56,7 +56,7 @@
           <!-- 操作列（固定） -->
           <th
             key="col-op"
-            class="bg-green-500 text-white border border-gray-300 px-2 py-1 text-center col-op"
+            class="bg-primary text-text-inverse border border-border px-2 py-1 text-center col-op"
           >
             操作
           </th>
@@ -79,8 +79,8 @@
               'data-drag-item',
               { 'opacity-30': dragIndex === rowIndex },
               rowDropIndicatorClass(rowIndex),
-              { 'bg-gray-100': isRowSelected(row._rowKey) && !editingCell },
-              row._isSeparator ? 'h-4 bg-gray-200' : ''
+              { 'bg-surface-hover': isRowSelected(row._rowKey) && !editingCell },
+              row._isSeparator ? 'h-4 bg-border' : ''
             ]"
             class="transition-all duration-200 ease-in-out"
           >
@@ -90,7 +90,7 @@
             <!-- 普通行 -->
             <template v-else>
               <!-- 复选框 -->
-              <td class="border border-gray-300 px-1 text-center align-middle w-8" @click.stop>
+              <td class="border border-border px-1 text-center align-middle w-8" @click.stop>
                 <input
                   type="checkbox"
                   :checked="isRowSelected(row._rowKey)"
@@ -104,7 +104,7 @@
               <td
                 v-for="(field, fieldIndex) in fields"
                 :key="field.name"
-                class="border border-gray-300 px-2 py-1 text-center relative pl-6"
+                class="border border-border px-2 py-1 text-center relative pl-6"
                 :class="{
                   'cell-active':
                     !isEditing(row, field.name) &&
@@ -117,14 +117,14 @@
                 <!-- 拖拽手柄（仅在非去重模式或允许移动时显示） -->
                 <span
                   v-if="fieldIndex === 0 && !hideMoveButtons"
-                  class="absolute left-1 top-1/2 -translate-y-1/2 drag-handle cursor-grab select-none text-gray-400 hover:text-gray-600"
+                  class="absolute left-1 top-1/2 -translate-y-1/2 drag-handle cursor-grab select-none text-text-muted hover:text-text-secondary"
                   @mousedown.stop
                 >⠿</span>
 
                 <template v-if="field.name === 'id'">{{ row._isNew ? '自动' : row.id }}</template>
                 <template v-else-if="field.name === 'position'">{{ row._isNew ? '-' : row._displayIndex }}</template>
                 <template v-else-if="field.name === '收据'">
-                  <button @click="$emit('manageReceipt', { row, isNew: row._isNew })" class="bg-purple-500 text-white border-none py-1 px-2 rounded text-xs cursor-pointer">管理收据{{ row._isNew ? '' : ' (' + getReceiptCount(row) + ')' }}</button>
+                  <button @click="$emit('manageReceipt', { row, isNew: row._isNew })" class="bg-primary text-text-inverse border-none py-1 px-2 rounded text-xs cursor-pointer">管理收据{{ row._isNew ? '' : ' (' + getReceiptCount(row) + ')' }}</button>
                 </template>
                 <template v-else-if="field.control === 'select'">
                   <select
@@ -132,7 +132,7 @@
                     v-model="row[field.name]"
                     @change="row._isNew ? $emit('updateNewRow', field.name, $event.target.value) : $emit('saveCell', row, field)"
                     @blur="row._isNew ? null : $emit('saveCell', row, field)"
-                    class="w-full min-h-[24px] leading-6 px-1 py-0.5 border border-gray-300 bg-white focus:outline-none focus:border-green-400"
+                    class="w-full min-h-[24px] leading-6 px-1 py-0.5 border border-border bg-surface focus:outline-none focus:border-primary"
                   >
                     <option value=""></option>
                     <option v-for="opt in field.options" :key="opt" :value="opt">{{ opt }}</option>
@@ -140,7 +140,7 @@
                   <span v-else @dblclick="$emit('startEdit', row, field)" class="block w-full min-h-[24px] leading-6 px-1 cursor-default">{{ row[field.name] || '' }}</span>
                 </template>
                 <template v-else-if="field.type === '日期' || field.control === 'datepicker'">
-                  <input type="date" v-if="row._isNew || isEditing(row, field.name)" v-model="row[field.name]" @blur="row._isNew ? null : $emit('saveCell', row, field)" class="w-full min-h-[24px] leading-6 px-1 py-0.5 border border-transparent bg-yellow-50 focus:outline-none focus:border-green-400 box-border" />
+                  <input type="date" v-if="row._isNew || isEditing(row, field.name)" v-model="row[field.name]" @blur="row._isNew ? null : $emit('saveCell', row, field)" class="w-full min-h-[24px] leading-6 px-1 py-0.5 border border-transparent bg-warning/10 focus:outline-none focus:border-primary box-border" />
                   <span v-else @dblclick="$emit('startEdit', row, field)" class="block w-full min-h-[24px] leading-6 px-1 cursor-default">{{ row[field.name] || '' }}</span>
                 </template>
                 <template v-else>
@@ -149,7 +149,7 @@
                     v-model="row[field.name]"
                     @blur="row._isNew ? null : $emit('saveCell', row, field)"
                     @keyup.enter="row._isNew ? null : $emit('saveCell', row, field)"
-                    class="w-full min-h-[24px] leading-6 px-1 py-0.5 border border-transparent bg-yellow-50 focus:outline-none focus:border-green-400 box-border"
+                    class="w-full min-h-[24px] leading-6 px-1 py-0.5 border border-transparent bg-warning/10 focus:outline-none focus:border-primary box-border"
                     :placeholder="field.name"
                     :ref="row._isNew ? 'newRowInput' : 'editInput-' + row._rowKey + '-' + field.name"
                   />
@@ -158,35 +158,35 @@
               </td>
 
               <!-- 操作列 -->
-              <td class="border border-gray-300 px-2 py-1 text-center whitespace-nowrap">
+              <td class="border border-border px-2 py-1 text-center whitespace-nowrap">
                 <template v-if="row._isNew">
-                  <button @click="$emit('saveNewRow')" class="bg-blue-500 text-white border-none py-0.5 px-2 mr-1 cursor-pointer rounded">保存</button>
-                  <button @click="$emit('cancelNewRow')" class="bg-gray-400 text-white border-none py-0.5 px-2 cursor-pointer rounded">取消</button>
+                  <button @click="$emit('saveNewRow')" class="bg-info text-text-inverse border-none py-0.5 px-2 mr-1 cursor-pointer rounded">保存</button>
+                  <button @click="$emit('cancelNewRow')" class="bg-text-muted text-text-inverse border-none py-0.5 px-2 cursor-pointer rounded">取消</button>
                 </template>
                 <template v-else>
                   <!-- 上移 / 下移（仅在非去重模式显示） -->
                   <button
                     v-if="!hideMoveButtons"
                     @click="$emit('moveRow', row, 'up')"
-                    class="bg-gray-400 text-white border-none py-0.5 px-1.5 mr-0.5 cursor-pointer rounded"
+                    class="bg-text-muted text-text-inverse border-none py-0.5 px-1.5 mr-0.5 cursor-pointer rounded"
                     title="上移"
                   >↑</button>
                   <button
                     v-if="!hideMoveButtons"
                     @click="$emit('moveRow', row, 'down')"
-                    class="bg-gray-400 text-white border-none py-0.5 px-1.5 mr-0.5 cursor-pointer rounded"
+                    class="bg-text-muted text-text-inverse border-none py-0.5 px-1.5 mr-0.5 cursor-pointer rounded"
                     title="下移"
                   >↓</button>
                   <!-- 删除按钮始终保留 -->
-                  <button @click="$emit('deleteRow', row.id)" class="bg-red-500 text-white border-none py-0.5 px-2 cursor-pointer rounded">删除</button>
+                  <button @click="$emit('deleteRow', row.id)" class="bg-danger text-text-inverse border-none py-0.5 px-2 cursor-pointer rounded">删除</button>
                 </template>
               </td>
             </template>
           </tr>
         </TransitionGroup>
 
-        <tr v-if="!hasNewRow" class="bg-gray-50 cursor-pointer" @click="$emit('addNewRowAtBottom')">
-          <td :colspan="(fields ? fields.length : 0) + 2" class="text-center py-2 text-green-500 font-medium">
+        <tr v-if="!hasNewRow" class="bg-bg cursor-pointer" @click="$emit('addNewRowAtBottom')">
+          <td :colspan="(fields ? fields.length : 0) + 2" class="text-center py-2 text-primary font-medium">
             ＋ 点击添加一行
           </td>
         </tr>
@@ -287,17 +287,17 @@ export default {
       if (this.dragIndex === null || this.dragOverIndex === null) return '';
       if (rowIndex !== this.dragOverIndex) return '';
       if (this.dragOverIndex > this.dragIndex) {
-        return 'border-b-2 border-blue-500';
+        return 'border-b-2 border-info';
       }
-      return 'border-t-2 border-blue-500';
+      return 'border-t-2 border-info';
     },
     colDropIndicatorClass(colIndex) {
       if (this.colDragIndex === null || this.colDragOverIndex === null) return '';
       if (colIndex !== this.colDragOverIndex) return '';
       if (this.colDragOverIndex > this.colDragIndex) {
-        return 'border-r-2 border-blue-500';
+        return 'border-r-2 border-info';
       }
-      return 'border-l-2 border-blue-500';
+      return 'border-l-2 border-info';
     },
 
     onRowDragStart(event, row, index) {
@@ -424,10 +424,10 @@ export default {
 .drag-handle:hover { opacity: 1; }
 th .drag-handle { color: rgba(255,255,255,0.7); }
 th:hover .drag-handle { color: white; }
-.cell-input { padding: 2px 4px; line-height: 1.5; min-height: 24px; box-sizing: border-box; border: 1px solid transparent; background-color: #fffde7; outline: none; transition: border-color 0.1s; }
-.cell-input:focus { border-color: #4CAF50; }
+.cell-input { padding: 2px 4px; line-height: 1.5; min-height: 24px; box-sizing: border-box; border: 1px solid transparent; background-color: var(--color-warning-light, #fffde7); outline: none; transition: border-color 0.1s; }
+.cell-input:focus { border-color: var(--color-primary, #4CAF50); }
 .cell-text { padding: 2px 4px; line-height: 1.5; min-height: 24px; box-sizing: border-box; }
-.cell-active { outline: 2px solid #2563eb; outline-offset: -2px; background-color: rgba(37,99,235,0.05); }
+.cell-active { outline: 2px solid var(--color-info, #2563eb); outline-offset: -2px; background-color: color-mix(in srgb, var(--color-info, #2563eb) 5%, transparent); }
 .row-flip-move { transition: transform 0.25s ease; }
 .row-flip-enter-active, .row-flip-leave-active { transition: all 0.25s ease; }
 .row-flip-enter-from, .row-flip-leave-to { opacity: 0; transform: translateX(-20px); }
