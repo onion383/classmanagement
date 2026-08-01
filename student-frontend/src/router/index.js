@@ -2,8 +2,8 @@ import { createRouter, createWebHistory } from 'vue-router'
 import ClassroomView from '../views/ClassroomView.vue'
 import FeeManagement from '../views/FeeManagement.vue'
 import Login from '../views/Login.vue'
-import Account from '../views/Account.vue'    // 确保路径正确
-import ScheduleView from '../views/ScheduleView.vue'   
+import SettingsView from '../views/SettingsView.vue'
+import ScheduleView from '../views/ScheduleView.vue'
 import SeatView from '../views/SeatView.vue';
 
 
@@ -11,8 +11,9 @@ const routes = [
   { path: '/', name: 'classroom', component: ClassroomView },
   { path: '/fee', name: 'fee', component: FeeManagement },
   { path: '/login', name: 'login', component: Login },
-  { path: '/account', name: 'account', component: Account, meta: { requiresAuth: true } },
-  { path: '/schedule', name: 'schedule', component: ScheduleView, meta: { requiresAuth: true } }, 
+  { path: '/settings', name: 'settings', component: SettingsView, meta: { requiresAuth: true } },
+  { path: '/account', redirect: '/settings' },
+  { path: '/schedule', name: 'schedule', component: ScheduleView, meta: { requiresAuth: true } },
   { path: '/seats',name: 'SeatView',component: SeatView },
 ]
 

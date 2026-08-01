@@ -5,24 +5,24 @@
     class="fixed inset-0 bg-black/50 flex items-center justify-center z-[10001]"
     @click.self="cancel"
   >
-    <div class="bg-white p-5 rounded-lg w-[900px] max-h-[85vh] flex flex-col">
+    <div class="bg-surface p-5 rounded-lg w-[900px] max-h-[85vh] flex flex-col shadow-card">
       <h3 class="text-lg font-bold mb-3">管理重复数据</h3>
 
       <template v-if="flatRows.length > 0">
         <div class="flex items-center justify-between mb-2">
-          <p class="text-sm text-gray-600">
+          <p class="text-sm text-text-secondary">
             共发现 {{ totalDuplicateRows }} 行重复数据（涉及 {{ groupedRows.length }} 组），
             每组将自动保留至少一行。
           </p>
           <button
             @click="toggleAllSelect"
-            class="text-sm text-blue-600 hover:underline"
+            class="text-sm text-info hover:underline"
           >
             {{ isAllSelected ? '取消全选' : '全选可删除行' }}
           </button>
         </div>
 
-        <div class="flex-1 overflow-auto border rounded">
+        <div class="flex-1 overflow-auto border border-border rounded">
           <DynamicTable
             ref="dupTable"
             :fields="localFields"
@@ -49,13 +49,13 @@
           />
         </div>
         <div class="flex justify-between items-center mt-4">
-          <span class="text-sm text-gray-600">已选择 {{ selectedCount }} 行</span>
+          <span class="text-sm text-text-secondary">已选择 {{ selectedCount }} 行</span>
           <div class="flex gap-2">
-            <button @click="cancel" class="bg-gray-300 px-4 py-1.5 rounded">取消</button>
+            <button @click="cancel" class="bg-surface-hover px-4 py-1.5 rounded text-text">取消</button>
             <button
               @click="confirmDelete"
               :disabled="selectedCount === 0"
-              class="bg-red-500 text-white px-4 py-1.5 rounded"
+              class="bg-danger text-text-inverse px-4 py-1.5 rounded"
             >
               删除选中行
             </button>
@@ -64,11 +64,11 @@
       </template>
 
       <template v-else>
-        <div class="text-center py-8 text-gray-400">
+        <div class="text-center py-8 text-text-muted">
           ✅ 没有发现重复数据。
         </div>
         <div class="flex justify-center mt-4">
-          <button @click="cancel" class="bg-gray-300 px-4 py-1.5 rounded">关闭</button>
+          <button @click="cancel" class="bg-surface-hover px-4 py-1.5 rounded text-text">关闭</button>
         </div>
       </template>
     </div>

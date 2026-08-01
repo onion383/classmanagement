@@ -1,8 +1,8 @@
 <template>
   <div>
     <!-- 顶部标题栏 -->
-    <div class="w-full bg-gradient-to-r from-blue-80 to-blue-100 shadow-md rounded-xl mb-6  px-6 py-5 ">
-      <h1 class="text-2xl font-bold text-gray-800">📅 课程表</h1>
+    <div class="w-full bg-surface shadow-md rounded-xl mb-6 px-6 py-5 border border-border">
+      <h1 class="text-2xl font-bold text-text">📅 课程表</h1>
     </div>
 
     <!-- 标签切换 -->
@@ -14,10 +14,10 @@
           <section class="mb-10">
             <h2 class="text-xl font-semibold mb-4">📅 实行课表（临时）</h2>
             <div class="mb-4 flex items-center gap-3">
-              <button @click="activeSettingsVisible = true" class="bg-purple-500 text-white px-4 py-2 rounded">⚙️ 设置</button>
-              <button @click="loadActive" class="bg-gray-500 text-white px-4 py-2 rounded">🔄 刷新</button>
-              <button @click="applyMasterToActive" class="bg-green-500 text-white px-4 py-2 rounded">📥 从一般课表导入</button>
-              <button @click="$refs.activeExportDialog.open()" class="bg-yellow-500 text-white px-4 py-2 rounded">📥 导出 Excel</button>
+              <button @click="activeSettingsVisible = true" class="bg-primary text-text-inverse px-4 py-2 rounded">⚙️ 设置</button>
+              <button @click="loadActive" class="bg-text-muted text-text-inverse px-4 py-2 rounded">🔄 刷新</button>
+              <button @click="applyMasterToActive" class="bg-primary text-text-inverse px-4 py-2 rounded">📥 从一般课表导入</button>
+              <button @click="$refs.activeExportDialog.open()" class="bg-warning text-text-inverse px-4 py-2 rounded">📥 导出 Excel</button>
             </div>
 
             <GridView
@@ -25,12 +25,15 @@
               :colHeaders="activeColHeaders"
               :rows="activeDisplayRows"
               :showPeriodColumn="true"
+              :enableCandidate="true"
+              :candidateItems="courseCandidates"
+              candidateLabelField="label"
+              candidatePlaceholder="输入科目"
+              :allowDuplicate="true"
               @update:cells="onActiveCellsUpdate"
               @swapRows="onActiveSwapRows"
               @swapColumns="onActiveSwapColumns"
               @update:row-meta="onActiveRowMeta"
-              
-
             />
 
             <SettingsDialog
@@ -59,15 +62,20 @@
           <section>
             <h2 class="text-xl font-semibold mb-4">📋 一般课表（模板）</h2>
             <div class="mb-4 flex items-center gap-3">
-              <button @click="masterSettingsVisible = true" class="bg-purple-500 text-white px-4 py-2 rounded">⚙️ 设置</button>
-              <button @click="loadMaster" class="bg-gray-500 text-white px-4 py-2 rounded">🔄 刷新</button>
-              <button @click="$refs.masterExportDialog.open()" class="bg-yellow-500 text-white px-4 py-2 rounded">📥 导出 Excel</button>
+              <button @click="masterSettingsVisible = true" class="bg-primary text-text-inverse px-4 py-2 rounded">⚙️ 设置</button>
+              <button @click="loadMaster" class="bg-text-muted text-text-inverse px-4 py-2 rounded">🔄 刷新</button>
+              <button @click="$refs.masterExportDialog.open()" class="bg-warning text-text-inverse px-4 py-2 rounded">📥 导出 Excel</button>
             </div>
 
             <GridView
               :colHeaders="masterColHeaders"
               :rows="masterDisplayRows"
               :showPeriodColumn="true"
+              :enableCandidate="true"
+              :candidateItems="courseCandidates"
+              candidateLabelField="label"
+              candidatePlaceholder="输入科目"
+              :allowDuplicate="true"
               @update:cells="onMasterCellsUpdate"
               @swapRows="onMasterSwapRows"
               @swapColumns="onMasterSwapColumns"
@@ -98,7 +106,7 @@
         <div v-else-if="activeTab === 'history'">
           
           <div v-if="historyLoading" class="text-center py-10">加载中...</div>
-          <div v-else-if="!historySnapshot" class="text-center py-10 text-gray-500">该周暂无快照</div>
+          <div v-else-if="!historySnapshot" class="text-center py-10 text-text-muted">该周暂无快照</div>
           <GridView
             v-else
             :colHeaders="historyColHeaders"
@@ -116,7 +124,7 @@
             @update:currentWeek="loadHistorySnapshot"
           />
           <div class="text-center mt-4">
-            <button @click="captureHistorySnapshot" class="bg-green-500 text-white px-4 py-2 rounded">
+            <button @click="captureHistorySnapshot" class="bg-primary text-text-inverse px-4 py-2 rounded">
               📸 保存本周快照
             </button>
           </div>
@@ -169,6 +177,11 @@ const SECTION_NAMES = {
   night: '晚上'
 };
 
+const COURSE_CANDIDATES = [
+  '语文', '数学', '英语', '物理', '化学', '生物',
+  '历史', '政治', '地理', '体育', '信息', '音乐', '美术', '班会'
+].map((name, idx) => ({ id: idx, label: name, value: name }));
+
 export default {
   name: 'ScheduleView',
   components: { GridView, SettingsDialog, ExportExcel,Tabs,WeekSwitcher },
@@ -209,6 +222,7 @@ export default {
       historySettings: { sections: null, periods: [], days: ['周一','周二','周三','周四','周五'] },
       historyColHeaders: ['周一','周二','周三','周四','周五'],
       historyLoading: false,
+      courseCandidates: COURSE_CANDIDATES,
     };
   },
   watch: {

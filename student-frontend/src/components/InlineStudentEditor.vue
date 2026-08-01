@@ -2,7 +2,7 @@
   <Teleport to="body">
     <div
       v-if="visible"
-      class="fixed z-50"
+      class="fixed z-[10002]"
       :style="{ left: position.x + 'px', top: position.y + 'px', width: '180px' }"
       @mousedown.stop
     >
@@ -11,7 +11,7 @@
           ref="inputRef"
           v-model="inputText"
           class="w-full border px-2 py-1 text-sm rounded"
-          placeholder="输入姓名..."
+          :placeholder="placeholder"
           @keydown.down.prevent="highlightNext"
           @keydown.up.prevent="highlightPrev"
           @keydown.enter.prevent="selectHighlighted"
@@ -20,31 +20,29 @@
           @blur="handleBlur"
         />
         <ul
-          v-if="filteredStudents.length > 0"
+          v-if="filteredItems.length > 0"
           class="max-h-32 overflow-auto border-t mt-1 bg-white"
         >
           <li
-            v-for="(student, idx) in filteredStudents"
-            :key="student.id"
+            v-for="(item, idx) in filteredItems"
+            :key="itemKey(item)"
             :class="[
               'px-2 py-1 text-sm cursor-pointer hover:bg-blue-100',
               { 'bg-blue-200': idx === highlightIndex }
             ]"
-            @mousedown.prevent="selectStudent(student)"
+            @mousedown.prevent="selectItem(item)"
             @mouseenter="highlightIndex = idx"
           >
-            {{ student.姓名 }}
+            {{ itemLabel(item) }}
           </li>
         </ul>
-        <div v-else class="text-xs text-gray-400 p-2">无匹配学生</div>
+        <div v-else-if="inputText.trim()" class="text-xs text-gray-400 p-2">无匹配项</div>
       </div>
     </div>
   </Teleport>
 </template>
 
 <script>
-import axios from 'axios';
-
 export default {
   name: 'InlineStudentEditor',
   props: {
@@ -53,32 +51,61 @@ export default {
       type: Object,
       default: () => ({ x: 0, y: 0 })
     },
+    // 候选列表，每项可以是 { id, label, value } 或 { id, 姓名 }（旧格式兼容）
+    items: {
+      type: Array,
+      default: () => []
+    },
+    // 显示字段名，默认 'label'，兼容旧学生数据可传 '姓名'
+    labelField: {
+      type: String,
+      default: 'label'
+    },
+    // 取值字段名，默认取 labelField
+    valueField: {
+      type: String,
+      default: ''
+    },
+    // 唯一标识字段名，默认 'id'
+    keyField: {
+      type: String,
+      default: 'id'
+    },
+    // 已排除的 id 列表
     excludeIds: {
       type: Array,
       default: () => []
+    },
+    placeholder: {
+      type: String,
+      default: '输入...'
+    },
+    // 是否允许自由输入（没有候选时按回车提交输入文本）
+    allowFreeInput: {
+      type: Boolean,
+      default: true
     }
   },
   emits: ['select', 'cancel'],
   data() {
     return {
       inputText: '',
-      allStudents: [],
       highlightIndex: 0,
-      isSelecting: false   // 辅助标记，防止失焦时误关
+      isSelecting: false
     };
   },
   computed: {
-    filteredStudents() {
-      const list = this.allStudents.filter(s => !this.excludeIds.includes(s.id));
-      if (!this.inputText.trim()) return list;
-      const kw = this.inputText.trim().toLowerCase();
-      return list.filter(s => s.姓名.toLowerCase().includes(kw));
+    filteredItems() {
+      const list = this.items.filter(item => !this.excludeIds.includes(this.itemKey(item)));
+      const text = this.inputText.trim();
+      if (!text) return list;
+      const kw = text.toLowerCase();
+      return list.filter(item => String(this.itemLabel(item)).toLowerCase().includes(kw));
     }
   },
   watch: {
     visible(val) {
       if (val) {
-        this.fetchStudents();
         this.inputText = '';
         this.highlightIndex = 0;
         this.isSelecting = false;
@@ -92,19 +119,25 @@ export default {
     }
   },
   methods: {
-    async fetchStudents() {
-      try {
-        const res = await axios.get('/api/students');
-        this.allStudents = res.data.data || res.data;
-      } catch (e) {
-        console.error(e);
-      }
+    itemLabel(item) {
+      if (!item) return '';
+      // 兼容旧格式 { id, 姓名 }
+      if (this.labelField === 'label' && item.姓名 !== undefined) return item.姓名;
+      return item[this.labelField] ?? item.姓名 ?? '';
+    },
+    itemValue(item) {
+      const field = this.valueField || this.labelField;
+      if (field === 'label' && item.姓名 !== undefined) return item.姓名;
+      return item[field] ?? item.姓名 ?? '';
+    },
+    itemKey(item) {
+      return item[this.keyField] ?? item.id ?? '';
     },
     onInput() {
       this.highlightIndex = 0;
     },
     highlightNext() {
-      if (this.highlightIndex < this.filteredStudents.length - 1) {
+      if (this.highlightIndex < this.filteredItems.length - 1) {
         this.highlightIndex++;
       }
     },
@@ -114,42 +147,31 @@ export default {
       }
     },
     selectHighlighted() {
-      if (this.filteredStudents.length > 0) {
-        this.selectStudent(this.filteredStudents[this.highlightIndex]);
+      if (this.filteredItems.length > 0) {
+        this.selectItem(this.filteredItems[this.highlightIndex]);
+      } else if (this.allowFreeInput && this.inputText.trim()) {
+        this.$emit('select', { id: null, label: this.inputText.trim(), value: this.inputText.trim() });
       } else {
-        // 没有候选列表时，如果输入内容不为空，直接提交输入内容
-        if (this.inputText.trim()) {
-          this.$emit('select', { id: null, 姓名: this.inputText.trim() });
-          this.close();
-        } else {
-          this.cancel();
-        }
+        this.cancel();
       }
     },
-    selectStudent(student) {
-      // 标记正在选择，失焦时不关闭
+    selectItem(item) {
       this.isSelecting = true;
-      this.$emit('select', student);
-      this.close();
-      // 重置标记
+      this.$emit('select', {
+        id: this.itemKey(item),
+        label: this.itemLabel(item),
+        value: this.itemValue(item),
+        raw: item
+      });
       this.$nextTick(() => { this.isSelecting = false; });
     },
     cancel() {
       this.$emit('cancel');
-      this.close();
-    },
-    close() {
-      // 父组件只需设置 visible 为 false，组件会自行清理
-      // 这里不需要做额外操作，由父组件控制
     },
     handleBlur() {
-      // 如果正在选择，不处理失焦（因为选择会由 mousedown.prevent 保持焦点，然后选择完关闭）
       if (this.isSelecting) return;
-      // 延迟一点点，确保选择操作优先
       setTimeout(() => {
-        if (!this.isSelecting) {
-          this.cancel();
-        }
+        if (!this.isSelecting) this.cancel();
       }, 150);
     }
   }

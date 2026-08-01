@@ -1,7 +1,7 @@
 <template>
   <div>
-    <div class="w-full bg-gradient-to-r from-blue-80 to-blue-100 shadow-md rounded-xl mb-6 px-6 py-5">
-      <h1 class="text-2xl font-bold text-gray-800">🪑 座位管理</h1>
+    <div class="w-full bg-surface shadow-md rounded-xl mb-6 px-6 py-5 border border-border">
+      <h1 class="text-2xl font-bold text-text">🪑 座位管理</h1>
     </div>
 
     <Tabs :tabs="tabItems" v-model="activeTab">
@@ -10,13 +10,13 @@
           <section class="mb-4">
             <h2 class="text-xl font-semibold mb-4">🪑 当前座位</h2>
             <div class="mb-4 flex flex-wrap items-center gap-3">
-              <button @click="openSettings('active')" class="bg-purple-500 text-white px-4 py-2 rounded">⚙️ 设置</button>
-              <button @click="loadActive" class="bg-gray-500 text-white px-4 py-2 rounded">🔄 刷新</button>
-              <button @click="applyMasterToActive" class="bg-green-500 text-white px-4 py-2 rounded">📥 从模板导入</button>
-              <button @click="$refs.activeExportDialog.open()" class="bg-yellow-500 text-white px-4 py-2 rounded">📥 导出 Excel</button>
+              <button @click="openSettings('active')" class="bg-primary text-text-inverse px-4 py-2 rounded">⚙️ 设置</button>
+              <button @click="loadActive" class="bg-text-muted text-text-inverse px-4 py-2 rounded">🔄 刷新</button>
+              <button @click="applyMasterToActive" class="bg-primary text-text-inverse px-4 py-2 rounded">📥 从模板导入</button>
+              <button @click="$refs.activeExportDialog.open()" class="bg-warning text-text-inverse px-4 py-2 rounded">📥 导出 Excel</button>
             </div>
 
-            <div v-if="!activeLoaded" class="text-center py-10 text-gray-500">加载中...</div>
+            <div v-if="!activeLoaded" class="text-center py-10 text-text-muted">加载中...</div>
             <GridView
               v-else
               ref="activeGridRef"
@@ -27,6 +27,8 @@
               :enableCandidate="true"
               :candidateItems="allStudents"
               :candidateExcludeIds="currentEditExcludeIds"
+              candidateLabelField="姓名"
+              candidatePlaceholder="输入姓名"
               :minTableHeight="200"
               @cell-dblclick="onActiveCellDblClick"
               @update:cells="onActiveCellsUpdate"
@@ -42,12 +44,12 @@
           <section>
             <h2 class="text-xl font-semibold mb-4">📋 座位模板</h2>
             <div class="mb-4 flex flex-wrap items-center gap-3">
-              <button @click="openSettings('master')" class="bg-purple-500 text-white px-4 py-2 rounded">⚙️ 设置</button>
-              <button @click="loadMaster" class="bg-gray-500 text-white px-4 py-2 rounded">🔄 刷新</button>
-              <button @click="$refs.masterExportDialog.open()" class="bg-yellow-500 text-white px-4 py-2 rounded">📥 导出 Excel</button>
+              <button @click="openSettings('master')" class="bg-primary text-text-inverse px-4 py-2 rounded">⚙️ 设置</button>
+              <button @click="loadMaster" class="bg-text-muted text-text-inverse px-4 py-2 rounded">🔄 刷新</button>
+              <button @click="$refs.masterExportDialog.open()" class="bg-warning text-text-inverse px-4 py-2 rounded">📥 导出 Excel</button>
             </div>
 
-            <div v-if="!masterLoaded" class="text-center py-10 text-gray-500">加载中...</div>
+            <div v-if="!masterLoaded" class="text-center py-10 text-text-muted">加载中...</div>
             <GridView
               v-else
               ref="masterGridRef"
@@ -58,6 +60,8 @@
               :enableCandidate="true"
               :candidateItems="allStudents"
               :candidateExcludeIds="currentMasterEditExcludeIds"
+              candidateLabelField="姓名"
+              candidatePlaceholder="输入姓名"
               :minTableHeight="200"
               @cell-dblclick="onMasterCellDblClick"
               @update:cells="onMasterCellsUpdate"
@@ -70,11 +74,11 @@
 
         <div v-else-if="activeTab === 'history'">
           <div v-if="historyLoading" class="text-center py-10">加载中...</div>
-          <div v-else-if="!historySnapshot" class="text-center py-10 text-gray-500">该周暂无快照</div>
+          <div v-else-if="!historySnapshot" class="text-center py-10 text-text-muted">该周暂无快照</div>
           <GridView v-else :colHeaders="historyColHeaders" :rows="historyDisplayRows" :hideMetaColumns="true" :showRowNumber="true" />
           <WeekSwitcher v-model:currentWeek="historyCurrentWeek" :weeks="historyWeeks" @update:currentWeek="loadHistorySnapshot" />
           <div class="text-center mt-4">
-            <button @click="captureHistorySnapshot" class="bg-green-500 text-white px-4 py-2 rounded">📸 保存本周快照</button>
+            <button @click="captureHistorySnapshot" class="bg-primary text-text-inverse px-4 py-2 rounded">📸 保存本周快照</button>
           </div>
         </div>
       </template>

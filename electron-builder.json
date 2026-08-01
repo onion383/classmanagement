@@ -1,0 +1,35 @@
+{
+  "appId": "com.example.campus-assistant",
+  "productName": "校园助手",
+  "directories": {
+    "output": "release",
+    "buildResources": "build"
+  },
+  "files": [
+    "electron/**/*",
+    "student-frontend/dist/**/*",
+    "student-backend/**/*",
+    "package.json"
+  ],
+  "extraResources": [
+    {
+      "from": "student-backend/data",
+      "to": "data",
+      "filter": ["**/*"]
+    }
+  ],
+  "win": {
+    "target": "nsis",
+    "icon": "student-frontend/public/favicon.svg"
+  },
+  "mac": {
+    "target": "dmg",
+    "icon": "student-frontend/public/favicon.svg"
+  },
+  "nsis": {
+    "oneClick": false,
+    "allowToChangeInstallationDirectory": true,
+    "createDesktopShortcut": true,
+    "createStartMenuShortcut": true
+  }
+}

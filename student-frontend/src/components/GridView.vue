@@ -4,13 +4,13 @@
       <table class="w-full border-collapse select-none">
         <thead>
           <tr v-if="title">
-            <th :colspan="totalColumns" class="bg-green-500 text-white text-center py-2 text-lg font-bold">{{ title }}</th>
+            <th :colspan="totalColumns" class="bg-primary text-text-inverse text-center py-2 text-lg font-bold">{{ title }}</th>
           </tr>
           <tr>
-            <th v-if="showPeriodColumn && !hideMetaColumns" class="bg-green-500 text-white border border-gray-300 px-2 py-1 text-center" style="width: 80px;">时段</th>
-            <th v-if="!hideMetaColumns" class="bg-green-500 text-white border border-gray-300 px-2 py-1 text-center" style="width: 100px;">节次</th>
-            <th v-if="!hideMetaColumns" class="bg-green-500 text-white border border-gray-300 px-2 py-1 text-center" style="width: 130px;">时间</th>
-            <th v-if="hideMetaColumns && showRowNumber" class="bg-green-500 text-white border border-gray-300 px-2 py-1 text-center" style="width: 70px;">行号</th>
+            <th v-if="showPeriodColumn && !hideMetaColumns" class="bg-primary text-text-inverse border border-border px-2 py-1 text-center" style="width: 80px;">时段</th>
+            <th v-if="!hideMetaColumns" class="bg-primary text-text-inverse border border-border px-2 py-1 text-center" style="width: 100px;">节次</th>
+            <th v-if="!hideMetaColumns" class="bg-primary text-text-inverse border border-border px-2 py-1 text-center" style="width: 130px;">时间</th>
+            <th v-if="hideMetaColumns && showRowNumber" class="bg-primary text-text-inverse border border-border px-2 py-1 text-center" style="width: 70px;">行号</th>
             <th
               v-for="(col, colIdx) in colHeaders"
               :key="colIdx"
@@ -20,14 +20,14 @@
               @dragleave="onColDragLeave($event, colIdx)"
               @drop="onColDrop($event, colIdx)"
               @dragend="onColDragEnd"
-              :class="['bg-green-500 text-white border border-gray-300 px-2 py-1 text-center', col !== '走廊' ? 'cursor-pointer' : 'cursor-default bg-gray-400', { 'opacity-30': colDragIdx === colIdx }]"
+              :class="['bg-primary text-text-inverse border border-border px-2 py-1 text-center', col !== '走廊' ? 'cursor-pointer' : 'cursor-default bg-text-muted', { 'opacity-30': colDragIdx === colIdx }]"
               :style="col === '走廊' ? 'width: 60px;' : ''"
             >
               <div v-if="col !== '走廊'" class="flex items-center justify-center gap-1">
-                <span class="drag-handle cursor-grab text-gray-300 hover:text-white">⠿</span>
+                <span class="drag-handle cursor-grab text-text-inverse/70 hover:text-text-inverse">⠿</span>
                 <span>{{ col }}</span>
               </div>
-              <span v-else class="text-base text-gray-200">走廊</span>
+              <span v-else class="text-base text-text-inverse/80">走廊</span>
             </th>
           </tr>
         </thead>
@@ -36,7 +36,7 @@
             <tr
               v-for="(row, rowIdx) in rows"
               :key="row._rowKey || rowIdx"
-              :class="[{ 'opacity-30': rowDragIdx === rowIdx }, rowDropIndicatorClass(rowIdx), row._isSeparator ? 'bg-gray-200 h-8' : '', row._isPodium ? 'bg-yellow-100 h-10' : '']"
+              :class="[{ 'opacity-30': rowDragIdx === rowIdx }, rowDropIndicatorClass(rowIdx), row._isSeparator ? 'bg-border h-8' : '', row._isPodium ? 'bg-warning/20 h-10' : '']"
               @dragover.prevent="onRowDragOver($event, rowIdx, row)"
               @dragleave="onRowDragLeave($event, rowIdx)"
               @drop="onRowDrop($event, rowIdx, row)"
@@ -44,49 +44,49 @@
             >
               <!-- 讲台行 -->
               <template v-if="row._isPodium">
-                <td v-if="hideMetaColumns && showRowNumber" class="bg-green-500 text-white border border-gray-300 text-center text-sm font-bold py-2" style="width: 70px;">讲台</td>
-                <td :colspan="totalColumns - (hideMetaColumns && showRowNumber ? 1 : 0)" class="text-center font-bold text-gray-800 py-3 bg-yellow-200 border-b-2 border-yellow-400 text-lg">讲  台</td>
+                <td v-if="hideMetaColumns && showRowNumber" class="bg-primary text-text-inverse border border-border text-center text-sm font-bold py-2" style="width: 70px;">讲台</td>
+                <td :colspan="totalColumns - (hideMetaColumns && showRowNumber ? 1 : 0)" class="text-center font-bold text-text py-3 bg-warning/30 border-b-2 border-warning/50 text-lg">讲  台</td>
               </template>
               <!-- 分隔行 -->
-              <td v-else-if="row._isSeparator" :colspan="totalColumns" class="text-center font-bold text-gray-700 py-2 bg-blue-50 border-b-2 border-blue-300">{{ row.label }}</td>
+              <td v-else-if="row._isSeparator" :colspan="totalColumns" class="text-center font-bold text-text-secondary py-2 bg-info/10 border-b-2 border-info/30">{{ row.label }}</td>
               <!-- 合并行 -->
-              <td v-else-if="row._mergeCells" :colspan="totalColumns" class="border border-gray-300 px-2 py-1 text-center bg-gray-100 text-sm font-semibold">{{ row.label }} {{ row.time }}</td>
+              <td v-else-if="row._mergeCells" :colspan="totalColumns" class="border border-border px-2 py-1 text-center bg-surface-hover text-sm font-semibold">{{ row.label }} {{ row.time }}</td>
               <!-- 普通行 -->
               <template v-else>
-                <td v-if="showPeriodColumn && !hideMetaColumns && row._periodRowSpan > 0" :rowspan="row._periodRowSpan" class="bg-green-100 border border-gray-300 px-2 py-1 text-center font-bold align-middle" style="vertical-align: middle;">{{ row.periodLabel }}</td>
+                <td v-if="showPeriodColumn && !hideMetaColumns && row._periodRowSpan > 0" :rowspan="row._periodRowSpan" class="bg-primary/10 border border-border px-2 py-1 text-center font-bold align-middle" style="vertical-align: middle;">{{ row.periodLabel }}</td>
                 <td v-else-if="showPeriodColumn && !hideMetaColumns" class="hidden"></td>
 
-                <td v-if="!hideMetaColumns" class="bg-green-500 text-white border border-gray-300 px-2 py-1 text-center font-bold" style="width: 100px;">
+                <td v-if="!hideMetaColumns" class="bg-primary text-text-inverse border border-border px-2 py-1 text-center font-bold" style="width: 100px;">
                   <div class="flex items-center justify-center gap-1">
-                    <span v-if="canDragRow(row)" class="drag-handle cursor-grab select-none text-gray-300 hover:text-white" draggable="true" @dragstart.stop="onRowDragStart($event, rowIdx)" @dragend.stop="onRowDragEnd">⠿</span>
+                    <span v-if="canDragRow(row)" class="drag-handle cursor-grab select-none text-text-inverse/70 hover:text-text-inverse" draggable="true" @dragstart.stop="onRowDragStart($event, rowIdx)" @dragend.stop="onRowDragEnd">⠿</span>
                     <span @dblclick.stop="startEditMeta(rowIdx, 'label')">
-                      <input v-if="editingMeta && editingMeta.row === rowIdx && editingMeta.field === 'label'" v-model="editingMetaValue" class="w-20 border p-0 text-sm text-black" @keyup.enter="saveEditMeta(rowIdx)" @blur="saveEditMeta(rowIdx)" @mousedown.stop />
+                      <input v-if="editingMeta && editingMeta.row === rowIdx && editingMeta.field === 'label'" v-model="editingMetaValue" class="w-20 border border-border p-0 text-sm text-text" @keyup.enter="saveEditMeta(rowIdx)" @blur="saveEditMeta(rowIdx)" @mousedown.stop />
                       <span v-else>{{ row.label }}</span>
                     </span>
                   </div>
                 </td>
-                <td v-if="!hideMetaColumns" class="border border-gray-300 px-2 py-1 text-center text-sm" style="width: 130px;" @dblclick.stop="startEditMeta(rowIdx, 'time')">
+                <td v-if="!hideMetaColumns" class="border border-border px-2 py-1 text-center text-sm" style="width: 130px;" @dblclick.stop="startEditMeta(rowIdx, 'time')">
                   <input v-if="editingMeta && editingMeta.row === rowIdx && editingMeta.field === 'time'" v-model="editingMetaValue" class="w-28 border p-0 text-sm" @keyup.enter="saveEditMeta(rowIdx)" @blur="saveEditMeta(rowIdx)" @mousedown.stop />
                   <span v-else>{{ row.time || '' }}</span>
                 </td>
 
                 <!-- 行号列（绿色背景，可拖拽） -->
-                <td v-if="hideMetaColumns && showRowNumber" class="bg-green-500 text-white border border-gray-300 text-center text-sm font-bold py-2" style="width: 70px;">
+                <td v-if="hideMetaColumns && showRowNumber" class="bg-primary text-text-inverse border border-border text-center text-sm font-bold py-2" style="width: 70px;">
                   <div class="flex items-center justify-center gap-1">
-                    <span v-if="canDragRow(row)" class="drag-handle cursor-grab select-none text-gray-300 hover:text-white" draggable="true" @dragstart.stop="onRowDragStart($event, rowIdx)" @dragend.stop="onRowDragEnd">⠿</span>
+                    <span v-if="canDragRow(row)" class="drag-handle cursor-grab select-none text-text-inverse/70 hover:text-text-inverse" draggable="true" @dragstart.stop="onRowDragStart($event, rowIdx)" @dragend.stop="onRowDragEnd">⠿</span>
                     <span>{{ row.label }}</span>
                   </div>
                 </td>
 
                 <!-- 数据单元格 -->
                 <template v-for="(cell, colIdx) in row.cells" :key="colIdx">
-                  <td v-if="cell._isAisle && cell._aisleRowSpan" :rowspan="cell._aisleRowSpan" class="border border-gray-300 bg-gray-300 text-center align-middle" style="width: 60px; vertical-align: middle; font-size: 0.875rem; line-height: 1.2;">
+                  <td v-if="cell._isAisle && cell._aisleRowSpan" :rowspan="cell._aisleRowSpan" class="border border-border bg-text-muted text-center align-middle" style="width: 60px; vertical-align: middle; font-size: 0.875rem; line-height: 1.2;">
                      <div style="writing-mode: vertical-lr; text-orientation: upright; display: flex; align-items: center; justify-content: center;">走廊</div></td>
                   <td v-else-if="cell._isAisleHidden" style="display: none;"></td>
                   <td
                     v-else
                     :ref="el => setCellRef(rowIdx, colIdx, el)"
-                    :class="['border border-gray-300 px-2 py-2 text-center transition-colors relative', isDragTarget(rowIdx, colIdx) ? 'bg-blue-100 outline outline-2 outline-blue-400' : '', isCellSelected(rowIdx, colIdx) && !isEditing(rowIdx, colIdx) ? 'bg-blue-100 outline outline-2 outline-blue-400' : '', isEditing(rowIdx, colIdx) ? 'ring-2 ring-blue-500 ring-inset' : '', row._isReadonly ? '' : 'cursor-pointer']"
+                    :class="['border border-border px-2 py-2 text-center transition-colors relative', isDragTarget(rowIdx, colIdx) ? 'bg-info/10 outline outline-2 outline-info' : '', isCellSelected(rowIdx, colIdx) && !isEditing(rowIdx, colIdx) ? 'bg-info/10 outline outline-2 outline-info' : '', isEditing(rowIdx, colIdx) ? 'ring-2 ring-info ring-inset' : '', row._isReadonly ? '' : 'cursor-pointer']"
                     :style="{ backgroundColor: isEditing(rowIdx, colIdx) ? '' : getCellColor(cell), minHeight: '40px' }"
                     @mousedown="onCellMouseDown($event, rowIdx, colIdx)"
                     @mouseenter="onCellMouseEnter(rowIdx, colIdx)"
@@ -97,7 +97,7 @@
                         v-model="editingCellData.course"
                         class="w-full h-full text-center text-sm bg-transparent outline-none border-none m-0 p-0"
                         style="box-sizing: border-box;"
-                        :placeholder="enableCandidate ? '输入姓名' : '输入课程'"
+                        :placeholder="candidatePlaceholder || (enableCandidate ? '输入姓名' : '输入课程')"
                         @keydown.down.prevent="candidateHighlightNext"
                         @keydown.up.prevent="candidateHighlightPrev"
                         @keydown.enter.prevent="candidateSelectHighlighted"
@@ -122,7 +122,7 @@
     <!-- 外挂候选列表 -->
     <div
       v-if="showCandidatePopup"
-      class="fixed z-50 bg-white border border-blue-400 shadow-lg rounded"
+      class="fixed z-50 bg-surface border border-info shadow-lg rounded"
       :style="{ left: candidatePopupX + 'px', top: candidatePopupY + 'px', width: '180px', maxHeight: '200px', overflow: 'auto' }"
       @mousedown.stop
     >
@@ -130,14 +130,14 @@
         <div
           v-for="(item, idx) in filteredCandidates"
           :key="item.id"
-          :class="['px-3 py-2 text-sm cursor-pointer hover:bg-blue-100', { 'bg-blue-200': idx === candidateHighlightIndex }]"
+          :class="['px-3 py-2 text-sm cursor-pointer hover:bg-info/10', { 'bg-info/20': idx === candidateHighlightIndex }]"
           @mousedown.prevent="candidateSelect(item)"
           @mouseenter="candidateHighlightIndex = idx"
         >
-          {{ item.姓名 }}
+          {{ getCandidateLabel(item) }}
         </div>
       </div>
-      <div v-else class="px-3 py-2 text-sm text-gray-400">无匹配学生</div>
+      <div v-else class="px-3 py-2 text-sm text-text-muted">无匹配项</div>
     </div>
   </div>
 </template>
@@ -161,6 +161,10 @@ export default {
     enableCandidate: { type: Boolean, default: false },
     candidateItems: { type: Array, default: () => [] },
     candidateExcludeIds: { type: Array, default: () => [] },
+    candidateLabelField: { type: String, default: '姓名' },
+    candidateValueField: { type: String, default: '' },
+    candidatePlaceholder: { type: String, default: '' },
+    allowDuplicate: { type: Boolean, default: false },
     minTableHeight: { type: Number, default: 400 },
   },
   emits: ['update:cells', 'swapRows', 'swapColumns', 'update:row-meta', 'cell-dblclick'],
@@ -185,11 +189,11 @@ export default {
     },
     filteredCandidates() {
       if (!this.enableCandidate || !this.editingCell) return [];
-      let list = this.candidateItems.filter(s => !this.candidateExcludeIds.includes(s.id));
+      let list = this.allowDuplicate ? [...this.candidateItems] : this.candidateItems.filter(s => !this.candidateExcludeIds.includes(s.id));
       const text = this.editingCellData.course?.trim() || '';
       if (text) {
         const kw = text.toLowerCase();
-        list = list.filter(s => s.姓名.toLowerCase().includes(kw));
+        list = list.filter(s => String(this.getCandidateLabel(s)).toLowerCase().includes(kw));
       }
       return list;
     },
@@ -312,8 +316,15 @@ export default {
       }
     },
     candidateSelect(item) {
-      if (item) this.editingCellData.course = item.姓名;
+      if (item) this.editingCellData.course = this.getCandidateValue(item);
       this.saveEditCell();
+    },
+    getCandidateLabel(item) {
+      return item[this.candidateLabelField] ?? item.姓名 ?? '';
+    },
+    getCandidateValue(item) {
+      const field = this.candidateValueField || this.candidateLabelField;
+      return item[field] ?? item.姓名 ?? '';
     },
     isEditing(rowIdx, colIdx) { return this.editingCell?.row === rowIdx && this.editingCell?.col === colIdx; },
     startEditMeta(rowIdx, field) { /* 省略，保留原逻辑 */ },
@@ -321,7 +332,7 @@ export default {
     rowDropIndicatorClass(rowIdx) {
       if (this.rowDragIdx === null || this.rowDragOverIdx === null) return '';
       if (rowIdx !== this.rowDragOverIdx) return '';
-      return this.rowDragOverIdx > this.rowDragIdx ? 'border-b-2 border-blue-500' : 'border-t-2 border-blue-500';
+      return this.rowDragOverIdx > this.rowDragIdx ? 'border-b-2 border-info' : 'border-t-2 border-info';
     },
     onRowDragStart(event, rowIdx) {
       if (this.rows[rowIdx]._isSeparator || this.rows[rowIdx]._isPodium) return;
@@ -361,8 +372,8 @@ export default {
 <style scoped>
 .drag-handle { font-size: 14px; user-select: none; opacity: 0.6; }
 .drag-handle:hover { opacity: 1; }
-th .drag-handle { color: rgba(255,255,255,0.7); }
-th:hover .drag-handle { color: white; }
+th .drag-handle { color: color-mix(in srgb, var(--color-text-inverse, #ffffff) 70%, transparent); }
+th:hover .drag-handle { color: var(--color-text-inverse, #ffffff); }
 .row-flip-move { transition: transform 0.25s ease; }
 .row-flip-enter-active, .row-flip-leave-active { transition: all 0.25s ease; }
 .row-flip-enter-from, .row-flip-leave-to { opacity: 0; transform: translateX(-20px); }

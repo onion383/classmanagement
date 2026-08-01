@@ -3,7 +3,7 @@
     <button
       @click="goPrev"
       :disabled="!hasPrev"
-      class="px-3 py-1 rounded bg-gray-200 hover:bg-gray-300 disabled:opacity-40"
+      class="px-3 py-1 rounded bg-surface-hover hover:bg-border disabled:opacity-40 text-text"
     >
       ◀ 上一周
     </button>
@@ -11,7 +11,7 @@
     <button
       @click="goNext"
       :disabled="!hasNext"
-      class="px-3 py-1 rounded bg-gray-200 hover:bg-gray-300 disabled:opacity-40"
+      class="px-3 py-1 rounded bg-surface-hover hover:bg-border disabled:opacity-40 text-text"
     >
       下一周 ▶
     </button>
@@ -19,7 +19,7 @@
       v-if="weeks.length > 0"
       :value="currentWeek"
       @change="$emit('update:currentWeek', $event.target.value)"
-      class="border rounded px-2 py-1 text-sm"
+      class="border border-border rounded px-2 py-1 text-sm bg-surface text-text"
     >
       <option v-for="w in weeks" :key="w.week_start" :value="w.week_start">
         {{ formatWeek(w.week_start) }}

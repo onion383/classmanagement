@@ -1,17 +1,17 @@
 <template>
   <div v-if="visible" class="fixed inset-0 bg-black/50 flex items-center justify-center z-[10001]">
-    <div class="bg-white p-5 rounded-lg w-[900px] max-h-[85vh] flex flex-col">
+    <div class="bg-surface p-5 rounded-lg w-[900px] max-h-[85vh] flex flex-col shadow-card">
       <h3 class="text-lg font-bold mb-3">从文件导入数据</h3>
       <!-- 文件选择 -->
       <div class="mb-4 flex items-center gap-3">
         <input type="file" accept=".xlsx,.xls,.csv" @change="handleFile" ref="fileInput" class="text-sm" />
-        <span v-if="fileName" class="text-sm text-gray-600">{{ fileName }}</span>
-        <button @click="parseFile" :disabled="!fileData" class="bg-blue-500 text-white px-3 py-1 rounded text-sm">解析预览</button>
+        <span v-if="fileName" class="text-sm text-text-secondary">{{ fileName }}</span>
+        <button @click="parseFile" :disabled="!fileData" class="bg-info text-text-inverse px-3 py-1 rounded text-sm">解析预览</button>
       </div>
-      <div v-if="parseError" class="text-red-500 text-sm mb-2">{{ parseError }}</div>
-      <div v-if="filteredCount > 0" class="text-yellow-600 text-sm mb-2">由于缺少受保护字段，已过滤 {{ filteredCount }} 条数据。</div>
+      <div v-if="parseError" class="text-danger text-sm mb-2">{{ parseError }}</div>
+      <div v-if="filteredCount > 0" class="text-warning text-sm mb-2">由于缺少受保护字段，已过滤 {{ filteredCount }} 条数据。</div>
       <!-- 预览表格 -->
-      <div class="flex-1 overflow-auto border rounded" v-if="previewFields.length && previewRows.length">
+      <div class="flex-1 overflow-auto border border-border rounded" v-if="previewFields.length && previewRows.length">
         <DynamicTable
           :fields="previewFields"
           :rows="previewRows"
@@ -24,13 +24,13 @@
           :sortOrder="sortOrder"
         />
       </div>
-      <div v-else class="text-center py-6 text-gray-400">请选择一个文件并点击“解析预览”</div>
+      <div v-else class="text-center py-6 text-text-muted">请选择一个文件并点击“解析预览”</div>
       <!-- 底部按钮 -->
       <div class="flex justify-between items-center mt-4">
-        <span class="text-sm text-gray-600">共 {{ previewRows.length }} 行</span>
+        <span class="text-sm text-text-secondary">共 {{ previewRows.length }} 行</span>
         <div class="flex gap-2">
-          <button @click="cancel" class="bg-gray-300 px-4 py-1.5 rounded">取消</button>
-          <button @click="confirmImport" :disabled="previewRows.length === 0" class="bg-green-500 text-white px-4 py-1.5 rounded">导入并合并保存</button>
+          <button @click="cancel" class="bg-surface-hover px-4 py-1.5 rounded text-text">取消</button>
+          <button @click="confirmImport" :disabled="previewRows.length === 0" class="bg-primary text-text-inverse px-4 py-1.5 rounded">导入并合并保存</button>
         </div>
       </div>
     </div>

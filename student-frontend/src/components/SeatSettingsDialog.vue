@@ -1,6 +1,6 @@
 <template>
   <div v-if="visible" class="fixed inset-0 bg-black/30 z-50 flex items-center justify-center">
-    <div class="bg-white rounded-lg p-6 w-80">
+    <div class="bg-surface rounded-lg p-6 w-80 shadow-card">
       <h3 class="text-lg font-bold mb-4">座位设置</h3>
       <div class="mb-3">
         <label class="block text-sm font-medium">行数</label>
@@ -25,13 +25,13 @@
         <label class="flex items-center gap-2 cursor-pointer">
           <input type="checkbox" v-model="localShowAisle" /> 显示走廊
         </label>
-        <p class="text-xs text-gray-500 mt-1">
+        <p class="text-xs text-text-muted mt-1">
           单桌：每列间有走廊；同桌：每两列为一组，组间有走廊。
         </p>
       </div>
       <div class="flex justify-end gap-2">
-        <button @click="$emit('cancel')" class="bg-gray-300 px-4 py-2 rounded">取消</button>
-        <button @click="save" class="bg-blue-500 text-white px-4 py-2 rounded">保存</button>
+        <button @click="$emit('cancel')" class="bg-surface-hover px-4 py-2 rounded text-text">取消</button>
+        <button @click="save" class="bg-info text-text-inverse px-4 py-2 rounded">保存</button>
       </div>
     </div>
   </div>

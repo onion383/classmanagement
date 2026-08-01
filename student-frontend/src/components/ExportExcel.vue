@@ -1,7 +1,7 @@
 <template>
   <!-- 导出表格组件 -->
   <div v-if="visible" class="fixed inset-0 bg-black/50 flex items-center justify-center z-[10001]">
-    <div class="bg-white p-5 rounded-lg min-w-[400px] max-w-xl">
+    <div class="bg-surface p-5 rounded-lg min-w-[400px] max-w-xl shadow-card border border-border">
       <h3 class="text-lg font-bold mb-3">导出选项</h3>
 
       <div class="mb-4">
@@ -12,7 +12,7 @@
             {{ field.name }}
           </label>
         </div>
-        <p v-if="selectedColumns.length === 0" class="text-red-500 text-sm mt-1">请至少选择一列</p>
+        <p v-if="selectedColumns.length === 0" class="text-danger text-sm mt-1">请至少选择一列</p>
       </div>
 
       <div class="mb-4">
@@ -42,8 +42,8 @@
       </div>
 
       <div class="text-right">
-        <button @click="cancel" class="bg-gray-300 border-none px-4 py-1.5 rounded mr-2 cursor-pointer">取消</button>
-        <button @click="doExport" class="bg-blue-500 text-white border-none px-4 py-1.5 rounded cursor-pointer" :disabled="selectedColumns.length === 0">导出</button>
+        <button @click="cancel" class="bg-surface-hover text-text border border-border px-4 py-1.5 rounded mr-2 cursor-pointer">取消</button>
+        <button @click="doExport" class="bg-info text-text-inverse border-none px-4 py-1.5 rounded cursor-pointer" :disabled="selectedColumns.length === 0">导出</button>
       </div>
     </div>
   </div>

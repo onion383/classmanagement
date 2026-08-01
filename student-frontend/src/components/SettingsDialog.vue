@@ -1,6 +1,6 @@
 <template>
   <div v-if="visible" class="fixed inset-0 bg-black/50 flex items-center justify-center z-[10001]">
-    <div class="bg-white p-6 rounded-lg w-[750px] max-h-[85vh] flex flex-col">
+    <div class="bg-surface p-6 rounded-lg w-[750px] max-h-[85vh] flex flex-col shadow-card">
       <h3 class="text-lg font-bold mb-4">⏱️ 作息时间设置</h3>
 
       <!-- 学期开始日期 -->
@@ -31,10 +31,10 @@
       <!-- 各时段 -->
       <div class="flex-1 overflow-y-auto space-y-4 mb-4">
         <!-- 上午 -->
-        <div class="border rounded p-3 bg-gray-50">
+        <div class="border border-border rounded p-3 bg-bg">
           <div class="flex items-center justify-between mb-2">
             <h4 class="font-semibold">上午</h4>
-            <button @click="addItem('morning')" class="bg-green-500 text-white px-2 py-1 rounded text-sm">＋ 新加上午时间段</button>
+            <button @click="addItem('morning')" class="bg-primary text-text-inverse px-2 py-1 rounded text-sm">＋ 新加上午时间段</button>
           </div>
           <div v-for="(item, idx) in sections.morning" :key="idx" class="flex items-center gap-2 mb-1">
             <select v-model="item.type" class="border p-1 text-sm rounded w-16">
@@ -45,15 +45,15 @@
             <input type="time" v-model="item.start" class="border p-1 text-sm rounded w-20" />
             <span class="text-sm">到</span>
             <input type="time" v-model="item.end" class="border p-1 text-sm rounded w-20" />
-            <button @click="removeItem('morning', idx)" class="text-red-500 text-sm">删除</button>
+            <button @click="removeItem('morning', idx)" class="text-danger text-sm">删除</button>
           </div>
         </div>
 
         <!-- 中午 -->
-        <div class="border rounded p-3 bg-gray-50">
+        <div class="border border-border rounded p-3 bg-bg">
           <div class="flex items-center justify-between mb-2">
             <h4 class="font-semibold">中午</h4>
-            <button @click="addItem('noon')" class="bg-green-500 text-white px-2 py-1 rounded text-sm">＋ 新加中午时间段</button>
+            <button @click="addItem('noon')" class="bg-primary text-text-inverse px-2 py-1 rounded text-sm">＋ 新加中午时间段</button>
           </div>
           <div v-for="(item, idx) in sections.noon" :key="idx" class="flex items-center gap-2 mb-1">
             <select v-model="item.type" class="border p-1 text-sm rounded w-16">
@@ -64,15 +64,15 @@
             <input type="time" v-model="item.start" class="border p-1 text-sm rounded w-20" />
             <span class="text-sm">到</span>
             <input type="time" v-model="item.end" class="border p-1 text-sm rounded w-20" />
-            <button @click="removeItem('noon', idx)" class="text-red-500 text-sm">删除</button>
+            <button @click="removeItem('noon', idx)" class="text-danger text-sm">删除</button>
           </div>
         </div>
 
         <!-- 下午 -->
-        <div class="border rounded p-3 bg-gray-50">
+        <div class="border border-border rounded p-3 bg-bg">
           <div class="flex items-center justify-between mb-2">
             <h4 class="font-semibold">下午</h4>
-            <button @click="addItem('afternoon')" class="bg-green-500 text-white px-2 py-1 rounded text-sm">＋ 新加下午时间段</button>
+            <button @click="addItem('afternoon')" class="bg-primary text-text-inverse px-2 py-1 rounded text-sm">＋ 新加下午时间段</button>
           </div>
           <div v-for="(item, idx) in sections.afternoon" :key="idx" class="flex items-center gap-2 mb-1">
             <select v-model="item.type" class="border p-1 text-sm rounded w-16">
@@ -83,15 +83,15 @@
             <input type="time" v-model="item.start" class="border p-1 text-sm rounded w-20" />
             <span class="text-sm">到</span>
             <input type="time" v-model="item.end" class="border p-1 text-sm rounded w-20" />
-            <button @click="removeItem('afternoon', idx)" class="text-red-500 text-sm">删除</button>
+            <button @click="removeItem('afternoon', idx)" class="text-danger text-sm">删除</button>
           </div>
         </div>
 
         <!-- 傍晚 -->
-        <div class="border rounded p-3 bg-gray-50">
+        <div class="border border-border rounded p-3 bg-bg">
           <div class="flex items-center justify-between mb-2">
             <h4 class="font-semibold">傍晚</h4>
-            <button @click="addItem('evening')" class="bg-green-500 text-white px-2 py-1 rounded text-sm">＋ 新加傍晚时间段</button>
+            <button @click="addItem('evening')" class="bg-primary text-text-inverse px-2 py-1 rounded text-sm">＋ 新加傍晚时间段</button>
           </div>
           <div v-for="(item, idx) in sections.evening" :key="idx" class="flex items-center gap-2 mb-1">
             <select v-model="item.type" class="border p-1 text-sm rounded w-16">
@@ -102,15 +102,15 @@
             <input type="time" v-model="item.start" class="border p-1 text-sm rounded w-20" />
             <span class="text-sm">到</span>
             <input type="time" v-model="item.end" class="border p-1 text-sm rounded w-20" />
-            <button @click="removeItem('evening', idx)" class="text-red-500 text-sm">删除</button>
+            <button @click="removeItem('evening', idx)" class="text-danger text-sm">删除</button>
           </div>
         </div>
 
         <!-- 晚上 -->
-        <div class="border rounded p-3 bg-gray-50">
+        <div class="border border-border rounded p-3 bg-bg">
           <div class="flex items-center justify-between mb-2">
             <h4 class="font-semibold">晚上</h4>
-            <button @click="addItem('night')" class="bg-green-500 text-white px-2 py-1 rounded text-sm">＋ 新加晚上时间段</button>
+            <button @click="addItem('night')" class="bg-primary text-text-inverse px-2 py-1 rounded text-sm">＋ 新加晚上时间段</button>
           </div>
           <div v-for="(item, idx) in sections.night" :key="idx" class="flex items-center gap-2 mb-1">
             <select v-model="item.type" class="border p-1 text-sm rounded w-16">
@@ -121,14 +121,14 @@
             <input type="time" v-model="item.start" class="border p-1 text-sm rounded w-20" />
             <span class="text-sm">到</span>
             <input type="time" v-model="item.end" class="border p-1 text-sm rounded w-20" />
-            <button @click="removeItem('night', idx)" class="text-red-500 text-sm">删除</button>
+            <button @click="removeItem('night', idx)" class="text-danger text-sm">删除</button>
           </div>
         </div>
       </div>
 
       <div class="text-right">
-        <button @click="$emit('cancel')" class="bg-gray-300 px-4 py-2 rounded mr-2">取消</button>
-        <button @click="save" class="bg-blue-500 text-white px-4 py-2 rounded">保存设置</button>
+        <button @click="$emit('cancel')" class="bg-surface-hover px-4 py-2 rounded mr-2 text-text">取消</button>
+        <button @click="save" class="bg-info text-text-inverse px-4 py-2 rounded">保存设置</button>
       </div>
     </div>
   </div>

@@ -1,0 +1,39 @@
+/* ==================== 极简主题 ==================== */
+
+:root[data-theme="minimal"] {
+  /* 品牌主色 */
+  --color-primary: #111827;
+  --color-primary-hover: #374151;
+  --color-primary-active: #1f2937;
+  --color-primary-light: #f3f4f6;
+
+  /* 背景色 */
+  --color-bg: #ffffff;
+  --color-surface: #ffffff;
+  --color-surface-hover: #f9fafb;
+  --color-sidebar: #111827;
+  --color-sidebar-hover: #374151;
+  --color-sidebar-active: #1f2937;
+
+  /* 文字色 */
+  --color-text: #111827;
+  --color-text-secondary: #374151;
+  --color-text-muted: #6b7280;
+  --color-text-inverse: #ffffff;
+
+  /* 边框色 */
+  --color-border: #e5e7eb;
+  --color-border-strong: #111827;
+
+  /* 阴影：无 */
+  --shadow-sm: none;
+  --shadow-md: none;
+  --shadow-lg: none;
+  --shadow-card: none;
+
+  /* 圆角：直角 */
+  --radius-sm: 0px;
+  --radius-md: 0px;
+  --radius-lg: 0px;
+  --radius-card: 0px;
+}

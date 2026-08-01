@@ -1,0 +1,63 @@
+/* ==================== 样式入口 ==================== */
+
+@import "tailwindcss";
+@import "./theme-base.css";
+@import "./theme-glass.css";
+@import "./theme-minimal.css";
+@import "./utilities.css";
+
+/* 注册 Tailwind 主题变量，让 class 可用 */
+@theme {
+  --color-primary: var(--color-primary);
+  --color-primary-hover: var(--color-primary-hover);
+  --color-primary-active: var(--color-primary-active);
+  --color-primary-light: var(--color-primary-light);
+
+  --color-success: var(--color-success);
+  --color-success-hover: var(--color-success-hover);
+  --color-warning: var(--color-warning);
+  --color-warning-hover: var(--color-warning-hover);
+  --color-warning-light: var(--color-warning-light);
+  --color-danger: var(--color-danger);
+  --color-danger-hover: var(--color-danger-hover);
+  --color-info: var(--color-info);
+  --color-info-hover: var(--color-info-hover);
+
+  --color-bg: var(--color-bg);
+  --color-surface: var(--color-surface);
+  --color-surface-hover: var(--color-surface-hover);
+  --color-sidebar: var(--color-sidebar);
+  --color-sidebar-hover: var(--color-sidebar-hover);
+  --color-sidebar-active: var(--color-sidebar-active);
+
+  --color-text: var(--color-text);
+  --color-text-secondary: var(--color-text-secondary);
+  --color-text-muted: var(--color-text-muted);
+  --color-text-inverse: var(--color-text-inverse);
+
+  --color-border: var(--color-border);
+  --color-border-strong: var(--color-border-strong);
+
+  --shadow-sm: var(--shadow-sm);
+  --shadow-md: var(--shadow-md);
+  --shadow-lg: var(--shadow-lg);
+  --shadow-card: var(--shadow-card);
+
+  --radius-sm: var(--radius-sm);
+  --radius-md: var(--radius-md);
+  --radius-lg: var(--radius-lg);
+  --radius-card: var(--radius-card);
+  --radius-full: var(--radius-full);
+}
+
+/* sortablejs 拖拽动画 */
+.sortable-ghost {
+  opacity: 0.4;
+  background-color: var(--color-primary-light);
+  border: 2px dashed var(--color-primary);
+}
+
+.sortable-drag {
+  opacity: 0.9;
+  box-shadow: var(--shadow-md);
+}
