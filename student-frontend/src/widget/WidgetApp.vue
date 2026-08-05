@@ -82,7 +82,6 @@ function onNoteReady() {
 function onNoteShrink() {
   noteFullscreen.value = false
   window.electron.send('widget-restore')
-  window.electron.send('widget-center')
   window.electron.send('widget-resize', [240, 220])
 }
 

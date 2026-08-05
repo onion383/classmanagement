@@ -1,30 +1,32 @@
 <template>
-  <div class="color-swatch">
-    <button
-      v-for="color in presetColors"
-      :key="color"
-      class="swatch-btn"
-      :class="{ active: modelValue === color }"
-      :style="{ backgroundColor: color }"
-      :title="color"
-      @click="select(color)"
-    ></button>
-    <div class="custom-color-wrapper">
-      <input
-        ref="colorInput"
-        type="color"
-        :value="customColor"
-        @input="onCustomInput"
-        class="color-input"
-      />
+  <div class="color-swatch-wrap">
+    <div class="color-swatch">
       <button
-        class="swatch-btn add-btn"
-        :class="{ active: isCustomActive }"
-        @click="openPicker"
-        title="自定义颜色"
-      >
-        <span class="plus-icon">+</span>
-      </button>
+        v-for="color in presetColors"
+        :key="color"
+        class="swatch-btn"
+        :class="{ active: modelValue === color }"
+        :style="{ backgroundColor: color }"
+        :title="color"
+        @click="select(color)"
+      ></button>
+      <div class="custom-color-wrapper">
+        <input
+          ref="colorInput"
+          type="color"
+          :value="customColor"
+          @input="onCustomInput"
+          class="color-input"
+        />
+        <button
+          class="swatch-btn add-btn"
+          :class="{ active: isCustomActive }"
+          @click="openPicker"
+          title="自定义颜色"
+        >
+          <span class="plus-icon">+</span>
+        </button>
+      </div>
     </div>
   </div>
 </template>
@@ -65,6 +67,13 @@ function onCustomInput(e) {
 </script>
 
 <style scoped>
+.color-swatch-wrap {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  align-items: flex-start;
+}
+
 .color-swatch {
   display: flex;
   align-items: center;
@@ -123,4 +132,6 @@ function onCustomInput(e) {
   opacity: 0;
   pointer-events: none;
 }
+
+
 </style>
