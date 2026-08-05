@@ -42,6 +42,7 @@
     <template v-else>
       <div class="canvas-area" ref="canvasArea" @mousedown="onCanvasMouseDown">
         <canvas ref="bgCanvas" class="bg-canvas"></canvas>
+        <canvas ref="hlCanvas" class="hl-canvas"></canvas>
         <canvas
           ref="drawCanvas"
           class="draw-canvas"
@@ -119,8 +120,12 @@
             </button>
           </div>
           <div class="tb-sub-row">
+            <span class="tb-sub-label">粗细</span>
+            <input type="range" min="1" max="30" v-model.number="brushSize" class="tb-slider" />
+            <span class="tb-size">{{ brushSize }}</span>
+          </div>
+          <div class="tb-sub-row">
             <ColorSwatch v-model="brushColor" :presetColors="['#ef4444', '#000000', '#3b82f6']" />
-            <button class="tb-btn-confirm" @click="subTool = null">确定</button>
           </div>
         </template>
 
@@ -144,6 +149,7 @@ import ColorSwatch from '../components/ColorSwatch.vue'
 const emit = defineEmits(['close', 'ready', 'shrink'])
 const canvasArea = ref(null)
 const bgCanvas = ref(null)
+const hlCanvas = ref(null)
 const drawCanvas = ref(null)
 const toolbarRef = ref(null)
 const subRef = ref(null)
@@ -176,6 +182,7 @@ const saveDisplayPath = computed(() => {
 
 const currentTool = ref('ballpoint')
 const brushColor = ref('#ef4444')
+const brushSize = ref(3)
 const eraserSize = ref(20)
 const subTool = ref(null) // null | 'brush' | 'eraser'
 
@@ -218,7 +225,8 @@ function toggleSub(tool) {
 }
 
 let isDrawing = false
-let lastX = 0, lastY = 0, lastTime = 0, lastWidth = 0
+let pointBuffer = [] // Catmull-Rom 点缓冲 [{x, y, w, time}]
+let widthSmooth = [] // 宽度平滑缓冲，减少钢笔笔锋抖动
 let bgImage = null
 let canvasW = 0, canvasH = 0
 
@@ -256,10 +264,11 @@ function onToolbarDragStart(e) {
 // 绘制
 function toolCfg() {
   const s = eraserSize.value
+  const b = brushSize.value
   switch (currentTool.value) {
-    case 'ballpoint': return { w: 3, minW: 3, maxW: 3, color: brushColor.value, alpha: 1 }
-    case 'pen': return { w: 4, minW: 1, maxW: 8, color: brushColor.value, alpha: 1 }
-    case 'highlighter': return { w: 16, minW: 16, maxW: 16, color: brushColor.value, alpha: 0.35 }
+    case 'ballpoint': return { w: b, minW: b, maxW: b, color: brushColor.value, alpha: 1 }
+    case 'pen': return { w: b, minW: Math.max(1, b / 4), maxW: b, color: brushColor.value, alpha: 1 }
+    case 'highlighter': return { w: b, minW: b, maxW: b, color: brushColor.value, alpha: 1 }
     case 'eraser': return { w: s, minW: s, maxW: s, color: '#000', alpha: 1, isEraser: true }
     default: return { w: 3, minW: 3, maxW: 3, color: '#000', alpha: 1 }
   }
@@ -281,27 +290,87 @@ function pos(e) {
   }
 }
 
+// ====== Centripetal Catmull-Rom 样条插值 (alpha=0.5) ======
+// 相比均匀 Catmull-Rom，弦长参数化能更好地处理采样点间距不均的情况，
+// 避免自交和回环，曲线更自然
+function catmullRom(p0, p1, p2, p3, t) {
+  const alpha = 0.5
+  function getT(prev, p0, p1) {
+    const d = Math.hypot(p1.x - p0.x, p1.y - p0.y)
+    return Math.pow(d, alpha) + prev
+  }
+  const t0 = 0
+  const t1 = getT(t0, p0, p1)
+  const t2 = getT(t1, p1, p2)
+  const t3 = getT(t2, p2, p3)
+  const tt = t1 + t * (t2 - t1)
+
+  const lerp = (a, b, r) => a + (b - a) * r
+
+  const a1x = lerp(p0.x, p1.x, (tt - t0) / (t1 - t0))
+  const a1y = lerp(p0.y, p1.y, (tt - t0) / (t1 - t0))
+  const a2x = lerp(p1.x, p2.x, (tt - t1) / (t2 - t1))
+  const a2y = lerp(p1.y, p2.y, (tt - t1) / (t2 - t1))
+  const a3x = lerp(p2.x, p3.x, (tt - t2) / (t3 - t2))
+  const a3y = lerp(p2.y, p3.y, (tt - t2) / (t3 - t2))
+
+  const b1x = lerp(a1x, a2x, (tt - t0) / (t2 - t0))
+  const b1y = lerp(a1y, a2y, (tt - t0) / (t2 - t0))
+  const b2x = lerp(a2x, a3x, (tt - t1) / (t3 - t1))
+  const b2y = lerp(a2y, a3y, (tt - t1) / (t3 - t1))
+
+  const cx = lerp(b1x, b2x, (tt - t1) / (t2 - t1))
+  const cy = lerp(b1y, b2y, (tt - t1) / (t2 - t1))
+
+  // 宽度用 smoothstep 过渡，避免线性插值的生硬感
+  const st = t * t * (3 - 2 * t)
+  return { x: cx, y: cy, w: p1.w + (p2.w - p1.w) * st }
+}
+
+// 根据两点距离自适应调整插值步数，保证平滑
+function drawCurveSegment(ctx, p0, p1, p2, p3) {
+  const dist = Math.hypot(p2.x - p1.x, p2.y - p1.y)
+  const steps = Math.max(8, Math.ceil(dist / 3))
+  ctx.beginPath()
+  ctx.moveTo(p1.x, p1.y)
+  for (let i = 1; i <= steps; i++) {
+    const pt = catmullRom(p0, p1, p2, p3, i / steps)
+    ctx.lineWidth = pt.w
+    ctx.lineTo(pt.x, pt.y)
+  }
+  ctx.stroke()
+}
+
 function onMouseDown(e) {
   if (!bgImage) return
   const p = pos(e)
   isDrawing = true
-  lastX = p.x; lastY = p.y; lastTime = Date.now()
-  lastWidth = toolCfg().w
-  const ctx = drawCanvas.value.getContext('2d')
   const cfg = toolCfg()
+  const width = cfg.w
+  // 初始化点缓冲和宽度平滑
+  const now = Date.now()
+  pointBuffer = [
+    { x: p.x, y: p.y, w: width, time: now },
+    { x: p.x, y: p.y, w: width, time: now }
+  ]
+  widthSmooth = [width]
+  const isHL = currentTool.value === 'highlighter'
+  const ctx = (isHL ? hlCanvas.value : drawCanvas.value).getContext('2d')
+
   if (cfg.isEraser) {
-    ctx.globalCompositeOperation = 'destination-out'
-    ctx.beginPath()
-    ctx.arc(p.x, p.y, lastWidth / 2, 0, Math.PI * 2)
-    ctx.fill()
-    ctx.globalCompositeOperation = 'source-over'
+    ;[drawCanvas.value, hlCanvas.value].forEach(c => {
+      const ec = c.getContext('2d')
+      ec.globalCompositeOperation = 'destination-out'
+      ec.beginPath()
+      ec.arc(p.x, p.y, width / 2, 0, Math.PI * 2)
+      ec.fill()
+      ec.globalCompositeOperation = 'source-over'
+    })
   } else {
     ctx.beginPath()
-    ctx.globalAlpha = cfg.alpha
     ctx.fillStyle = cfg.color
-    ctx.arc(p.x, p.y, lastWidth / 2, 0, Math.PI * 2)
+    ctx.arc(p.x, p.y, width / 2, 0, Math.PI * 2)
     ctx.fill()
-    ctx.globalAlpha = 1
   }
 }
 
@@ -309,34 +378,80 @@ function onMouseMove(e) {
   if (!isDrawing || !bgImage) return
   const p = pos(e)
   const now = Date.now()
-  const dt = Math.max(now - lastTime, 1)
-  const dist = Math.hypot(p.x - lastX, p.y - lastY)
+  const lastPt = pointBuffer[pointBuffer.length - 1]
+  const dt = Math.max(now - lastPt.time, 1)
+  const dist = Math.hypot(p.x - lastPt.x, p.y - lastPt.y)
   const speed = dist / dt
   const cfg = toolCfg()
-  const width = calcW(speed, cfg)
-  const ctx = drawCanvas.value.getContext('2d')
-  ctx.lineJoin = 'round'
-  ctx.lineCap = currentTool.value === 'highlighter' ? 'butt' : 'round'
+  let width = calcW(speed, cfg)
 
-  if (cfg.isEraser) {
-    ctx.globalCompositeOperation = 'destination-out'
-    ctx.strokeStyle = 'rgba(0,0,0,1)'
-  } else {
-    ctx.globalCompositeOperation = 'source-over'
-    ctx.strokeStyle = cfg.color
-    ctx.globalAlpha = cfg.alpha
+  // 宽度平滑：移动平均，减少速度突变导致的笔锋抖动
+  widthSmooth.push(width)
+  if (widthSmooth.length > 4) widthSmooth.shift()
+  width = widthSmooth.reduce((a, b) => a + b, 0) / widthSmooth.length
+  const isHL = currentTool.value === 'highlighter'
+  const ctx = (isHL ? hlCanvas.value : drawCanvas.value).getContext('2d')
+  ctx.lineCap = 'round'; ctx.lineJoin = 'round'
+
+  // 追加采样点到缓冲
+  pointBuffer.push({ x: p.x, y: p.y, w: width, time: now })
+
+  // 缓冲满 4 个点时，用 Catmull-Rom 绘制倒数第 3→倒数第 2 点之间的平滑曲线
+  if (pointBuffer.length >= 4) {
+    const n = pointBuffer.length
+    const p0 = pointBuffer[n - 4], p1 = pointBuffer[n - 3]
+    const p2 = pointBuffer[n - 2], p3 = pointBuffer[n - 1]
+
+    if (cfg.isEraser) {
+      ;[drawCanvas.value, hlCanvas.value].forEach(c => {
+        const ec = c.getContext('2d')
+        ec.globalCompositeOperation = 'destination-out'
+        ec.strokeStyle = 'rgba(0,0,0,1)'
+        ec.lineCap = 'round'; ec.lineJoin = 'round'
+        drawCurveSegment(ec, p0, p1, p2, p3)
+        ec.globalCompositeOperation = 'source-over'
+      })
+    } else {
+      ctx.strokeStyle = cfg.color
+      ctx.globalAlpha = cfg.alpha
+      drawCurveSegment(ctx, p0, p1, p2, p3)
+      ctx.globalAlpha = 1
+    }
   }
-
-  const mx = (lastX + p.x) / 2, my = (lastY + p.y) / 2
-  const aw = (lastWidth + width) / 2
-  ctx.lineWidth = aw
-  ctx.beginPath(); ctx.moveTo(lastX, lastY); ctx.quadraticCurveTo(lastX, lastY, mx, my); ctx.stroke()
-
-  ctx.globalAlpha = 1; ctx.globalCompositeOperation = 'source-over'
-  lastX = mx; lastY = my; lastTime = now; lastWidth = width
 }
 
-function onMouseUp() { isDrawing = false }
+function onMouseUp() {
+  if (!isDrawing) return
+  const n = pointBuffer.length
+  if (n < 3) { isDrawing = false; return }
+
+  const cfg = toolCfg()
+  const isHL = currentTool.value === 'highlighter'
+  const ctx = (isHL ? hlCanvas.value : drawCanvas.value).getContext('2d')
+  ctx.lineCap = 'round'; ctx.lineJoin = 'round'
+
+  // 用最后 3 个点绘制末尾曲线段，P3 镜像 P2 作为终点
+  const p0 = pointBuffer[n - 3], p1 = pointBuffer[n - 2], p2 = pointBuffer[n - 1]
+
+  if (cfg.isEraser) {
+    ;[drawCanvas.value, hlCanvas.value].forEach(c => {
+      const ec = c.getContext('2d')
+      ec.globalCompositeOperation = 'destination-out'
+      ec.strokeStyle = 'rgba(0,0,0,1)'
+      ec.lineCap = 'round'; ec.lineJoin = 'round'
+      drawCurveSegment(ec, p0, p1, p2, p2)
+      ec.globalCompositeOperation = 'source-over'
+    })
+  } else {
+    ctx.strokeStyle = cfg.color
+    ctx.globalAlpha = cfg.alpha
+    drawCurveSegment(ctx, p0, p1, p2, p2)
+    ctx.globalAlpha = 1
+  }
+
+  isDrawing = false
+  pointBuffer = []
+}
 
 // 点击画布区域关闭二级菜单
 function onCanvasMouseDown(e) {
@@ -348,16 +463,20 @@ function onCanvasMouseDown(e) {
 // 保存流程
 async function startSave() {
   if (!bgImage) return
-  // 先收缩回小窗口，再显示保存界面
+  // 先提取画布数据（此时编辑模板还在，canvas 引用有效）
+  const tc = document.createElement('canvas')
+  tc.width = canvasW; tc.height = canvasH
+  const tctx = tc.getContext('2d')
+  tctx.drawImage(bgImage, 0, 0, canvasW, canvasH)
+  tctx.drawImage(hlCanvas.value, 0, 0)
+  tctx.drawImage(drawCanvas.value, 0, 0)
+
+  // 切换到保存界面（白色），再收缩窗口，避免黑色 canvas 闪现
+  noteState.value = 'saving'
   emit('shrink')
   await new Promise(r => setTimeout(r, 200))
-  noteState.value = 'saving'
+
   try {
-    const tc = document.createElement('canvas')
-    tc.width = canvasW; tc.height = canvasH
-    const tctx = tc.getContext('2d')
-    tctx.drawImage(bgImage, 0, 0, canvasW, canvasH)
-    tctx.drawImage(drawCanvas.value, 0, 0)
     const blob = await new Promise(r => tc.toBlob(r, 'image/png'))
     if (!blob) {
       saveError.value = '保存失败：画布未初始化'
@@ -447,7 +566,7 @@ function fitCanvas() {
   const ox = Math.floor((aw - displayW) / 2)
   const oy = Math.floor((ah - displayH) / 2)
 
-  ;[bgCanvas.value, drawCanvas.value].forEach(c => {
+  ;[bgCanvas.value, hlCanvas.value, drawCanvas.value].forEach(c => {
     if (!c) return
     c.width = canvasW
     c.height = canvasH
@@ -611,12 +730,19 @@ onUnmounted(() => {
 }
 
 .bg-canvas,
+.hl-canvas,
 .draw-canvas {
   position: absolute;
 }
 
-.draw-canvas {
+.hl-canvas {
   z-index: 2;
+  opacity: 0.35;
+  pointer-events: none;
+}
+
+.draw-canvas {
+  z-index: 3;
 }
 
 /* ====== 工具栏 ====== */
@@ -737,20 +863,5 @@ onUnmounted(() => {
   width: 80px; height: 4px;
   accent-color: var(--color-primary, #22c55e);
   cursor: pointer;
-}
-
-.tb-btn-confirm {
-  padding: 3px 10px;
-  border-radius: 6px;
-  border: none;
-  background: var(--color-primary, #22c55e);
-  color: #fff;
-  font-size: 11px;
-  cursor: pointer;
-  white-space: nowrap;
-  margin-left: 4px;
-}
-.tb-btn-confirm:hover {
-  opacity: 0.85;
 }
 </style>
