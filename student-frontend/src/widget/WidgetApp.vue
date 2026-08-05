@@ -28,14 +28,14 @@
     </div>
 
     <!-- 具体工具 -->
-    <div v-if="state === 'tool'" class="panel tool-panel" :class="{ 'tool-hidden': !toolReady }">
-      <div class="drag-bar" @mousedown="onDragMouseDown">
+    <div v-if="state === 'tool'" class="panel tool-panel" :class="{ 'tool-hidden': !toolReady, 'no-radius': noteFullscreen }">
+      <div v-if="activeTool !== 'note' || !noteFullscreen" class="drag-bar" @mousedown="onDragMouseDown">
         <div class="drag-indicator"></div>
       </div>
       <Timer v-if="activeTool === 'timer'" @close="closeToIcon" />
       <RollCall v-else-if="activeTool === 'rollcall'" @close="closeToIcon" />
       <Screenshot v-else-if="activeTool === 'screenshot'" @close="closeToIcon" />
-      <Note v-else-if="activeTool === 'note'" @close="closeToIcon" />
+      <Note v-else-if="activeTool === 'note'" @close="closeToIcon" @ready="onNoteReady" @shrink="onNoteShrink" />
       <div v-else class="placeholder-tool">
         <div class="placeholder-icon">🚧</div>
         <div class="placeholder-text">功能开发中</div>
@@ -55,6 +55,7 @@ import Note from './Note.vue'
 const state = ref('icon') // 'icon' | 'menu' | 'tool'
 const activeTool = ref('')
 const toolReady = ref(false)
+const noteFullscreen = ref(false)
 
 const tools = [
   { id: 'timer', name: '计时器', icon: '⏱️' },
@@ -67,9 +68,22 @@ function openTool(id) {
   activeTool.value = id
   state.value = 'tool'
   toolReady.value = false
+  noteFullscreen.value = false
   setTimeout(() => {
     toolReady.value = true
   }, 150)
+}
+
+function onNoteReady() {
+  noteFullscreen.value = true
+  window.electron.send('widget-fullscreen')
+}
+
+function onNoteShrink() {
+  noteFullscreen.value = false
+  window.electron.send('widget-restore')
+  window.electron.send('widget-center')
+  window.electron.send('widget-resize', [240, 220])
 }
 
 function closeToIcon() {
@@ -157,21 +171,31 @@ onUnmounted(() => {
 // 状态变化时自动调整窗口大小和位置
 watch(
   [state, activeTool],
-  ([newState, newTool], [oldState]) => {
+  ([newState, newTool], [oldState, oldTool]) => {
     let size
     if (newState === 'icon') {
       size = [48, 48]
       if (oldState === 'tool') {
+        // 如果之前是全屏注释工具，先恢复窗口大小
+        if (oldTool === 'note') {
+          window.electron.send('widget-restore')
+        }
         window.electron.send('widget-restore-position')
       }
     } else if (newState === 'menu') {
       size = [284, 300]
     } else if (newState === 'tool') {
+      if (newTool === 'note') {
+        // 注释工具：先居中显示小窗口加载，等 Note 准备好再全屏
+        size = [220, 200]
+        window.electron.send('widget-center')
+        window.electron.send('widget-resize', size)
+        return
+      }
       const toolSizes = {
         timer: [200, 400],
         rollcall: [220, 400],
         screenshot: [250, 400],
-        note: [900, 620],
       }
       size = toolSizes[newTool] || [200, 300]
       window.electron.send('widget-center')
@@ -322,6 +346,8 @@ watch(
 
 .tool-panel {
   width: 100%;
+  height: 100%;
+  position: relative;
   padding: 12px;
   box-sizing: border-box;
   overflow: hidden;
@@ -331,6 +357,11 @@ watch(
 
 .tool-hidden {
   opacity: 0;
+}
+
+.no-radius {
+  border-radius: 0;
+  padding: 0;
 }
 
 .placeholder-tool {
