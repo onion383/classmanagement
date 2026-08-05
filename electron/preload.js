@@ -8,6 +8,8 @@ const validSendChannels = [
   'widget-move-to',
   'widget-center',
   'widget-restore-position',
+  'widget-fullscreen',
+  'widget-restore',
   'widget-set-ignore-mouse',
   'to-main',
   'to-widget',

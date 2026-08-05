@@ -228,6 +228,35 @@ ipcMain.on('widget-restore-position', () => {
   }
 })
 
+// 全屏小组件（用于注释工具）
+let preFullscreenBounds = null
+ipcMain.on('widget-fullscreen', () => {
+  if (widgetWindow && !widgetWindow.isDestroyed()) {
+    preFullscreenBounds = {
+      pos: widgetWindow.getPosition(),
+      size: widgetWindow.getContentSize()
+    }
+    const { x, y, width, height } = screen.getPrimaryDisplay().bounds
+    widgetWindow.setPosition(x, y)
+    widgetWindow.setContentSize(width, height)
+    widgetWindow.setAlwaysOnTop(true)
+    widgetWindow.focus()
+    currentWidgetSize = [width, height]
+  }
+})
+
+// 从全屏恢复
+ipcMain.on('widget-restore', () => {
+  if (widgetWindow && !widgetWindow.isDestroyed() && preFullscreenBounds) {
+    widgetWindow.setPosition(preFullscreenBounds.pos[0], preFullscreenBounds.pos[1])
+    widgetWindow.setContentSize(preFullscreenBounds.size[0], preFullscreenBounds.size[1])
+    widgetWindow.setAlwaysOnTop(true)
+    widgetWindow.focus()
+    currentWidgetSize = preFullscreenBounds.size
+    preFullscreenBounds = null
+  }
+})
+
 // 设置窗口是否忽略鼠标事件（true=透明区域穿透，false=正常接收）
 ipcMain.on('widget-set-ignore-mouse', (event, ignore) => {
   if (widgetWindow && !widgetWindow.isDestroyed()) {
@@ -287,23 +316,25 @@ ipcMain.on('to-main', (event, data) => {
 })
 
 // 一键截屏：截取整个屏幕并保存到本地
-ipcMain.handle('screenshot-capture', async () => {
-  // 截图前隐藏 widget 窗口，避免出现在截图中
+// options.hideWidget: 是否隐藏 widget 窗口（默认 true）。截屏工具传 false 以保持 spinner 可见
+ipcMain.handle('screenshot-capture', async (event, options) => {
+  const hideWidget = options?.hideWidget !== false
   let wasVisible = false
-  if (widgetWindow && !widgetWindow.isDestroyed()) {
+  if (hideWidget && widgetWindow && !widgetWindow.isDestroyed()) {
     wasVisible = widgetWindow.isVisible()
-    if (wasVisible) widgetWindow.hide()
+    if (wasVisible) widgetWindow.setOpacity(0)
     // 等待一帧确保窗口已隐藏
-    await new Promise(resolve => setTimeout(resolve, 100))
+    await new Promise(resolve => setTimeout(resolve, 150))
   }
 
   try {
     const primaryDisplay = screen.getPrimaryDisplay()
     const { width, height } = primaryDisplay.size
+    const scaleFactor = primaryDisplay.scaleFactor || 1
 
     const sources = await desktopCapturer.getSources({
       types: ['screen'],
-      thumbnailSize: { width, height }
+      thumbnailSize: { width: Math.round(width * scaleFactor), height: Math.round(height * scaleFactor) }
     })
 
     const primarySource = sources.find(s => s.display_id === String(primaryDisplay.id)) || sources[0]
@@ -318,11 +349,15 @@ ipcMain.handle('screenshot-capture', async () => {
     const filePath = path.join(saveDir, `screenshot_${timestamp}.png`)
     fs.writeFileSync(filePath, image)
 
-    return { success: true, filePath }
+    const dataUrl = `data:image/png;base64,${image.toString('base64')}`
+    return { success: true, filePath, dataUrl }
   } finally {
-    // 恢复 widget 窗口
+    // 恢复 widget 窗口透明度
     if (wasVisible && widgetWindow && !widgetWindow.isDestroyed()) {
-      widgetWindow.show()
+      widgetWindow.setOpacity(1)
+      // 显式恢复鼠标事件和焦点，避免 setOpacity 后透明窗口丢失交互
+      widgetWindow.setIgnoreMouseEvents(false)
+      widgetWindow.focus()
     }
   }
 })

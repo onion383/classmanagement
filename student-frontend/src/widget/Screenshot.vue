@@ -52,7 +52,7 @@ function truncatePath(fullPath) {
 
 async function capture() {
   try {
-    const res = await window.electron.invoke('screenshot-capture')
+    const res = await window.electron.invoke('screenshot-capture', { hideWidget: false })
     if (res.success) {
       result.value = res
     } else {
