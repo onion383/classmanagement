@@ -86,12 +86,39 @@
   font-weight: 600;
 }
 
-/* ========== 毛玻璃按钮 ========== */
+/* ========== 毛玻璃按钮 - 荧光边框 ========== */
 :root[data-theme="glass"] button {
   border-width: 1px;
   border-style: solid;
   border-radius: 12px;
   transition: background-color 0.2s, box-shadow 0.2s, color 0.2s, transform 0.15s;
+  position: relative;
+  box-shadow:
+    0 0 0 1px rgba(255, 255, 255, 0.12),
+    0 0 12px rgba(255, 255, 255, 0.04),
+    inset 0 1px 0 rgba(255, 255, 255, 0.15);
+}
+:root[data-theme="glass"] button::before {
+  content: '';
+  position: absolute;
+  inset: -1px;
+  border-radius: inherit;
+  padding: 1px;
+  background: linear-gradient(
+    180deg,
+    rgba(255, 255, 255, 0.25) 0%,
+    rgba(255, 255, 255, 0.05) 50%,
+    rgba(255, 255, 255, 0.1) 100%
+  );
+  -webkit-mask:
+    linear-gradient(#fff 0 0) content-box,
+    linear-gradient(#fff 0 0);
+  mask:
+    linear-gradient(#fff 0 0) content-box,
+    linear-gradient(#fff 0 0);
+  -webkit-mask-composite: xor;
+  mask-composite: exclude;
+  pointer-events: none;
 }
 :root[data-theme="glass"] button:active {
   transform: translateY(1px);
@@ -183,16 +210,43 @@
   color: var(--color-text, #111827);
 }
 
-/* ========== 毛玻璃卡片 / 面板 ========== */
+/* ========== 毛玻璃卡片 / 面板 - 荧光边框 ========== */
 :root[data-theme="glass"] .bg-surface {
-  background-color: rgba(255, 255, 255, 0.78) !important;
-  backdrop-filter: blur(16px);
-  -webkit-backdrop-filter: blur(16px);
-  border: 1px solid rgba(255, 255, 255, 0.6);
-  box-shadow: var(--shadow-card);
+  background-color: rgba(255, 255, 255, 0.12) !important;
+  backdrop-filter: blur(20px) saturate(1.1);
+  -webkit-backdrop-filter: blur(20px) saturate(1.1);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 20px;
+  position: relative;
+  box-shadow:
+    0 0 0 1px rgba(255, 255, 255, 0.1),
+    0 0 20px rgba(255, 255, 255, 0.03),
+    inset 0 1px 0 rgba(255, 255, 255, 0.15);
+}
+:root[data-theme="glass"] .bg-surface::before {
+  content: '';
+  position: absolute;
+  inset: -1px;
+  border-radius: inherit;
+  padding: 1px;
+  background: linear-gradient(
+    180deg,
+    rgba(255, 255, 255, 0.2) 0%,
+    rgba(255, 255, 255, 0.05) 50%,
+    rgba(255, 255, 255, 0.08) 100%
+  );
+  -webkit-mask:
+    linear-gradient(#fff 0 0) content-box,
+    linear-gradient(#fff 0 0);
+  mask:
+    linear-gradient(#fff 0 0) content-box,
+    linear-gradient(#fff 0 0);
+  -webkit-mask-composite: xor;
+  mask-composite: exclude;
+  pointer-events: none;
 }
 :root[data-theme="glass"] .bg-surface-hover {
-  background-color: rgba(255, 255, 255, 0.9) !important;
+  background-color: rgba(255, 255, 255, 0.18) !important;
 }
 
 /* ========== 毛玻璃表格 ========== */
@@ -224,10 +278,58 @@
   box-shadow: var(--shadow-lg);
 }
 
-/* ========== 登录界面背景 ========== */
+/* ========== 登录界面背景和光效 ========== */
 :root[data-theme="glass"] .login-bg {
   position: relative;
   background: transparent;
+}
+:root[data-theme="glass"] .login-glow {
+  position: relative;
+  box-shadow:
+    0 0 0 1px rgba(255, 255, 255, 0.25),
+    0 0 30px rgba(255, 255, 255, 0.1),
+    0 0 60px rgba(255, 255, 255, 0.05),
+    0 4px 20px rgba(0, 0, 0, 0.15),
+    inset 0 1px 0 rgba(255, 255, 255, 0.35),
+    inset 1px 0 0 rgba(255, 255, 255, 0.2),
+    inset 0 -1px 0 rgba(255, 255, 255, 0.1),
+    inset -1px 0 0 rgba(255, 255, 255, 0.15);
+}
+:root[data-theme="glass"] .login-glow::before {
+  content: '';
+  position: absolute;
+  inset: -2px;
+  border-radius: inherit;
+  padding: 2px;
+  background: linear-gradient(
+    180deg,
+    rgba(255, 255, 255, 0.5) 0%,
+    rgba(255, 255, 255, 0.15) 20%,
+    rgba(255, 255, 255, 0.05) 50%,
+    rgba(255, 255, 255, 0.15) 80%,
+    rgba(255, 255, 255, 0.4) 100%
+  );
+  -webkit-mask:
+    linear-gradient(#fff 0 0) content-box,
+    linear-gradient(#fff 0 0);
+  mask:
+    linear-gradient(#fff 0 0) content-box,
+    linear-gradient(#fff 0 0);
+  -webkit-mask-composite: xor;
+  mask-composite: exclude;
+  pointer-events: none;
+}
+:root[data-theme="glass"] .login-glow::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  background: linear-gradient(
+    180deg,
+    rgba(255, 255, 255, 0.15) 0%,
+    transparent 50%
+  );
+  pointer-events: none;
 }
 :root[data-theme="glass"] .login-bg::before {
   content: '';
