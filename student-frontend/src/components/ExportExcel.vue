@@ -55,8 +55,17 @@ import html2canvas from 'html2canvas';
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
 import fontUrl from '../assets/fonts/NotoSansSC-6.ttf';
+import { useNotification } from '../composables/useNotification';
 
 const SECTION_NAMES = { morning: '上午', noon: '中午', afternoon: '下午', evening: '傍晚', night: '晚上' };
+
+const FORMAT_LABELS = {
+  csv: '表格 (.csv)',
+  html: 'HTML 表格 (.html)',
+  xlsx: 'Excel 表格 (.xlsx)',
+  image: 'PNG 图片 (.png)',
+  pdf: 'PDF 文档 (.pdf)'
+};
 
 export default {
   name: 'ExportExcel',
@@ -68,6 +77,10 @@ export default {
     tableElement: { type: Object, default: null }
   },
   emits: ['export-start', 'export-finish', 'export-error'],
+  setup() {
+    const { success, error } = useNotification()
+    return { notifySuccess: success, notifyError: error }
+  },
   data() {
     return {
       visible: false,
@@ -114,9 +127,12 @@ export default {
           case 'pdf': await this.exportPDF(exportRows, selectedFields, finalFilename); break;
           default: this.exportHTMLTable(exportRows, selectedFields, finalFilename);
         }
+        const label = FORMAT_LABELS[this.exportFormat] || '文件'
+        this.notifySuccess(`已成功导出 ${label}`)
         this.$emit('export-finish');
       } catch (err) {
         console.error('导出失败:', err);
+        this.notifyError('导出失败，请重试')
         this.$emit('export-error', err);
       }
       this.visible = false;

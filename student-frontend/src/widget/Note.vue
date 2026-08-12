@@ -145,6 +145,7 @@
 <script setup>
 import { ref, reactive, computed, onMounted, onUnmounted, nextTick } from 'vue'
 import ColorSwatch from '../components/ColorSwatch.vue'
+import axios from 'axios'
 
 const emit = defineEmits(['close', 'ready', 'shrink'])
 const canvasArea = ref(null)
@@ -485,7 +486,17 @@ async function startSave() {
     }
     const buf = await blob.arrayBuffer()
     const arr = new Uint8Array(buf)
-    const res = await window.electron.invoke('note-save', Array.from(arr))
+
+    // 获取自定义保存路径
+    let saveDir = ''
+    try {
+      const settingsRes = await axios.get('/api/widget-settings')
+      if (settingsRes.data.success) {
+        saveDir = settingsRes.data.data.noteSavePath
+      }
+    } catch (_) { /* 读取设置失败则使用默认路径 */ }
+
+    const res = await window.electron.invoke('note-save', Array.from(arr), { saveDir })
     if (res.success) {
       saveFilePath.value = res.filePath
       noteState.value = 'saved'

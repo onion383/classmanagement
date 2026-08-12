@@ -47,6 +47,7 @@
 
 <script setup>
 import { ref, watch, onMounted, onUnmounted } from 'vue'
+import axios from 'axios'
 import Timer from './Timer.vue'
 import RollCall from './RollCall.vue'
 import Screenshot from './Screenshot.vue'
@@ -151,11 +152,26 @@ function onDocMouseDown(e) {
 
 let blurHandler = null
 
+async function checkToolboxEnabled() {
+  try {
+    const res = await axios.get('/api/widget-settings')
+    if (res.data.success) {
+      window.electron.send('widget-set-visible', res.data.data.toolboxEnabled)
+    }
+  } catch (_) {
+    // 读取失败则保持默认可见
+  }
+}
+
 onMounted(() => {
   document.addEventListener('mousedown', onDocMouseDown)
+  checkToolboxEnabled()
   blurHandler = window.electron.on('from-main', (data) => {
     if (data && data.type === 'blur' && state.value === 'menu') {
       state.value = 'icon'
+    }
+    if (data && data.type === 'settings-changed') {
+      checkToolboxEnabled()
     }
   })
 })

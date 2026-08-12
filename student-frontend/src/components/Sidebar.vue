@@ -35,6 +35,22 @@
       </router-link>
 
       <router-link
+        to="/widget-settings"
+        class="block px-3 py-2 rounded hover:bg-sidebar-hover transition-theme"
+        active-class="bg-sidebar-active"
+      >
+        🔧 小组件设置
+      </router-link>
+
+      <router-link
+        to="/test"
+        class="block px-3 py-2 rounded hover:bg-sidebar-hover transition-theme"
+        active-class="bg-sidebar-active"
+      >
+        🧪 UI 测试
+      </router-link>
+
+      <router-link
         to="/settings"
         class="block px-3 py-2 rounded hover:bg-sidebar-hover transition-theme"
         active-class="bg-sidebar-active"

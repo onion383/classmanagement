@@ -5,6 +5,8 @@ import Login from '../views/Login.vue'
 import SettingsView from '../views/SettingsView.vue'
 import ScheduleView from '../views/ScheduleView.vue'
 import SeatView from '../views/SeatView.vue';
+import WidgetSettingsView from '../views/WidgetSettingsView.vue';
+import TestView from '../views/TestView.vue';
 
 
 const routes = [
@@ -15,6 +17,8 @@ const routes = [
   { path: '/account', redirect: '/settings' },
   { path: '/schedule', name: 'schedule', component: ScheduleView, meta: { requiresAuth: true } },
   { path: '/seats',name: 'SeatView',component: SeatView },
+  { path: '/widget-settings', name: 'widgetSettings', component: WidgetSettingsView, meta: { requiresAuth: true } },
+  { path: '/test', name: 'test', component: TestView },
 ]
 
 const router = createRouter({

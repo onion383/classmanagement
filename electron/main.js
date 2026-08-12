@@ -1,4 +1,4 @@
-const { app, BrowserWindow, ipcMain, desktopCapturer, screen } = require('electron')
+const { app, BrowserWindow, ipcMain, desktopCapturer, screen, dialog } = require('electron')
 const path = require('path')
 const fs = require('fs')
 const { fork } = require('child_process')
@@ -46,7 +46,7 @@ function createMainWindow() {
       preload: path.join(__dirname, 'preload.js'),
       contextIsolation: true,
       nodeIntegration: false,
-      webSecurity: !isDev,
+      webSecurity: false,
     }
   })
 
@@ -264,6 +264,20 @@ ipcMain.on('widget-set-ignore-mouse', (event, ignore) => {
   }
 })
 
+// 设置工具箱可见性
+ipcMain.on('widget-set-visible', (event, visible) => {
+  if (widgetWindow && !widgetWindow.isDestroyed()) {
+    if (visible) {
+      widgetWindow.setOpacity(1)
+      widgetWindow.setIgnoreMouseEvents(false)
+      widgetWindow.focus()
+    } else {
+      widgetWindow.setOpacity(0)
+      widgetWindow.setIgnoreMouseEvents(true, { forward: true })
+    }
+  }
+})
+
 // 拖动开始：记录窗口初始位置、尺寸和鼠标初始位置
 ipcMain.on('widget-drag-start', (event, { screenX, screenY }) => {
   if (widgetWindow && !widgetWindow.isDestroyed()) {
@@ -315,6 +329,82 @@ ipcMain.on('to-main', (event, data) => {
   }
 })
 
+// 选择文件夹对话框
+ipcMain.handle('select-folder', async () => {
+  if (!mainWindow || mainWindow.isDestroyed()) return { filePaths: [] }
+  const result = await dialog.showOpenDialog(mainWindow, {
+    properties: ['openDirectory']
+  })
+  return result
+})
+
+// 选择图片文件对话框（用于背景图片）
+ipcMain.handle('select-image-file', async () => {
+  if (!mainWindow || mainWindow.isDestroyed()) return { canceled: true, filePaths: [] }
+  const result = await dialog.showOpenDialog(mainWindow, {
+    properties: ['openFile'],
+    filters: [
+      { name: '图片文件', extensions: ['jpg', 'jpeg', 'png', 'gif', 'webp', 'bmp'] },
+      { name: '所有文件', extensions: ['*'] }
+    ]
+  })
+  if (!result.canceled && result.filePaths.length > 0) {
+    const filePath = result.filePaths[0]
+    // 检查文件大小（限制 50MB）
+    const fileStat = fs.statSync(filePath)
+    const maxSize = 50 * 1024 * 1024 // 50MB
+    if (fileStat.size > maxSize) {
+      return { canceled: true, error: '图片大小超过 50MB，请选择更小的图片' }
+    }
+    // 将文件复制到后端 uploads/background 目录
+    const bgDir = path.join(__dirname, '../student-backend/uploads/background')
+    if (!fs.existsSync(bgDir)) {
+      fs.mkdirSync(bgDir, { recursive: true })
+    }
+    const fileName = `bg_${Date.now()}${path.extname(filePath)}`
+    const destPath = path.join(bgDir, fileName)
+    fs.copyFileSync(filePath, destPath)
+    // 根据环境返回不同的 URL
+    let imageUrl
+    if (isDev) {
+      // 开发模式：通过 Vite 代理访问 /api/background
+      imageUrl = `/api/background/${fileName}`
+    } else {
+      // 生产模式：直接请求后端 API
+      imageUrl = `http://localhost:3000/api/background/${fileName}`
+    }
+    return { canceled: false, filePath: destPath, fileUrl: imageUrl, originalName: path.basename(filePath) }
+  }
+  return result
+})
+
+// 保存背景图片（用于大图片，前端传入 base64）
+ipcMain.handle('save-background-image', async (event, { name, base64 }) => {
+  try {
+    const bgDir = path.join(__dirname, '../student-backend/uploads/background')
+    if (!fs.existsSync(bgDir)) {
+      fs.mkdirSync(bgDir, { recursive: true })
+    }
+    // 从原始文件名获取扩展名
+    const ext = name ? path.extname(name) || '.png' : '.png'
+    const fileName = `bg_${Date.now()}${ext}`
+    const destPath = path.join(bgDir, fileName)
+    // 将 base64 写入文件
+    const buffer = Buffer.from(base64, 'base64')
+    fs.writeFileSync(destPath, buffer)
+    // 根据环境返回不同的 URL
+    let imageUrl
+    if (isDev) {
+      imageUrl = `/api/background/${fileName}`
+    } else {
+      imageUrl = `http://localhost:3000/api/background/${fileName}`
+    }
+    return { success: true, url: imageUrl, fileName }
+  } catch (err) {
+    return { success: false, error: err.message }
+  }
+})
+
 // 一键截屏：截取整个屏幕并保存到本地
 // options.hideWidget: 是否隐藏 widget 窗口（默认 true）。截屏工具传 false 以保持 spinner 可见
 ipcMain.handle('screenshot-capture', async (event, options) => {
@@ -340,7 +430,7 @@ ipcMain.handle('screenshot-capture', async (event, options) => {
     const primarySource = sources.find(s => s.display_id === String(primaryDisplay.id)) || sources[0]
     const image = primarySource.thumbnail.toPNG()
 
-    const saveDir = path.join(app.getPath('pictures'), 'screenshots')
+    const saveDir = options?.saveDir || path.join(app.getPath('pictures'), 'screenshots')
     if (!fs.existsSync(saveDir)) {
       fs.mkdirSync(saveDir, { recursive: true })
     }
@@ -363,9 +453,9 @@ ipcMain.handle('screenshot-capture', async (event, options) => {
 })
 
 // 保存注释后的截图
-ipcMain.handle('note-save', async (event, uint8Array) => {
+ipcMain.handle('note-save', async (event, uint8Array, options) => {
   const buffer = Buffer.from(uint8Array)
-  const saveDir = path.join(app.getPath('pictures'), 'screenshots')
+  const saveDir = options?.saveDir || path.join(app.getPath('pictures'), 'screenshots')
   if (!fs.existsSync(saveDir)) {
     fs.mkdirSync(saveDir, { recursive: true })
   }

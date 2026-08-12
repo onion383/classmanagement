@@ -9,9 +9,13 @@ dist/
 # 上传文件夹（图片）
 */uploads/
 
+
 # 操作系统文件
 .DS_Store
 Thumbs.db
+
+# 测试数据
+*.db
 
 # Vite 缓存
 .vite/
