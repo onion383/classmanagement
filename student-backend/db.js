@@ -103,6 +103,14 @@ db.exec(`
     settings TEXT NOT NULL DEFAULT '{}',
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP
   );
+
+  CREATE TABLE IF NOT EXISTS widget_settings (
+    id INTEGER PRIMARY KEY CHECK (id = 1),
+    toolbox_enabled INTEGER DEFAULT 1,
+    note_save_path TEXT DEFAULT '',
+    screenshot_save_path TEXT DEFAULT ''
+  );
+  INSERT OR IGNORE INTO widget_settings (id) VALUES (1);
 `);
 
 // ======================== 初始化元数据 ========================

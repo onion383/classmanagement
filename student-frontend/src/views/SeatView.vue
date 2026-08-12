@@ -11,7 +11,7 @@
             <h2 class="text-xl font-semibold mb-4">🪑 当前座位</h2>
             <div class="mb-4 flex flex-wrap items-center gap-3">
               <button @click="openSettings('active')" class="bg-primary text-text-inverse px-4 py-2 rounded">⚙️ 设置</button>
-              <button @click="loadActive" class="bg-text-muted text-text-inverse px-4 py-2 rounded">🔄 刷新</button>
+              <button @click="refreshActive" class="bg-text-muted text-text-inverse px-4 py-2 rounded">🔄 刷新</button>
               <button @click="applyMasterToActive" class="bg-primary text-text-inverse px-4 py-2 rounded">📥 从模板导入</button>
               <button @click="$refs.activeExportDialog.open()" class="bg-warning text-text-inverse px-4 py-2 rounded">📥 导出 Excel</button>
             </div>
@@ -45,7 +45,7 @@
             <h2 class="text-xl font-semibold mb-4">📋 座位模板</h2>
             <div class="mb-4 flex flex-wrap items-center gap-3">
               <button @click="openSettings('master')" class="bg-primary text-text-inverse px-4 py-2 rounded">⚙️ 设置</button>
-              <button @click="loadMaster" class="bg-text-muted text-text-inverse px-4 py-2 rounded">🔄 刷新</button>
+              <button @click="refreshMaster" class="bg-text-muted text-text-inverse px-4 py-2 rounded">🔄 刷新</button>
               <button @click="$refs.masterExportDialog.open()" class="bg-warning text-text-inverse px-4 py-2 rounded">📥 导出 Excel</button>
             </div>
 
@@ -117,6 +117,7 @@ import Tabs from '../components/Tabs.vue'
 import WeekSwitcher from '../components/WeekSwitcher.vue'
 import SeatSettingsDialog from '../components/SeatSettingsDialog.vue'
 import { useSeatGrid } from '../composables/useSeatGrid.js'
+import { useNotification } from '../composables/useNotification.js'
 
 const API_BASE = '/api'
 
@@ -184,6 +185,21 @@ const masterExportRows = masterGrid.exportRows
 
 // ==================== 方法别名 ====================
 const loadActive = activeGrid.load
+const { success: notifySuccess } = useNotification()
+
+async function refreshActive() {
+  try {
+    await loadActive()
+    notifySuccess('已刷新座位表')
+  } catch (e) { /* 错误已在 load 内部处理 */ }
+}
+
+async function refreshMaster() {
+  try {
+    await loadMaster()
+    notifySuccess('已刷新座位表模板')
+  } catch (e) { /* 错误已在 load 内部处理 */ }
+}
 const onActiveCellsUpdate = activeGrid.onCellsUpdate
 const onActiveSwapRows = activeGrid.onSwapRows
 const onActiveSwapColumns = activeGrid.onSwapColumns

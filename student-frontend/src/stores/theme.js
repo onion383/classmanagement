@@ -4,6 +4,7 @@ import { ref, computed, watch } from 'vue'
 const THEME_KEY = 'app-theme'
 const CUSTOM_KEY = 'app-theme-custom'
 const CUSTOM_THEMES_KEY = 'app-custom-themes'
+const BG_IMAGE_KEY = 'app-bg-image'
 
 const PRESETS = [
   { id: 'base', name: '默认主题', editable: false },
@@ -15,6 +16,7 @@ export const useThemeStore = defineStore('theme', () => {
   const currentTheme = ref(localStorage.getItem(THEME_KEY) || 'base')
   const customColors = ref(JSON.parse(localStorage.getItem(CUSTOM_KEY) || '{}'))
   const customThemes = ref(JSON.parse(localStorage.getItem(CUSTOM_THEMES_KEY) || '[]'))
+  const backgroundImage = ref(localStorage.getItem(BG_IMAGE_KEY) || '')
 
   const allThemes = computed(() => [
     ...PRESETS,
@@ -30,6 +32,14 @@ export const useThemeStore = defineStore('theme', () => {
     Object.entries(customColors.value).forEach(([key, value]) => {
       document.documentElement.style.setProperty(`--${key}`, value)
     })
+    // 应用背景图（使用单引号避免 base64 data URL 中的双引号冲突）
+    if (backgroundImage.value) {
+      document.documentElement.style.setProperty('--bg-image', `url('${backgroundImage.value}')`)
+      document.documentElement.classList.add('has-bg-image')
+    } else {
+      document.documentElement.style.removeProperty('--bg-image')
+      document.documentElement.classList.remove('has-bg-image')
+    }
   }
 
   const setTheme = (themeId) => {
@@ -75,12 +85,22 @@ export const useThemeStore = defineStore('theme', () => {
     }
   }
 
+  const setBackgroundImage = (url) => {
+    backgroundImage.value = url
+    localStorage.setItem(BG_IMAGE_KEY, url)
+    applyTheme()
+  }
+
   watch(currentTheme, applyTheme)
+  watch(backgroundImage, (val) => {
+    localStorage.setItem(BG_IMAGE_KEY, val)
+  })
 
   return {
     currentTheme,
     customColors,
     customThemes,
+    backgroundImage,
     allThemes,
     currentThemeMeta,
     isPreset,
@@ -91,5 +111,6 @@ export const useThemeStore = defineStore('theme', () => {
     deleteCustomTheme,
     updateCustomTheme,
     applyTheme,
+    setBackgroundImage,
   }
 })

@@ -2,6 +2,15 @@ const express = require('express');
 const router = express.Router();
 const { db } = require('../db');
 
+const MAX_ROWS = 50;
+const MAX_COLS = 30;
+
+function validateSeatSize(rows, cols) {
+  if (rows < 1 || rows > MAX_ROWS) return `行数需在 1 ~ ${MAX_ROWS} 之间`;
+  if (cols < 1 || cols > MAX_COLS) return `列数需在 1 ~ ${MAX_COLS} 之间`;
+  return null;
+}
+
 // ======================== 当前座位 ========================
 router.get('/', (req, res) => {
   try {
@@ -26,6 +35,10 @@ router.put('/', (req, res) => {
     const { mode, rows, cols, seats, aisleCols, groupsConfig, settings } = req.body;
     if (!Number.isInteger(rows) || !Number.isInteger(cols) || !Array.isArray(seats)) {
       return res.status(400).json({ error: '参数格式错误' });
+    }
+    const sizeError = validateSeatSize(rows, cols);
+    if (sizeError) {
+      return res.status(400).json({ error: sizeError });
     }
     // 确保 seats 尺寸与 rows/cols 匹配
     const trimmed = seats.slice(0, rows).map(r => {
@@ -75,6 +88,10 @@ router.put('/master', (req, res) => {
     const { mode, rows, cols, seats, aisleCols, groupsConfig, settings } = req.body;
     if (!Number.isInteger(rows) || !Number.isInteger(cols) || !Array.isArray(seats)) {
       return res.status(400).json({ error: '参数格式错误' });
+    }
+    const sizeError = validateSeatSize(rows, cols);
+    if (sizeError) {
+      return res.status(400).json({ error: sizeError });
     }
     const trimmed = seats.slice(0, rows).map(r => {
       const row = Array.isArray(r) ? r.slice(0, cols) : [];

@@ -66,7 +66,7 @@
           <div v-if="showColorSettings" class="border-t border-border pt-6">
             <div class="flex items-center justify-between mb-4">
               <h3 class="text-lg font-semibold text-text">颜色调整</h3>
-              <button v-if="!isPresetTheme" @click="deleteCurrentCustomTheme" class="text-sm text-danger hover:underline">删除此主题</button>
+              <button v-if="!isPreset" @click="deleteCurrentCustomTheme" class="text-sm text-danger hover:underline">删除此主题</button>
             </div>
             <div class="grid grid-cols-3 gap-4">
               <div v-for="item in colorItems" :key="item.key" class="flex items-center gap-3 p-3 rounded border border-border bg-bg">
@@ -84,6 +84,27 @@
             </div>
             <div class="flex gap-3 mt-4">
               <button @click="resetThemeColors" class="bg-surface-hover text-text px-4 py-2 rounded border border-border transition-theme">重置为默认</button>
+            </div>
+          </div>
+
+          <!-- 背景图片（仅毛玻璃主题） -->
+          <div v-if="currentTheme === 'glass'" class="border-t border-border pt-6 mt-6">
+            <h3 class="text-lg font-semibold text-text mb-4">🖼️ 背景图片</h3>
+            <div class="flex items-center gap-3 mb-2">
+              <input
+                ref="bgImageInput"
+                type="file"
+                accept="image/*"
+                @change="onBgImageFileChange"
+                class="hidden"
+              />
+              <button @click="$refs.bgImageInput.click()" class="bg-info hover:bg-info-hover text-text-inverse px-4 py-2 rounded transition-theme whitespace-nowrap">📁 选择本地图片</button>
+              <span v-if="bgImageFileName" class="text-sm text-text-secondary">已选: {{ bgImageFileName }}</span>
+              <button v-if="bgImageUrl" @click="clearBgImage" class="text-sm text-danger hover:underline">清除</button>
+            </div>
+            <p class="text-xs text-text-muted">支持 JPG / PNG / GIF / WebP，留空使用默认弥散光斑</p>
+            <div v-if="bgImageUrl" class="mt-3">
+              <img :src="bgImageUrl" class="max-h-40 rounded border border-border object-cover shadow-sm" />
             </div>
           </div>
         </div>
@@ -167,6 +188,9 @@ export default {
       isCreatingNewTheme: false,
       newThemeName: '',
       newThemePrimary: '#22c55e',
+      // Background image
+      bgImageUrl: '',
+      bgImageFileName: '',
       presetThemes: [
         { id: 'base', name: '默认主题' },
         { id: 'glass', name: '毛玻璃主题' },
@@ -196,6 +220,7 @@ export default {
   },
   mounted() {
     this.selectedThemeId = this.currentTheme
+    this.bgImageUrl = this.themeStore.backgroundImage
   },
   methods: {
     // Account
@@ -325,6 +350,55 @@ export default {
         this.themeStore.deleteCustomTheme(this.currentTheme)
         this.selectedThemeId = 'base'
       })
+    },
+    // Background image
+    async onBgImageFileChange(e) {
+      const file = e.target.files[0]
+      if (!file) return
+      this.bgImageFileName = file.name
+      
+      // 检查是否在 Electron 环境中，且文件大于 2MB，使用后端存储
+      if (window.electron && window.electron.invoke && file.size > 2 * 1024 * 1024) {
+        try {
+          // 读取文件为 base64 后传给主进程保存
+          const reader = new FileReader()
+          reader.onload = async (ev) => {
+            const base64Data = ev.target.result.split(',')[1] // 去掉 data:image/...;base64, 前缀
+            const result = await window.electron.invoke('save-background-image', {
+              name: file.name,
+              base64: base64Data
+            })
+            if (result.success && result.url) {
+              this.bgImageUrl = result.url
+              this.themeStore.setBackgroundImage(result.url)
+            } else {
+              this.showAlert(result.error || '保存图片失败')
+            }
+          }
+          reader.readAsDataURL(file)
+        } catch (err) {
+          console.error('保存图片失败:', err)
+          this.showAlert('保存图片失败: ' + err.message)
+        }
+      } else {
+        // 小图片或非 Electron 环境，使用 base64
+        if (file.size > 2 * 1024 * 1024) {
+          this.showAlert('图片过大，请选择 2MB 以下的图片')
+          return
+        }
+        const reader = new FileReader()
+        reader.onload = (ev) => {
+          this.bgImageUrl = ev.target.result
+          this.themeStore.setBackgroundImage(ev.target.result)
+        }
+        reader.readAsDataURL(file)
+      }
+    },
+    clearBgImage() {
+      this.bgImageUrl = ''
+      this.bgImageFileName = ''
+      this.themeStore.setBackgroundImage('')
+      if (this.$refs.bgImageInput) this.$refs.bgImageInput.value = ''
     },
   },
 }

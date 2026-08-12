@@ -4,7 +4,7 @@ import axios from 'axios'
 import '../styles/index.css'
 
 // 配置 API 基础地址（生产模式下 widget 使用 file:// 协议，必须使用完整地址）
-axios.defaults.baseURL = 'http://localhost:3000/api'
+axios.defaults.baseURL = 'http://localhost:3000'
 
 // 请求拦截器：自动附加登录 Token
 axios.interceptors.request.use(config => {

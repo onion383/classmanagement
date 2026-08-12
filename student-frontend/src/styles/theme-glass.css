@@ -1,19 +1,19 @@
-/* ==================== 毛玻璃主题 ==================== */
+/* ==================== 毛玻璃主题 v3 ==================== */
 
 :root[data-theme="glass"] {
   /* 品牌主色 */
   --color-primary: #3b82f6;
   --color-primary-hover: #2563eb;
   --color-primary-active: #1d4ed8;
-  --color-primary-light: rgba(59, 130, 246, 0.15);
+  --color-primary-light: rgba(59, 130, 246, 0.12);
 
-  /* 背景色：半透明 */
-  --color-bg: linear-gradient(135deg, #e0f2fe 0%, #f0f9ff 100%);
-  --color-surface: rgba(255, 255, 255, 0.7);
-  --color-surface-hover: rgba(255, 255, 255, 0.85);
-  --color-sidebar: rgba(17, 24, 39, 0.85);
-  --color-sidebar-hover: rgba(31, 41, 55, 0.9);
-  --color-sidebar-active: rgba(55, 65, 81, 0.95);
+  /* 背景色 */
+  --color-bg: #f0f4f8;
+  --color-surface: rgba(255, 255, 255, 0.92);
+  --color-surface-hover: rgba(255, 255, 255, 0.98);
+  --color-sidebar: rgba(255, 255, 255, 0.7);
+  --color-sidebar-hover: rgba(255, 255, 255, 0.85);
+  --color-sidebar-active: rgba(255, 255, 255, 0.95);
 
   /* 文字色 */
   --color-text: #1e293b;
@@ -21,19 +21,225 @@
   --color-text-muted: #64748b;
   --color-text-inverse: #ffffff;
 
-  /* 边框色：半透明白 */
-  --color-border: rgba(255, 255, 255, 0.4);
-  --color-border-strong: rgba(255, 255, 255, 0.6);
+  /* 边框 */
+  --color-border: rgba(0, 0, 0, 0.06);
+  --color-border-strong: rgba(0, 0, 0, 0.12);
 
-  /* 阴影：更大更柔和 */
-  --shadow-sm: 0 2px 8px rgba(31, 38, 135, 0.08);
-  --shadow-md: 0 8px 24px rgba(31, 38, 135, 0.12);
-  --shadow-lg: 0 16px 40px rgba(31, 38, 135, 0.16);
-  --shadow-card: 0 8px 32px rgba(31, 38, 135, 0.12);
+  /* 阴影 */
+  --shadow-sm: 0 1px 2px rgba(15, 23, 42, 0.04);
+  --shadow-md: 0 4px 12px rgba(15, 23, 42, 0.06);
+  --shadow-lg: 0 8px 28px rgba(15, 23, 42, 0.1);
+  --shadow-card: 0 2px 10px rgba(15, 23, 42, 0.05);
 
-  /* 圆角：更圆润 */
+  /* 圆角 */
   --radius-sm: 6px;
-  --radius-md: 12px;
-  --radius-lg: 18px;
-  --radius-card: 16px;
+  --radius-md: 10px;
+  --radius-lg: 14px;
+  --radius-card: 12px;
+}
+
+/* ========== 全局背景 ========== */
+:root[data-theme="glass"] body {
+  background-color: #f0f4f8;
+}
+
+/* 默认弥散光斑背景 */
+:root[data-theme="glass"] main {
+  background-color: #f0f4f8;
+  background-image:
+    radial-gradient(ellipse 40% 30% at 10% 15%, rgba(59, 130, 246, 0.07) 0%, transparent 60%),
+    radial-gradient(ellipse 40% 30% at 90% 10%, rgba(139, 92, 246, 0.06) 0%, transparent 60%),
+    radial-gradient(ellipse 45% 35% at 50% 95%, rgba(34, 197, 94, 0.05) 0%, transparent 60%);
+  background-attachment: fixed;
+}
+
+/* ========== 自定义背景图 ========== */
+:root[data-theme="glass"].has-bg-image body {
+  background-image: var(--bg-image);
+  background-size: cover;
+  background-position: center;
+  background-attachment: fixed;
+  background-color: #f0f4f8;
+}
+/* main 区域半透明遮罩 */
+:root[data-theme="glass"].has-bg-image main {
+  background: rgba(240, 244, 248, 0.65) !important;
+  position: relative;
+}
+
+/* ========== 侧边栏：深蓝玻璃 ========== */
+:root[data-theme="glass"] .bg-sidebar {
+  background-color: rgba(37, 59, 143, 0.88) !important;
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+  border-right: 1px solid rgba(255, 255, 255, 0.06);
+  color: #f1f5f9 !important;
+  position: relative;
+  z-index: 1;
+}
+:root[data-theme="glass"] .bg-sidebar-hover {
+  background-color: rgba(37, 59, 143, 0.95) !important;
+}
+:root[data-theme="glass"] .bg-sidebar-active {
+  background-color: rgba(30, 41, 95, 0.98) !important;
+  color: #93c5fd !important;
+  font-weight: 600;
+}
+
+/* ========== 毛玻璃按钮 ========== */
+:root[data-theme="glass"] button {
+  border-width: 1px;
+  border-style: solid;
+  border-radius: 12px;
+  transition: background-color 0.2s, box-shadow 0.2s, color 0.2s, transform 0.15s;
+}
+:root[data-theme="glass"] button:active {
+  transform: translateY(1px);
+}
+:root[data-theme="glass"] button.bg-primary.text-text-inverse,
+:root[data-theme="glass"] button.bg-success.text-text-inverse {
+  background-color: rgba(34, 197, 94, 0.92) !important;
+  color: #ffffff !important;
+  border-color: rgba(34, 197, 94, 0.4);
+  box-shadow: 0 1px 4px rgba(34, 197, 94, 0.2);
+}
+:root[data-theme="glass"] button.bg-primary.text-text-inverse:hover,
+:root[data-theme="glass"] button.bg-success.text-text-inverse:hover {
+  background-color: rgba(34, 197, 94, 1) !important;
+  box-shadow: 0 2px 10px rgba(34, 197, 94, 0.35);
+}
+:root[data-theme="glass"] button.bg-warning.text-text-inverse {
+  background-color: rgba(245, 158, 11, 0.92) !important;
+  color: #ffffff !important;
+  border-color: rgba(245, 158, 11, 0.4);
+  box-shadow: 0 1px 4px rgba(245, 158, 11, 0.2);
+}
+:root[data-theme="glass"] button.bg-warning.text-text-inverse:hover {
+  background-color: rgba(245, 158, 11, 1) !important;
+  box-shadow: 0 2px 10px rgba(245, 158, 11, 0.35);
+}
+:root[data-theme="glass"] button.bg-danger.text-text-inverse {
+  background-color: rgba(239, 68, 68, 0.92) !important;
+  color: #ffffff !important;
+  border-color: rgba(239, 68, 68, 0.4);
+  box-shadow: 0 1px 4px rgba(239, 68, 68, 0.2);
+}
+:root[data-theme="glass"] button.bg-danger.text-text-inverse:hover {
+  background-color: rgba(239, 68, 68, 1) !important;
+  box-shadow: 0 2px 10px rgba(239, 68, 68, 0.35);
+}
+:root[data-theme="glass"] button.bg-info.text-text-inverse {
+  background-color: rgba(59, 130, 246, 0.92) !important;
+  color: #ffffff !important;
+  border-color: rgba(59, 130, 246, 0.4);
+  box-shadow: 0 1px 4px rgba(59, 130, 246, 0.2);
+}
+:root[data-theme="glass"] button.bg-info.text-text-inverse:hover {
+  background-color: rgba(59, 130, 246, 1) !important;
+  box-shadow: 0 2px 10px rgba(59, 130, 246, 0.35);
+}
+:root[data-theme="glass"] button.bg-surface-hover {
+  background-color: rgba(255, 255, 255, 0.75) !important;
+  border-color: rgba(0, 0, 0, 0.08);
+  color: var(--color-text) !important;
+}
+:root[data-theme="glass"] button.bg-surface-hover:hover {
+  background-color: rgba(255, 255, 255, 0.95) !important;
+}
+:root[data-theme="glass"] button:disabled {
+  opacity: 0.35;
+  cursor: not-allowed;
+  box-shadow: none !important;
+  transform: none !important;
+}
+
+/* ========== 毛玻璃输入框 ========== */
+:root[data-theme="glass"] input[type="text"],
+:root[data-theme="glass"] input[type="number"],
+:root[data-theme="glass"] input[type="password"],
+:root[data-theme="glass"] textarea,
+:root[data-theme="glass"] select {
+  background-color: rgba(255, 255, 255, 0.88) !important;
+  border: 1px solid rgba(0, 0, 0, 0.08) !important;
+  border-radius: 12px;
+  transition: border-color 0.2s, box-shadow 0.2s, background-color 0.2s;
+}
+:root[data-theme="glass"] input[type="text"]:focus,
+:root[data-theme="glass"] input[type="number"]:focus,
+:root[data-theme="glass"] input[type="password"]:focus,
+:root[data-theme="glass"] textarea:focus,
+:root[data-theme="glass"] select:focus {
+  border-color: rgba(59, 130, 246, 0.5) !important;
+  box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.1);
+  background-color: rgba(255, 255, 255, 0.98) !important;
+}
+:root[data-theme="glass"] input:disabled,
+:root[data-theme="glass"] textarea:disabled {
+  background-color: rgba(0, 0, 0, 0.03) !important;
+  opacity: 0.6;
+}
+:root[data-theme="glass"] select option {
+  background-color: #ffffff;
+  color: var(--color-text, #111827);
+}
+
+/* ========== 毛玻璃卡片 / 面板 ========== */
+:root[data-theme="glass"] .bg-surface {
+  background-color: rgba(255, 255, 255, 0.78) !important;
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  border: 1px solid rgba(255, 255, 255, 0.6);
+  box-shadow: var(--shadow-card);
+}
+:root[data-theme="glass"] .bg-surface-hover {
+  background-color: rgba(255, 255, 255, 0.9) !important;
+}
+
+/* ========== 毛玻璃表格 ========== */
+:root[data-theme="glass"] table {
+  border-collapse: separate;
+  border-spacing: 0;
+}
+:root[data-theme="glass"] table th {
+  background-color: rgba(255, 255, 255, 0.85) !important;
+  color: #1e293b !important;
+  border-color: rgba(0, 0, 0, 0.06) !important;
+  font-weight: 600;
+  backdrop-filter: blur(10px);
+}
+:root[data-theme="glass"] table td {
+  background-color: rgba(255, 255, 255, 0.72) !important;
+  border-color: rgba(0, 0, 0, 0.05) !important;
+}
+:root[data-theme="glass"] table tbody tr:hover td {
+  background-color: rgba(255, 255, 255, 0.9) !important;
+}
+
+/* ========== 毛玻璃通知弹窗 ========== */
+:root[data-theme="glass"] .nt-toast {
+  background: rgba(255, 255, 255, 0.95) !important;
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+  border: 1px solid rgba(0, 0, 0, 0.06) !important;
+  box-shadow: var(--shadow-lg);
+}
+
+/* ========== 登录界面背景 ========== */
+:root[data-theme="glass"] .login-bg {
+  position: relative;
+  background: transparent;
+}
+:root[data-theme="glass"] .login-bg::before {
+  content: '';
+  position: fixed;
+  inset: 0;
+  z-index: 0;
+  background: rgba(240, 244, 248, 0.5);
+  backdrop-filter: blur(3px);
+  -webkit-backdrop-filter: blur(3px);
+  pointer-events: none;
+}
+:root[data-theme="glass"] .login-bg > * {
+  position: relative;
+  z-index: 1;
 }

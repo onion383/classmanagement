@@ -11,12 +11,16 @@
       <router-view />
     </main>
   </div>
+
+  <!-- 全局通知弹窗 -->
+  <NotificationToast />
 </template>
 
 <script>
 import Sidebar from './components/Sidebar.vue'
+import NotificationToast from './components/NotificationToast.vue'
 
 export default {
-  components: { Sidebar }
+  components: { Sidebar, NotificationToast }
 }
 </script>

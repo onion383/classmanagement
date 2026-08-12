@@ -25,7 +25,7 @@
       <button @click="addNewRowAtBottom" class="bg-primary hover:bg-primary-hover text-text-inverse px-5 py-2 rounded">
         ＋ 添加记录
       </button>
-      <button @click="fetchRecords" class="bg-text-muted hover:bg-text-secondary text-text-inverse px-4 py-2 rounded flex items-center gap-1" title="刷新表格">
+      <button @click="refreshRecords" class="bg-text-muted hover:bg-text-secondary text-text-inverse px-4 py-2 rounded flex items-center gap-1" title="刷新表格">
         🔄 刷新
       </button>
       <button
@@ -185,6 +185,7 @@ import ExportExcel from '../components/ExportExcel.vue'
 import ImportExcel from '../components/ImportExcel.vue'
 import DeduplicateDialog from '../components/DeduplicateDialog.vue'
 import { useTableCRUD } from '../composables/useTableCRUD.js'
+import { useNotification } from '../composables/useNotification.js'
 
 const API_BASE = '/api'
 const DEFAULT_FIELDS = [
@@ -234,6 +235,14 @@ const {
 } = table
 
 const fetchRecords = fetchRows
+const { success: notifySuccess } = useNotification()
+
+async function refreshRecords() {
+  try {
+    await fetchRecords()
+    notifySuccess('已刷新费用数据')
+  } catch (e) { /* 错误已在 fetchRows 内部处理 */ }
+}
 
 // ==================== 看板统计 ====================
 const balance = computed(() => {

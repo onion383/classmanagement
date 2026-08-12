@@ -1,5 +1,5 @@
 <template>
-  <div class="flex justify-center items-center h-screen">
+  <div class="flex justify-center items-center h-screen login-bg">
     <form @submit.prevent="login" class="bg-surface p-6 rounded shadow-card w-80">
       <h2 class="text-xl font-bold mb-4">班级管理系统登录</h2>
       <input v-model="username" placeholder="账号" class="border p-2 w-full mb-2" />

@@ -11,6 +11,7 @@ const authRoutes = require('./routes/auth');
 const accountRoutes = require('./routes/account');
 const scheduleRouter = require('./routes/schedule');
 const seatsRouter = require('./routes/seats');
+const widgetSettingsRouter = require('./routes/widgetSettings');
 
 const app = express();
 const PORT = 3000;
@@ -18,6 +19,9 @@ const PORT = 3000;
 app.use(cors());
 app.use(express.json());
 app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
+
+// 背景图片静态文件服务
+app.use('/api/background', express.static(path.join(__dirname, 'uploads', 'background')));
 
 // Multer 配置（供上传收据使用）
 const storage = multer.diskStorage({
@@ -54,6 +58,7 @@ app.use('/api', authRoutes);
 app.use('/api/account', auth(), accountRoutes);
 app.use('/api/schedule', auth(['teacher']), scheduleRouter);
 app.use('/api/seats', auth(['teacher']), seatsRouter);
+app.use('/api/widget-settings', auth(['teacher']), widgetSettingsRouter);
 
 // 托管前端静态文件（生产模式用）
 app.use(express.static(path.join(__dirname, '../dist')));

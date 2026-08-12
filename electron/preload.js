@@ -11,6 +11,7 @@ const validSendChannels = [
   'widget-fullscreen',
   'widget-restore',
   'widget-set-ignore-mouse',
+  'widget-set-visible',
   'to-main',
   'to-widget',
 ]

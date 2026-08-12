@@ -15,7 +15,7 @@
             <h2 class="text-xl font-semibold mb-4">📅 实行课表（临时）</h2>
             <div class="mb-4 flex items-center gap-3">
               <button @click="activeSettingsVisible = true" class="bg-primary text-text-inverse px-4 py-2 rounded">⚙️ 设置</button>
-              <button @click="loadActive" class="bg-text-muted text-text-inverse px-4 py-2 rounded">🔄 刷新</button>
+              <button @click="refreshActive" class="bg-text-muted text-text-inverse px-4 py-2 rounded">🔄 刷新</button>
               <button @click="applyMasterToActive" class="bg-primary text-text-inverse px-4 py-2 rounded">📥 从一般课表导入</button>
               <button @click="$refs.activeExportDialog.open()" class="bg-warning text-text-inverse px-4 py-2 rounded">📥 导出 Excel</button>
             </div>
@@ -63,7 +63,7 @@
             <h2 class="text-xl font-semibold mb-4">📋 一般课表（模板）</h2>
             <div class="mb-4 flex items-center gap-3">
               <button @click="masterSettingsVisible = true" class="bg-primary text-text-inverse px-4 py-2 rounded">⚙️ 设置</button>
-              <button @click="loadMaster" class="bg-text-muted text-text-inverse px-4 py-2 rounded">🔄 刷新</button>
+              <button @click="refreshMaster" class="bg-text-muted text-text-inverse px-4 py-2 rounded">🔄 刷新</button>
               <button @click="$refs.masterExportDialog.open()" class="bg-warning text-text-inverse px-4 py-2 rounded">📥 导出 Excel</button>
             </div>
 
@@ -142,6 +142,7 @@ import SettingsDialog from '../components/SettingsDialog.vue';
 import ExportExcel from '../components/ExportExcel.vue';
 import Tabs from '../components/Tabs.vue';
 import WeekSwitcher from '../components/WeekSwitcher.vue';
+import { useNotification } from '../composables/useNotification.js';
 
 const API_BASE = '/api';
 
@@ -185,6 +186,10 @@ const COURSE_CANDIDATES = [
 export default {
   name: 'ScheduleView',
   components: { GridView, SettingsDialog, ExportExcel,Tabs,WeekSwitcher },
+  setup() {
+    const { success } = useNotification()
+    return { notifySuccess: success }
+  },
   data() {
     return {
       // ========== 一般课表 ==========
@@ -490,6 +495,12 @@ export default {
     },
 
     // ============= 一般课表操作 =============
+    async refreshMaster() {
+      try {
+        await this.loadMaster()
+        this.notifySuccess('已刷新课程表模板')
+      } catch (e) { /* 错误已在 loadMaster 内部处理 */ }
+    },
     async loadMaster() {
       try {
         const res = await axios.get(`${API_BASE}/schedule/master`);
@@ -603,6 +614,12 @@ export default {
     },
 
     // ============= 实行课表操作 =============
+    async refreshActive() {
+      try {
+        await this.loadActive()
+        this.notifySuccess('已刷新实行课表')
+      } catch (e) { /* 错误已在 loadActive 内部处理 */ }
+    },
     async loadActive() {
       try {
         const res = await axios.get(`${API_BASE}/schedule`);

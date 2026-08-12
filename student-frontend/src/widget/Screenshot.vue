@@ -19,6 +19,7 @@
 
 <script setup>
 import { ref, computed, onMounted, onUnmounted } from 'vue'
+import axios from 'axios'
 
 const emit = defineEmits(['close'])
 
@@ -52,7 +53,16 @@ function truncatePath(fullPath) {
 
 async function capture() {
   try {
-    const res = await window.electron.invoke('screenshot-capture', { hideWidget: false })
+    // 获取自定义保存路径
+    let saveDir = ''
+    try {
+      const settingsRes = await axios.get('/api/widget-settings')
+      if (settingsRes.data.success) {
+        saveDir = settingsRes.data.data.screenshotSavePath
+      }
+    } catch (_) { /* 读取设置失败则使用默认路径 */ }
+
+    const res = await window.electron.invoke('screenshot-capture', { hideWidget: false, saveDir })
     if (res.success) {
       result.value = res
     } else {

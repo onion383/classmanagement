@@ -4,11 +4,11 @@
       <h3 class="text-lg font-bold mb-4">座位设置</h3>
       <div class="mb-3">
         <label class="block text-sm font-medium">行数</label>
-        <input v-model.number="localRows" type="number" min="1" class="w-full border px-3 py-2 rounded" />
+        <input v-model.number="localRows" type="number" min="1" max="50" class="w-full border px-3 py-2 rounded" />
       </div>
       <div class="mb-3">
-        <label class="block text-sm font-medium">列数（实际座位列数）</label>
-        <input v-model.number="localCols" type="number" min="1" class="w-full border px-3 py-2 rounded" />
+        <label class="block text-sm font-medium">列数</label>
+        <input v-model.number="localCols" type="number" min="1" max="30" class="w-full border px-3 py-2 rounded" />
       </div>
       <div class="mb-3">
         <label class="block text-sm font-medium mb-1">座位模式</label>
@@ -38,6 +38,8 @@
 </template>
 
 <script>
+import { useNotification } from '../composables/useNotification.js'
+
 export default {
   name: 'SeatSettingsDialog',
   props: {
@@ -48,6 +50,10 @@ export default {
     showAisle: { type: Boolean, default: true }
   },
   emits: ['save', 'cancel'],
+  setup() {
+    const { error: notifyError } = useNotification()
+    return { notifyError }
+  },
   data() {
     return {
       localRows: this.rows,
@@ -59,7 +65,6 @@ export default {
   watch: {
     visible(val) {
       if (val) {
-        // 每次打开时用父组件最新值初始化
         this.localRows = this.rows
         this.localCols = this.cols
         this.localMode = this.mode
@@ -69,7 +74,14 @@ export default {
   },
   methods: {
     save() {
-      if (this.localRows <= 0 || this.localCols <= 0) return
+      if (this.localRows < 1 || this.localRows > 50) {
+        this.notifyError('设置的行/列过大\n过大的行和列会引起显示问题和程序卡顿')
+        return
+      }
+      if (this.localCols < 1 || this.localCols > 30) {
+        this.notifyError('设置的行/列过大\n过大的行和列会引起显示问题和程序卡顿')
+        return
+      }
       this.$emit('save', {
         rows: this.localRows,
         cols: this.localCols,
