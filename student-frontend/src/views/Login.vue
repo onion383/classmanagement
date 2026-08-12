@@ -1,6 +1,6 @@
 <template>
   <div class="flex justify-center items-center h-screen login-bg">
-    <form @submit.prevent="login" class="bg-surface p-8 rounded-3xl shadow-card w-80">
+    <form @submit.prevent="login" class="bg-surface p-8 rounded-3xl shadow-card w-80 login-glow">
       <h2 class="text-xl font-bold mb-4">班级管理系统登录</h2>
       <input v-model="username" placeholder="账号" class="border p-2 w-full mb-2" />
       <input v-model="password" type="password" placeholder="密码" autocomplete="current-password" class="border p-2 w-full mb-4" />
