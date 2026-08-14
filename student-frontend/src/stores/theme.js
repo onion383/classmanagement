@@ -5,6 +5,8 @@ const THEME_KEY = 'app-theme'
 const CUSTOM_KEY = 'app-theme-custom'
 const CUSTOM_THEMES_KEY = 'app-custom-themes'
 const BG_IMAGE_KEY = 'app-bg-image'
+const BG_MASK_KEY = 'app-bg-mask-opacity'
+const GLASS_KEY = 'app-glass-opacity'
 
 const PRESETS = [
   { id: 'base', name: '默认主题', editable: false },
@@ -17,6 +19,10 @@ export const useThemeStore = defineStore('theme', () => {
   const customColors = ref(JSON.parse(localStorage.getItem(CUSTOM_KEY) || '{}'))
   const customThemes = ref(JSON.parse(localStorage.getItem(CUSTOM_THEMES_KEY) || '[]'))
   const backgroundImage = ref(localStorage.getItem(BG_IMAGE_KEY) || '')
+  // 背景遮罩层不透明度（0~1，有自定义背景图时生效）
+  const bgMaskOpacity = ref(parseFloat(localStorage.getItem(BG_MASK_KEY)) || 0.65)
+  // 组件透明玻璃层不透明度（0~1，卡片基准值）
+  const glassOpacity = ref(parseFloat(localStorage.getItem(GLASS_KEY)) || 0.5)
 
   const allThemes = computed(() => [
     ...PRESETS,
@@ -40,6 +46,9 @@ export const useThemeStore = defineStore('theme', () => {
       document.documentElement.style.removeProperty('--bg-image')
       document.documentElement.classList.remove('has-bg-image')
     }
+    // 应用透明度设置
+    document.documentElement.style.setProperty('--bg-mask-opacity', bgMaskOpacity.value)
+    document.documentElement.style.setProperty('--glass-opacity', glassOpacity.value)
   }
 
   const setTheme = (themeId) => {
@@ -91,6 +100,18 @@ export const useThemeStore = defineStore('theme', () => {
     applyTheme()
   }
 
+  const setBgMaskOpacity = (value) => {
+    bgMaskOpacity.value = value
+    localStorage.setItem(BG_MASK_KEY, value)
+    applyTheme()
+  }
+
+  const setGlassOpacity = (value) => {
+    glassOpacity.value = value
+    localStorage.setItem(GLASS_KEY, value)
+    applyTheme()
+  }
+
   watch(currentTheme, applyTheme)
   watch(backgroundImage, (val) => {
     localStorage.setItem(BG_IMAGE_KEY, val)
@@ -101,6 +122,8 @@ export const useThemeStore = defineStore('theme', () => {
     customColors,
     customThemes,
     backgroundImage,
+    bgMaskOpacity,
+    glassOpacity,
     allThemes,
     currentThemeMeta,
     isPreset,
@@ -112,5 +135,7 @@ export const useThemeStore = defineStore('theme', () => {
     updateCustomTheme,
     applyTheme,
     setBackgroundImage,
+    setBgMaskOpacity,
+    setGlassOpacity,
   }
 })

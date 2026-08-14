@@ -16,7 +16,7 @@
             <div class="mb-4 flex items-center gap-3">
               <button @click="activeSettingsVisible = true" class="bg-primary text-text-inverse px-4 py-2 rounded">⚙️ 设置</button>
               <button @click="refreshActive" class="bg-text-muted text-text-inverse px-4 py-2 rounded">🔄 刷新</button>
-              <button @click="applyMasterToActive" class="bg-primary text-text-inverse px-4 py-2 rounded">📥 从一般课表导入</button>
+              <button @click="applyMasterToActive" class="bg-primary text-text-inverse px-4 py-2 rounded">📥 从模板导入</button>
               <button @click="$refs.activeExportDialog.open()" class="bg-warning text-text-inverse px-4 py-2 rounded">📥 导出 Excel</button>
             </div>
 

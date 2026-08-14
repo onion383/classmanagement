@@ -1,11 +1,12 @@
 <template>
   <!-- 重复筛选组件 -->
+  <Transition name="dialog">
   <div
     v-if="visible"
     class="fixed inset-0 bg-black/50 flex items-center justify-center z-[10001]"
     @click.self="cancel"
   >
-    <div class="bg-surface p-5 rounded-lg w-[900px] max-h-[85vh] flex flex-col shadow-card">
+    <div class="bg-surface p-5 rounded-lg w-[900px] max-h-[85vh] flex flex-col shadow-card dialog-card">
       <h3 class="text-lg font-bold mb-3">管理重复数据</h3>
 
       <template v-if="flatRows.length > 0">
@@ -73,10 +74,12 @@
       </template>
     </div>
   </div>
+  </Transition>
 </template>
 
 <script>
 import DynamicTable from './DynamicTable.vue';
+import '../styles/dialog-transition.css'
 
 export default {
   name: 'DeduplicateDialog',

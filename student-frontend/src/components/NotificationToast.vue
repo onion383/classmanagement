@@ -64,7 +64,7 @@ function onLeave(item) {
 }
 </script>
 
-<style scoped>
+<style>
 .nt-container {
   position: fixed;
   top: 16px;

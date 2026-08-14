@@ -405,6 +405,25 @@ ipcMain.handle('save-background-image', async (event, { name, base64 }) => {
   }
 })
 
+// 导出文件保存对话框：用户确认保存后才写入文件并返回
+ipcMain.handle('save-file', async (event, { defaultName, data }) => {
+  if (!mainWindow || mainWindow.isDestroyed()) return { canceled: true }
+  const ext = path.extname(defaultName) || ''
+  const result = await dialog.showSaveDialog(mainWindow, {
+    title: '保存文件',
+    defaultPath: defaultName,
+    filters: ext ? [{ name: '文件', extensions: [ext.replace('.', '')] }] : undefined
+  })
+  if (result.canceled || !result.filePath) return { canceled: true }
+  try {
+    const buffer = Buffer.from(data)
+    fs.writeFileSync(result.filePath, buffer)
+    return { canceled: false, filePath: result.filePath }
+  } catch (err) {
+    return { canceled: true, error: err.message }
+  }
+})
+
 // 一键截屏：截取整个屏幕并保存到本地
 // options.hideWidget: 是否隐藏 widget 窗口（默认 true）。截屏工具传 false 以保持 spinner 可见
 ipcMain.handle('screenshot-capture', async (event, options) => {
