@@ -1,7 +1,8 @@
 <template>
   <!-- 导出表格组件 -->
+  <Transition name="dialog">
   <div v-if="visible" class="fixed inset-0 bg-black/50 flex items-center justify-center z-[10001]">
-    <div class="bg-surface p-5 rounded-lg min-w-[400px] max-w-xl shadow-card border border-border">
+    <div class="bg-surface p-5 rounded-lg min-w-[400px] max-w-xl shadow-card border border-border dialog-card">
       <h3 class="text-lg font-bold mb-3">导出选项</h3>
 
       <div class="mb-4">
@@ -47,6 +48,7 @@
       </div>
     </div>
   </div>
+  </Transition>
 </template>
 
 <script>
@@ -56,6 +58,7 @@ import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
 import fontUrl from '../assets/fonts/NotoSansSC-6.ttf';
 import { useNotification } from '../composables/useNotification';
+import '../styles/dialog-transition.css'
 
 const SECTION_NAMES = { morning: '上午', noon: '中午', afternoon: '下午', evening: '傍晚', night: '晚上' };
 
@@ -119,23 +122,46 @@ export default {
       const finalFilename = `${this.filename}_${dateStr}`;
 
       try {
+        let saved = true
         switch (this.exportFormat) {
-          case 'csv': this.exportCSV(exportRows, selectedFields, finalFilename); break;
-          case 'html': this.exportHTMLTable(exportRows, selectedFields, finalFilename); break;
-          case 'xlsx': await this.exportXLSX(exportRows, selectedFields, finalFilename); break;
-          case 'image': await this.exportImage(exportRows, selectedFields, finalFilename); break;
-          case 'pdf': await this.exportPDF(exportRows, selectedFields, finalFilename); break;
-          default: this.exportHTMLTable(exportRows, selectedFields, finalFilename);
+          case 'csv': saved = await this.exportCSV(exportRows, selectedFields, finalFilename); break;
+          case 'html': saved = await this.exportHTMLTable(exportRows, selectedFields, finalFilename); break;
+          case 'xlsx': saved = await this.exportXLSX(exportRows, selectedFields, finalFilename); break;
+          case 'image': saved = await this.exportImage(exportRows, selectedFields, finalFilename); break;
+          case 'pdf': saved = await this.exportPDF(exportRows, selectedFields, finalFilename); break;
+          default: saved = await this.exportHTMLTable(exportRows, selectedFields, finalFilename);
         }
-        const label = FORMAT_LABELS[this.exportFormat] || '文件'
-        this.notifySuccess(`已成功导出 ${label}`)
-        this.$emit('export-finish');
+        if (saved) {
+          const label = FORMAT_LABELS[this.exportFormat] || '文件'
+          this.notifySuccess(`已成功导出 ${label}`)
+          this.$emit('export-finish');
+        }
       } catch (err) {
         console.error('导出失败:', err);
         this.notifyError('导出失败，请重试')
         this.$emit('export-error', err);
       }
       this.visible = false;
+    },
+
+    // 保存文件：Electron 下弹系统保存对话框，用户确认后才写入；浏览器则直接下载
+    async saveFileWithDialog(defaultName, blob) {
+      if (window.electron && typeof window.electron.invoke === 'function') {
+        const arrayBuffer = await blob.arrayBuffer()
+        const result = await window.electron.invoke('save-file', {
+          defaultName,
+          data: arrayBuffer
+        })
+        return !!result && !result.canceled
+      }
+      // 浏览器环境：直接触发下载
+      const url = URL.createObjectURL(blob)
+      const a = document.createElement('a')
+      a.href = url
+      a.download = defaultName
+      a.click()
+      URL.revokeObjectURL(url)
+      return true
     },
 
     getSectionName(key) {
@@ -348,16 +374,11 @@ export default {
 
       const buffer = await workbook.xlsx.writeBuffer();
       const blob = new Blob([buffer], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = `${filename}.xlsx`;
-      a.click();
-      URL.revokeObjectURL(url);
+      return await this.saveFileWithDialog(`${filename}.xlsx`, blob);
     },
 
     // ==================== HTML ====================
-    exportHTMLTable(rows, fields, filename) {
+    async exportHTMLTable(rows, fields, filename) {
       const headers = fields.map(f => f.name);
       const isSchedule = this.isScheduleData(rows);
       const periodColIdx = headers.indexOf('时段');
@@ -418,16 +439,11 @@ export default {
 
       html += '</tbody></table></body></html>';
       const blob = new Blob([html], { type: 'text/html' });
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = `${filename}.html`;
-      a.click();
-      URL.revokeObjectURL(url);
+      return await this.saveFileWithDialog(`${filename}.html`, blob);
     },
 
     // ==================== CSV ====================
-    exportCSV(rows, fields, filename) {
+    async exportCSV(rows, fields, filename) {
       const headers = fields.map(f => f.name);
       let csv = '\uFEFF' + headers.join(',') + '\n';
       rows.forEach(row => {
@@ -452,12 +468,7 @@ export default {
         csv += line + '\n';
       });
       const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = `${filename}.csv`;
-      a.click();
-      URL.revokeObjectURL(url);
+      return await this.saveFileWithDialog(`${filename}.csv`, blob);
     },
 
     // ==================== 图片 ====================
@@ -466,11 +477,8 @@ export default {
       if (el && el.offsetParent !== null) {
         try {
           const canvas = await html2canvas(el, { scale: 2 });
-          const link = document.createElement('a');
-          link.download = `${filename}.png`;
-          link.href = canvas.toDataURL('image/png');
-          link.click();
-          return;
+          const blob = await new Promise(resolve => canvas.toBlob(resolve, 'image/png'));
+          if (blob) return await this.saveFileWithDialog(`${filename}.png`, blob);
         } catch (e) {}
       }
 
@@ -481,10 +489,8 @@ export default {
       document.body.appendChild(tempDiv);
       const canvas = await html2canvas(tempDiv, { scale: 2 });
       document.body.removeChild(tempDiv);
-      const link = document.createElement('a');
-      link.download = `${filename}.png`;
-      link.href = canvas.toDataURL('image/png');
-      link.click();
+      const blob = await new Promise(resolve => canvas.toBlob(resolve, 'image/png'));
+      return await this.saveFileWithDialog(`${filename}.png`, blob);
     },
 
     buildHTMLString(rows, fields, filename) {
@@ -747,7 +753,8 @@ export default {
         }
       });
 
-      doc.save(`${filename}.pdf`);
+      const blob = doc.output('blob');
+      return await this.saveFileWithDialog(`${filename}.pdf`, blob);
     }
   }
 };

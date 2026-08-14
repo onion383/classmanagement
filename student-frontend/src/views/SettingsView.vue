@@ -69,7 +69,7 @@
               <button v-if="!isPreset" @click="deleteCurrentCustomTheme" class="text-sm text-danger hover:underline">删除此主题</button>
             </div>
             <div class="grid grid-cols-3 gap-4">
-              <div v-for="item in colorItems" :key="item.key" class="flex items-center gap-3 p-3 rounded border border-border bg-bg">
+              <div v-for="item in colorItems" :key="item.key" class="flex items-center gap-3 p-3 rounded border border-border bg-surface-hover">
                 <input
                   type="color"
                   :value="currentColor(item.key, item.default)"
@@ -105,6 +105,45 @@
             <p class="text-xs text-text-muted">支持 JPG / PNG / GIF / WebP，留空使用默认弥散光斑</p>
             <div v-if="bgImageUrl" class="mt-3">
               <img :src="bgImageUrl" class="max-h-40 rounded border border-border object-cover shadow-sm" />
+            </div>
+          </div>
+
+          <!-- 透明度设置（仅毛玻璃主题） -->
+          <div v-if="currentTheme === 'glass'" class="border-t border-border pt-6 mt-6">
+            <h3 class="text-lg font-semibold text-text mb-4">🎚️ 透明度设置</h3>
+            <div class="space-y-5">
+              <div>
+                <div class="flex items-center justify-between mb-1">
+                  <label class="text-sm font-medium text-text">背景遮罩层（有自定义背景图时）</label>
+                  <span class="text-xs text-text-muted">{{ Math.round(bgMaskOpacity * 100) }}%</span>
+                </div>
+                <input
+                  type="range"
+                  min="0"
+                  max="1"
+                  step="0.01"
+                  :value="bgMaskOpacity"
+                  @input="onBgMaskOpacityChange"
+                  class="w-full"
+                />
+                <p class="text-xs text-text-muted mt-1">数值越高，背景图越不明显；越低，背景图越清晰</p>
+              </div>
+              <div>
+                <div class="flex items-center justify-between mb-1">
+                  <label class="text-sm font-medium text-text">组件透明玻璃层</label>
+                  <span class="text-xs text-text-muted">{{ Math.round(glassOpacity * 100) }}%</span>
+                </div>
+                <input
+                  type="range"
+                  min="0"
+                  max="1"
+                  step="0.01"
+                  :value="glassOpacity"
+                  @input="onGlassOpacityChange"
+                  class="w-full"
+                />
+                <p class="text-xs text-text-muted mt-1">控制卡片、表格、通知弹窗等玻璃层的透明度</p>
+              </div>
             </div>
           </div>
         </div>
@@ -157,7 +196,7 @@ export default {
   components: { ConfirmDialog },
   setup() {
     const themeStore = useThemeStore()
-    const { currentTheme, customColors, customThemes, isPreset } = storeToRefs(themeStore)
+    const { currentTheme, customColors, customThemes, isPreset, bgMaskOpacity, glassOpacity } = storeToRefs(themeStore)
 
     return {
       themeStore,
@@ -165,6 +204,8 @@ export default {
       customColors,
       customThemes,
       isPreset,
+      bgMaskOpacity,
+      glassOpacity,
     }
   },
   data() {
@@ -399,6 +440,12 @@ export default {
       this.bgImageFileName = ''
       this.themeStore.setBackgroundImage('')
       if (this.$refs.bgImageInput) this.$refs.bgImageInput.value = ''
+    },
+    onBgMaskOpacityChange(e) {
+      this.themeStore.setBgMaskOpacity(parseFloat(e.target.value))
+    },
+    onGlassOpacityChange(e) {
+      this.themeStore.setGlassOpacity(parseFloat(e.target.value))
     },
   },
 }

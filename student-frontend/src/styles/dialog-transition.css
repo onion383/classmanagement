@@ -1,0 +1,75 @@
+/* ==================== 弹窗通用过渡动画 ====================
+ * 用法：
+ *   1. 在弹窗根元素外包一层 <Transition name="dialog">，根元素用 v-if 控制显隐
+ *   2. 内部卡片元素加 class="dialog-card"
+ *   3. 在组件里 import 本文件即可复用
+ * 效果：
+ *   打开：遮罩淡入 + 卡片淡入 + 模糊增强 + 95%→102%→100% 回弹缩放
+ *   关闭：遮罩淡出 + 卡片淡出 + 模糊减弱 + 100%→95% 缩小
+ *
+ * 说明：
+ *   - 卡片在动画期间强制 GPU 合成避免毛玻璃闪烁，动画结束后脱离图层保证文字清晰
+ *   - 毛玻璃卡片需自己带 backdrop-filter（这里用 CSS 变量 --glass-blur 控制强度）
+ */
+
+/* ---------- 背景遮罩：淡入淡出（慢慢变暗） ---------- */
+.dialog-enter-active,
+.dialog-leave-active {
+  transition: opacity 0.28s ease;
+}
+.dialog-enter-from,
+.dialog-leave-to {
+  opacity: 0;
+}
+.dialog-leave-active {
+  transition: opacity 0.3s ease;
+}
+
+/* ---------- 卡片：淡入 + 模糊增强 + 回弹缩放 ---------- */
+.dialog-card {
+  animation: dialogCardIn 0.4s ease;
+}
+/* 仅动画期间强制 GPU 合成（避免毛玻璃 backdrop-filter 闪烁），结束后脱离图层文字清晰 */
+.dialog-enter-active .dialog-card,
+.dialog-leave-active .dialog-card {
+  will-change: opacity, transform, backdrop-filter;
+  transform: translateZ(0);
+  backface-visibility: hidden;
+}
+@keyframes dialogCardIn {
+  0% {
+    opacity: 0;
+    transform: translateZ(0) scale(0.95);
+    backdrop-filter: blur(0px) saturate(1);
+    -webkit-backdrop-filter: blur(0px) saturate(1);
+  }
+  70% {
+    opacity: 1;
+    transform: translateZ(0) scale(1.02);
+  }
+  100% {
+    opacity: 1;
+    transform: translateZ(0) scale(1);
+    backdrop-filter: blur(var(--glass-blur, 20px)) saturate(1.1);
+    -webkit-backdrop-filter: blur(var(--glass-blur, 20px)) saturate(1.1);
+  }
+}
+
+/* ---------- 关闭：卡片从 100% 缩到 95% 并淡出 ---------- */
+.dialog-leave-active .dialog-card {
+  animation: dialogCardOut 0.3s ease forwards;
+}
+@keyframes dialogCardOut {
+  from {
+    opacity: 1;
+    transform: translateZ(0) scale(1);
+    backdrop-filter: blur(var(--glass-blur, 20px)) saturate(1.1);
+    -webkit-backdrop-filter: blur(var(--glass-blur, 20px)) saturate(1.1);
+  }
+  to {
+    opacity: 0;
+    transform: translateZ(0) scale(0.95);
+    backdrop-filter: blur(0px) saturate(1);
+    -webkit-backdrop-filter: blur(0px) saturate(1);
+  }
+}

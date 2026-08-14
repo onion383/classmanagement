@@ -1,6 +1,7 @@
 <template>
+  <Transition name="dialog">
   <div v-if="visible" class="fixed inset-0 bg-black/50 flex items-center justify-center z-[10001]">
-    <div class="bg-surface p-6 rounded-lg w-[750px] max-h-[85vh] flex flex-col shadow-card">
+    <div class="bg-surface p-6 rounded-lg w-[750px] max-h-[85vh] flex flex-col shadow-card dialog-card">
       <h3 class="text-lg font-bold mb-4">⏱️ 作息时间设置</h3>
 
       <!-- 学期开始日期 -->
@@ -31,7 +32,7 @@
       <!-- 各时段 -->
       <div class="flex-1 overflow-y-auto space-y-4 mb-4">
         <!-- 上午 -->
-        <div class="border border-border rounded p-3 bg-bg">
+        <div class="border border-border rounded-xl p-3 bg-surface-hover">
           <div class="flex items-center justify-between mb-2">
             <h4 class="font-semibold">上午</h4>
             <button @click="addItem('morning')" class="bg-primary text-text-inverse px-2 py-1 rounded text-sm">＋ 新加上午时间段</button>
@@ -50,7 +51,7 @@
         </div>
 
         <!-- 中午 -->
-        <div class="border border-border rounded p-3 bg-bg">
+        <div class="border border-border rounded-xl p-3 bg-surface-hover">
           <div class="flex items-center justify-between mb-2">
             <h4 class="font-semibold">中午</h4>
             <button @click="addItem('noon')" class="bg-primary text-text-inverse px-2 py-1 rounded text-sm">＋ 新加中午时间段</button>
@@ -69,7 +70,7 @@
         </div>
 
         <!-- 下午 -->
-        <div class="border border-border rounded p-3 bg-bg">
+        <div class="border border-border rounded-xl p-3 bg-surface-hover">
           <div class="flex items-center justify-between mb-2">
             <h4 class="font-semibold">下午</h4>
             <button @click="addItem('afternoon')" class="bg-primary text-text-inverse px-2 py-1 rounded text-sm">＋ 新加下午时间段</button>
@@ -88,7 +89,7 @@
         </div>
 
         <!-- 傍晚 -->
-        <div class="border border-border rounded p-3 bg-bg">
+        <div class="border border-border rounded-xl p-3 bg-surface-hover">
           <div class="flex items-center justify-between mb-2">
             <h4 class="font-semibold">傍晚</h4>
             <button @click="addItem('evening')" class="bg-primary text-text-inverse px-2 py-1 rounded text-sm">＋ 新加傍晚时间段</button>
@@ -107,7 +108,7 @@
         </div>
 
         <!-- 晚上 -->
-        <div class="border border-border rounded p-3 bg-bg">
+        <div class="border border-border rounded-xl p-3 bg-surface-hover">
           <div class="flex items-center justify-between mb-2">
             <h4 class="font-semibold">晚上</h4>
             <button @click="addItem('night')" class="bg-primary text-text-inverse px-2 py-1 rounded text-sm">＋ 新加晚上时间段</button>
@@ -132,9 +133,12 @@
       </div>
     </div>
   </div>
+  </Transition>
 </template>
 
 <script>
+import '../styles/dialog-transition.css'
+
 export default {
   name: 'SettingsDialog',
   props: {
@@ -246,4 +250,5 @@ export default {
     }
   }
 };
+
 </script>

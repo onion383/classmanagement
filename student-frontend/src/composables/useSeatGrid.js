@@ -216,10 +216,15 @@ export function useSeatGrid(apiBase, options = {}) {
     await save()
   }
 
+  async function saveSeats(newSeats) {
+    seats.value = newSeats
+    await save()
+  }
+
   return {
     loaded, rows, cols, seats, mode, showAisle, settings, settingsVisible, currentEditExcludeIds,
     colHeaders, displayRows, exportFields, exportRows,
-    load, save, onCellsUpdate, onSwapRows, onSwapColumns, onCellDblClick, saveSettings,
+    load, save, saveSeats, onCellsUpdate, onSwapRows, onSwapColumns, onCellDblClick, saveSettings,
     generateColHeaders, getDisplayColCount, isAisleCol
   }
 }

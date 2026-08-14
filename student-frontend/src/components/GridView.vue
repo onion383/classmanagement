@@ -119,26 +119,28 @@
       </table>
     </div>
 
-    <!-- 外挂候选列表 -->
-    <div
-      v-if="showCandidatePopup"
-      class="fixed z-50 bg-surface border border-info shadow-lg rounded"
-      :style="{ left: candidatePopupX + 'px', top: candidatePopupY + 'px', width: '180px', maxHeight: '200px', overflow: 'auto' }"
-      @mousedown.stop
-    >
-      <div v-if="filteredCandidates.length > 0">
-        <div
-          v-for="(item, idx) in filteredCandidates"
-          :key="item.id"
-          :class="['px-3 py-2 text-sm cursor-pointer hover:bg-info/10', { 'bg-info/20': idx === candidateHighlightIndex }]"
-          @mousedown.prevent="candidateSelect(item)"
-          @mouseenter="candidateHighlightIndex = idx"
-        >
-          {{ getCandidateLabel(item) }}
+    <!-- 外挂候选列表（Teleport 到 body，避免毛玻璃 backdrop-filter 创建包含块导致 fixed 定位错乱） -->
+    <Teleport to="body">
+      <div
+        v-if="showCandidatePopup"
+        class="candidate-popup fixed z-[10002] bg-surface border border-info shadow-lg rounded"
+        :style="{ left: candidatePopupX + 'px', top: candidatePopupY + 'px', width: '180px', maxHeight: '200px', overflow: 'auto' }"
+        @mousedown.stop
+      >
+        <div v-if="filteredCandidates.length > 0">
+          <div
+            v-for="(item, idx) in filteredCandidates"
+            :key="item.id"
+            :class="['px-3 py-2 text-sm cursor-pointer hover:bg-info/10', { 'bg-info/20': idx === candidateHighlightIndex }]"
+            @mousedown.prevent="candidateSelect(item)"
+            @mouseenter="candidateHighlightIndex = idx"
+          >
+            {{ getCandidateLabel(item) }}
+          </div>
         </div>
+        <div v-else class="px-3 py-2 text-sm text-text-muted">无匹配项</div>
       </div>
-      <div v-else class="px-3 py-2 text-sm text-text-muted">无匹配项</div>
-    </div>
+    </Teleport>
   </div>
 </template>
 
@@ -265,7 +267,21 @@ export default {
         if (this.enableCandidate) this.positionPopup(rowIdx, colIdx);
       });
     },
-    positionPopup(rowIdx, colIdx) { const cellEl = this.cellRefs[rowIdx]?.[colIdx]; if (cellEl) { const rect = cellEl.getBoundingClientRect(); this.candidatePopupX = rect.left; this.candidatePopupY = rect.bottom; } },
+    positionPopup(rowIdx, colIdx) {
+      const cellEl = this.cellRefs[rowIdx]?.[colIdx];
+      if (cellEl) {
+        const rect = cellEl.getBoundingClientRect();
+        const popupW = 180;
+        const popupH = 200;
+        let x = rect.left;
+        let y = rect.bottom;
+        // 防止超出视口右/下边缘
+        if (x + popupW > window.innerWidth) x = Math.max(0, window.innerWidth - popupW - 8);
+        if (y + popupH > window.innerHeight) y = Math.max(0, window.innerHeight - popupH - 8);
+        this.candidatePopupX = x;
+        this.candidatePopupY = y;
+      }
+    },
     onEditInput(rowIdx, colIdx) { this.candidateHighlightIndex = 0; if (this.showCandidatePopup) this.positionPopup(rowIdx, colIdx); },
     // ---------- 保存编辑 ----------
     saveEditCell() {

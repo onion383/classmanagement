@@ -1,6 +1,7 @@
 <template>
+  <Transition name="dialog">
   <div v-if="visible" class="fixed inset-0 bg-black/50 flex items-center justify-center z-[10003] pointer-events-auto" @click.self="handleOverlayClick">
-    <div class="bg-surface p-5 rounded-lg min-w-[300px] text-center shadow-card">
+    <div class="bg-surface p-5 rounded-lg min-w-[300px] text-center shadow-card dialog-card">
       <p v-if="message" class="mb-3">{{ message }}</p>
 
       <!-- 添加列：显示列名输入 + 类型选择 -->
@@ -45,9 +46,12 @@
       </div>
     </div>
   </div>
+  </Transition>
 </template>
 
 <script>
+import '../styles/dialog-transition.css'
+
 export default {
   name: 'ConfirmDialog',
   props: {

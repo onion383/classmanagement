@@ -1,6 +1,7 @@
 <template>
+  <Transition name="dialog">
   <div v-if="visible" class="fixed inset-0 bg-black/30 z-50 flex items-center justify-center">
-    <div class="bg-surface rounded-lg p-6 w-80 shadow-card">
+    <div class="bg-surface rounded-lg p-6 w-80 shadow-card dialog-card">
       <h3 class="text-lg font-bold mb-4">座位设置</h3>
       <div class="mb-3">
         <label class="block text-sm font-medium">行数</label>
@@ -35,10 +36,12 @@
       </div>
     </div>
   </div>
+  </Transition>
 </template>
 
 <script>
 import { useNotification } from '../composables/useNotification.js'
+import '../styles/dialog-transition.css'
 
 export default {
   name: 'SeatSettingsDialog',

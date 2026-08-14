@@ -11,6 +11,7 @@
             <h2 class="text-xl font-semibold mb-4">🪑 当前座位</h2>
             <div class="mb-4 flex flex-wrap items-center gap-3">
               <button @click="openSettings('active')" class="bg-primary text-text-inverse px-4 py-2 rounded">⚙️ 设置</button>
+              <button @click="smartArrangementVisible = true" class="bg-primary text-text-inverse px-4 py-2 rounded">🧠 智能排表</button>
               <button @click="refreshActive" class="bg-text-muted text-text-inverse px-4 py-2 rounded">🔄 刷新</button>
               <button @click="applyMasterToActive" class="bg-primary text-text-inverse px-4 py-2 rounded">📥 从模板导入</button>
               <button @click="$refs.activeExportDialog.open()" class="bg-warning text-text-inverse px-4 py-2 rounded">📥 导出 Excel</button>
@@ -105,6 +106,18 @@
       @save="saveMasterSettings"
       @cancel="masterSettingsVisible = false"
     />
+
+    <!-- 智能排表弹窗 -->
+    <SmartArrangementDialog
+      :visible="smartArrangementVisible"
+      :rows="activeRows"
+      :cols="activeCols"
+      :mode="activeMode"
+      :showAisle="activeShowAisle"
+      :students="allStudents"
+      @cancel="smartArrangementVisible = false"
+      @confirm="applySmartArrangement"
+    />
   </div>
 </template>
 
@@ -116,6 +129,7 @@ import ExportExcel from '../components/ExportExcel.vue'
 import Tabs from '../components/Tabs.vue'
 import WeekSwitcher from '../components/WeekSwitcher.vue'
 import SeatSettingsDialog from '../components/SeatSettingsDialog.vue'
+import SmartArrangementDialog from '../components/SmartArrangementDialog.vue'
 import { useSeatGrid } from '../composables/useSeatGrid.js'
 import { useNotification } from '../composables/useNotification.js'
 
@@ -218,6 +232,18 @@ function openSettings(target) {
     activeSettingsVisible.value = true
   } else {
     masterSettingsVisible.value = true
+  }
+}
+
+const smartArrangementVisible = ref(false)
+
+async function applySmartArrangement(result) {
+  smartArrangementVisible.value = false
+  try {
+    await activeGrid.saveSeats(result.seats)
+    notifySuccess('已应用智能排表')
+  } catch (e) {
+    notifySuccess('应用失败')
   }
 }
 
