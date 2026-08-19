@@ -73,6 +73,12 @@ export default {
         this.localMode = this.mode
         this.localShowAisle = this.showAisle
       }
+    },
+    // 同桌模式下列数必须为偶数（每两列为一组）；切到同桌时自动把奇数取整为偶数
+    localMode(val) {
+      if (val === 'double' && this.localCols % 2 !== 0) {
+        this.localCols = Math.max(2, Math.min(30, this.localCols + 1))
+      }
     }
   },
   methods: {
@@ -83,6 +89,10 @@ export default {
       }
       if (this.localCols < 1 || this.localCols > 30) {
         this.notifyError('设置的行/列过大\n过大的行和列会引起显示问题和程序卡顿')
+        return
+      }
+      if (this.localMode === 'double' && this.localCols % 2 !== 0) {
+        this.notifyError('同桌模式下列数必须为偶数\n如需单桌，请自行留空该座位')
         return
       }
       this.$emit('save', {

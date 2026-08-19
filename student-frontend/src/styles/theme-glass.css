@@ -694,6 +694,12 @@
 
 /* ========== 表格候选列表（Teleport 到 body，需更实更清晰的毛玻璃） ========== */
 :root[data-theme="glass"] .candidate-popup {
+  /* 关键：必须显式声明 position: fixed。
+     弹窗模板同时带有 .bg-surface 类（毛玻璃主题下 .bg-surface 设置了 position: relative），
+     由于 theme-glass.css 在 Tailwind 之后加载，.bg-surface 的 position: relative 会覆盖 .fixed 的 position: fixed，
+     导致弹窗退化为 relative，top 坐标把它推到 body 末端（页面底部），看起来在视口底部"乱跑"。
+     这里强制 position: fixed，与 .bg-surface 同优先级但定义在更后面，赢得级联。 */
+  position: fixed;
   background-color: rgba(255, 255, 255, 0.95) !important;
   backdrop-filter: blur(14px) saturate(1.1);
   -webkit-backdrop-filter: blur(14px) saturate(1.1);
