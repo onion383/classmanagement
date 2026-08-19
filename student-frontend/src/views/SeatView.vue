@@ -115,6 +115,7 @@
       :mode="activeMode"
       :showAisle="activeShowAisle"
       :students="allStudents"
+      :initial-seats="activeSeats"
       @cancel="smartArrangementVisible = false"
       @confirm="applySmartArrangement"
     />

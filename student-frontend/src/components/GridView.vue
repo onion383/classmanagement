@@ -31,8 +31,7 @@
             </th>
           </tr>
         </thead>
-        <tbody>
-          <TransitionGroup name="row-flip" tag="">
+        <TransitionGroup name="row-flip" tag="tbody">
             <tr
               v-for="(row, rowIdx) in rows"
               :key="row._rowKey || rowIdx"
@@ -90,7 +89,7 @@
                     :style="{ backgroundColor: isEditing(rowIdx, colIdx) ? '' : getCellColor(cell), minHeight: '40px' }"
                     @mousedown="onCellMouseDown($event, rowIdx, colIdx)"
                     @mouseenter="onCellMouseEnter(rowIdx, colIdx)"
-                    @dblclick="onCellDoubleClick(rowIdx, colIdx)"
+                    @dblclick="onCellDoubleClick($event, rowIdx, colIdx)"
                   >
                     <div v-if="isEditing(rowIdx, colIdx)" class="absolute inset-0 flex items-center justify-center">
                       <input
@@ -115,32 +114,39 @@
               </template>
             </tr>
           </TransitionGroup>
-        </tbody>
       </table>
-    </div>
 
-    <!-- 外挂候选列表（Teleport 到 body，避免毛玻璃 backdrop-filter 创建包含块导致 fixed 定位错乱） -->
-    <Teleport to="body">
-      <div
-        v-if="showCandidatePopup"
-        class="candidate-popup fixed z-[10002] bg-surface border border-info shadow-lg rounded"
-        :style="{ left: candidatePopupX + 'px', top: candidatePopupY + 'px', width: '180px', maxHeight: '200px', overflow: 'auto' }"
-        @mousedown.stop
-      >
-        <div v-if="filteredCandidates.length > 0">
-          <div
-            v-for="(item, idx) in filteredCandidates"
-            :key="item.id"
-            :class="['px-3 py-2 text-sm cursor-pointer hover:bg-info/10', { 'bg-info/20': idx === candidateHighlightIndex }]"
-            @mousedown.prevent="candidateSelect(item)"
-            @mouseenter="candidateHighlightIndex = idx"
-          >
-            {{ getCandidateLabel(item) }}
+      <!--
+        候选弹窗：用 <Teleport to="body"> 把弹窗渲染到 body 下，
+        彻底跳出 .grid-view-container 的 backdrop-filter 包含块。
+        为什么必须 Teleport：毛玻璃主题下 .grid-view-container 有 backdrop-filter: blur(16px)，
+        根据 CSS 规范它会作为 position: fixed 的包含块祖先，使 fixed 不再相对视口。
+        即便坐标用 getBoundingClientRect()（视口坐标）算对了，弹窗位置仍会偏移。
+        Teleport 到 body 后，弹窗没有 backdrop-filter 祖先，fixed 才真正相对视口定位。
+        配合 event.currentTarget 拿到用户实际双击的 td，定位完全准确。
+      -->
+      <Teleport to="body">
+        <div
+          v-if="showCandidatePopup"
+          class="candidate-popup fixed z-[10002] bg-surface border border-info shadow-lg rounded"
+          :style="{ left: candidatePopupX + 'px', top: candidatePopupY + 'px', width: '180px', maxHeight: '200px', overflow: 'auto' }"
+          @mousedown.stop
+        >
+          <div v-if="filteredCandidates.length > 0">
+            <div
+              v-for="(item, idx) in filteredCandidates"
+              :key="item.id"
+              :class="['px-3 py-2 text-sm cursor-pointer hover:bg-info/10', { 'bg-info/20': idx === candidateHighlightIndex }]"
+              @mousedown.prevent="candidateSelect(item)"
+              @mouseenter="candidateHighlightIndex = idx"
+            >
+              {{ getCandidateLabel(item) }}
+            </div>
           </div>
+          <div v-else class="px-3 py-2 text-sm text-text-muted">无匹配项</div>
         </div>
-        <div v-else class="px-3 py-2 text-sm text-text-muted">无匹配项</div>
-      </div>
-    </Teleport>
+      </Teleport>
+    </div>
   </div>
 </template>
 
@@ -255,33 +261,37 @@ export default {
       [newRows[r1].cells[c1], newRows[r2].cells[c2]] = [{ ...newRows[r2].cells[c2] }, { ...newRows[r1].cells[c1] }];
       this.$emit('update:cells', newRows);
     },
-    onCellDoubleClick(rowIdx, colIdx) {
+    onCellDoubleClick(event, rowIdx, colIdx) {
       const row = this.rows[rowIdx]; if (!row || row._isSeparator || row._mergeCells || row._isReadonly || row._isPodium) return;
       if (this.editingCell) requestAnimationFrame(() => this.saveEditCell());
       this.$emit('cell-dblclick', { rowIdx, colIdx, row, cell: row.cells[colIdx] });
       this.clearLongPress(); this.selectionStart = null; this.selectionEnd = null;
       this.editingCell = { row: rowIdx, col: colIdx }; this.editingCellData = { ...row.cells[colIdx] };
       this.candidateHighlightIndex = 0; this.showCandidatePopup = this.enableCandidate;
+      // 关键：用 event.currentTarget 拿到用户实际双击的 td（避免 cellRefs 错位）。
+      // event.currentTarget 在同步代码中有效，保存到 cellEl 供 nextTick 使用。
+      const cellEl = event && event.currentTarget ? event.currentTarget : this.cellRefs[rowIdx]?.[colIdx];
       this.$nextTick(() => {
-        const cellEl = this.cellRefs[rowIdx]?.[colIdx]; if (cellEl) { const input = cellEl.querySelector('input'); if (input) input.focus(); }
-        if (this.enableCandidate) this.positionPopup(rowIdx, colIdx);
+        if (cellEl) { const input = cellEl.querySelector('input'); if (input) input.focus(); }
+        if (this.enableCandidate) this.positionPopupFromEl(cellEl);
       });
     },
-    positionPopup(rowIdx, colIdx) {
-      const cellEl = this.cellRefs[rowIdx]?.[colIdx];
-      if (cellEl) {
-        const rect = cellEl.getBoundingClientRect();
-        const popupW = 180;
-        const popupH = 200;
-        let x = rect.left;
-        let y = rect.bottom;
-        // 防止超出视口右/下边缘
-        if (x + popupW > window.innerWidth) x = Math.max(0, window.innerWidth - popupW - 8);
-        if (y + popupH > window.innerHeight) y = Math.max(0, window.innerHeight - popupH - 8);
-        this.candidatePopupX = x;
-        this.candidatePopupY = y;
-      }
+    positionPopupFromEl(cellEl) {
+      if (!cellEl) return;
+      // 用 cellEl 的 getBoundingClientRect() 拿视口坐标，pop 用 position: fixed 相对视口定位。
+      // cellEl 是 event.currentTarget（用户实际双击的 td），rect 一定反映该 cell 的真实视口位置。
+      const cellRect = cellEl.getBoundingClientRect();
+      const popupW = 180;
+      const popupH = 200;
+      let x = cellRect.left;
+      let y = cellRect.bottom + 2;
+      // 防止超出视口右/下边缘
+      if (x + popupW > window.innerWidth) x = Math.max(0, window.innerWidth - popupW - 8);
+      if (y + popupH > window.innerHeight) y = Math.max(0, window.innerHeight - popupH - 8);
+      this.candidatePopupX = x;
+      this.candidatePopupY = y;
     },
+    positionPopup(rowIdx, colIdx) { /* 兼容保留：内部已用 event.currentTarget 路径 */ },
     onEditInput(rowIdx, colIdx) { this.candidateHighlightIndex = 0; if (this.showCandidatePopup) this.positionPopup(rowIdx, colIdx); },
     // ---------- 保存编辑 ----------
     saveEditCell() {
