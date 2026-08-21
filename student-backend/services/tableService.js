@@ -1,5 +1,16 @@
 const { db, getFields, renumber } = require('../db');
 
+// 列名白名单：与 addColumn/renameColumn 保持一致，防止列名拼入 SQL 造成注入。
+// 仅允许中英文、数字、下划线，且禁止保留字段（id/position 由内部管理，atPosition 为插入位置参数）。
+const COLUMN_NAME_RE = /^[a-zA-Z0-9_\u4e00-\u9fa5]+$/;
+const RESERVED_COLUMNS = ['id', 'position', 'atPosition'];
+
+function assertValidColumn(name) {
+  if (!name || RESERVED_COLUMNS.includes(name) || !COLUMN_NAME_RE.test(name)) {
+    throw new Error('字段名不合法');
+  }
+}
+
 function queryAll(tableName) {
   const results = db.prepare(`SELECT * FROM ${tableName} ORDER BY position ASC`).all();
   let fields = getFields(tableName);
@@ -18,6 +29,7 @@ function insertRow(tableName, data) {
 
   const cleaned = {};
   keys.forEach(k => {
+    assertValidColumn(k);
     cleaned[k] = (data[k] === '' || data[k] === undefined) ? null : data[k];
   });
 
@@ -47,6 +59,7 @@ function updateRow(tableName, id, data) {
 
   const cleaned = {};
   keys.forEach(k => {
+    assertValidColumn(k);
     cleaned[k] = (data[k] === '' || data[k] === undefined) ? null : data[k];
   });
 
@@ -178,6 +191,7 @@ function importRows(tableName, fields, rows) {
   const existingFields = getFields(tableName).map(f => f.name);
 
   for (const f of fields) {
+    assertValidColumn(f);
     if (!existingFields.includes(f)) {
       db.prepare(`ALTER TABLE ${tableName} ADD COLUMN "${f}" TEXT`).run();
       const maxSort = db.prepare(`SELECT MAX(sort_order) AS max FROM table_meta WHERE table_name = ?`).get(tableName).max || 0;

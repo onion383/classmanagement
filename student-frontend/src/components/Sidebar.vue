@@ -35,6 +35,14 @@
       </router-link>
 
       <router-link
+        to="/leaves"
+        class="block px-3 py-2 rounded hover:bg-sidebar-hover transition-theme"
+        active-class="bg-sidebar-active"
+      >
+        🛌 请假管理
+      </router-link>
+
+      <router-link
         to="/widget-settings"
         class="block px-3 py-2 rounded hover:bg-sidebar-hover transition-theme"
         active-class="bg-sidebar-active"

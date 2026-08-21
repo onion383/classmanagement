@@ -1,196 +1,84 @@
-const Database = require('better-sqlite3');
-const path = require('path');
-const fs = require('fs');
+// =========================================================================
+// db.js —— 统一的数据库接入点
+//
+// 多库架构下，本文件不再固定打开单一数据库，而是通过 dbManager 按请求解析：
+//   - 每个请求进入时，auth 中间件会通过 dbManager.withDb(slug) 绑定当前班主任库。
+//   - 这里导出的 db 是一个 **_Proxy**_：对 db.prepare / db.exec / db.transaction 等
+//     所有调用的访问，都会被转发到「当前请求绑定的库连接」。
+//   因此系统中各处已有的 `const { db } = require('../db') .prepare(...)` 代码
+//   无需逐个修改，即可自动命中登录者对应的班主任库。
+//   - 在未绑定库的请求（如登录、忘记密码）中，db 回退到默认库（旧单库 default）。
+//
+// 兼容性说明：better-sqlite3 的 prepare/exec/transaction 都是「方法」，Proxy 的
+// get 会把函数 this 绑定到当前连接，保证内部状态正确。
+// =========================================================================
 
-const dataDir = path.join(__dirname, 'data');
-if (!fs.existsSync(dataDir)) fs.mkdirSync(dataDir, { recursive: true });
+const dbManager = require('./dbManager');
 
-const dbPath = path.join(dataDir, 'database.db');
-const db = new Database(dbPath);
-db.pragma('journal_mode = WAL');
+// 解析当前请求对应的数据库连接（登录前回退默认库）
+function currentDb() {
+  return dbManager.current();
+}
 
-// ======================== 迁移工具函数 ========================
-function ensureTableWithMigration(tableName, createSQL, insertSQL, migrations) {
-  const exists = db.prepare(`SELECT name FROM sqlite_master WHERE type='table' AND name=?`).get(tableName);
-  if (!exists) {
-    db.exec(createSQL);
-    if (insertSQL) db.exec(insertSQL);
-  } else if (migrations && migrations.length > 0) {
-    const cols = db.prepare(`PRAGMA table_info(${tableName})`).all().map(c => c.name);
-    for (const { column, sql } of migrations) {
-      if (!cols.includes(column)) {
-        db.prepare(`ALTER TABLE ${tableName} ADD COLUMN ${sql}`).run();
-      }
+// 统一代理：所有属性/方法访问转发到当前库
+const db = new Proxy({}, {
+  get(_target, prop) {
+    const conn = currentDb();
+    if (conn == null) return undefined;
+    const value = conn[prop];
+    if (typeof value === 'function') {
+      return value.bind(conn);
     }
-  }
+    return value;
+  },
+  set(_target, prop, val) {
+    const conn = currentDb();
+    if (conn) conn[prop] = val;
+    return true;
+  },
+});
+
+// 与 db 代理等价、但始终绑定「默认库（default）」的连接（供不依赖登录上下文的场景）
+// 惰性获取，避免加载阶段因密钥未配置而崩溃
+function getDefaultDb() {
+  return dbManager.getDefault();
 }
+const defaultDb = new Proxy({}, {
+  get(_target, prop) {
+    const conn = dbManager.getDefault();
+    if (conn == null) return undefined;
+    const value = conn[prop];
+    if (typeof value === 'function') return value.bind(conn);
+    return value;
+  },
+});
 
-// ======================== 原有建表 ========================
-db.exec(`
-  CREATE TABLE IF NOT EXISTS students (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    position INTEGER DEFAULT 1,
-    学号 TEXT,
-    年级 TEXT,
-    班级 TEXT,
-    姓名 TEXT NOT NULL,
-    年龄 INTEGER,
-    备注 TEXT
-  );
-
-  CREATE TABLE IF NOT EXISTS fee_records (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    position INTEGER DEFAULT 1,
-    收支编码 TEXT,
-    收支类型 TEXT,
-    收支金额 REAL,
-    收支时间 TEXT,
-    备注 TEXT,
-    收据 TEXT
-  );
-
-  CREATE TABLE IF NOT EXISTS table_meta (
-    table_name TEXT NOT NULL,
-    column_name TEXT NOT NULL,
-    data_type TEXT DEFAULT '文字',
-    sort_order INTEGER DEFAULT 0,
-    PRIMARY KEY (table_name, column_name)
-  );
-
-  CREATE TABLE IF NOT EXISTS users (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    username TEXT UNIQUE NOT NULL,
-    password TEXT NOT NULL,
-    role TEXT NOT NULL DEFAULT 'teacher'
-  );
-
-  CREATE TABLE IF NOT EXISTS pending_requests (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    from_user TEXT NOT NULL,
-    target_table TEXT NOT NULL,
-    target_id INTEGER,
-    action_type TEXT NOT NULL,
-    data TEXT,
-    status TEXT DEFAULT 'pending',
-    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
-  );
-
-  CREATE TABLE IF NOT EXISTS schedule_settings (
-    id INTEGER PRIMARY KEY CHECK (id = 1),
-    semester_start TEXT NOT NULL DEFAULT '',
-    auto_apply INTEGER DEFAULT 1
-  );
-  INSERT OR IGNORE INTO schedule_settings (id, semester_start) VALUES (1, '');
-
-  CREATE TABLE IF NOT EXISTS master_schedule (
-    id INTEGER PRIMARY KEY CHECK (id = 1),
-    cells TEXT NOT NULL DEFAULT '[]',
-    settings TEXT NOT NULL DEFAULT '{}'
-  );
-  INSERT OR IGNORE INTO master_schedule (id, cells, settings) VALUES (1, '[]', '{}');
-
-  CREATE TABLE IF NOT EXISTS schedule (
-    id INTEGER PRIMARY KEY CHECK (id = 1),
-    cells TEXT NOT NULL DEFAULT '[]',
-    settings TEXT NOT NULL DEFAULT '{}'
-  );
-  INSERT OR IGNORE INTO schedule (id, cells, settings) VALUES (1, '[]', '{}');
-
-  CREATE TABLE IF NOT EXISTS schedule_history (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    week_start TEXT NOT NULL,
-    cells TEXT NOT NULL DEFAULT '[]',
-    settings TEXT NOT NULL DEFAULT '{}',
-    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
-  );
-
-  CREATE TABLE IF NOT EXISTS widget_settings (
-    id INTEGER PRIMARY KEY CHECK (id = 1),
-    toolbox_enabled INTEGER DEFAULT 1,
-    note_save_path TEXT DEFAULT '',
-    screenshot_save_path TEXT DEFAULT ''
-  );
-  INSERT OR IGNORE INTO widget_settings (id) VALUES (1);
-`);
-
-// ======================== 初始化元数据 ========================
-const initMeta = db.prepare(`INSERT OR IGNORE INTO table_meta (table_name, column_name, sort_order) VALUES (?, ?, ?)`);
-['学号','年级','班级','姓名','年龄','备注'].forEach((c,i) => initMeta.run('students', c, i+1));
-['收支编码','收支类型','收支金额','收支时间','备注','收据'].forEach((c,i) => initMeta.run('fee_records', c, i+1));
-
-// ======================== 示例数据 ========================
-if (db.prepare('SELECT COUNT(*) AS cnt FROM students').get().cnt === 0) {
-  db.prepare(`INSERT INTO students (学号,年级,班级,姓名,年龄,备注,position) VALUES ('2024001','大三','计算机1班','张三',20,'班长',1)`).run();
-}
-if (db.prepare('SELECT COUNT(*) AS cnt FROM fee_records').get().cnt === 0) {
-  db.prepare(`INSERT INTO fee_records (收支编码,收支类型,收支金额,收支时间,备注,收据,position) VALUES ('SZ-2024001','收入',500.00,'2024-01-15','班费收缴','[]',1)`).run();
-}
-
-// ======================== 默认账号 ========================
-const bcrypt = require('bcryptjs');
-const insertUser = db.prepare('INSERT OR IGNORE INTO users (username, password, role) VALUES (?, ?, ?)');
-const hashedPassword = bcrypt.hashSync('123456', 10);
-insertUser.run('admin', hashedPassword, 'teacher');
-
-// ======================== 座位表迁移（抽象复用） ========================
-const seatMigrations = [
-  { column: 'mode', sql: "mode TEXT NOT NULL DEFAULT 'single'" },
-  { column: 'aisle_cols', sql: "aisle_cols TEXT NOT NULL DEFAULT '[]'" },
-  { column: 'groups_config', sql: "groups_config TEXT NOT NULL DEFAULT '[]'" }
-];
-
-ensureTableWithMigration('seat_layout', `
-  CREATE TABLE seat_layout (
-    id INTEGER PRIMARY KEY CHECK (id = 1),
-    mode TEXT NOT NULL DEFAULT 'single',
-    rows INTEGER NOT NULL DEFAULT 6,
-    cols INTEGER NOT NULL DEFAULT 7,
-    seats TEXT NOT NULL DEFAULT '[]',
-    aisle_cols TEXT NOT NULL DEFAULT '[]',
-    groups_config TEXT NOT NULL DEFAULT '[]',
-    settings TEXT NOT NULL DEFAULT '{}'
-  );
-  INSERT INTO seat_layout (id) VALUES (1);
-`, null, seatMigrations);
-
-ensureTableWithMigration('seat_template', `
-  CREATE TABLE seat_template (
-    id INTEGER PRIMARY KEY CHECK (id = 1),
-    mode TEXT NOT NULL DEFAULT 'single',
-    rows INTEGER NOT NULL DEFAULT 6,
-    cols INTEGER NOT NULL DEFAULT 7,
-    seats TEXT NOT NULL DEFAULT '[]',
-    aisle_cols TEXT NOT NULL DEFAULT '[]',
-    groups_config TEXT NOT NULL DEFAULT '[]',
-    settings TEXT NOT NULL DEFAULT '{}'
-  );
-  INSERT INTO seat_template (id) VALUES (1);
-`, null, seatMigrations);
-
-ensureTableWithMigration('seat_history', `
-  CREATE TABLE seat_history (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    week_start TEXT NOT NULL,
-    mode TEXT NOT NULL DEFAULT 'single',
-    rows INTEGER NOT NULL,
-    cols INTEGER NOT NULL,
-    seats TEXT NOT NULL DEFAULT '[]',
-    aisle_cols TEXT NOT NULL DEFAULT '[]',
-    groups_config TEXT NOT NULL DEFAULT '[]',
-    settings TEXT NOT NULL DEFAULT '{}',
-    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
-  );
-`, null, seatMigrations);
-
-// ======================== 工具函数 ========================
+// ======================== 元数据/排序 工具（作用于当前库） ========================
 function getFields(tableName) {
-  return db.prepare(`SELECT column_name AS name, data_type AS type FROM table_meta WHERE table_name = ? ORDER BY sort_order`).all(tableName);
+  const conn = currentDb();
+  return conn.prepare(`SELECT column_name AS name, data_type AS type FROM table_meta WHERE table_name = ? ORDER BY sort_order`).all(tableName);
 }
 
 function renumber(tableName) {
-  const rows = db.prepare(`SELECT id FROM ${tableName} ORDER BY position, id`).all();
-  const stmt = db.prepare(`UPDATE ${tableName} SET position = ? WHERE id = ?`);
+  const conn = currentDb();
+  const rows = conn.prepare(`SELECT id FROM ${tableName} ORDER BY position, id`).all();
+  const stmt = conn.prepare(`UPDATE ${tableName} SET position = ? WHERE id = ?`);
   rows.forEach((r, i) => stmt.run(i + 1, r.id));
 }
 
-module.exports = { db, getFields, renumber };
+// 启动自检：初始化默认库并登记 index（幂等）
+try {
+  dbManager.initDefault();
+} catch (err) {
+  // 允许延迟到首次真正访问数据库时再初始化；这里仅打印提示，不阻断启动
+  console.warn('[db] 默认库初始化待定：', err.message);
+}
+
+module.exports = {
+  db,
+  getFields,
+  renumber,
+  defaultDb,
+  dbManager,
+  _current: currentDb,
+};

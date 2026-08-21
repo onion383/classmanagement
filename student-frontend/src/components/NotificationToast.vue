@@ -69,7 +69,7 @@ function onLeave(item) {
   position: fixed;
   top: 16px;
   right: 16px;
-  z-index: 9999;
+  z-index: 2147483000;
   display: flex;
   flex-direction: column;
   gap: 8px;
