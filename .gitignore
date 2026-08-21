@@ -6,6 +6,9 @@ dist/
 .env
 .env.local
 
+# JWT 密钥文件
+.jwt-secret
+
 # 上传文件夹（图片）
 */uploads/
 

@@ -46,7 +46,9 @@ function createMainWindow() {
       preload: path.join(__dirname, 'preload.js'),
       contextIsolation: true,
       nodeIntegration: false,
-      webSecurity: false,
+      // webSecurity 仅开发模式关闭（用于加载自签名 https 的 Vite 服务）；
+      // 生产环境必须保持开启，禁止在打包后关闭网页安全策略。
+      webSecurity: !isDev,
     }
   })
 

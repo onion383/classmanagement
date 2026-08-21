@@ -20,6 +20,22 @@
       <button @click="changePassword" class="bg-info text-text-inverse px-4 py-2 rounded">确认修改</button>
     </div>
 
+    <div class="border-t pt-4 mb-4">
+      <h3 class="font-semibold mb-2">重置恢复密钥</h3>
+      <p class="text-xs text-text-muted mb-2">重置后旧恢复密钥立即失效，请妥善保存新密钥。</p>
+      <button @click="resetRecoveryKey" class="bg-warning text-text-inverse px-4 py-2 rounded">重新生成</button>
+    </div>
+
+    <div class="border-t pt-4 mb-4">
+      <h3 class="font-semibold mb-2">导出数据库</h3>
+      <p class="text-xs text-text-muted mb-2">一次导出当前库（业务数据 + 应用设置 + 账号）。换机后可用「密码」或「助记词」解包恢复，请至少填写一项。</p>
+      <input v-model="exportPassword" type="password" placeholder="密码" autocomplete="current-password" class="border p-2 w-full mb-2" />
+      <input v-model="exportMnemonic" placeholder="助记词（12字，可选）" class="border p-2 w-full mb-2" />
+      <button @click="exportDb" class="bg-primary text-text-inverse px-4 py-2 rounded" :disabled="busyExport">
+        {{ busyExport ? '导出中…' : '导出备份' }}
+      </button>
+    </div>
+
     <div class="mt-6">
       <button @click="confirmLogout" class="bg-danger text-text-inverse px-4 py-2 rounded">退出登录</button>
     </div>
@@ -47,6 +63,9 @@ export default {
       usernamePassword: '',
       oldPassword: '',
       newPassword: '',
+      exportPassword: '',
+      exportMnemonic: '',
+      busyExport: false,
       dialog: {
         visible: false,
         message: '',
@@ -111,6 +130,41 @@ export default {
         localStorage.removeItem('currentUser');
         this.$router.push('/login');
       });
+    },
+    async resetRecoveryKey() {
+      try {
+        const res = await axios.get('/api/account/recovery-key');
+        this.showConfirm('新的恢复密钥（仅此一次显示，请保存）：\n\n' + res.data.phrase + '\n\n请立即保存，忘记密码时可用来重置。', () => {});
+      } catch (err) {
+        this.showAlert(err.response?.data?.error || '生成失败');
+      }
+    },
+    async exportDb() {
+      const pwd = this.exportPassword;
+      const mnemonic = this.exportMnemonic;
+      if (!pwd && !mnemonic) {
+        this.showAlert('请至少输入密码或助记词之一，用于保护备份包。');
+        return;
+      }
+      this.busyExport = true;
+      try {
+        const params = {};
+        if (pwd) params.password = pwd;
+        if (mnemonic) params.mnemonic = mnemonic;
+        const res = await axios.get('/api/account/export', { params });
+        const blob = new Blob([JSON.stringify(res.data, null, 2)], { type: 'application/json' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = this.user.username + '-backup.json';
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
+        this.showAlert('导出成功。请保管好备份文件与你在本页填写的密码/助记词（线上明文不保存）。');
+      } catch (err) {
+        this.showAlert(err.response?.data?.error || '导出失败');
+      } finally { this.busyExport = false; }
     }
   }
 }

@@ -276,6 +276,29 @@
   color: var(--color-text, #111827);
 }
 
+/* ========== 登录页角色下拉框：圆角与账号/密码输入框统一（12px） ========== */
+:root[data-theme="glass"] .login-bg select {
+  border-radius: 12px;
+}
+
+/* ========== 登录页账号/密码输入框：毛玻璃适配（半透明磨砂，与卡片一致） ========== */
+:root[data-theme="glass"] .login-bg input {
+  background-color: rgba(255, 255, 255, var(--glass-opacity, 0.5)) !important;
+  backdrop-filter: blur(10px) saturate(1.1);
+  -webkit-backdrop-filter: blur(10px) saturate(1.1);
+}
+/* 避免浏览器自动填充（autofill）覆盖账号框的半透明背景 */
+:root[data-theme="glass"] .login-bg input:-webkit-autofill,
+:root[data-theme="glass"] .login-bg input:-webkit-autofill:hover,
+:root[data-theme="glass"] .login-bg input:-webkit-autofill:focus {
+  -webkit-text-fill-color: var(--color-text, #1e293b);
+  -webkit-box-shadow: 0 0 0 1000px rgba(255, 255, 255, 0.5) inset;
+  box-shadow: 0 0 0 1000px rgba(255, 255, 255, 0.5) inset;
+  backdrop-filter: blur(10px) saturate(1.1);
+  -webkit-backdrop-filter: blur(10px) saturate(1.1);
+  transition: background-color 9999s ease-out;
+}
+
 /* ========== 登录界面毛玻璃窗 - 更白更透 ========== */
 :root[data-theme="glass"] .login-bg .bg-surface {
   background-color: rgba(255, 255, 255, var(--glass-opacity, 0.5)) !important;
@@ -722,6 +745,30 @@
 }
 :root[data-theme="glass"] .candidate-popup .text-text-muted {
   color: #64748b !important;
+}
+
+/* ========== 右键菜单（与候选弹窗同理） ========== */
+:root[data-theme="glass"] .context-menu-popup,
+:root[data-theme="glass"] .context-menu-popup.context-menu-popup {
+  /* 与 .candidate-popup 同样的原因：.bg-surface 的 position: relative 覆盖了 .fixed，
+     导致菜单的 top/left 退化为相对页面末端定位，跑到视口底部。
+     用 !important 强制覆盖 .bg-surface 的 position（特异性相同时 !important 胜出）。 */
+  position: fixed !important;
+  background-color: rgba(255, 255, 255, 0.95) !important;
+  backdrop-filter: blur(14px) saturate(1.1);
+  -webkit-backdrop-filter: blur(14px) saturate(1.1);
+  border: 1px solid rgba(59, 130, 246, 0.4) !important;
+  border-radius: 10px !important;
+  box-shadow:
+    0 0 0 1px rgba(255, 255, 255, 0.4),
+    0 8px 28px rgba(15, 23, 42, 0.18);
+  overflow: hidden;
+}
+:root[data-theme="glass"] .context-menu-popup::before {
+  display: none !important;
+}
+:root[data-theme="glass"] .context-menu-popup .hover\:bg-surface-hover:hover {
+  background-color: rgba(59, 130, 246, 0.12) !important;
 }
 
 /* ========== 毛玻璃滚动条 ========== */

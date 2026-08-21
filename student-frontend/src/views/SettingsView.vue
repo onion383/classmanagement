@@ -19,6 +19,7 @@
           <div class="flex gap-3">
             <button @click="openModal('username')" class="bg-primary hover:bg-primary-hover text-text-inverse px-4 py-2 rounded transition-theme">修改用户名</button>
             <button @click="openModal('password')" class="bg-info hover:bg-info-hover text-text-inverse px-4 py-2 rounded transition-theme">修改密码</button>
+            <button @click="openModal('export')" class="bg-warning hover:bg-warning-hover text-text-inverse px-4 py-2 rounded transition-theme" :disabled="busyExport">导出数据库</button>
             <button @click="confirmLogout" class="bg-danger hover:bg-danger-hover text-text-inverse px-4 py-2 rounded transition-theme">退出登录</button>
           </div>
         </div>
@@ -175,6 +176,22 @@
       </div>
     </div>
 
+    <!-- 内嵌弹窗：导出数据库 -->
+    <div v-if="modalType === 'export'" class="fixed inset-0 bg-black/50 flex items-center justify-center z-[10001]" @click.self="closeModal">
+      <div class="bg-surface rounded-lg p-6 w-96 border border-border shadow-lg">
+        <h3 class="text-lg font-bold text-text mb-4">导出数据库</h3>
+        <p class="text-xs text-text-muted mb-3">导出当前库（业务数据 + 应用设置 + 账号）。换机后可用「密码」或「助记词」解包恢复，请至少填写一项。</p>
+        <input v-model="exportPassword" type="password" placeholder="密码" autocomplete="current-password" class="border border-border bg-surface text-text p-2 w-full mb-3 rounded" />
+        <input v-model="exportMnemonic" placeholder="助记词（12字，可选）" autocomplete="off" class="border border-border bg-surface text-text p-2 w-full mb-4 rounded" />
+        <div class="flex justify-end gap-2">
+          <button @click="closeModal" class="bg-surface-hover text-text px-4 py-2 rounded border border-border transition-theme">取消</button>
+          <button @click="exportDb" :disabled="busyExport" class="bg-warning hover:bg-warning-hover text-text-inverse px-4 py-2 rounded transition-theme disabled:opacity-50">
+            {{ busyExport ? '导出中…' : '导出备份' }}
+          </button>
+        </div>
+      </div>
+    </div>
+
     <ConfirmDialog
       :visible="dialog.visible"
       :message="dialog.message"
@@ -216,6 +233,10 @@ export default {
       usernamePassword: '',
       oldPassword: '',
       newPassword: '',
+      // Export database
+      exportPassword: '',
+      exportMnemonic: '',
+      busyExport: false,
       // Dialog
       dialog: {
         visible: false,
@@ -271,6 +292,8 @@ export default {
       this.usernamePassword = ''
       this.oldPassword = ''
       this.newPassword = ''
+      this.exportPassword = ''
+      this.exportMnemonic = ''
     },
     closeModal() {
       this.modalType = ''
@@ -322,6 +345,34 @@ export default {
         localStorage.removeItem('currentUser')
         this.$router.push('/login')
       })
+    },
+    async exportDb() {
+      const pwd = this.exportPassword
+      const mnemonic = this.exportMnemonic
+      if (!pwd && !mnemonic) {
+        this.showAlert('请至少输入密码或助记词之一，用于保护备份包')
+        return
+      }
+      this.busyExport = true
+      try {
+        const params = {}
+        if (pwd) params.password = pwd
+        if (mnemonic) params.mnemonic = mnemonic
+        const res = await axios.get('/api/account/export', { params })
+        const blob = new Blob([JSON.stringify(res.data, null, 2)], { type: 'application/json' })
+        const url = URL.createObjectURL(blob)
+        const a = document.createElement('a')
+        a.href = url
+        a.download = this.user.username + '-backup.json'
+        document.body.appendChild(a)
+        a.click()
+        document.body.removeChild(a)
+        URL.revokeObjectURL(url)
+        this.closeModal()
+        this.showAlert('导出成功。请保管好备份文件与你在本页填写的密码/助记词（线上明文不保存）')
+      } catch (err) {
+        this.showAlert(err.response?.data?.error || '导出失败')
+      } finally { this.busyExport = false }
     },
     // Theme
     onThemeSelect() {

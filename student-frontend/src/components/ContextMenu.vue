@@ -1,7 +1,7 @@
 <template>
   <div
     v-if="visible"
-    class="fixed bg-surface border border-border shadow-md z-[9999] min-w-[120px] py-1 pointer-events-auto"
+    class="context-menu-popup fixed bg-surface border border-border shadow-md z-[9999] min-w-[120px] py-1 pointer-events-auto"
     :style="{ top: y + 'px', left: x + 'px' }"
   >
     <div
