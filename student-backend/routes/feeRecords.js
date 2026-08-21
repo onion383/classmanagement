@@ -3,10 +3,11 @@ const router = express.Router();
 const multer = require('multer');
 const path = require('path');
 const { db, getFields, renumber } = require('../db');
+const dbManager = require('../dbManager');
 
-// Multer 配置（不变）
+// Multer 配置：上传目录统一指向 DATA_DIR/uploads（可写，打包后位于 userData）
 const storage = multer.diskStorage({
-  destination: (req, file, cb) => cb(null, 'uploads/'),
+  destination: (req, file, cb) => cb(null, dbManager.uploadsDir),
   filename: (req, file, cb) => {
     const uniqueSuffix = Date.now() + '-' + Math.round(Math.random() * 1E9);
     cb(null, uniqueSuffix + path.extname(file.originalname));

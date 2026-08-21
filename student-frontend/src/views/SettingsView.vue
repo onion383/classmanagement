@@ -105,7 +105,7 @@
             </div>
             <p class="text-xs text-text-muted">支持 JPG / PNG / GIF / WebP，留空使用默认弥散光斑</p>
             <div v-if="bgImageUrl" class="mt-3">
-              <img :src="bgImageUrl" class="max-h-40 rounded border border-border object-cover shadow-sm" />
+              <img :src="bgImagePreviewUrl" class="max-h-40 rounded border border-border object-cover shadow-sm" />
             </div>
           </div>
 
@@ -180,9 +180,8 @@
     <div v-if="modalType === 'export'" class="fixed inset-0 bg-black/50 flex items-center justify-center z-[10001]" @click.self="closeModal">
       <div class="bg-surface rounded-lg p-6 w-96 border border-border shadow-lg">
         <h3 class="text-lg font-bold text-text mb-4">导出数据库</h3>
-        <p class="text-xs text-text-muted mb-3">导出当前库（业务数据 + 应用设置 + 账号）。换机后可用「密码」或「助记词」解包恢复，请至少填写一项。</p>
-        <input v-model="exportPassword" type="password" placeholder="密码" autocomplete="current-password" class="border border-border bg-surface text-text p-2 w-full mb-3 rounded" />
-        <input v-model="exportMnemonic" placeholder="助记词（12字，可选）" autocomplete="off" class="border border-border bg-surface text-text p-2 w-full mb-4 rounded" />
+        <p class="text-xs text-text-muted mb-3">输入你的登录密码即可导出当前库（业务数据 + 应用设置 + 账号），换机后可用同一密码恢复。</p>
+        <input v-model="exportPassword" type="password" placeholder="登录密码" autocomplete="current-password" class="border border-border bg-surface text-text p-2 w-full mb-4 rounded" />
         <div class="flex justify-end gap-2">
           <button @click="closeModal" class="bg-surface-hover text-text px-4 py-2 rounded border border-border transition-theme">取消</button>
           <button @click="exportDb" :disabled="busyExport" class="bg-warning hover:bg-warning-hover text-text-inverse px-4 py-2 rounded transition-theme disabled:opacity-50">
@@ -208,6 +207,7 @@ import axios from 'axios'
 import ConfirmDialog from '../components/ConfirmDialog.vue'
 import { useThemeStore } from '../stores/theme'
 import { storeToRefs } from 'pinia'
+import { resourceUrl } from '../utils/apiUrl'
 
 export default {
   components: { ConfirmDialog },
@@ -235,7 +235,6 @@ export default {
       newPassword: '',
       // Export database
       exportPassword: '',
-      exportMnemonic: '',
       busyExport: false,
       // Dialog
       dialog: {
@@ -279,6 +278,10 @@ export default {
     showColorSettings() {
       return !this.isCreatingNewTheme && this.currentTheme !== 'base'
     },
+    // 预览图走 resourceUrl：补完整后端地址并追加 ?token=，保证打包版 file:// 下能通过鉴权
+    bgImagePreviewUrl() {
+      return this.bgImageUrl ? resourceUrl(this.bgImageUrl) : ''
+    },
   },
   mounted() {
     this.selectedThemeId = this.currentTheme
@@ -293,7 +296,6 @@ export default {
       this.oldPassword = ''
       this.newPassword = ''
       this.exportPassword = ''
-      this.exportMnemonic = ''
     },
     closeModal() {
       this.modalType = ''
@@ -348,17 +350,13 @@ export default {
     },
     async exportDb() {
       const pwd = this.exportPassword
-      const mnemonic = this.exportMnemonic
-      if (!pwd && !mnemonic) {
-        this.showAlert('请至少输入密码或助记词之一，用于保护备份包')
+      if (!pwd) {
+        this.showAlert('请输入登录密码以导出数据库')
         return
       }
       this.busyExport = true
       try {
-        const params = {}
-        if (pwd) params.password = pwd
-        if (mnemonic) params.mnemonic = mnemonic
-        const res = await axios.get('/api/account/export', { params })
+        const res = await axios.get('/api/account/export', { params: { password: pwd } })
         const blob = new Blob([JSON.stringify(res.data, null, 2)], { type: 'application/json' })
         const url = URL.createObjectURL(blob)
         const a = document.createElement('a')

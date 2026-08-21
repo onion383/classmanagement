@@ -1,5 +1,6 @@
 import { defineStore } from 'pinia'
 import { ref, computed, watch } from 'vue'
+import { resourceUrl } from '../utils/apiUrl'
 
 const THEME_KEY = 'app-theme'
 const CUSTOM_KEY = 'app-theme-custom'
@@ -39,8 +40,9 @@ export const useThemeStore = defineStore('theme', () => {
       document.documentElement.style.setProperty(`--${key}`, value)
     })
     // 应用背景图（使用单引号避免 base64 data URL 中的双引号冲突）
+    // resourceUrl 会补完整后端地址并追加 ?token=，保证 file:// 打包版下背景图能通过鉴权加载
     if (backgroundImage.value) {
-      document.documentElement.style.setProperty('--bg-image', `url('${backgroundImage.value}')`)
+      document.documentElement.style.setProperty('--bg-image', `url('${resourceUrl(backgroundImage.value)}')`)
       document.documentElement.classList.add('has-bg-image')
     } else {
       document.documentElement.style.removeProperty('--bg-image')

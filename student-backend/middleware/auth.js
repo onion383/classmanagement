@@ -6,12 +6,19 @@ const dbManager = require('../dbManager');
 
 // 杜绝硬编码兜底：优先使用环境变量 JWT_SECRET。
 // 若未配置，则从 .jwt-secret 文件读取（无则自动生成并持久化），保证重启后已签发 Token 仍有效。
+// secret 文件必须放在 dataDir（可写、随 userData 持久化）：打包后 __dirname 位于只读 asar 内，
+// 写在那里会失败导致每次重启都重新登录。
 function resolveSecret() {
   if (process.env.JWT_SECRET && process.env.JWT_SECRET.length >= 16) {
     return process.env.JWT_SECRET;
   }
-  const secretFile = path.join(__dirname, '..', '.jwt-secret');
+  const secretFile = path.join(dbManager.dataDir, '.jwt-secret');
+  const legacyFile = path.join(__dirname, '..', '.jwt-secret');
   try {
+    // 兼容旧位置：若旧文件存在且新位置没有，沿用旧密钥并迁移，避免已签发 Token 失效
+    if (!fs.existsSync(secretFile) && fs.existsSync(legacyFile)) {
+      fs.copyFileSync(legacyFile, secretFile);
+    }
     const existing = fs.readFileSync(secretFile, 'utf8').trim();
     if (existing) return existing;
   } catch (_) { /* 文件不存在则生成 */ }
@@ -25,12 +32,15 @@ function resolveSecret() {
 const SECRET = resolveSecret();
 
 // 解析请求中的 Token：优先 Authorization 头，其次 Cookie，最后 URL 查询参数。
+// 查询参数供 <img> / CSS url() 等无法携带请求头的资源请求使用（渲染层受 file:// 跨源限制，
+// Lax Cookie 不会自动带过去），后端仍校验 Token 有效性，不降低鉴权。
 function resolveToken(req) {
   const headerToken = (req.headers.authorization || '').split(' ')[1];
   if (headerToken) return headerToken;
   const cookie = req.headers.cookie || '';
   const match = cookie.match(/(?:^|;\s*)token=([^;]+)/);
   if (match) return decodeURIComponent(match[1]);
+  if (req.query && req.query.token) return String(req.query.token);
   return null;
 }
 

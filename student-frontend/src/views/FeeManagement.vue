@@ -186,6 +186,7 @@ import ImportExcel from '../components/ImportExcel.vue'
 import DeduplicateDialog from '../components/DeduplicateDialog.vue'
 import { useTableCRUD } from '../composables/useTableCRUD.js'
 import { useNotification } from '../composables/useNotification.js'
+import { resourceUrl } from '../utils/apiUrl'
 
 const API_BASE = '/api'
 const DEFAULT_FIELDS = [
@@ -365,8 +366,9 @@ async function saveReceiptImages() {
 
 function getFullUrl(img) {
   if (!img) return ''
-  if (img.startsWith('http')) return img
-  return `${API_BASE}${img}`
+  // 收据存储路径为 /uploads/xxx；resourceUrl 会补完整后端地址（file:// 打包版）并追加 ?token= 通过鉴权。
+  // 兼容历史数据里可能存在的绝对 http 地址（直接透传 + 补 token）。
+  return resourceUrl(img)
 }
 
 function previewImage(img) {

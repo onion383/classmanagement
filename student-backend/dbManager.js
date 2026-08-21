@@ -44,8 +44,18 @@ if (!MASTER_KEY) {
 // 主密钥派生为 AES-256 包裹密钥
 const WRAP_KEY = crypto.createHash('sha256').update(MASTER_KEY).digest();
 
-const dataDir = path.join(__dirname, 'data');
+// 数据目录优先取环境变量（打包后由 Electron 主进程指向 userData），兜底用本目录 data
+const dataDir = process.env.DATA_DIR
+  ? path.resolve(process.env.DATA_DIR)
+  : path.join(__dirname, 'data');
 if (!fs.existsSync(dataDir)) fs.mkdirSync(dataDir, { recursive: true });
+
+// 可写资源目录：上传文件（收据/背景图）、相册缩略图等统一放 dataDir 下，
+// 避免打包后 __dirname 位于只读的 asar 归档内导致写入失败（ENOTDIR/无权限）。
+function ensureDir(p) { fs.mkdirSync(p, { recursive: true }); return p; }
+const uploadsDir = ensureDir(path.join(dataDir, 'uploads'));
+const backgroundDir = ensureDir(path.join(uploadsDir, 'background'));
+const thumbsDir = ensureDir(path.join(dataDir, 'album-thumbs'));
 
 // ---------- 库密钥 包裹/解包 ----------
 // wrapped = base64(iv).base64(tag).base64(ciphertext)
@@ -306,4 +316,9 @@ module.exports = {
   exportBundle,
   restoreBundle,
   registryList,
+  // 可写资源目录（与数据库同层，随 userData 持久化）
+  dataDir,
+  uploadsDir,
+  backgroundDir,
+  thumbsDir,
 };

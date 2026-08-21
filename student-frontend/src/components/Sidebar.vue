@@ -51,6 +51,14 @@
       </router-link>
 
       <router-link
+        to="/album"
+        class="block px-3 py-2 rounded hover:bg-sidebar-hover transition-theme"
+        active-class="bg-sidebar-active"
+      >
+        📷 班级相册
+      </router-link>
+
+      <router-link
         to="/test"
         class="block px-3 py-2 rounded hover:bg-sidebar-hover transition-theme"
         active-class="bg-sidebar-active"

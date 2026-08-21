@@ -28,9 +28,8 @@
 
     <div class="border-t pt-4 mb-4">
       <h3 class="font-semibold mb-2">导出数据库</h3>
-      <p class="text-xs text-text-muted mb-2">一次导出当前库（业务数据 + 应用设置 + 账号）。换机后可用「密码」或「助记词」解包恢复，请至少填写一项。</p>
-      <input v-model="exportPassword" type="password" placeholder="密码" autocomplete="current-password" class="border p-2 w-full mb-2" />
-      <input v-model="exportMnemonic" placeholder="助记词（12字，可选）" class="border p-2 w-full mb-2" />
+      <p class="text-xs text-text-muted mb-2">输入你的登录密码即可导出当前库（业务数据 + 应用设置 + 账号），换机后可用同一密码恢复。</p>
+      <input v-model="exportPassword" type="password" placeholder="登录密码" autocomplete="current-password" class="border p-2 w-full mb-2" />
       <button @click="exportDb" class="bg-primary text-text-inverse px-4 py-2 rounded" :disabled="busyExport">
         {{ busyExport ? '导出中…' : '导出备份' }}
       </button>
@@ -64,7 +63,6 @@ export default {
       oldPassword: '',
       newPassword: '',
       exportPassword: '',
-      exportMnemonic: '',
       busyExport: false,
       dialog: {
         visible: false,
@@ -141,17 +139,13 @@ export default {
     },
     async exportDb() {
       const pwd = this.exportPassword;
-      const mnemonic = this.exportMnemonic;
-      if (!pwd && !mnemonic) {
-        this.showAlert('请至少输入密码或助记词之一，用于保护备份包。');
+      if (!pwd) {
+        this.showAlert('请输入登录密码以导出数据库。');
         return;
       }
       this.busyExport = true;
       try {
-        const params = {};
-        if (pwd) params.password = pwd;
-        if (mnemonic) params.mnemonic = mnemonic;
-        const res = await axios.get('/api/account/export', { params });
+        const res = await axios.get('/api/account/export', { params: { password: pwd } });
         const blob = new Blob([JSON.stringify(res.data, null, 2)], { type: 'application/json' });
         const url = URL.createObjectURL(blob);
         const a = document.createElement('a');

@@ -6,8 +6,10 @@ import axios from 'axios'   // 必须导入
 import './styles/index.css'
 import { useThemeStore } from './stores/theme'
 
-
-
+// 生产模式（file:// 协议）下无 Vite 代理，需指定完整后端地址
+if (import.meta.env.PROD) {
+  axios.defaults.baseURL = 'http://localhost:3000'
+}
 
 // 请求拦截器
 axios.interceptors.request.use(config => {

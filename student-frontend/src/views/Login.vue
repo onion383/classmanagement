@@ -101,14 +101,26 @@
         {{ busy ? '重置中…' : '重置密码' }}
       </button>
     </form>
+
+    <!-- 覆盖恢复确认弹窗 -->
+    <ConfirmDialog
+      v-if="confirmVisible"
+      :visible="confirmVisible"
+      :message="confirmMessage"
+      :show-cancel="true"
+      @confirm="confirmRestore"
+      @cancel="cancelConfirmRestore"
+    />
   </div>
 </template>
 
 <script>
 import axios from 'axios';
 import { useNotification } from '../composables/useNotification.js';
+import ConfirmDialog from '../components/ConfirmDialog.vue';
 
 export default {
+  components: { ConfirmDialog },
   data() {
     return {
       mode: 'login',           // login | register | recovery | recover
@@ -133,6 +145,9 @@ export default {
       showAccounts: false,
       restoreBundle: null,
       restoreFile: '',
+      confirmVisible: false,
+      confirmMessage: '',
+      confirmPayload: null,
     };
   },
   methods: {
@@ -230,12 +245,11 @@ export default {
       };
       reader.readAsText(file);
     },
-    restore() {
+    async restore() {
       const b = this.restoreBundle;
       if (!b) return useNotification().warning('请先选择备份文件');
       if (!this.password && !this.recoverPhrase) return useNotification().warning('请至少输入密码或助记词之一');
-      this.busy = true;
-      axios.post('/api/account/restore-offline', {
+      const payload = {
         data: b.data,
         slug: b.slug,
         username: b.username,
@@ -243,17 +257,54 @@ export default {
         wrappedByMnemonic: b.wrappedByMnemonic,
         password: this.password || undefined,
         mnemonic: this.recoverPhrase || undefined,
-      }).then(res => {
+      };
+      this.busy = true;
+      try {
+        const res = await axios.post('/api/account/restore-offline', payload);
         useNotification().success('恢复成功！账号 ' + (res.data.username || b.username) + ' 已还原，请用其密码登录。');
-        this.username = b.username || res.data.username || '';
-        this.password = '';
-        this.recoverPhrase = '';
-        this.restoreBundle = null;
-        this.restoreFile = '';
-        this.switchMode('login');
-      }).catch(err => {
-        useNotification().error(err.response?.data?.error || '恢复失败');
-      }).finally(() => { this.busy = false; });
+        this.afterRestore(b, res.data.username);
+      } catch (err) {
+        const data = err.response?.data || {};
+        // 本机已存在同一账号，需用户确认后才真正覆盖
+        if (data.needConfirm) {
+          this.confirmMessage = data.message || '本机已存在同名账号，是否确认覆盖？';
+          this.confirmPayload = payload;
+          this.confirmVisible = true;
+          useNotification().info('该账号在本机已存在，请确认后覆盖恢复');
+        } else {
+          useNotification().error(data.error || '恢复失败');
+        }
+      } finally { this.busy = false; }
+    },
+    async confirmRestore() {
+      this.confirmVisible = false;
+      const b = this.restoreBundle;
+      const payload = this.confirmPayload;
+      this.confirmPayload = null;
+      if (!payload) return;
+      this.busy = true;
+      try {
+        payload.confirm = true;
+        const res = await axios.post('/api/account/restore-offline', payload);
+        useNotification().success('已覆盖恢复！账号 ' + (res.data.username || (b ? b.username : '')) + ' 已还原，请用其密码登录。');
+        this.afterRestore(b, res.data.username);
+      } catch (err) {
+        useNotification().error(err.response?.data?.error || '覆盖恢复失败');
+      } finally { this.busy = false; }
+    },
+    cancelConfirmRestore() {
+      this.confirmVisible = false;
+      this.confirmPayload = null;
+      useNotification().info('已取消恢复');
+    },
+    afterRestore(b, restoredUsername) {
+      const name = restoredUsername || (b && b.username) || '';
+      this.username = name;
+      this.password = '';
+      this.recoverPhrase = '';
+      this.restoreBundle = null;
+      this.restoreFile = '';
+      this.switchMode('login');
     },
     recoverPassword() {
       this.busy = true;

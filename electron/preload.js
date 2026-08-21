@@ -25,6 +25,7 @@ const validInvokeChannels = [
   'save-file',
   'screenshot-capture',
   'note-save',
+  'open-folder',
 ]
 
 // 白名单：仅允许以下主进程 -> 渲染进程推送通道
