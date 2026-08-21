@@ -2,25 +2,25 @@
   "appId": "com.example.campus-assistant",
   "productName": "校园助手",
   "directories": {
-    "output": "release",
+    "output": "release4",
     "buildResources": "build"
   },
   "files": [
     "electron/**/*",
     "student-frontend/dist/**/*",
     "student-backend/**/*",
+    "!student-backend/data/**",
+    "!student-backend/uploads/**",
     "package.json"
   ],
-  "extraResources": [
-    {
-      "from": "student-backend/data",
-      "to": "data",
-      "filter": ["**/*"]
-    }
+  "asarUnpack": [
+    "**/student-backend/**",
+    "node_modules/**/*",
+    "**/*.node"
   ],
+  "npmRebuild": false,
   "win": {
-    "target": "nsis",
-    "icon": "student-frontend/public/favicon.svg"
+    "target": "nsis"
   },
   "mac": {
     "target": "dmg",

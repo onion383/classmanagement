@@ -1,7 +1,6 @@
-const { app, BrowserWindow, ipcMain, desktopCapturer, screen, dialog } = require('electron')
+const { app, BrowserWindow, ipcMain, desktopCapturer, screen, dialog, shell } = require('electron')
 const path = require('path')
 const fs = require('fs')
-const { fork } = require('child_process')
 
 let mainWindow
 let widgetWindow
@@ -46,6 +45,10 @@ function createMainWindow() {
       preload: path.join(__dirname, 'preload.js'),
       contextIsolation: true,
       nodeIntegration: false,
+      // 禁用 sandbox：Electron 43 的 sandboxed renderer 存在启动崩溃
+      // （binding.startupData 为 null），导致 preload 无法注入 window.electron。
+      // contextIsolation + nodeIntegration:false 仍保证渲染层隔离。
+      sandbox: false,
       // webSecurity 仅开发模式关闭（用于加载自签名 https 的 Vite 服务）；
       // 生产环境必须保持开启，禁止在打包后关闭网页安全策略。
       webSecurity: !isDev,
@@ -81,6 +84,7 @@ function createWidgetWindow() {
       preload: path.join(__dirname, 'preload.js'),
       contextIsolation: true,
       nodeIntegration: false,
+      sandbox: false,
       webSecurity: !isDev,
     }
   })
@@ -129,24 +133,164 @@ function createWidgetWindow() {
   })
 }
 
-function startBackend() {
-  const backendPath = path.join(__dirname, '../student-backend/app.js')
-  const backendCwd = path.join(__dirname, '../student-backend')
+// 后端日志文件：位于用户数据目录，用于持久化记录后端启动/崩溃原因，方便排查无需再抓终端
+let backendLogStream = null
 
-  // execPath: 'node' 强制使用系统安装的 Node.js，而非 Electron 内置的 Node
+function getBackendLogPath() {
+  return path.join(app.getPath('userData'), 'data', 'backend.log')
+}
+
+function ensureBackendLogStream() {
+  if (backendLogStream) return
+  try {
+    const logPath = getBackendLogPath()
+    fs.mkdirSync(path.dirname(logPath), { recursive: true })
+    backendLogStream = fs.createWriteStream(logPath, { flags: 'a' })
+    fs.appendFileSync(logPath, `\n===== Electron 启动后端 @ ${new Date().toISOString()} =====\n`)
+  } catch (err) {
+    console.error('[main] 无法创建后端日志文件:', err.message)
+  }
+}
+
+function backendLog(text) {
+  ensureBackendLogStream()
+  if (backendLogStream) backendLogStream.write(text)
+  process.stdout.write(`[backend] ${text}`)
+}
+
+let backendRestartCount = 0
+let backendRestartTimer = null
+
+// 项目根目录（含 node_modules 里的 electron 等）
+const appRootDir = path.join(__dirname, '..')
+
+function getBackendPaths() {
+  const backendDir = isDev
+    ? path.join(appRootDir, 'student-backend')
+    : path.join(process.resourcesPath, 'app.asar.unpacked', 'student-backend')
+  const backendPath = path.join(backendDir, 'app.js')
+  return { backendDir, backendPath }
+}
+
+// 开发模式子进程：使用系统 node（child_process.fork）。开发环境本就安装 Node，
+// 用它启动稳定、可打印「服务器已启动」，也避免 Electron 内置 Node 在开发机上
+// 的 crashpad 进程级崩溃。
+// 打包模式子进程：child_process.fork + execPath=electron.exe + ELECTRON_RUN_AS_NODE=1，
+// 以 Electron 内置 Node 的纯 Node 模式运行后端，目标机无需安装 Node.js，
+// 实现免依赖分发（原生模块已通过 @electron/rebuild 针对 Electron ABI 重编译）。
+function compileBackendProcess() {
+  const { backendDir, backendPath } = getBackendPaths()
+  const dataDir = path.join(app.getPath('userData'), 'data')
+  fs.mkdirSync(dataDir, { recursive: true })
+
+  // 统一的输出/退出处理
+  const onData = (chunk) => backendLog(chunk)
+  const onErrData = (chunk) => {
+    ensureBackendLogStream()
+    if (backendLogStream) backendLogStream.write(`[err] ${chunk}`)
+    process.stderr.write(`[backend:err] ${chunk}`)
+  }
+  const onProcessorError = (err) => {
+    const msg = `后端启动失败(error): ${err?.message || err}\n`
+    ensureBackendLogStream()
+    if (backendLogStream) backendLogStream.write(`[fatal] ${msg}`)
+    console.error('[main]', msg)
+  }
+  const onExit = (code, signal) => {
+    const msg = `后端进程退出，码: ${code}, signal: ${signal} @ ${new Date().toISOString()}\n`
+    ensureBackendLogStream()
+    if (backendLogStream) backendLogStream.write(`[exit] ${msg}`)
+    console.log(`[main] ${msg}`)
+  }
+  const onDisconnect = () => {
+    const msg = `后端进程已断开连接 @ ${new Date().toISOString()}\n`
+    ensureBackendLogStream()
+    if (backendLogStream) backendLogStream.write(`[disconnect] ${msg}`)
+    console.log(`[main] ${msg}`)
+  }
+
+  if (isDev) {
+    // 开发模式：托管系统 node。注意：Electron 主进程中 child_process.fork 默认
+    // execPath 是 process.execPath（electron.exe），会导致子进程用 Electron 内置
+    // Node 运行后端并崩溃。必须显式指定系统 node 的可执行文件路径。
+    const { fork, execFileSync } = require('child_process')
+    let systemNode = process.env.NODE_EXEC_PATH
+    if (!systemNode) {
+      try {
+        systemNode = execFileSync('node', ['-p', 'process.execPath'], { encoding: 'utf8' }).trim()
+      } catch (_) {
+        systemNode = 'node'
+      }
+    }
+    const child = fork(backendPath, [], {
+      cwd: backendDir,
+      execPath: systemNode,
+      stdio: ['ignore', 'pipe', 'pipe', 'ipc'],
+      env: {
+        ...process.env,
+        DATA_DIR: dataDir,
+      },
+    })
+    backendProcess = child
+    child.stdout?.on('data', onData)
+    child.stderr?.on('data', onErrData)
+    child.on('error', onProcessorError)
+    child.on('exit', onExit)
+    child.on('disconnect', onDisconnect)
+    return
+  }
+
+  // 打包模式：用 Electron 内置 Node 以「纯 Node 模式」运行后端。
+  // 关键：execPath 指向 process.execPath（electron.exe）+ ELECTRON_RUN_AS_NODE=1，
+  // 让子进程以纯 Node.js 运行时启动，不连接 Electron crashpad，也不初始化界面，
+  // 因此不会出现 utilityProcess 在 Windows 上的「not connected」进程级崩溃。
+  // 原生模块已针对 Electron ABI 重编译（@electron/rebuild），目标机无需安装 Node.js。
+  const { fork } = require('child_process')
   backendProcess = fork(backendPath, [], {
-    cwd: backendCwd,
-    execPath: 'node',
-    silent: false,
+    cwd: backendDir,
+    execPath: process.execPath,
+    stdio: ['ignore', 'pipe', 'pipe', 'ipc'],
+    env: {
+      ...process.env,
+      DATA_DIR: dataDir,
+      ELECTRON_RUN_AS_NODE: '1',
+    },
   })
 
-  backendProcess.on('error', (err) => {
-    console.error('后端启动失败:', err)
-  })
+  backendProcess.stdout?.on('data', onData)
+  backendProcess.stderr?.on('data', onErrData)
+  backendProcess.on('error', onProcessorError)
+  backendProcess.on('exit', onExit)
+  backendProcess.on('disconnect', onDisconnect)
+}
 
-  backendProcess.on('exit', (code) => {
-    console.log(`后端进程退出，码: ${code}`)
-  })
+function startBackend() {
+  // 重启保护：仅当应用仍在运行时才重启，且限制最多 10 次，避免无限崩溃循环刷屏
+  if (backendRestartCount >= 10) {
+    const msg = `后端在启动阶段连续崩溃 ${backendRestartCount} 次，已停止自动重启。请查看日志：${getBackendLogPath()}\n`
+    ensureBackendLogStream()
+    if (backendLogStream) backendLogStream.write(`[fatal] ${msg}`)
+    console.error(`[main] ${msg}`)
+    return
+  }
+
+  ensureBackendLogStream()
+  backendLog(`[main] 正在启动后端 (第 ${backendRestartCount + 1} 次)...\n`)
+
+  compileBackendProcess()
+
+  // 监听退出并自动重启（放弃内核权限控后台后）；
+  // 用一个短延迟把退出与重启解耦，避免同一个 exit 触发多次重启
+  const onExit = () => {
+    clearTimeout(backendRestartTimer)
+    backendRestartTimer = setTimeout(() => {
+      if (app.isQuitting) return
+      backendRestartCount += 1
+      backendProcess = null
+      startBackend()
+    }, 1500)
+  }
+  backendProcess.on('exit', onExit)
 }
 
 app.whenReady().then(() => {
@@ -331,13 +475,28 @@ ipcMain.on('to-main', (event, data) => {
   }
 })
 
+// Electron 43 起，未传 defaultPath 时对话框默认打开「下载」目录，且系统不再记忆上次访问目录
+// （43.0 breaking change）。这里自行记忆上次目录并回填 defaultPath，恢复 31 之前的体验。
+let lastDialogDir = null
+
 // 选择文件夹对话框
 ipcMain.handle('select-folder', async () => {
   if (!mainWindow || mainWindow.isDestroyed()) return { filePaths: [] }
   const result = await dialog.showOpenDialog(mainWindow, {
-    properties: ['openDirectory']
+    properties: ['openDirectory'],
+    defaultPath: lastDialogDir || undefined,
   })
+  if (!result.canceled && result.filePaths.length > 0) {
+    lastDialogDir = result.filePaths[0]
+  }
   return result
+})
+
+// 在文件管理器中打开指定文件夹
+ipcMain.handle('open-folder', async (event, folderPath) => {
+  if (!folderPath) return { error: '路径为空' }
+  shell.openPath(folderPath)
+  return {}
 })
 
 // 选择图片文件对话框（用于背景图片）
@@ -345,12 +504,14 @@ ipcMain.handle('select-image-file', async () => {
   if (!mainWindow || mainWindow.isDestroyed()) return { canceled: true, filePaths: [] }
   const result = await dialog.showOpenDialog(mainWindow, {
     properties: ['openFile'],
+    defaultPath: lastDialogDir || undefined,
     filters: [
       { name: '图片文件', extensions: ['jpg', 'jpeg', 'png', 'gif', 'webp', 'bmp'] },
       { name: '所有文件', extensions: ['*'] }
     ]
   })
   if (!result.canceled && result.filePaths.length > 0) {
+    lastDialogDir = path.dirname(result.filePaths[0])
     const filePath = result.filePaths[0]
     // 检查文件大小（限制 50MB）
     const fileStat = fs.statSync(filePath)
@@ -359,7 +520,8 @@ ipcMain.handle('select-image-file', async () => {
       return { canceled: true, error: '图片大小超过 50MB，请选择更小的图片' }
     }
     // 将文件复制到后端 uploads/background 目录
-    const bgDir = path.join(__dirname, '../student-backend/uploads/background')
+    // 打包后 __dirname 位于只读 asar 内，必须写到 userData/data/uploads/background（与后端 DATA_DIR 一致）
+    const bgDir = path.join(app.getPath('userData'), 'data', 'uploads', 'background')
     if (!fs.existsSync(bgDir)) {
       fs.mkdirSync(bgDir, { recursive: true })
     }
@@ -383,7 +545,7 @@ ipcMain.handle('select-image-file', async () => {
 // 保存背景图片（用于大图片，前端传入 base64）
 ipcMain.handle('save-background-image', async (event, { name, base64 }) => {
   try {
-    const bgDir = path.join(__dirname, '../student-backend/uploads/background')
+    const bgDir = path.join(app.getPath('userData'), 'data', 'uploads', 'background')
     if (!fs.existsSync(bgDir)) {
       fs.mkdirSync(bgDir, { recursive: true })
     }
@@ -413,13 +575,14 @@ ipcMain.handle('save-file', async (event, { defaultName, data }) => {
   const ext = path.extname(defaultName) || ''
   const result = await dialog.showSaveDialog(mainWindow, {
     title: '保存文件',
-    defaultPath: defaultName,
+    defaultPath: lastDialogDir ? path.join(lastDialogDir, defaultName) : defaultName,
     filters: ext ? [{ name: '文件', extensions: [ext.replace('.', '')] }] : undefined
   })
   if (result.canceled || !result.filePath) return { canceled: true }
   try {
     const buffer = Buffer.from(data)
     fs.writeFileSync(result.filePath, buffer)
+    lastDialogDir = path.dirname(result.filePath)
     return { canceled: false, filePath: result.filePath }
   } catch (err) {
     return { canceled: true, error: err.message }
@@ -486,11 +649,23 @@ ipcMain.handle('note-save', async (event, uint8Array, options) => {
   return { success: true, filePath }
 })
 
-app.on('window-all-closed', () => {
+app.isQuitting = false
+
+function shutdownBackend() {
+  app.isQuitting = true
+  clearTimeout(backendRestartTimer)
   if (backendProcess) {
-    backendProcess.kill()
+    try { backendProcess.kill() } catch (_) {}
     backendProcess = null
   }
+  if (backendLogStream) {
+    try { backendLogStream.end() } catch (_) {}
+    backendLogStream = null
+  }
+}
+
+app.on('window-all-closed', () => {
+  shutdownBackend()
   if (process.platform !== 'darwin') {
     app.quit()
   }
@@ -504,8 +679,5 @@ app.on('activate', () => {
 })
 
 app.on('before-quit', () => {
-  if (backendProcess) {
-    backendProcess.kill()
-    backendProcess = null
-  }
+  shutdownBackend()
 })

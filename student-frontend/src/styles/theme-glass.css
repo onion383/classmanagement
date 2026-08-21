@@ -714,6 +714,12 @@
   position: relative;
   z-index: 1;
 }
+/* 覆盖弹窗遮罩：.login-bg > * 的 position: relative 会覆盖 ConfirmDialog 遮罩的 .fixed，
+  使其退化为普通 flex 子项、与登录表单并排。此规则强制遮罩保持 fixed 全屏盖住。 */
+:root[data-theme="glass"] .bg-black\/50 {
+  position: fixed;
+  inset: 0;
+}
 
 /* ========== 表格候选列表（Teleport 到 body，需更实更清晰的毛玻璃） ========== */
 :root[data-theme="glass"] .candidate-popup {

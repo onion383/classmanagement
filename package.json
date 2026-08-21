@@ -7,17 +7,27 @@
     "dev": "cd student-frontend && npm run dev",
     "electron": "electron .",
     "electron:dev": "concurrently --names \"Vite,Electron\" --prefix-colors \"blue,green\" --kill-others \"npm run dev\" \"electron .\"",
-    "build": "cd student-frontend && vite build",
+    "build": "cd student-frontend && npm run build",
     "electron:build": "npm run build && electron-builder",
     "postinstall": "cd student-backend && npm install"
   },
   "dependencies": {
+    "bcryptjs": "^3.0.3",
+    "better-sqlite3-multiple-ciphers": "^13.0.3",
+    "cors": "^2.8.6",
+    "express": "^5.2.1",
+    "ffmpeg-static": "^5.3.0",
+    "jsonwebtoken": "^9.0.3",
     "multer": "^2.1.1",
-    "sortablejs": "^1.15.7"
+    "mysql2": "^3.22.3",
+    "sharp": "^0.35.3",
+    "sortablejs": "^1.15.7",
+    "trash": "^10.1.1"
   },
   "devDependencies": {
+    "@electron/rebuild": "^4.2.0",
     "concurrently": "^10.0.4",
-    "electron": "^31.0.0",
+    "electron": "43.4.1",
     "electron-builder": "^24.13.0",
     "wait-on": "^9.1.0"
   }
