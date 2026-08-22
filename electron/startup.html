@@ -1,0 +1,40 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+  <meta charset="utf-8" />
+  <title>启动中</title>
+  <style>
+    html, body { margin: 0; height: 100%; }
+    body {
+      height: 100vh;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      margin: 0;
+      background: rgba(30, 64, 175, 0.55);
+      color: #fff;
+      font-family: -apple-system, "Segoe UI", "Microsoft YaHei", sans-serif;
+      border-radius: 16px;
+      overflow: hidden;
+      user-select: none;
+    }
+    .wrap { display: flex; align-items: center; gap: 14px; padding: 26px 34px; }
+    .ring { flex: none; }
+    .ring .spin { animation: rotate 1.4s linear infinite; transform-origin: center; }
+    .logo { font-size: 18px; font-weight: 600; letter-spacing: 1px; }
+    .tip { font-size: 13px; opacity: .85; }
+    @keyframes rotate { to { transform: rotate(360deg); } }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <svg class="ring" width="22" height="22" viewBox="0 0 22 22">
+      <circle cx="11" cy="11" r="8" fill="none" stroke="rgba(255,255,255,.25)" stroke-width="3"/>
+      <circle class="spin" cx="11" cy="11" r="8" fill="none" stroke="#fff" stroke-width="3"
+              stroke-dasharray="42" stroke-dashoffset="12" stroke-linecap="round"/>
+    </svg>
+    <span class="logo">校园助手</span>
+    <span class="tip">启动中…</span>
+  </div>
+</body>
+</html>

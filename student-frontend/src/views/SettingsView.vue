@@ -253,7 +253,7 @@ export default {
       bgImageUrl: '',
       bgImageFileName: '',
       presetThemes: [
-        { id: 'base', name: '默认主题' },
+        { id: 'base', name: '彩色色块主题' },
         { id: 'glass', name: '毛玻璃主题' },
         { id: 'minimal', name: '极简主题' },
       ],

@@ -8,7 +8,8 @@ const { db } = require('../db');
 const dbManager = require('../dbManager');
 
 // 服务端缩略图/视频封面生成
-const sharp = require('sharp');
+// 注：sharp 为重的原生库，改为用到时（genThumb 生成缩略图）才 require，避免随 app.js 顶层
+// require(album) 一起在启动阶段加载，拖慢后端就绪。
 const ffmpegPath = (() => { try { return require('ffmpeg-static'); } catch (_) { return ''; } })();
 // 缩略图缓存目录：统一放 DATA_DIR/album-thumbs（与数据库同层，随 userData 持久化）。
 // 打包后 __dirname 位于只读 asar 内，不能把写入目录建立在 __dirname 下。
@@ -70,23 +71,28 @@ function releaseThumbSlot() {
 
 async function genThumb(photoId, filePath, isVideo) {
   const out = path.join(THUMB_DIR, `${photoId}.jpg`);
+  // 用唯一临时文件名落盘再改名：扫描后台生成与前端现场生成可能并发处理同一张照片，
+  // 各写一个临时文件再改名为 {id}.jpg，避免同一路径并发写冲突；对调用方返回路径不变。
+  const tmp = out + '.' + Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
   await acquireThumbSlot();
   try {
     if (isVideo && ffmpegPath) {
       await new Promise((resolve, reject) => {
-        execFile(ffmpegPath, ['-y', '-ss', '0.1', '-i', filePath, '-frames:v', '1', '-vf', 'scale=320:-2', '-q:v', '5', out],
+        execFile(ffmpegPath, ['-y', '-ss', '0.1', '-i', filePath, '-frames:v', '1', '-vf', 'scale=320:-2', '-q:v', '5', tmp],
           err => err ? reject(err) : resolve());
       });
     } else {
+      const sharp = require('sharp') // 懒加载原生库：首次生成缩略图时才加载，启动不背 sharp 初始化成本
       await sharp(filePath)
         .rotate() // 处理竖拍 EXIF 方向
         .resize(320, 320, { fit: 'inside', withoutEnlargement: true })
         .jpeg({ quality: 80 })
-        .toFile(out);
+        .toFile(tmp);
     }
+    await fsp.rename(tmp, out);
     return out;
   } catch (_) {
-    try { await fsp.unlink(out); } catch (_) {}
+    try { await fsp.unlink(tmp); } catch (_) {}
     return '';
   } finally {
     releaseThumbSlot();
@@ -326,28 +332,25 @@ router.get('/photo/:photoId/file', async (req, res) => {
 });
 
 // GET /api/album/photo/:photoId/thumb 返回网格用的缩略图 / 视频封面（320px JPEG）
-// 有缩略图则返回缓存小图（长缓存）；没有则图片退回源文件、视频返回 404（前端走占位）。
+// 有缩略图则返回缓存小图（长缓存）。
+// 没有缩略图（全量扫描进行中、缩略图尚未后台生成完）时：现场用 genThumb 生成一张
+// 320px 小图并写库缓存后再返回，绝不回退 pipe 源文件原图。否则网格在扫描中请求的
+// 会是一张几 MB 的原图，几十张并发流进前端渲染进程，扫描期间内存会瞬间飙高。
+// genThumb 内部自带并发信号量，现场生成不会同时打爆 CPU。生成失败返回 404，前端走占位。
 router.get('/photo/:photoId/thumb', async (req, res) => {
   try {
     const photo = db.prepare('SELECT * FROM album_photos WHERE id = ?').get(Number(req.params.photoId));
     if (!photo) return res.status(404).json({ error: '照片不存在' });
-    const tp = thumbOf(photo);
-    if (tp) {
-      res.setHeader('Content-Type', 'image/jpeg');
-      res.setHeader('Cache-Control', 'public, max-age=86400');
-      return fs.createReadStream(tp).pipe(res);
+    let tp = thumbOf(photo);
+    if (!tp) {
+      const isVideo = mediaTypeOf(photo.file_name) === 'video';
+      tp = await genThumb(photo.id, photo.file_path, isVideo);
+      if (tp) db.prepare('UPDATE album_photos SET thumb_path = ? WHERE id = ?').run(tp, photo.id);
     }
-    // 无缩略图：图片返回原图；视频无法当图片显示，返回 404 让前端兜底
-    if (mediaTypeOf(photo.file_name) === 'video') return res.status(404).end();
-    let stat;
-    try {
-      stat = await fsp.stat(photo.file_path);
-    } catch (_) {
-      return res.status(404).json({ error: '源文件已不存在' });
-    }
-    res.setHeader('Content-Type', contentTypeOf(photo.file_name));
+    if (!tp) return res.status(404).json({ error: '缩略图生成失败' });
+    res.setHeader('Content-Type', 'image/jpeg');
     res.setHeader('Cache-Control', 'public, max-age=86400');
-    fs.createReadStream(photo.file_path).pipe(res);
+    return fs.createReadStream(tp).pipe(res);
   } catch (err) {
     res.status(500).json({ error: err.message });
   }

@@ -9,14 +9,18 @@ const BG_IMAGE_KEY = 'app-bg-image'
 const BG_MASK_KEY = 'app-bg-mask-opacity'
 const GLASS_KEY = 'app-glass-opacity'
 
+// 毛玻璃主题的内置默认背景图：放于 public/ 下，随前端一起打包，属前端静态资源，
+// 不经 resourceUrl/鉴权直接加载。用户选择本地图片后由 backgroundImage 覆盖它；清除则回此图。
+const DEFAULT_GLASS_BG = `${import.meta.env.BASE_URL}glass-bg.jpg`
+
 const PRESETS = [
-  { id: 'base', name: '默认主题', editable: false },
+  { id: 'base', name: '彩色色块主题', editable: false },
   { id: 'glass', name: '毛玻璃主题', editable: true },
   { id: 'minimal', name: '极简主题', editable: true },
 ]
 
 export const useThemeStore = defineStore('theme', () => {
-  const currentTheme = ref(localStorage.getItem(THEME_KEY) || 'base')
+  const currentTheme = ref(localStorage.getItem(THEME_KEY) || 'glass')
   const customColors = ref(JSON.parse(localStorage.getItem(CUSTOM_KEY) || '{}'))
   const customThemes = ref(JSON.parse(localStorage.getItem(CUSTOM_THEMES_KEY) || '[]'))
   const backgroundImage = ref(localStorage.getItem(BG_IMAGE_KEY) || '')
@@ -40,9 +44,14 @@ export const useThemeStore = defineStore('theme', () => {
       document.documentElement.style.setProperty(`--${key}`, value)
     })
     // 应用背景图（使用单引号避免 base64 data URL 中的双引号冲突）
-    // resourceUrl 会补完整后端地址并追加 ?token=，保证 file:// 打包版下背景图能通过鉴权加载
-    if (backgroundImage.value) {
-      document.documentElement.style.setProperty('--bg-image', `url('${resourceUrl(backgroundImage.value)}')`)
+    // resourceUrl 会补完整后端地址并追加 ?token=，保证 file:// 打包版下背景图能通过鉴权加载。
+    // 毛玻璃主题无自定义图时使用内置默认背景（前端静态资源，无需鉴权，直接引用）；
+    // 自定义图仍走 resourceUrl。其余主题保持无背景。
+    const isCustomBg = Boolean(backgroundImage.value)
+    const bg = backgroundImage.value || (currentTheme.value === 'glass' ? DEFAULT_GLASS_BG : '')
+    if (bg) {
+      const bgUrl = isCustomBg ? resourceUrl(bg) : bg
+      document.documentElement.style.setProperty('--bg-image', `url('${bgUrl}')`)
       document.documentElement.classList.add('has-bg-image')
     } else {
       document.documentElement.style.removeProperty('--bg-image')
@@ -83,7 +92,7 @@ export const useThemeStore = defineStore('theme', () => {
     customThemes.value = customThemes.value.filter(t => t.id !== id)
     localStorage.setItem(CUSTOM_THEMES_KEY, JSON.stringify(customThemes.value))
     if (currentTheme.value === id) {
-      setTheme('base')
+      setTheme('glass')
       resetCustomColors()
     }
   }

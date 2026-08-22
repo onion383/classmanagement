@@ -62,7 +62,7 @@ const { currentTheme, customColors } = storeToRefs(themeStore)
 const { setTheme, setCustomColor, resetCustomColors } = themeStore
 
 const themes = [
-  { key: 'base', label: '默认', preview: '#22c55e' },
+  { key: 'base', label: '彩色', preview: '#22c55e' },
   { key: 'glass', label: '毛玻璃', preview: 'linear-gradient(135deg, #e0f2fe, #f0f9ff)' },
   { key: 'minimal', label: '极简', preview: '#ffffff' },
 ]

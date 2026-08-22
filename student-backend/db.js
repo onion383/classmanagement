@@ -66,13 +66,10 @@ function renumber(tableName) {
   rows.forEach((r, i) => stmt.run(i + 1, r.id));
 }
 
-// 启动自检：初始化默认库并登记 index（幂等）
-try {
-  dbManager.initDefault();
-} catch (err) {
-  // 允许延迟到首次真正访问数据库时再初始化；这里仅打印提示，不阻断启动
-  console.warn('[db] 默认库初始化待定：', err.message);
-}
+// 启动最小化：不再在 require 时预热默认库（打开加密库 + initSchema 全量建表/建索引）。
+// 改由首次真正访问时懒初始化（见 dbManager 的 defaultDb / getConn 懒兜底），
+// 让后端更快吐出就绪信号；首次碰库时的那点建库耗时顺延到该请求上，功能与结果不变。
+// 若需要立即就绪也可在此手动 initDefault()，但会拖慢启动，属可选预热。
 
 module.exports = {
   db,
