@@ -1,7 +1,7 @@
 <template>
   <div class="widget-wrapper" :class="{ 'with-menu': state === 'menu' }">
-    <!-- 图标始终显示（工具状态时隐藏） -->
-    <div v-if="state !== 'tool'" class="fab" @mousedown="onFabMouseDown">
+    <!-- 图标始终显示（工具状态时隐藏）。左键切换菜单，右键呼出「本次退出」等菜单 -->
+    <div v-if="state !== 'tool'" class="fab" @mousedown="onFabMouseDown" @contextmenu.prevent="onFabContextMenu">
       🧰
     </div>
 
@@ -113,6 +113,8 @@ function onDragMouseDown(e) {
 
 function onFabMouseDown(e) {
   e.preventDefault()
+  // 仅左键触发拖拽/菜单切换；右键只走 contextmenu 的「本次退出」原生菜单，不进工具箱菜单
+  if (e.button !== 0) return
   let hasMoved = false
   const startScreenX = e.screenX
   const startScreenY = e.screenY
@@ -140,6 +142,11 @@ function onFabMouseDown(e) {
   document.addEventListener('mouseup', onMouseUp)
 }
 
+// 右键浮窗图标：呼出原生右键菜单（当前含「本次退出」）
+function onFabContextMenu() {
+  window.electron.send('widget-context-menu')
+}
+
 // 点击菜单外部区域自动收起菜单
 function onDocMouseDown(e) {
   if (state.value !== 'menu') return
@@ -155,9 +162,15 @@ let blurHandler = null
 async function checkToolboxEnabled() {
   try {
     const res = await axios.get('/api/widget-settings')
-    if (res.data.success) {
-      window.electron.send('widget-set-visible', res.data.data.toolboxEnabled)
+    if (!res.data.success) return
+    // 持久「是否启用工具箱」作为本次会话的默认值，注入一次后即由会话开关独立控制
+    const persistent = res.data.data.toolboxEnabled
+    let session = await window.electron.invoke('get-session-widget-visible')
+    if (session === null) {
+      session = persistent
+      window.electron.send('widget-set-session-visible', session)
     }
+    window.electron.send('widget-set-visible', session)
   } catch (_) {
     // 读取失败则保持默认可见
   }

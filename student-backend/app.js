@@ -15,6 +15,7 @@ const seatsRouter = require('./routes/seats');
 const widgetSettingsRouter = require('./routes/widgetSettings');
 const leavesRouter = require('./routes/leaves');
 const albumRouter = require('./routes/album');
+const groupManageRouter = require('./routes/groupManage');
 
 const app = express();
 const PORT = 3000;
@@ -79,6 +80,7 @@ app.use('/api/schedule', auth(['teacher']), scheduleRouter);
 app.use('/api/seats', auth(['teacher']), seatsRouter);
 app.use('/api/leaves', auth(['teacher']), leavesRouter);
 app.use('/api/album', auth(['teacher']), albumRouter);
+app.use('/api/group-manage', auth(['teacher']), groupManageRouter);
 app.use('/api/widget-settings', auth(['teacher']), widgetSettingsRouter);
 
 // 托管前端静态文件（生产模式用）

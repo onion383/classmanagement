@@ -131,6 +131,37 @@ function initSchema(conn) {
       thumb_path TEXT DEFAULT '',
       UNIQUE (album_id, file_path)
     );
+
+    -- 分组管理：分组维度（宿舍管理/学习小组…，设置维度级：组长称呼/每组人数/小组组数）
+    CREATE TABLE IF NOT EXISTS group_dimensions (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      name TEXT NOT NULL,
+      leader_title TEXT DEFAULT '',
+      members_per_group INTEGER DEFAULT 0,
+      group_count INTEGER DEFAULT 0,
+      is_default INTEGER DEFAULT 0,
+      male_group_count INTEGER DEFAULT 0,
+      female_group_count INTEGER DEFAULT 0,
+      sort_order INTEGER DEFAULT 0
+    );
+
+    -- 分组管理：某个维度下的组（小组名字，如宿舍号 302/303；gender：0=男生 1=女生）
+    CREATE TABLE IF NOT EXISTS groups (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      dimension_id INTEGER NOT NULL,
+      name TEXT NOT NULL,
+      gender INTEGER DEFAULT 0,
+      sort_order INTEGER DEFAULT 0
+    );
+
+    -- 分组管理：组内成员（成员 + 备注）
+    CREATE TABLE IF NOT EXISTS group_members (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      group_id INTEGER NOT NULL,
+      member_name TEXT DEFAULT '',
+      remark TEXT DEFAULT '',
+      sort_order INTEGER DEFAULT 0
+    );
   `);
 
   // 存量库迁移：为相册照片表补充 thumb_path 列
@@ -138,6 +169,33 @@ function initSchema(conn) {
     const photoCols = conn.prepare('PRAGMA table_info(album_photos)').all().map(c => c.name);
     if (!photoCols.includes('thumb_path')) {
       conn.exec(`ALTER TABLE album_photos ADD COLUMN thumb_path TEXT DEFAULT ''`);
+    }
+  }
+  // 存量库迁移：为分组维度表补充 group_count（小组组数）列
+  {
+    const dimCols = conn.prepare('PRAGMA table_info(group_dimensions)').all().map(c => c.name);
+    if (!dimCols.includes('group_count')) {
+      conn.exec(`ALTER TABLE group_dimensions ADD COLUMN group_count INTEGER DEFAULT 0`);
+    }
+  }
+  // 存量库迁移：为分组维度表补充 内置标记 + 男/女生宿舍数列
+  {
+    const dimCols = conn.prepare('PRAGMA table_info(group_dimensions)').all().map(c => c.name);
+    if (!dimCols.includes('is_default')) {
+      conn.exec(`ALTER TABLE group_dimensions ADD COLUMN is_default INTEGER DEFAULT 0`);
+    }
+    if (!dimCols.includes('male_group_count')) {
+      conn.exec(`ALTER TABLE group_dimensions ADD COLUMN male_group_count INTEGER DEFAULT 0`);
+    }
+    if (!dimCols.includes('female_group_count')) {
+      conn.exec(`ALTER TABLE group_dimensions ADD COLUMN female_group_count INTEGER DEFAULT 0`);
+    }
+  }
+  // 存量库迁移：为 groups 表补充 gender 列（0=男生 1=女生）
+  {
+    const groupCols = conn.prepare('PRAGMA table_info(groups)').all().map(c => c.name);
+    if (!groupCols.includes('gender')) {
+      conn.exec(`ALTER TABLE groups ADD COLUMN gender INTEGER DEFAULT 0`);
     }
   }
   // 优化：相册照片按 (album_id, mtime) 排序展示，建索引避免大相册全表扫+排序（幂等）

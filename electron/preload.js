@@ -13,6 +13,8 @@ const validSendChannels = [
   'widget-restore',
   'widget-set-ignore-mouse',
   'widget-set-visible',
+  'widget-set-session-visible',
+  'widget-context-menu',
   'to-main',
   'to-widget',
 ]
@@ -26,6 +28,7 @@ const validInvokeChannels = [
   'screenshot-capture',
   'note-save',
   'open-folder',
+  'get-session-widget-visible',
 ]
 
 // 白名单：仅允许以下主进程 -> 渲染进程推送通道
