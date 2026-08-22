@@ -1,12 +1,35 @@
-const { app, BrowserWindow, ipcMain, desktopCapturer, screen, dialog, shell } = require('electron')
+const { app, BrowserWindow, ipcMain, desktopCapturer, screen, dialog, shell, protocol } = require('electron')
 const path = require('path')
 const fs = require('fs')
+const { Readable } = require('stream')
 
 let mainWindow
 let widgetWindow
+let startupWindow
 let backendProcess
 
 const isDev = !app.isPackaged
+
+// 单实例锁：防止手快点多次图标导致同时跑出多个应用实例。
+// 第一个实例拿到锁；后续实例 requestSingleInstanceLock 返回 false，直接退出，
+// 并把用户注意力拉回到已存在的主窗口。
+const gotSingleInstanceLock = app.requestSingleInstanceLock()
+
+// 用户又尝试启动一次（重复点击图标/快捷键）时，唤起已存在的主窗口而不是新开
+app.on('second-instance', () => {
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    if (mainWindow.isMinimized()) mainWindow.restore()
+    mainWindow.show()
+    mainWindow.focus()
+  }
+})
+
+// 打包模式用自定义 app:// 安全协议加载前端，避免 file:// 的「不透明 origin」导致
+// localStorage 仅会话内生效、每次重启即清空（表现：重新登录 + 设置还原）。
+// 标准+安全+supportFetchAPI 使其成为真实持久化的 origin。
+protocol.registerSchemesAsPrivileged([
+  { scheme: 'app', privileges: { standard: true, secure: true, supportFetchAPI: true, corsEnabled: true, stream: true } }
+])
 
 // 开发模式：忽略自签名 HTTPS 证书错误
 app.on('certificate-error', (event, webContents, url, error, certificate, callback) => {
@@ -65,7 +88,7 @@ function createMainWindow() {
     loadUrlWithRetry(mainWindow, 'https://127.0.0.1:5173/')
     mainWindow.webContents.openDevTools()
   } else {
-    mainWindow.loadFile(path.join(__dirname, '../student-frontend/dist/index.html'))
+    mainWindow.loadURL('app://local/index.html')
   }
 
   mainWindow.on('closed', () => {
@@ -109,7 +132,7 @@ function createWidgetWindow() {
   if (isDev) {
     loadUrlWithRetry(widgetWindow, 'https://127.0.0.1:5173/widget.html')
   } else {
-    widgetWindow.loadFile(path.join(__dirname, '../student-frontend/dist/widget.html'))
+    widgetWindow.loadURL('app://local/widget.html')
   }
 
   widgetWindow.on('blur', () => {
@@ -173,6 +196,7 @@ let backendRestartTimer = null
 // 窗口创建由后端就绪信号触发（不再写死延迟）；以下为就绪检测状态
 let windowsCreated = false
 let backendReadyFallbackTimer = null
+let startupShownTimer = null
 let readyBuffer = ''
 
 // 项目根目录（含 node_modules 里的 electron 等）
@@ -310,12 +334,98 @@ function startBackend() {
   backendProcess.on('exit', onExit)
 }
 
+// 打包模式静态资源 MIME 表
+const MIME = {
+  '.html': 'text/html; charset=utf-8',
+  '.js': 'text/javascript; charset=utf-8',
+  '.mjs': 'text/javascript; charset=utf-8',
+  '.css': 'text/css; charset=utf-8',
+  '.json': 'application/json; charset=utf-8',
+  '.map': 'application/json; charset=utf-8',
+  '.png': 'image/png',
+  '.jpg': 'image/jpeg',
+  '.jpeg': 'image/jpeg',
+  '.gif': 'image/gif',
+  '.svg': 'image/svg+xml',
+  '.webp': 'image/webp',
+  '.ico': 'image/x-icon',
+  '.woff': 'font/woff',
+  '.woff2': 'font/woff2',
+  '.ttf': 'font/ttf',
+  '.otf': 'font/otf',
+  '.eot': 'application/vnd.ms-fontobject',
+  '.wasm': 'application/wasm',
+}
+
+// 注册 app:// 协议：从打包产物目录安全地提供静态文件（支持 asar 内 fs 流式读取）。
+function setupAppProtocol() {
+  if (isDev) return
+  const distDir = path.join(__dirname, '../student-frontend/dist')
+  const root = path.normalize(distDir)
+  protocol.handle('app', (req) => {
+    try {
+      const url = new URL(req.url)
+      let p = decodeURIComponent(url.pathname)
+      if (p === '/' || p === '') p = '/index.html'
+      // 防目录穿越
+      const file = path.normalize(path.join(root, p))
+      if (file !== root && !file.startsWith(root + path.sep)) {
+        return new Response('Forbidden', { status: 403 })
+      }
+      // 目录或缺失：SPA 路由回退 index.html
+      if (!fs.existsSync(file) || fs.statSync(file).isDirectory()) {
+        return new Response(Readable.toWeb(fs.createReadStream(path.join(root, 'index.html'))), {
+          headers: { 'content-type': 'text/html; charset=utf-8' },
+        })
+      }
+      const ct = MIME[path.extname(file).toLowerCase()] || 'application/octet-stream'
+      return new Response(Readable.toWeb(fs.createReadStream(file)), { headers: { 'content-type': ct } })
+    } catch (_) {
+      return new Response('Not Found', { status: 404 })
+    }
+  })
+}
+
+// 启动壳：在后端起好、主窗口就绪前先弹一个轻量「启动中…」窗，让用户立刻有响应。
+// 独立于前端产物，纯静态启动页，开发/打包都用 loadFile 加载本地 html，无框架无依赖。
+function createStartupWindow() {
+  startupWindow = new BrowserWindow({
+    width: 280,
+    height: 90,
+    frame: false,
+    transparent: true,
+    resizable: false,
+    movable: true,
+    minimizable: false,
+    maximizable: false,
+    fullscreenable: false,
+    alwaysOnTop: false,
+    skipTaskbar: true,
+    hasShadow: false,
+    backgroundColor: '#00000000',
+    webPreferences: {
+      contextIsolation: true,
+      nodeIntegration: false,
+      sandbox: false,
+      backgroundThrottling: true,
+      spellcheck: false,
+      devTools: isDev,
+    }
+  })
+  startupWindow.center()
+  startupWindow.loadFile(path.join(__dirname, 'startup.html'))
+  startupWindow.on('closed', () => { startupWindow = null })
+}
+
 // 先建主窗口，等其页面加载完毕后再错峰建 widget（避免启动瞬间两个渲染进程并行抢占资源）
 function openMainThenWidget() {
   createMainWindow()
   mainWindow?.webContents.once('did-finish-load', () => {
     setTimeout(() => { if (!widgetWindow || widgetWindow.isDestroyed()) createWidgetWindow() }, 300)
   })
+  // 主窗口已接上，回收启动壳
+  if (startupWindow && !startupWindow.isDestroyed()) startupWindow.close()
+  startupWindow = null
 }
 
 // 后端就绪检测：后端 app.listen 回调会打印「服务器已启动」，作为建窗信号。
@@ -328,10 +438,23 @@ function detectBackendReady(chunk) {
   readyBuffer = ''
   windowsCreated = true
   clearTimeout(backendReadyFallbackTimer)
+  clearTimeout(startupShownTimer)
   openMainThenWidget()
 }
 
 app.whenReady().then(() => {
+  // 未拿到单实例锁：说明已有另一个实例在运行，本实例直接退出
+  if (!gotSingleInstanceLock) {
+    app.quit()
+    return
+  }
+
+  setupAppProtocol()
+  // 启动壳改为「慢启动保护」：1.5s 内后端仍未就绪（说明机器慢）才弹「启动中…」，
+  // 否则完全不显示，避免快启动下壳一闪而过造成的闪屏。
+  startupShownTimer = setTimeout(() => {
+    if (!windowsCreated) createStartupWindow()
+  }, 1500)
   startBackend()
 
   // 不再写死固定延迟：后端一旦就绪就建主窗口。
@@ -703,6 +826,9 @@ function shutdownBackend() {
     try { backendLogStream.end() } catch (_) {}
     backendLogStream = null
   }
+  // 退出时若启动壳还开着，一并回收，避免残留
+  if (startupWindow && !startupWindow.isDestroyed()) startupWindow.destroy()
+  startupWindow = null
 }
 
 app.on('window-all-closed', () => {
