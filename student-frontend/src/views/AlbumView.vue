@@ -71,8 +71,9 @@
     </div>
 
     <!-- 添加相册弹窗 -->
+    <Transition name="dialog">
     <div v-if="showAdd" class="fixed inset-0 bg-black/50 flex items-center justify-center z-[10003]" @click.self="showAdd = false">
-      <div class="bg-surface p-6 rounded-xl w-96 shadow-card">
+      <div class="bg-surface p-6 rounded-xl w-96 shadow-card dialog-card">
         <h3 class="text-lg font-bold text-text mb-4">添加文件夹</h3>
         <label class="block text-sm text-text-secondary mb-1">相册名称</label>
         <input v-model="newName" placeholder="如：文艺晚会" class="border border-border bg-surface text-text px-3 py-2 rounded w-full mb-4" />
@@ -90,6 +91,7 @@
         </div>
       </div>
     </div>
+    </Transition>
 
     <!-- 管理弹窗（相册管理 + 任务管理） -->
     <Transition name="dialog">
@@ -267,6 +269,7 @@ import { useNotification } from '../composables/useNotification.js'
 import VideoThumb from '../components/VideoThumb.vue'
 import Sortable from 'sortablejs'
 import { resourceUrl } from '../utils/apiUrl'
+import '../styles/dialog-transition.css'
 
 const albums = ref([])
 const activeAlbumId = ref(null)

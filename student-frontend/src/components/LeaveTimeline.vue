@@ -106,14 +106,14 @@ export default {
 <style scoped>
 .timeline {
   position: relative;
-  padding-left: 20px;
+  padding-left: 15px;
   max-height: 420px;
   overflow-y: auto;
 }
 .timeline::before {
   content: '';
   position: absolute;
-  left: 6px;
+  left: 21px;
   top: 6px;
   bottom: 6px;
   width: 2px;
@@ -122,26 +122,29 @@ export default {
 }
 .timeline-row {
   position: relative;
+  display: flex;
+  align-items: center;
+  gap: 12px;
   padding: 0 0 18px;
 }
 .timeline-row:last-child {
   padding-bottom: 4px;
 }
 .timeline-marker {
-  position: absolute;
-  left: -20px;
-  top: 4px;
+  flex-shrink: 0;
   width: 14px;
   height: 14px;
   border-radius: 50%;
-  border: 3px solid #fff;
+  border: 3px solid var(--color-surface, #ffffff);
   box-shadow: 0 0 0 2px currentColor;
 }
 .marker-apply { color: var(--color-primary, #3b82f6); background: var(--color-primary, #3b82f6); }
 .marker-return { color: #16a34a; background: #16a34a; }
 .marker-leave { color: #dc2626; background: #dc2626; }
 .timeline-item {
-  background: rgba(255, 255, 255, 0.5);
+  flex: 1;
+  min-width: 0;
+  background: var(--color-surface-hover, rgba(255, 255, 255, 0.5));
   border: 1px solid var(--color-border, rgba(0, 0, 0, 0.08));
   border-radius: 10px;
   padding: 8px 12px;

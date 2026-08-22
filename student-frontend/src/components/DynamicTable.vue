@@ -259,7 +259,9 @@ export default {
     },
     rows: {
       handler(newVal) {
-        this.selectedRowKeys = this.selectedRowKeys.filter(key => newVal.some(r => r._rowKey === key));
+        // 先构建行键集合再过滤，避免选中项多 + 行数大时的 O(n×m) 逐条 some
+        const keys = new Set(newVal.map(r => r._rowKey));
+        this.selectedRowKeys = this.selectedRowKeys.filter(key => keys.has(key));
       },
       immediate: true,
     },

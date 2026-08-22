@@ -140,6 +140,12 @@ function initSchema(conn) {
       conn.exec(`ALTER TABLE album_photos ADD COLUMN thumb_path TEXT DEFAULT ''`);
     }
   }
+  // 优化：相册照片按 (album_id, mtime) 排序展示，建索引避免大相册全表扫+排序（幂等）
+  conn.exec(`CREATE INDEX IF NOT EXISTS idx_album_photos_album_mtime ON album_photos (album_id, mtime DESC);`);
+  // 优化：请假按学生+状态过滤（看板统计/时段冲突校验）
+  conn.exec(`CREATE INDEX IF NOT EXISTS idx_leave_student_status ON leave_records (student_id, 状态);`);
+  // 优化：收支按时间排序展示
+  conn.exec(`CREATE INDEX IF NOT EXISTS idx_fee_time ON fee_records (收支时间);`);
   // 存量库迁移：为相册表补充 sort_order 列
   {
     const albumCols = conn.prepare('PRAGMA table_info(albums)').all().map(c => c.name);

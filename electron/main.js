@@ -52,6 +52,12 @@ function createMainWindow() {
       // webSecurity 仅开发模式关闭（用于加载自签名 https 的 Vite 服务）；
       // 生产环境必须保持开启，禁止在打包后关闭网页安全策略。
       webSecurity: !isDev,
+      // 窗口隐藏/最小化时自动节流渲染进程定时器与 rAF，降低后台内存与 CPU 占用
+      backgroundThrottling: true,
+      // 关闭拼写检查，节省渲染进程内存
+      spellcheck: false,
+      // 生产模式关闭 DevTools，进一步缩小暴露面与内存开销
+      devTools: isDev,
     }
   })
 
@@ -86,6 +92,9 @@ function createWidgetWindow() {
       nodeIntegration: false,
       sandbox: false,
       webSecurity: !isDev,
+      backgroundThrottling: true,
+      spellcheck: false,
+      devTools: isDev,
     }
   })
 
@@ -161,6 +170,11 @@ function backendLog(text) {
 let backendRestartCount = 0
 let backendRestartTimer = null
 
+// 窗口创建由后端就绪信号触发（不再写死延迟）；以下为就绪检测状态
+let windowsCreated = false
+let backendReadyFallbackTimer = null
+let readyBuffer = ''
+
 // 项目根目录（含 node_modules 里的 electron 等）
 const appRootDir = path.join(__dirname, '..')
 
@@ -184,7 +198,10 @@ function compileBackendProcess() {
   fs.mkdirSync(dataDir, { recursive: true })
 
   // 统一的输出/退出处理
-  const onData = (chunk) => backendLog(chunk)
+  const onData = (chunk) => {
+    backendLog(chunk)
+    detectBackendReady(chunk)
+  }
   const onErrData = (chunk) => {
     ensureBackendLogStream()
     if (backendLogStream) backendLogStream.write(`[err] ${chunk}`)
@@ -293,14 +310,35 @@ function startBackend() {
   backendProcess.on('exit', onExit)
 }
 
+// 先建主窗口，等其页面加载完毕后再错峰建 widget（避免启动瞬间两个渲染进程并行抢占资源）
+function openMainThenWidget() {
+  createMainWindow()
+  mainWindow?.webContents.once('did-finish-load', () => {
+    setTimeout(() => { if (!widgetWindow || widgetWindow.isDestroyed()) createWidgetWindow() }, 300)
+  })
+}
+
+// 后端就绪检测：后端 app.listen 回调会打印「服务器已启动」，作为建窗信号。
+// stdout 可能被分片，这里做滚动缓冲 + 子串匹配，触发后只建一次窗。
+function detectBackendReady(chunk) {
+  if (windowsCreated) return
+  readyBuffer += String(chunk)
+  if (readyBuffer.length > 4096) readyBuffer = readyBuffer.slice(-4096)
+  if (!/服务器已启动|listening|server started/i.test(readyBuffer)) return
+  readyBuffer = ''
+  windowsCreated = true
+  clearTimeout(backendReadyFallbackTimer)
+  openMainThenWidget()
+}
+
 app.whenReady().then(() => {
   startBackend()
 
-  // 等待后端启动后再创建窗口（简单延迟）
-  setTimeout(() => {
-    createMainWindow()
-    createWidgetWindow()
-  }, 1500)
+  // 不再写死固定延迟：后端一旦就绪就建主窗口。
+  // 兜底：若就绪信号因异常缺失（如日志被吞），预留超时仍建窗，避免卡在无窗口状态。
+  backendReadyFallbackTimer = setTimeout(() => {
+    if (!windowsCreated) { windowsCreated = true; openMainThenWidget() }
+  }, 20000)
 })
 
 // 调整小组件窗口大小（带边界保护，防止超出屏幕）
@@ -623,7 +661,10 @@ ipcMain.handle('screenshot-capture', async (event, options) => {
     const filePath = path.join(saveDir, `screenshot_${timestamp}.png`)
     fs.writeFileSync(filePath, image)
 
-    const dataUrl = `data:image/png;base64,${image.toString('base64')}`
+    // dataUrl 仅按需生成：整屏 PNG base64 在主进程/IPC/渲染进程各持一份，
+    // 内存开销大。默认生成以兼容旧调用；调用方（Screenshot.vue）不需要时可关闭。
+    const withDataUrl = options?.withDataUrl !== false
+    const dataUrl = withDataUrl ? `data:image/png;base64,${image.toString('base64')}` : ''
     return { success: true, filePath, dataUrl }
   } finally {
     // 恢复 widget 窗口透明度

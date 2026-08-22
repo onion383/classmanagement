@@ -1,28 +1,17 @@
 import { createRouter, createWebHistory, createWebHashHistory } from 'vue-router'
-import ClassroomView from '../views/ClassroomView.vue'
-import FeeManagement from '../views/FeeManagement.vue'
-import Login from '../views/Login.vue'
-import SettingsView from '../views/SettingsView.vue'
-import ScheduleView from '../views/ScheduleView.vue'
-import SeatView from '../views/SeatView.vue';
-import LeaveManagement from '../views/LeaveManagement.vue';
-import WidgetSettingsView from '../views/WidgetSettingsView.vue';
-import TestView from '../views/TestView.vue';
-import AlbumView from '../views/AlbumView.vue';
-
 
 const routes = [
-  { path: '/', name: 'classroom', component: ClassroomView },
-  { path: '/fee', name: 'fee', component: FeeManagement },
-  { path: '/login', name: 'login', component: Login },
-  { path: '/settings', name: 'settings', component: SettingsView, meta: { requiresAuth: true } },
+  { path: '/', name: 'classroom', component: () => import('../views/ClassroomView.vue') },
+  { path: '/fee', name: 'fee', component: () => import('../views/FeeManagement.vue') },
+  { path: '/login', name: 'login', component: () => import('../views/Login.vue') },
+  { path: '/settings', name: 'settings', component: () => import('../views/SettingsView.vue'), meta: { requiresAuth: true } },
   { path: '/account', redirect: '/settings' },
-  { path: '/schedule', name: 'schedule', component: ScheduleView, meta: { requiresAuth: true } },
-  { path: '/seats',name: 'SeatView',component: SeatView },
-  { path: '/leaves', name: 'leaves', component: LeaveManagement, meta: { requiresAuth: true } },
-  { path: '/widget-settings', name: 'widgetSettings', component: WidgetSettingsView, meta: { requiresAuth: true } },
-  { path: '/album', name: 'album', component: AlbumView, meta: { requiresAuth: true } },
-  { path: '/test', name: 'test', component: TestView },
+  { path: '/schedule', name: 'schedule', component: () => import('../views/ScheduleView.vue'), meta: { requiresAuth: true } },
+  { path: '/seats', name: 'SeatView', component: () => import('../views/SeatView.vue') },
+  { path: '/leaves', name: 'leaves', component: () => import('../views/LeaveManagement.vue'), meta: { requiresAuth: true } },
+  { path: '/widget-settings', name: 'widgetSettings', component: () => import('../views/WidgetSettingsView.vue'), meta: { requiresAuth: true } },
+  { path: '/album', name: 'album', component: () => import('../views/AlbumView.vue'), meta: { requiresAuth: true } },
+  { path: '/test', name: 'test', component: () => import('../views/TestView.vue') },
 ]
 
 const router = createRouter({

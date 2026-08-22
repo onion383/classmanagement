@@ -52,10 +52,6 @@
 </template>
 
 <script>
-import ExcelJS from 'exceljs';
-import html2canvas from 'html2canvas';
-import jsPDF from 'jspdf';
-import autoTable from 'jspdf-autotable';
 import fontUrl from '../assets/fonts/NotoSansSC-6.ttf';
 import { useNotification } from '../composables/useNotification';
 import '../styles/dialog-transition.css'
@@ -200,6 +196,7 @@ export default {
 
     // ==================== XLSX ====================
     async exportXLSX(rows, fields, filename) {
+      const { default: ExcelJS } = await import('exceljs');
       const workbook = new ExcelJS.Workbook();
       const sheet = workbook.addWorksheet('Sheet1');
       const headers = fields.map(f => f.name);
@@ -473,6 +470,7 @@ export default {
 
     // ==================== 图片 ====================
     async exportImage(rows, fields, filename) {
+      const { default: html2canvas } = await import('html2canvas');
       const el = this.tableElement instanceof Element ? this.tableElement : null;
       if (el && el.offsetParent !== null) {
         try {
@@ -557,6 +555,8 @@ export default {
 
     // ==================== PDF ====================
     async exportPDF(rows, fields, filename) {
+      const { default: jsPDF } = await import('jspdf');
+      const { default: autoTable } = await import('jspdf-autotable');
       const doc = new jsPDF({ orientation: 'landscape', unit: 'mm', format: 'a4' });
 
       let fontLoaded = false;
