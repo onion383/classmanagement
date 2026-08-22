@@ -54,7 +54,7 @@ let autoCloseTimer = null
 async function fetchStudents() {
   const token = localStorage.getItem('token')
   if (!token) throw new Error('未登录，请先登录主应用')
-  const res = await axios.get('/students')
+  const res = await axios.get('/api/students')
   return res.data.data || []
 }
 

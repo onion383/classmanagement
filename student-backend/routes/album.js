@@ -52,8 +52,25 @@ function dateKey(t) {
 // ---------- 缩略图 / 视频封面 ----------
 // 生成 320px JPEG 小图：图片用 sharp 处理竖拍 EXIF 方向；视频用 ffmpeg 抓第 0.1 秒帧。
 // 输出文件名固定为 {photoId}.jpg，写入 THUMB_DIR；成功返回路径，失败返回 ''（网格退回源文件/占位）。
+
+// 缩略图生成共享并发信号量：多个相册可同时扫描，限制同时进行的 sharp/ffmpeg 数量，
+// 避免大相册批量扫描瞬间把内存/CPU 打满。
+const MAX_CONCURRENT_THUMBS = 2;
+let activeThumbs = 0;
+const thumbWaiters = [];
+function acquireThumbSlot() {
+  if (activeThumbs < MAX_CONCURRENT_THUMBS) { activeThumbs++; return Promise.resolve(); }
+  return new Promise(res => thumbWaiters.push(res));
+}
+function releaseThumbSlot() {
+  activeThumbs--;
+  const next = thumbWaiters.shift();
+  if (next) { activeThumbs++; next(); }
+}
+
 async function genThumb(photoId, filePath, isVideo) {
   const out = path.join(THUMB_DIR, `${photoId}.jpg`);
+  await acquireThumbSlot();
   try {
     if (isVideo && ffmpegPath) {
       await new Promise((resolve, reject) => {
@@ -71,12 +88,44 @@ async function genThumb(photoId, filePath, isVideo) {
   } catch (_) {
     try { await fsp.unlink(out); } catch (_) {}
     return '';
+  } finally {
+    releaseThumbSlot();
   }
 }
 
 function thumbOf(photo) {
   const tp = photo.thumb_path;
   return tp && fs.existsSync(tp) ? tp : '';
+}
+
+// ---------- 扫描批量事务 ----------
+// 相册扫描会写入成千上万行（insert/update/delete）。默认每条语句单独提交，
+// 磁盘 fsync 开销大且慢。这里用显式 BEGIN/COMMIT 跨 async 边界（缩略图生成是异步的，
+// 不能用 better-sqlite3 的同步 .transaction）在累计 N 条后批量提交一次，大幅减少提交次数。
+// WAL 模式下扫描期间其它请求仍可并发读库。
+function createBatchedTxn(batchSize = 200) {
+  let open = false;
+  let pending = 0;
+  return {
+    touch() {
+      if (!open) return;
+      if (++pending >= batchSize) { this.flush(); this.open(); }
+    },
+    open() {
+      if (open) return;
+      db.exec('BEGIN');
+      open = true;
+      pending = 0;
+    },
+    flush() {
+      if (!open) return;
+      try { db.exec('COMMIT'); } finally { open = false; pending = 0; }
+    },
+    abort() {
+      if (!open) return;
+      try { db.exec('ROLLBACK'); } finally { open = false; pending = 0; }
+    },
+  };
 }
 
 // ---------- 相册 CRUD ----------
@@ -366,6 +415,9 @@ async function fullScan(albumId) {
   const insert = db.prepare('INSERT OR IGNORE INTO album_photos (album_id, file_path, file_name, file_size, mtime, photo_date) VALUES (?, ?, ?, ?, ?, ?)');
   const setThumb = db.prepare('UPDATE album_photos SET thumb_path = ? WHERE id = ?');
 
+  // 批量事务提交（此处含异步 genThumb，用显式 BEGIN/COMMIT 分批）
+  const txn = createBatchedTxn();
+
   async function scanDir(dir) {
     if (task.cancelled) return;
     let entries;
@@ -386,15 +438,17 @@ async function fullScan(albumId) {
           const mtime = st.mtime.toISOString();
           const ri = insert.run(albumId, full, ent.name, st.size, mtime, dateKey(mtime));
           task.scanned++;
+          txn.touch();
           const isVid = VIDEO_EXT.test(ent.name);
           const tp = await genThumb(ri.lastInsertRowid, full, isVid);
-          if (tp) setThumb.run(tp, ri.lastInsertRowid);
+          if (tp) { setThumb.run(tp, ri.lastInsertRowid); txn.touch(); }
         } catch (_) {}
       }
     }
   }
 
   await scanDir(album.folder_path);
+  txn.flush();
   db.prepare('UPDATE albums SET updated_at = ? WHERE id = ?').run(now(), albumId);
   if (task.cancelled) return;
   const taskNow = scanTasks.get(albumId);
@@ -416,6 +470,9 @@ async function incrementalScan(albumId) {
   const setThumb = db.prepare('UPDATE album_photos SET thumb_path = ? WHERE id = ?');
   const deletePhoto = db.prepare('DELETE FROM album_photos WHERE id = ?');
 
+  // 批量事务提交（含异步 genThumb，用显式 BEGIN/COMMIT 分批）
+  const txn = createBatchedTxn();
+
   // 1. 建立现有索引映射：file_path → 记录
   const existing = new Map();
   for (const r of db.prepare('SELECT id, file_path, file_name, file_size, mtime FROM album_photos WHERE album_id = ?').all(albumId)) {
@@ -423,6 +480,7 @@ async function incrementalScan(albumId) {
   }
 
   const foundPaths = new Set();
+  txn.open();
 
   async function scanDir(dir) {
     if (task.cancelled) return;
@@ -449,9 +507,10 @@ async function incrementalScan(albumId) {
             // 文件已存在：检查 mtime 是否变化
             if (old.mtime !== mtime) {
               updateMeta.run(ent.name, st.size, mtime, dateKey(mtime), old.id);
+              txn.touch();
               const isVid = VIDEO_EXT.test(ent.name);
               const tp = await genThumb(old.id, full, isVid);
-              if (tp) setThumb.run(tp, old.id);
+              if (tp) { setThumb.run(tp, old.id); txn.touch(); }
               task.scanned++;
             }
             // mtime 相同则跳过
@@ -459,9 +518,10 @@ async function incrementalScan(albumId) {
             // 新文件：插入索引 + 生成缩略图
             const ri = insert.run(albumId, full, ent.name, st.size, mtime, dateKey(mtime));
             task.scanned++;
+            txn.touch();
             const isVid = VIDEO_EXT.test(ent.name);
             const tp = await genThumb(ri.lastInsertRowid, full, isVid);
-            if (tp) setThumb.run(tp, ri.lastInsertRowid);
+            if (tp) { setThumb.run(tp, ri.lastInsertRowid); txn.touch(); }
           }
         } catch (_) {}
       }
@@ -476,8 +536,10 @@ async function incrementalScan(albumId) {
       const tp = thumbOf(record);
       if (tp) await fsp.unlink(tp).catch(() => {});
       deletePhoto.run(record.id);
+      txn.touch();
     }
   }
+  txn.flush();
 
   db.prepare('UPDATE albums SET updated_at = ? WHERE id = ?').run(now(), albumId);
   if (task.cancelled) return;

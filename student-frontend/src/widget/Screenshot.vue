@@ -5,6 +5,9 @@
       <div class="result-area">
         <div class="icon-wrapper">
           <div v-if="capturing" class="spinner"></div>
+          <svg v-else-if="result" class="status-icon flat-check" viewBox="0 0 24 24" width="36" height="36">
+            <path fill="none" stroke="var(--color-primary, #22c55e)" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" d="M4 12.5l5 5L20 6.5" />
+          </svg>
           <span v-else class="status-icon">{{ statusIcon }}</span>
         </div>
         <div class="status-text">{{ statusText }}</div>
@@ -30,7 +33,6 @@ let autoCloseTimer = null
 
 const statusIcon = computed(() => {
   if (error.value) return '❌'
-  if (result.value) return '✅'
   return '⏳'
 })
 
@@ -62,7 +64,8 @@ async function capture() {
       }
     } catch (_) { /* 读取设置失败则使用默认路径 */ }
 
-    const res = await window.electron.invoke('screenshot-capture', { hideWidget: false, saveDir })
+    // 只保存文件，不回传整屏 base64（本组件只用 filePath，省掉一大块内存）
+    const res = await window.electron.invoke('screenshot-capture', { hideWidget: false, saveDir, withDataUrl: false })
     if (res.success) {
       result.value = res
     } else {

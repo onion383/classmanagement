@@ -23,6 +23,9 @@
         <div class="result-area">
           <div class="icon-wrapper">
             <div v-if="noteState === 'saving'" class="spinner"></div>
+            <svg v-else-if="noteState === 'saved'" class="status-icon flat-check" viewBox="0 0 24 24" width="36" height="36">
+              <path fill="none" stroke="var(--color-primary, #22c55e)" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" d="M4 12.5l5 5L20 6.5" />
+            </svg>
             <span v-else class="status-icon">{{ saveStatusIcon }}</span>
           </div>
           <div class="status-text">{{ saveStatusText }}</div>
@@ -163,7 +166,7 @@ let autoCloseTimer = null
 
 const saveStatusIcon = computed(() => {
   if (noteState.value === 'saveError') return '❌'
-  return '✅'
+  return ''
 })
 
 const saveStatusText = computed(() => {
@@ -496,7 +499,9 @@ async function startSave() {
       }
     } catch (_) { /* 读取设置失败则使用默认路径 */ }
 
-    const res = await window.electron.invoke('note-save', Array.from(arr), { saveDir })
+    // 直接传 Uint8Array：IPC 走结构化克隆的二进制路径（内存紧凑），
+    // 避免 Array.from 将每个字节装箱成 Number（全屏 PNG 会膨胀 8~16 倍）。
+    const res = await window.electron.invoke('note-save', arr, { saveDir })
     if (res.success) {
       saveFilePath.value = res.filePath
       noteState.value = 'saved'

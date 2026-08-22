@@ -38,7 +38,6 @@
 </template>
 
 <script>
-import * as XLSX from 'xlsx';
 import DynamicTable from './DynamicTable.vue';
 
 export default {
@@ -73,10 +72,12 @@ export default {
       reader.onload = (ev) => { this.fileData = new Uint8Array(ev.target.result); };
       reader.readAsArrayBuffer(file);
     },
-    parseFile() {
+    async parseFile() {
       if (!this.fileData) return;
       this.parseError = '';
       this.filteredCount = 0;
+      // 大依赖 xlsx（SheetJS）延迟到真正导入文件时才加载，避免随表格页一打开就拖进几 MB 代码
+      const XLSX = await import('xlsx');
       try {
         const workbook = XLSX.read(this.fileData, { type: 'array' });
         const sheetName = workbook.SheetNames[0];

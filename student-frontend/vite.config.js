@@ -30,6 +30,20 @@ export default defineConfig({
       input: {
         main: path.resolve(__dirname, 'index.html'),
         widget: path.resolve(__dirname, 'widget.html'),
+      },
+      output: {
+        // 大依赖单独拆包，延迟到使用时才被加载
+        manualChunks(id) {
+          if (id.includes('node_modules/exceljs')) {
+            return 'exceljs';
+          }
+          if (id.includes('node_modules/html2canvas')) {
+            return 'html2canvas';
+          }
+          if (id.includes('node_modules/jspdf')) {
+            return 'jspdf';
+          }
+        }
       }
     }
   }

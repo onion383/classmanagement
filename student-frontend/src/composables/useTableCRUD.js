@@ -1,4 +1,4 @@
-import { ref, computed, onMounted, onBeforeUnmount } from 'vue'
+import { ref, computed, watch, onMounted, onBeforeUnmount } from 'vue'
 import axios from 'axios'
 
 export function useTableCRUD(apiBase, defaultFields, options = {}) {
@@ -22,6 +22,14 @@ export function useTableCRUD(apiBase, defaultFields, options = {}) {
   const sortOrder = ref('asc')
   const searchField = ref(null)
   const searchKeyword = ref('')
+  // 防抖后的搜索词：避免每敲一个键就触发全表 filter+sort+重建数组造成卡顿
+  const searchKeywordDebounced = ref('')
+  let searchTimer = null
+  watch(searchKeyword, (v) => {
+    clearTimeout(searchTimer)
+    if (v === '') { searchKeywordDebounced.value = ''; return }
+    searchTimer = setTimeout(() => { searchKeywordDebounced.value = v }, 150)
+  })
   const dialogCallback = ref(null)
   const selectedCount = ref(0)
   const clipboard = ref(null)
@@ -32,8 +40,8 @@ export function useTableCRUD(apiBase, defaultFields, options = {}) {
   // ==================== Computed ====================
   const displayRows = computed(() => {
     let filtered = rows.value
-    if (searchField.value && searchKeyword.value) {
-      const kw = searchKeyword.value.toLowerCase()
+    if (searchField.value && searchKeywordDebounced.value) {
+      const kw = searchKeywordDebounced.value.toLowerCase()
       filtered = rows.value.filter(s => {
         const val = s[searchField.value]
         return val != null && String(val).toLowerCase().includes(kw)
@@ -550,6 +558,7 @@ export function useTableCRUD(apiBase, defaultFields, options = {}) {
 
   onBeforeUnmount(() => {
     document.removeEventListener('click', hideContextMenu)
+    clearTimeout(searchTimer)
   })
 
   return {

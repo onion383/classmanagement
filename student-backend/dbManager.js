@@ -130,6 +130,7 @@ function ensureIndex() {
   const indexPath = path.join(dataDir, 'index.db');
   indexDb = new Database(indexPath);
   indexDb.pragma(`key = '${sqlKey(MASTER_KEY)}'`);
+  applyPerfPragmas(indexDb);
   indexDb.exec(`
     CREATE TABLE IF NOT EXISTS registry (
       slug TEXT PRIMARY KEY,
@@ -142,9 +143,21 @@ function ensureIndex() {
 }
 
 // ---------- 打开/创建 单个班主任库 ----------
+function applyPerfPragmas(conn) {
+  // WAL：读写不互斥、大幅减少 fsync；synchronous=NORMAL 兼顾安全与性能；
+  // cache_size=-20000（约20MB页缓存）；busy_timeout 避免并发写互相报锁；temp_store 放内存。
+  // 先设 busy_timeout 再开 WAL，避免切换日志模式期间的锁等待。
+  conn.pragma('busy_timeout = 5000');
+  conn.pragma('journal_mode = WAL');
+  conn.pragma('synchronous = NORMAL');
+  conn.pragma('cache_size = -20000');
+  conn.pragma('temp_store = MEMORY');
+}
+
 function openFile(dbPath, passphrase) {
   const conn = new Database(dbPath);
   conn.pragma(`key = '${sqlKey(passphrase)}'`);
+  applyPerfPragmas(conn);
   return conn;
 }
 
