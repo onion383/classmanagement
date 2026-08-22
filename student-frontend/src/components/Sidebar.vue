@@ -59,6 +59,14 @@
       </router-link>
 
       <router-link
+        to="/group-manage"
+        class="block px-3 py-2 rounded hover:bg-sidebar-hover transition-theme"
+        active-class="bg-sidebar-active"
+      >
+        👥 分组管理
+      </router-link>
+
+      <router-link
         to="/test"
         class="block px-3 py-2 rounded hover:bg-sidebar-hover transition-theme"
         active-class="bg-sidebar-active"

@@ -22,6 +22,21 @@
             <span class="ml-2 text-sm text-text-secondary">{{ toolboxEnabled ? '已启用' : '已禁用' }}</span>
           </label>
         </div>
+        <p class="text-xs text-text-muted mt-2 ml-40">下次启动时是否显示工具箱（本次运行不受此开关影响）</p>
+
+        <div class="flex items-center gap-4 mt-6">
+          <label class="text-sm font-medium text-text w-40 flex-shrink-0">本次启用工具箱</label>
+          <label class="inline-flex items-center cursor-pointer">
+            <input
+              type="checkbox"
+              :checked="sessionEnabled"
+              @change="onSessionChange"
+              class="w-4 h-4 rounded border-border text-primary focus:ring-primary cursor-pointer"
+            />
+            <span class="ml-2 text-sm text-text-secondary">{{ sessionEnabled ? '已启用' : '已禁用' }}</span>
+          </label>
+        </div>
+        <p class="text-xs text-text-muted mt-2 ml-40">仅本次运行立即显示/隐藏工具箱；重启后按上方「是否启用」决定</p>
       </div>
     </div>
 
@@ -91,6 +106,8 @@ export default {
   data() {
     return {
       toolboxEnabled: true,
+      sessionEnabled: true,
+      sessionLoaded: false,
       noteSavePath: '',
       screenshotSavePath: '',
       loaded: false,
@@ -98,12 +115,20 @@ export default {
       _screenshotDebounce: null
     }
   },
-  mounted() {
-    this.loadSettings()
+  async mounted() {
+    await this.loadSettings()
+    this.loadSession()
+    // 监听浮窗「右键本次退出」导致会话开关变化，同步本页开关状态
+    this._fromMainHandler = window.electron.on('from-main', (data) => {
+      if (data && data.type === 'session-widget-changed') this.loadSession()
+    })
   },
   beforeUnmount() {
     clearTimeout(this._noteDebounce)
     clearTimeout(this._screenshotDebounce)
+    if (this._fromMainHandler) {
+      window.electron.off('from-main', this._fromMainHandler)
+    }
   },
   methods: {
     async loadSettings() {
@@ -137,6 +162,25 @@ export default {
       this.toolboxEnabled = e.target.checked
       if (!this.loaded) return
       this.saveSettings()
+    },
+    // 读取会话级开关：未初始化则用持久「是否启用工具箱」作为本次会话默认值
+    async loadSession() {
+      try {
+        this.sessionEnabled = await window.electron.invoke('get-session-widget-visible')
+      } catch (_) {
+        // 忽略：保持默认
+      }
+      if (this.sessionEnabled === null) {
+        this.sessionEnabled = this.toolboxEnabled
+        window.electron.send('widget-set-session-visible', this.sessionEnabled)
+      }
+      this.sessionLoaded = true
+    },
+    // 切换「本次启用工具箱」：立即显隐浮窗（不持久，重启后按持久开关决定）
+    onSessionChange(e) {
+      this.sessionEnabled = e.target.checked
+      if (!this.sessionLoaded) return
+      window.electron.send('widget-set-session-visible', this.sessionEnabled)
     },
     onNotePathInput(e) {
       this.noteSavePath = e.target.value

@@ -3,7 +3,7 @@
   <!-- 表头切换组件 -->
   <div>
     <!-- 标签头 -->
-    <div class="flex gap-2 mb-6">
+    <div class="flex gap-2 mb-6 items-center">
       <button
         v-for="tab in tabs"
         :key="tab.value"
@@ -18,6 +18,7 @@
       >
         {{ tab.label }}
       </button>
+      <slot name="extra" />
     </div>
 
     <!-- 内容区 -->

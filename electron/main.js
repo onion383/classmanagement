@@ -1,4 +1,4 @@
-const { app, BrowserWindow, ipcMain, desktopCapturer, screen, dialog, shell, protocol } = require('electron')
+const { app, BrowserWindow, ipcMain, desktopCapturer, screen, dialog, shell, protocol, Menu } = require('electron')
 const path = require('path')
 const fs = require('fs')
 const { Readable } = require('stream')
@@ -7,6 +7,10 @@ let mainWindow
 let widgetWindow
 let startupWindow
 let backendProcess
+
+// 「本次启用工具箱」会话级开关：仅影响本次运行浮窗显隐（不持久）。
+// null = 尚未由浮窗初始化（浮窗会以持久「是否启用工具箱」作为本次默认注入）。
+let sessionWidgetEnabled = null
 
 const isDev = !app.isPackaged
 
@@ -593,6 +597,35 @@ ipcMain.on('widget-drag-start', (event, { screenX, screenY }) => {
     dragStartMousePos = [screenX, screenY]
   }
 })
+
+// 工具箱浮窗右键菜单：当前提供「本次退出」，仅关闭浮窗（隐藏 widget），主程序与后端保留运行
+ipcMain.on('widget-context-menu', (event) => {
+  const win = BrowserWindow.fromWebContents(event.sender)
+  const menu = Menu.buildFromTemplate([
+    {
+      label: '本次退出',
+      click: () => {
+        sessionWidgetEnabled = false
+        if (widgetWindow && !widgetWindow.isDestroyed()) widgetWindow.hide()
+        // 通知设置页同步「本次启用工具箱」开关为关闭
+        mainWindow?.webContents.send('from-main', { type: 'session-widget-changed' })
+      },
+    },
+  ])
+  menu.popup({ window: win || undefined })
+})
+
+// 会话级「本次启用工具箱」：仅影响本次运行浮窗显隐，不持久化
+ipcMain.on('widget-set-session-visible', (event, enabled) => {
+  sessionWidgetEnabled = !!enabled
+  if (widgetWindow && !widgetWindow.isDestroyed()) {
+    if (sessionWidgetEnabled) widgetWindow.show()
+    else widgetWindow.hide()
+  }
+})
+
+// 读取会话级开关；未初始化（尚未注入本次默认值）返回 null
+ipcMain.handle('get-session-widget-visible', () => sessionWidgetEnabled)
 
 // 拖动中：使用 setContentBounds 与 setContentSize 保持一致，避免 setBounds/setSize 边界计算差异
 ipcMain.on('widget-drag-move', (event, { screenX, screenY }) => {

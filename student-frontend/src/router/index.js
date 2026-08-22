@@ -11,6 +11,7 @@ const routes = [
   { path: '/leaves', name: 'leaves', component: () => import('../views/LeaveManagement.vue'), meta: { requiresAuth: true } },
   { path: '/widget-settings', name: 'widgetSettings', component: () => import('../views/WidgetSettingsView.vue'), meta: { requiresAuth: true } },
   { path: '/album', name: 'album', component: () => import('../views/AlbumView.vue'), meta: { requiresAuth: true } },
+  { path: '/group-manage', name: 'groupManage', component: () => import('../views/GroupManageView.vue'), meta: { requiresAuth: true } },
   { path: '/test', name: 'test', component: () => import('../views/TestView.vue') },
 ]
 
