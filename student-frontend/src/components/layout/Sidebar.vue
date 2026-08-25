@@ -57,6 +57,14 @@
       >
         🏅 加分管理
       </router-link>
+
+      <router-link
+        to="/duty"
+        class="block px-3 py-2 rounded hover:bg-sidebar-hover transition-theme"
+        active-class="bg-sidebar-active"
+      >
+        🧹 卫生值日
+      </router-link>
       
       <router-link
         to="/album"
@@ -98,7 +106,7 @@
 
 <script setup>
 import { useRouter } from 'vue-router'
-import { prefetchRoute } from '../utils/routePrefetch.js'
+import { prefetchRoute } from '../../utils/routePrefetch.js'
 
 const router = useRouter()
 

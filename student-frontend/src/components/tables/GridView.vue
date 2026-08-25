@@ -1,5 +1,5 @@
 <template>
-  <div class="grid-view-container" ref="gridContainer" :style="{ minHeight: minTableHeight + 'px', position: 'relative' }">
+  <div class="grid-view-container" ref="gridContainer" :style="{ minHeight: rows.length ? 'auto' : minTableHeight + 'px', position: 'relative' }">
     <div ref="gridTable" class="overflow-auto border rounded">
       <table class="w-full border-collapse select-none">
         <thead>
@@ -10,7 +10,7 @@
             <th v-if="showPeriodColumn && !hideMetaColumns" class="bg-primary text-text-inverse border border-border px-2 py-1 text-center" style="width: 80px;">时段</th>
             <th v-if="!hideMetaColumns" class="bg-primary text-text-inverse border border-border px-2 py-1 text-center" style="width: 100px;">节次</th>
             <th v-if="!hideMetaColumns" class="bg-primary text-text-inverse border border-border px-2 py-1 text-center" style="width: 130px;">时间</th>
-            <th v-if="hideMetaColumns && showRowNumber" class="bg-primary text-text-inverse border border-border px-2 py-1 text-center" style="width: 70px;">行号</th>
+            <th v-if="hideMetaColumns && showRowNumber" class="bg-primary text-text-inverse border border-border px-2 py-1 text-center" style="width: 110px;">{{ rowHeaderLabel }}</th>
             <th
               v-for="(col, colIdx) in colHeaders"
               :key="colIdx"
@@ -69,13 +69,14 @@
                   <span v-else>{{ row.time || '' }}</span>
                 </td>
 
-                <!-- 行号列（绿色背景，可拖拽） -->
-                <td v-if="hideMetaColumns && showRowNumber" class="bg-primary text-text-inverse border border-border text-center text-sm font-bold py-2" style="width: 70px;">
+                <!-- 行号列（绿色背景；首子行跨行合并居中显示分组名，可拖拽排序） -->
+                <td v-if="hideMetaColumns && showRowNumber && row._rowHeaderRowSpan !== 0" class="bg-primary text-text-inverse border border-border text-center text-sm font-bold align-middle" style="width: 110px; vertical-align: middle;" :rowspan="row._rowHeaderRowSpan > 0 ? row._rowHeaderRowSpan : undefined">
                   <div class="flex items-center justify-center gap-1">
-                    <span v-if="canDragRow(row)" class="drag-handle cursor-grab select-none text-text-inverse/70 hover:text-text-inverse" draggable="true" @dragstart.stop="onRowDragStart($event, rowIdx)" @dragend.stop="onRowDragEnd">⠿</span>
+                    <span v-if="!disableRowDrag && row._rowHeaderRowSpan !== 0 && canDragRow(row)" class="drag-handle cursor-grab select-none text-text-inverse/70 hover:text-text-inverse" draggable="true" @dragstart.stop="onRowDragStart($event, rowIdx)" @dragend.stop="onRowDragEnd">⠿</span>
                     <span>{{ row.label }}</span>
                   </div>
                 </td>
+                <td v-else-if="hideMetaColumns && showRowNumber" class="hidden"></td>
 
                 <!-- 数据单元格 -->
                 <template v-for="(cell, colIdx) in row.cells" :key="colIdx">
@@ -86,7 +87,7 @@
                     v-else
                     :ref="el => setCellRef(rowIdx, colIdx, el)"
                     :class="['border border-border px-2 py-2 text-center transition-colors relative', isDragTarget(rowIdx, colIdx) ? 'bg-info/10 outline outline-2 outline-info' : '', isCellSelected(rowIdx, colIdx) && !isEditing(rowIdx, colIdx) ? 'bg-info/10 outline outline-2 outline-info' : '', isEditing(rowIdx, colIdx) ? 'ring-2 ring-info ring-inset' : '', row._isReadonly ? '' : 'cursor-pointer']"
-                    :style="{ backgroundColor: isEditing(rowIdx, colIdx) ? '' : getCellColor(cell), minHeight: '40px' }"
+                    :style="{ backgroundColor: isEditing(rowIdx, colIdx) ? '' : getCellColor(cell), height: '40px', minHeight: '40px' }"
                     @mousedown="onCellMouseDown($event, rowIdx, colIdx)"
                     @mouseenter="onCellMouseEnter(rowIdx, colIdx)"
                     @dblclick="onCellDoubleClick($event, rowIdx, colIdx)"
@@ -174,6 +175,8 @@ export default {
     candidatePlaceholder: { type: String, default: '' },
     allowDuplicate: { type: Boolean, default: false },
     minTableHeight: { type: Number, default: 400 },
+    rowHeaderLabel: { type: String, default: '行号' },  // 新增：行号/首列表头文案（座位用「行号」，值日用「劳动项目」）
+    disableRowDrag: { type: Boolean, default: false },  // 新增：禁用行号列的整行拖拽排序（值日多行分组时关闭，避免拖单个子行）
   },
   emits: ['update:cells', 'swapRows', 'swapColumns', 'update:row-meta', 'cell-dblclick'],
   data() {
@@ -361,6 +364,7 @@ export default {
       return this.rowDragOverIdx > this.rowDragIdx ? 'border-b-2 border-info' : 'border-t-2 border-info';
     },
     onRowDragStart(event, rowIdx) {
+      if (this.disableRowDrag) { event.preventDefault(); return; }
       if (this.rows[rowIdx]._isSeparator || this.rows[rowIdx]._isPodium) return;
       this.rowDragIdx = rowIdx;
       event.dataTransfer.effectAllowed = 'move';
@@ -377,6 +381,7 @@ export default {
     },
     onRowDragLeave(event, rowIdx) { if (this.rowDragOverIdx === rowIdx) this.rowDragOverIdx = null; },
     onRowDrop(event, targetIdx, row) {
+      if (this.disableRowDrag) { this.rowDragIdx = null; this.rowDragOverIdx = null; return; }
       if (this.rowDragIdx === null || this.rowDragIdx === targetIdx) { this.rowDragIdx = null; this.rowDragOverIdx = null; return; }
       if (row._isSeparator || row._mergeCells || row._isPodium) { this.rowDragIdx = null; this.rowDragOverIdx = null; return; }
       this.$emit('swapRows', this.rowDragIdx, targetIdx);

@@ -8,7 +8,11 @@
   <div v-else class="flex h-screen">
     <Sidebar />
     <main class="flex-1 p-6 bg-bg overflow-auto">
-      <router-view />
+      <router-view v-slot="{ Component }">
+        <KeepAlive :max="10">
+          <component :is="Component" />
+        </KeepAlive>
+      </router-view>
     </main>
   </div>
 
@@ -17,8 +21,8 @@
 </template>
 
 <script>
-import Sidebar from './components/Sidebar.vue'
-import NotificationToast from './components/NotificationToast.vue'
+import Sidebar from './components/layout/Sidebar.vue'
+import NotificationToast from './components/base/NotificationToast.vue'
 
 export default {
   components: { Sidebar, NotificationToast }

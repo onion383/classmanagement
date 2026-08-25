@@ -173,13 +173,7 @@
         <label class="block text-sm text-text-secondary mb-1">组名</label>
         <input v-model="addDimForm.name" placeholder="如：宿舍管理" class="border border-border bg-surface text-text px-3 py-2 rounded w-full mb-4" />
         <label class="block text-sm text-text-secondary mb-1">组名排序</label>
-        <select v-model="addDimForm.name_rule" class="border border-border bg-surface text-text px-3 py-2 rounded w-full">
-          <option value="custom">自定义</option>
-          <option value="cn">第一组，第二组，第三组…</option>
-          <option value="num">第1组，第2组，第3组…</option>
-          <option value="prefix_cn">{组名} 第一组，{组名} 第二组，{组名} 第三组</option>
-          <option value="prefix_num">{组名} 第1组，{组名} 第2组，{组名} 第3组</option>
-        </select>
+        <AppSelect v-model="addDimForm.name_rule" class="w-full" :options="[{value:'custom',label:'自定义'},{value:'cn',label:'第一组，第二组，第三组…'},{value:'num',label:'第1组，第2组，第3组…'},{value:'prefix_cn',label:'{组名} 第一组，{组名} 第二组，{组名} 第三组'},{value:'prefix_num',label:'{组名} 第1组，{组名} 第2组，{组名} 第3组'}]" />
         <p v-if="addDimForm.name_rule !== 'custom'" class="text-xs text-text-muted mb-4 mt-1">初始化小组时将按此规则自动生成组名</p>
         <div v-else class="mb-4"></div>
         <div class="grid grid-cols-2 gap-3 mb-4">
@@ -216,13 +210,7 @@
         <!-- 普通维度：组名排序（快速生成/重命名组名） -->
         <template v-if="!activeDim.is_default">
           <label class="block text-sm text-text-secondary mb-1">组名排序</label>
-          <select v-model="settingsForm.name_rule" class="border border-border bg-surface text-text px-3 py-2 rounded w-full">
-            <option value="custom">自定义</option>
-            <option value="cn">第一组，第二组，第三组…</option>
-            <option value="num">第1组，第2组，第3组…</option>
-            <option value="prefix_cn">{组名} 第一组，{组名} 第二组，{组名} 第三组</option>
-            <option value="prefix_num">{组名} 第1组，{组名} 第2组，{组名} 第3组</option>
-          </select>
+          <AppSelect v-model="settingsForm.name_rule" class="w-full" :options="[{value:'custom',label:'自定义'},{value:'cn',label:'第一组，第二组，第三组…'},{value:'num',label:'第1组，第2组，第3组…'},{value:'prefix_cn',label:'{组名} 第一组，{组名} 第二组，{组名} 第三组'},{value:'prefix_num',label:'{组名} 第1组，{组名} 第2组，{组名} 第3组'}]" />
           <p v-if="settingsForm.name_rule !== 'custom'" class="text-xs text-text-muted mb-4 mt-1">保存后按此规则自动生成/重命名现有小组组名</p>
           <div v-else class="mb-4"></div>
         </template>
@@ -310,6 +298,7 @@
 
     <!-- ============ 组名覆盖确认（复用组件 + 统一动画） ============ -->
     <ConfirmDialog
+      v-if="overwriteMounted"
       :visible="overwriteVisible"
       message="检测到部分小组已有自定义组名，是否用当前「组名排序」规则覆盖这些组名？"
       :show-cancel="true"
@@ -340,6 +329,7 @@
 
     <!-- ============ 智能分组弹窗（仿座位表流水线） ============ -->
     <SmartGroupDialog
+      v-if="smartGroupMounted"
       :visible="showSmartGroup"
       :students="allStudents"
       :groups="active?.groups || []"
@@ -350,22 +340,27 @@
 
     <!-- ============ 导出弹窗（复用 ExportExcel，选择导出的小组） ============ -->
     <ExportExcel
-      ref="exportDialog"
+      v-if="exportMounted"
+      :is-visible="exportVisible"
       :rows="[]"
       :fields="[]"
       :default-filename="(activeDim?.name || '分组') + '-分组表'"
       :group-source="groupExportSource"
+      @update:is-visible="exportVisible = $event"
     />
   </div>
 </template>
 
 <script setup>
-import { ref, reactive, computed, onMounted, nextTick } from 'vue';
-import Tabs from '../components/Tabs.vue';
-import ConfirmDialog from '../components/ConfirmDialog.vue';
-import SmartGroupDialog from '../components/SmartGroupDialog.vue';
-import ExportExcel from '../components/ExportExcel.vue';
+import { ref, reactive, computed, onMounted, nextTick, defineAsyncComponent } from 'vue';
+import Tabs from '../components/base/Tabs.vue';
+import AppSelect from '../components/base/AppSelect.vue';
 import { useNotification } from '../composables/useNotification';
+
+// 弹窗类组件懒加载：打开时才加载对应 chunk
+const ConfirmDialog = defineAsyncComponent(() => import('../components/base/ConfirmDialog.vue'));
+const SmartGroupDialog = defineAsyncComponent(() => import('../components/dialogs/SmartGroupDialog.vue'));
+const ExportExcel = defineAsyncComponent(() => import('../components/import-export/ExportExcel.vue'));
 
 const { success, error, info } = useNotification();
 
@@ -418,6 +413,9 @@ async function applyGroupNames(groups, names) {
 }
 
 // ============ 组名覆盖确认 ============
+// overwriteMounted 保活：组件首次打开后保持挂载，关闭只降 overwriteVisible，
+// 从而让内部 <Transition> 能播放关闭的缩小淡出动画（懒加载不砍动画）
+const overwriteMounted = ref(false);
 const overwriteVisible = ref(false);
 const overwriteInfo = ref(null);
 
@@ -660,6 +658,7 @@ async function submitSettings() {
     const hasCustom = groups.some((g, i) => String(g.name || '').trim() !== '' && g.name !== names[i]);
     if (hasCustom) {
       overwriteInfo.value = { form: JSON.parse(JSON.stringify(settingsForm)), names };
+      overwriteMounted.value = true;
       overwriteVisible.value = true;
       return;
     }
@@ -882,10 +881,13 @@ async function doDelete() {
 }
 
 // ============ 智能分组入口 ============
+// smartGroupMounted 保活：保持挂载以便关闭动画播放
+const smartGroupMounted = ref(false);
 const showSmartGroup = ref(false);
 function onSmartGroup() {
   if (!activeDim.value) return error('请先选择分组维度');
   if (!active.value?.groups?.length) return error('当前维度还没有小组，请先添加小组');
+  smartGroupMounted.value = true;
   showSmartGroup.value = true;
 }
 
@@ -908,7 +910,9 @@ async function handleSmartGroupResult(result) {
 }
 
 // ============ 导出（复用 ExportExcel 弹窗，选择导出的小组） ============
-const exportDialog = ref(null);
+// exportMounted 保活：保持挂载以便关闭动画播放
+const exportMounted = ref(false);
+const exportVisible = ref(false);
 // 传给导出弹窗的分组数据结构
 const groupExportSource = computed(() => {
   if (!active.value) return null;
@@ -923,8 +927,8 @@ const groupExportSource = computed(() => {
 });
 async function openExport() {
   if (!active.value || active.value.groups.length === 0) return error('暂无小组可导出');
-  await nextTick();
-  exportDialog.value && exportDialog.value.open();
+  exportMounted.value = true;
+  exportVisible.value = true;
 }
 
 onMounted(() => { loadAll(); fetchStudents(); });

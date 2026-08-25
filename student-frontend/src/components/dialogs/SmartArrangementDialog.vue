@@ -43,44 +43,23 @@
               <span>{{ node.label }}</span>
               <!-- 普通下拉配置（锁定同桌/性别选择等作一级条件时也支持） -->
               <span v-if="node.key === 'random'" class="text-text-inverse/80">随机单位</span>
-              <select
+              <AppSelect
                 v-if="optionDef(node.key)"
                 v-model="node.option"
-                class="border rounded px-1.5 py-0.5 text-xs bg-white text-text cursor-pointer"
-              >
-                <option v-for="op in optionDef(node.key).options" :key="op.value" :value="op.value">{{ op.label }}</option>
-              </select>
+                :options="optionDef(node.key).options"
+                class="w-32"
+              />
               <!-- 特殊关系条件配置 -->
               <template v-if="node.key === 'relation'">
-                <select v-model="node.pair.a" class="border rounded px-1.5 py-0.5 text-xs bg-white text-text cursor-pointer">
-                  <option value="" selected disabled>选择学生</option>
-                  <option v-for="s in students" :key="'a'+s.id" :value="s.id">{{ s.姓名 }}</option>
-                </select>
+                <AppSelect v-model="node.pair.a" :options="studentOptions" placeholder="选择学生" class="w-24" />
                 <span class="text-text-inverse/80">和</span>
-                <select v-model="node.pair.b" class="border rounded px-1.5 py-0.5 text-xs bg-white text-text cursor-pointer">
-                  <option value="" selected disabled>选择学生</option>
-                  <option v-for="s in students" :key="'b'+s.id" :value="s.id">{{ s.姓名 }}</option>
-                </select>
-                <select v-model="node.relationType" class="border rounded px-1.5 py-0.5 text-xs bg-white text-text cursor-pointer">
-                  <option
-                    v-for="rt in (relationOptionDef() || {}).relationOptions"
-                    :key="rt.value"
-                    :value="rt.value"
-                  >{{ rt.label }}</option>
-                </select>
+                <AppSelect v-model="node.pair.b" :options="studentOptions" placeholder="选择学生" class="w-24" />
+                <AppSelect v-model="node.relationType" :options="relationOptionDef().relationOptions" class="w-28" />
               </template>
               <!-- 组内排表条件配置 -->
               <template v-if="node.key === 'group'">
-                <select v-model="node.groupBy" class="border rounded px-1.5 py-0.5 text-xs bg-white text-text cursor-pointer">
-                  <option v-for="g in groupOptions()" :key="g.value" :value="g.value">{{ g.label }}</option>
-                </select>
-                <select v-model="node.swapType" class="border rounded px-1.5 py-0.5 text-xs bg-white text-text cursor-pointer">
-                  <option
-                    v-for="s in swapTypeOptions(node.groupBy)"
-                    :key="s.value"
-                    :value="s.value"
-                  >{{ s.label }}</option>
-                </select>
+                <AppSelect v-model="node.groupBy" :options="groupOptions()" class="w-24" />
+                <AppSelect v-model="node.swapType" :options="swapTypeOptions(node.groupBy)" class="w-28" />
               </template>
               <span v-if="satisfactionOf(node) !== null" class="ml-auto text-xs px-1.5 py-0.5 rounded bg-white/20 text-text-inverse border border-white/30">满足 {{ satisfactionOf(node) }}%</span>
               <button @click="removeNode(ni)" class="cursor-pointer text-text-inverse/80 hover:text-text-inverse font-bold leading-none text-base">×</button>
@@ -103,44 +82,23 @@
                   <span class="cursor-grab select-none" draggable="true" @dragstart="onNodeDragStart($event, child)">⠿</span>
                   <span>{{ child.label }}</span>
                   <span v-if="child.key === 'random'" class="text-text-muted">随机单位</span>
-                  <select
+                  <AppSelect
                     v-if="optionDef(child.key)"
                     v-model="child.option"
-                    class="border rounded px-1.5 py-0.5 text-xs bg-surface cursor-pointer"
-                  >
-                    <option v-for="op in optionDef(child.key).options" :key="op.value" :value="op.value">{{ op.label }}</option>
-                  </select>
+                    :options="optionDef(child.key).options"
+                    class="w-32"
+                  />
                   <!-- 特殊关系条件配置（内联在同一行） -->
                   <template v-if="child.key === 'relation'">
-                    <select v-model="child.pair.a" class="border rounded px-1.5 py-0.5 text-xs bg-surface cursor-pointer">
-                      <option value="" selected disabled>选择学生</option>
-                      <option v-for="s in students" :key="'a'+s.id" :value="s.id">{{ s.姓名 }}</option>
-                    </select>
+                    <AppSelect v-model="child.pair.a" :options="studentOptions" placeholder="选择学生" class="w-24" />
                     <span class="text-text-muted">和</span>
-                    <select v-model="child.pair.b" class="border rounded px-1.5 py-0.5 text-xs bg-surface cursor-pointer">
-                      <option value="" selected disabled>选择学生</option>
-                      <option v-for="s in students" :key="'b'+s.id" :value="s.id">{{ s.姓名 }}</option>
-                    </select>
-                    <select v-model="child.relationType" class="border rounded px-1.5 py-0.5 text-xs bg-surface cursor-pointer">
-                      <option
-                        v-for="rt in (relationOptionDef() || {}).relationOptions"
-                        :key="rt.value"
-                        :value="rt.value"
-                      >{{ rt.label }}</option>
-                    </select>
+                    <AppSelect v-model="child.pair.b" :options="studentOptions" placeholder="选择学生" class="w-24" />
+                    <AppSelect v-model="child.relationType" :options="relationOptionDef().relationOptions" class="w-28" />
                   </template>
                   <!-- 组内排表条件配置 -->
                   <template v-if="child.key === 'group'">
-                    <select v-model="child.groupBy" class="border rounded px-1.5 py-0.5 text-xs bg-surface cursor-pointer">
-                      <option v-for="g in groupOptions()" :key="g.value" :value="g.value">{{ g.label }}</option>
-                    </select>
-                    <select v-model="child.swapType" class="border rounded px-1.5 py-0.5 text-xs bg-surface cursor-pointer">
-                      <option
-                        v-for="s in swapTypeOptions(child.groupBy)"
-                        :key="s.value"
-                        :value="s.value"
-                      >{{ s.label }}</option>
-                    </select>
+                    <AppSelect v-model="child.groupBy" :options="groupOptions()" class="w-24" />
+                    <AppSelect v-model="child.swapType" :options="swapTypeOptions(child.groupBy)" class="w-28" />
                   </template>
                   <span v-if="satisfactionOf(child) !== null" class="ml-auto text-xs px-1.5 py-0.5 rounded bg-info/15 text-info border border-info/30">满足 {{ satisfactionOf(child) }}%</span>
                   <button @click="removeChild(ni, ci)" class="cursor-pointer text-text-muted hover:text-text font-bold leading-none text-base">×</button>
@@ -157,22 +115,12 @@
                     <div class="flex flex-wrap items-center gap-2 px-3 py-1.5 rounded bg-surface-hover border border-border text-text text-xs">
                       <span class="cursor-grab select-none" draggable="true" @dragstart="onNodeDragStart($event, gc)">⠿</span>
                       <span>{{ gc.label }}</span>
-                      <select v-if="optionDef(gc.key)" v-model="gc.option" class="border rounded px-1.5 py-0.5 text-xs bg-surface cursor-pointer">
-                        <option v-for="op in optionDef(gc.key).options" :key="op.value" :value="op.value">{{ op.label }}</option>
-                      </select>
+                      <AppSelect v-if="optionDef(gc.key)" v-model="gc.option" :options="optionDef(gc.key).options" class="w-32" />
                       <template v-if="gc.key === 'relation'">
-                        <select v-model="gc.pair.a" class="border rounded px-1.5 py-0.5 text-xs bg-surface cursor-pointer">
-                          <option value="" selected disabled>选择学生</option>
-                          <option v-for="s in students" :key="'ga'+s.id" :value="s.id">{{ s.姓名 }}</option>
-                        </select>
+                        <AppSelect v-model="gc.pair.a" :options="studentOptions" placeholder="选择学生" class="w-24" />
                         <span class="text-text-muted">和</span>
-                        <select v-model="gc.pair.b" class="border rounded px-1.5 py-0.5 text-xs bg-surface cursor-pointer">
-                          <option value="" selected disabled>选择学生</option>
-                          <option v-for="s in students" :key="'gb'+s.id" :value="s.id">{{ s.姓名 }}</option>
-                        </select>
-                        <select v-model="gc.relationType" class="border rounded px-1.5 py-0.5 text-xs bg-surface cursor-pointer">
-                          <option v-for="rt in (relationOptionDef() || {}).relationOptions" :key="rt.value" :value="rt.value">{{ rt.label }}</option>
-                        </select>
+                        <AppSelect v-model="gc.pair.b" :options="studentOptions" placeholder="选择学生" class="w-24" />
+                        <AppSelect v-model="gc.relationType" :options="relationOptionDef().relationOptions" class="w-28" />
                       </template>
                       <span v-if="satisfactionOf(gc) !== null" class="ml-auto text-xs px-1.5 py-0.5 rounded bg-info/15 text-info border border-info/30">满足 {{ satisfactionOf(gc) }}%</span>
                       <button @click="removeGrandChild(ni, ci, gi)" class="cursor-pointer text-text-muted hover:text-text font-bold leading-none text-base">×</button>
@@ -245,9 +193,10 @@
 </template>
 
 <script>
-import GridView from './GridView.vue';
+import GridView from '../tables/GridView.vue';
 import NewComerConfirm from './NewComerConfirm.vue';
-import '../styles/dialog-transition.css'
+import AppSelect from '../base/AppSelect.vue';
+import '../../styles/dialog-transition.css'
 
 // Fisher-Yates 洗牌
 function shuffle(arr) {
@@ -313,7 +262,7 @@ const OPTIONS = [
 
 export default {
   name: 'SmartArrangementDialog',
-  components: { GridView, NewComerConfirm },
+  components: { GridView, NewComerConfirm, AppSelect },
   props: {
     visible: Boolean,
     rows: { type: Number, default: 6 },
@@ -381,6 +330,10 @@ export default {
     // 限制条件（只能作子级附加条件）
     constraintOptions() {
       return OPTIONS.filter(o => o.type === 'constraint')
+    },
+    // 特殊关系可选学生（转为 { value: id, label: 姓名 }）
+    studentOptions() {
+      return this.students.map(s => ({ value: s.id, label: s.姓名 }))
     }
   },
   watch: {

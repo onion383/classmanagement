@@ -3,12 +3,12 @@
     <!-- 登录表单 -->
     <form v-if="mode === 'login'" @submit.prevent="login" class="bg-surface p-8 rounded-3xl shadow-card w-80 login-glow">
       <h2 class="text-xl font-bold mb-4">班级管理系统登录</h2>
-      <select v-model="role" class="border p-2 w-full mb-2 rounded-xl bg-surface text-text-muted">
-        <option value="" disabled>请选择角色</option>
-        <option v-for="r in roleOptions" :key="r.value" :value="r.value">
-          {{ r.label }}
-        </option>
-      </select>
+      <AppSelect
+        v-model="role"
+        placeholder="请选择角色"
+        class="w-full mb-2"
+        :options="roleOptions"
+      />
       <input v-model="username" placeholder="账号" class="border p-2 w-full mb-2 rounded-xl" autocomplete="username" />
       <input v-model="password" type="password" placeholder="密码" autocomplete="current-password" class="border p-2 w-full mb-4 rounded-xl" />
       <div class="flex gap-2">
@@ -61,12 +61,12 @@
       <p class="text-xs text-text-muted mb-4">
         <a class="cursor-pointer underline" @click="switchMode('login')">已有账号，去登录</a>
       </p>
-      <select v-model="role" class="border p-2 w-full mb-2 rounded-xl bg-surface text-text-muted">
-        <option value="" disabled>请选择角色</option>
-        <option v-for="r in roleOptions" :key="r.value" :value="r.value">
-          {{ r.label }}
-        </option>
-      </select>
+      <AppSelect
+        v-model="role"
+        placeholder="请选择角色"
+        class="w-full mb-2"
+        :options="roleOptions"
+      />
       <input v-model="username" placeholder="账号" class="border p-2 w-full mb-2 rounded-xl" autocomplete="username" />
       <input v-model="password" type="password" placeholder="密码（至少 6 位）" autocomplete="new-password" class="border p-2 w-full mb-2 rounded-xl" />
       <input v-model="confirm" type="password" placeholder="确认密码" autocomplete="new-password" class="border p-2 w-full mb-4 rounded-xl" />
@@ -104,7 +104,7 @@
 
     <!-- 覆盖恢复确认弹窗 -->
     <ConfirmDialog
-      v-if="confirmVisible"
+      v-if="confirmMounted"
       :visible="confirmVisible"
       :message="confirmMessage"
       :show-cancel="true"
@@ -116,11 +116,19 @@
 
 <script>
 import axios from 'axios';
+import { defineAsyncComponent } from 'vue';
 import { useNotification } from '../composables/useNotification.js';
-import ConfirmDialog from '../components/ConfirmDialog.vue';
+import AppSelect from '../components/base/AppSelect.vue';
+
+// 弹窗类组件懒加载：打开时才加载对应 chunk
+const ConfirmDialog = defineAsyncComponent(() => import('../components/base/ConfirmDialog.vue'));
 
 export default {
-  components: { ConfirmDialog },
+  components: { ConfirmDialog, AppSelect },
+  // 懒加载弹窗保活：首次打开后保持挂载，关闭只降 visible，保留退出动画
+  watch: {
+    confirmVisible(n) { if (n) this.confirmMounted = true }
+  },
   data() {
     return {
       mode: 'login',           // login | register | recovery | recover
@@ -146,6 +154,7 @@ export default {
       restoreBundle: null,
       restoreFile: '',
       confirmVisible: false,
+      confirmMounted: false,
       confirmMessage: '',
       confirmPayload: null,
     };

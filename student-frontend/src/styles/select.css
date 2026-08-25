@@ -1,0 +1,119 @@
+/* ============================================================
+ * 自定义下拉框样式（AppSelect 组件）
+ * 全局统一样式：圆角 + 主题变量适配 + 毛玻璃(glass)覆盖
+ * 类名统一以 .av-select 为前缀，避免与其他样式冲突
+ * ============================================================ */
+
+.av-select {
+  position: relative;
+  width: 100%;
+  font-size: 14px;
+  color: var(--color-text, #111827);
+}
+
+/* ---------- 触发区 ---------- */
+.av-select__trigger {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  width: 100%;
+  padding: 8px 10px;
+  text-align: left;
+  border: 1px solid var(--color-border, #e5e7eb);
+  border-radius: var(--radius-md, 8px);
+  background-color: var(--color-surface-hover, #f3f4f6);
+  color: inherit;
+  cursor: pointer;
+  transition: border-color 0.2s, box-shadow 0.2s, background-color 0.2s, transform 0.12s ease;
+  font: inherit;
+}
+.av-select__trigger:hover { background-color: var(--color-surface, #ffffff); }
+.av-select__trigger:active { transform: scale(0.975); }
+.av-select--open .av-select__trigger,
+.av-select__trigger:focus-visible {
+  outline: none;
+  border-color: color-mix(in srgb, var(--color-primary, #22c55e) 55%, transparent);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--color-primary, #22c55e) 12%, transparent);
+}
+.av-select--disabled .av-select__trigger {
+  cursor: not-allowed;
+  opacity: 0.5;
+  background-color: color-mix(in srgb, var(--color-surface-hover, #f3f4f6) 50%, transparent);
+}
+
+/* ---------- 当前值文本：尾部显示，省略号在前 ---------- */
+.av-select__value {
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  direction: rtl;
+  text-align: left;
+}
+.av-select__value--placeholder { color: var(--color-text-muted, #9ca3af); }
+
+/* ---------- 箭头 ---------- */
+.av-select__arrow {
+  display: inline-flex;
+  color: var(--color-text-secondary, #6b7280);
+  transition: transform 0.15s cubic-bezier(0.4, 0, 0.2, 1);
+  flex-shrink: 0;
+}
+.av-select--open .av-select__arrow { transform: rotate(180deg); }
+
+/* ---------- 下拉菜单与选项 ---------- */
+.av-select__menu {
+  position: absolute;
+  top: calc(100% + 4px);
+  left: 0;
+  right: 0;
+  z-index: 30;
+  margin: 0;
+  padding: 4px;
+  list-style: none;
+  max-height: 220px;
+  overflow-y: auto;
+  background-color: var(--color-surface, #ffffff);
+  border: 1px solid var(--color-border, #e5e7eb);
+  border-radius: var(--radius-md, 8px);
+  box-shadow: 0 10px 28px rgba(0, 0, 0, 0.10);
+}
+.av-select__option {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 7px 10px;
+  border-radius: var(--radius-sm, 6px);
+  cursor: pointer;
+  transition: background-color 0.15s ease;
+  user-select: none;
+}
+.av-select__option--active { background-color: var(--color-surface-hover, #f3f4f6); }
+.av-select__option--selected .av-select__option-label { color: var(--color-primary, #22c55e); font-weight: 600; }
+.av-select__option--disabled { opacity: 0.4; cursor: not-allowed; }
+.av-select__option--empty { color: var(--color-text-muted, #9ca3af); cursor: default; justify-content: center; }
+.av-select__check { color: var(--color-primary, #22c55e); flex-shrink: 0; }
+.av-select__option-label {
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+/* ---------- 毛玻璃主题（glass）轻薄磨砂覆盖 ---------- */
+:root[data-theme="glass"] .av-select__trigger {
+  background-color: rgba(255, 255, 255, 0.82) !important;
+  border-color: rgba(0, 0, 0, 0.08) !important;
+  backdrop-filter: blur(8px) saturate(1.15);
+  -webkit-backdrop-filter: blur(8px) saturate(1.15);
+}
+:root[data-theme="glass"] .av-select--open .av-select__trigger {
+  background-color: rgba(255, 255, 255, 0.95) !important;
+}
+:root[data-theme="glass"] .av-select__menu {
+  background-color: rgba(255, 255, 255, 0.88) !important;
+  border-color: rgba(0, 0, 0, 0.08) !important;
+  backdrop-filter: blur(var(--glass-blur, 18px)) saturate(1.2);
+  -webkit-backdrop-filter: blur(var(--glass-blur, 18px)) saturate(1.2);
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.12);
+}

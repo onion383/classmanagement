@@ -14,16 +14,12 @@
           />
         </label>
         <label class="block mb-2">数据类型：
-          <select
-            :value="columnType"
-            @change="$emit('update:columnType', $event.target.value)"
-            class="w-4/5 border border-border rounded px-2 py-1 mt-1"
-          >
-            <option value="文字">文字</option>
-            <option value="整数">整数</option>
-            <option value="小数">小数</option>
-            <option value="日期">日期</option>
-          </select>
+          <AppSelect
+            :model-value="columnType"
+            @change="$emit('update:columnType', $event)"
+            class="w-4/5 mt-1"
+            :options="[{ value: '文字', label: '文字' }, { value: '整数', label: '整数' }, { value: '小数', label: '小数' }, { value: '日期', label: '日期' }]"
+          />
         </label>
         <p v-if="errorMsg" class="text-danger text-sm mt-1">{{ errorMsg }}</p>
       </div>
@@ -50,10 +46,12 @@
 </template>
 
 <script>
-import '../styles/dialog-transition.css'
+import '../../styles/dialog-transition.css'
+import AppSelect from './AppSelect.vue'
 
 export default {
   name: 'ConfirmDialog',
+  components: { AppSelect },
   props: {
     visible: Boolean,
     message: String,

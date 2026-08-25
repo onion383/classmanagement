@@ -19,13 +19,9 @@
       <div class="mb-4">
         <span class="font-semibold">一周天数</span>
         <div class="flex items-center gap-2 mt-1">
-          <select v-model="startDay" class="border p-1 rounded text-sm">
-            <option v-for="d in dayOptions" :key="d.value" :value="d.value">{{ d.label }}</option>
-          </select>
+          <AppSelect v-model="startDay" :options="dayOptions" class="w-24" />
           <span class="text-sm">到</span>
-          <select v-model="endDay" class="border p-1 rounded text-sm">
-            <option v-for="d in dayOptions" :key="d.value" :value="d.value">{{ d.label }}</option>
-          </select>
+          <AppSelect v-model="endDay" :options="dayOptions" class="w-24" />
         </div>
       </div>
 
@@ -38,10 +34,7 @@
             <button @click="addItem('morning')" class="bg-primary text-text-inverse px-2 py-1 rounded text-sm">＋ 新加上午时间段</button>
           </div>
           <div v-for="(item, idx) in sections.morning" :key="idx" class="flex items-center gap-2 mb-1">
-            <select v-model="item.type" class="border p-1 text-sm rounded w-16">
-              <option value="lesson">学习</option>
-              <option value="rest">休息</option>
-            </select>
+            <AppSelect v-model="item.type" :options="[{ value: 'lesson', label: '学习' }, { value: 'rest', label: '休息' }]" class="w-16" />
             <input v-model="item.name" placeholder="名称" class="border p-1 text-sm rounded w-24" />
             <input type="time" v-model="item.start" class="border p-1 text-sm rounded w-20" />
             <span class="text-sm">到</span>
@@ -57,10 +50,7 @@
             <button @click="addItem('noon')" class="bg-primary text-text-inverse px-2 py-1 rounded text-sm">＋ 新加中午时间段</button>
           </div>
           <div v-for="(item, idx) in sections.noon" :key="idx" class="flex items-center gap-2 mb-1">
-            <select v-model="item.type" class="border p-1 text-sm rounded w-16">
-              <option value="lesson">学习</option>
-              <option value="rest">休息</option>
-            </select>
+            <AppSelect v-model="item.type" :options="[{ value: 'lesson', label: '学习' }, { value: 'rest', label: '休息' }]" class="w-16" />
             <input v-model="item.name" placeholder="名称" class="border p-1 text-sm rounded w-24" />
             <input type="time" v-model="item.start" class="border p-1 text-sm rounded w-20" />
             <span class="text-sm">到</span>
@@ -76,10 +66,7 @@
             <button @click="addItem('afternoon')" class="bg-primary text-text-inverse px-2 py-1 rounded text-sm">＋ 新加下午时间段</button>
           </div>
           <div v-for="(item, idx) in sections.afternoon" :key="idx" class="flex items-center gap-2 mb-1">
-            <select v-model="item.type" class="border p-1 text-sm rounded w-16">
-              <option value="lesson">学习</option>
-              <option value="rest">休息</option>
-            </select>
+            <AppSelect v-model="item.type" :options="[{ value: 'lesson', label: '学习' }, { value: 'rest', label: '休息' }]" class="w-16" />
             <input v-model="item.name" placeholder="名称" class="border p-1 text-sm rounded w-24" />
             <input type="time" v-model="item.start" class="border p-1 text-sm rounded w-20" />
             <span class="text-sm">到</span>
@@ -95,10 +82,7 @@
             <button @click="addItem('evening')" class="bg-primary text-text-inverse px-2 py-1 rounded text-sm">＋ 新加傍晚时间段</button>
           </div>
           <div v-for="(item, idx) in sections.evening" :key="idx" class="flex items-center gap-2 mb-1">
-            <select v-model="item.type" class="border p-1 text-sm rounded w-16">
-              <option value="lesson">学习</option>
-              <option value="rest">休息</option>
-            </select>
+            <AppSelect v-model="item.type" :options="[{ value: 'lesson', label: '学习' }, { value: 'rest', label: '休息' }]" class="w-16" />
             <input v-model="item.name" placeholder="名称" class="border p-1 text-sm rounded w-24" />
             <input type="time" v-model="item.start" class="border p-1 text-sm rounded w-20" />
             <span class="text-sm">到</span>
@@ -114,10 +98,7 @@
             <button @click="addItem('night')" class="bg-primary text-text-inverse px-2 py-1 rounded text-sm">＋ 新加晚上时间段</button>
           </div>
           <div v-for="(item, idx) in sections.night" :key="idx" class="flex items-center gap-2 mb-1">
-            <select v-model="item.type" class="border p-1 text-sm rounded w-16">
-              <option value="lesson">学习</option>
-              <option value="rest">休息</option>
-            </select>
+            <AppSelect v-model="item.type" :options="[{ value: 'lesson', label: '学习' }, { value: 'rest', label: '休息' }]" class="w-16" />
             <input v-model="item.name" placeholder="名称" class="border p-1 text-sm rounded w-24" />
             <input type="time" v-model="item.start" class="border p-1 text-sm rounded w-20" />
             <span class="text-sm">到</span>
@@ -137,10 +118,12 @@
 </template>
 
 <script>
-import '../styles/dialog-transition.css'
+import '../../styles/dialog-transition.css'
+import AppSelect from '../base/AppSelect.vue'
 
 export default {
   name: 'SettingsDialog',
+  components: { AppSelect },
   props: {
     visible: Boolean,
     settings: { type: Object, default: () => ({}) },

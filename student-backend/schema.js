@@ -368,6 +368,41 @@ function initSchema(conn) {
     { column: 'group_name', sql: `"group_name" TEXT` },
     { column: '成员数', sql: `"成员数" INTEGER DEFAULT 0` }
   ]);
+
+  // ======================== 卫生值日表（设置/当前/模板/历史） ========================
+  // duty_settings：全局「时间(星期几) + 劳动项目(含辛苦度、人数)」配置
+  // duty_layout / duty_template：当前值日表与值日模板（cells 按 项目名→星期→学生名单 存储）
+  // duty_history：按周保存的当前值日表快照
+  conn.exec(`
+    CREATE TABLE IF NOT EXISTS duty_settings (
+      id INTEGER PRIMARY KEY CHECK (id = 1),
+      days TEXT NOT NULL DEFAULT '["周一","周二","周三","周四","周五"]',
+      items TEXT NOT NULL DEFAULT '[]'
+    );
+    INSERT OR IGNORE INTO duty_settings (id, items) VALUES (1, '[{"name":"擦黑板","difficulty":0.6,"count":1},{"name":"倒垃圾","difficulty":0.7,"count":2},{"name":"扫地","difficulty":0.8,"count":2}]');
+
+    CREATE TABLE IF NOT EXISTS duty_layout (
+      id INTEGER PRIMARY KEY CHECK (id = 1),
+      cells TEXT NOT NULL DEFAULT '{}',
+      settings TEXT NOT NULL DEFAULT '{}'
+    );
+    INSERT OR IGNORE INTO duty_layout (id) VALUES (1);
+
+    CREATE TABLE IF NOT EXISTS duty_template (
+      id INTEGER PRIMARY KEY CHECK (id = 1),
+      cells TEXT NOT NULL DEFAULT '{}',
+      settings TEXT NOT NULL DEFAULT '{}'
+    );
+    INSERT OR IGNORE INTO duty_template (id) VALUES (1);
+
+    CREATE TABLE IF NOT EXISTS duty_history (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      week_start TEXT NOT NULL,
+      cells TEXT NOT NULL DEFAULT '{}',
+      settings TEXT NOT NULL DEFAULT '{}',
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    );
+  `);
 }
 
 module.exports = { initSchema };

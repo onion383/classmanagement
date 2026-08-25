@@ -39,7 +39,7 @@
         📥 从 Excel 导入
       </button>
       <button
-        @click="$refs.exportDialog.open()"
+        @click="exportDialogVisible = true"
         class="bg-warning hover:bg-warning-hover text-text-inverse px-4 py-2 rounded"
       >
         📥 导出 Excel
@@ -57,6 +57,7 @@
     />
 
     <ConfirmDialog
+      v-if="dialogMounted"
       :visible="dialog.visible"
       :message="dialog.message"
       :type="dialog.type"
@@ -69,6 +70,7 @@
     />
 
     <ContextMenu
+      v-if="contextMenuMounted"
       :visible="contextMenu.visible"
       :x="contextMenu.x"
       :y="contextMenu.y"
@@ -149,7 +151,9 @@
       @moveSelectedRows="onMoveSelectedRows"
     />
     <ExportExcel
-      ref="exportDialog"
+      v-if="exportMounted"
+      :is-visible="exportDialogVisible"
+      @update:is-visible="exportDialogVisible = $event"
       :rows="feeRecords"
       :fields="visibleFields"
       :selectedRowKeys="selectedRowKeys"
@@ -158,6 +162,7 @@
       @export-finish="onExportFinish"
     />
     <ImportExcel
+      v-if="importMounted"
       :visible="importDialogVisible"
       :existingFields="visibleFields"
       :requiredFields="['收支编码']"
@@ -165,6 +170,7 @@
       @cancel="importDialogVisible = false"
     />
     <DeduplicateDialog
+      v-if="dedupeMounted"
       :visible="dedupeDialogVisible"
       :rows="feeRecords"
       :fields="allBusinessFields"
@@ -175,18 +181,30 @@
 </template>
 
 <script setup>
-import { ref, computed } from 'vue'
+import { ref, computed, watch, defineAsyncComponent } from 'vue'
 import axios from 'axios'
-import ConfirmDialog from '../components/ConfirmDialog.vue'
-import ContextMenu from '../components/ContextMenu.vue'
-import SearchBar from '../components/SearchBar.vue'
-import DynamicTable from '../components/DynamicTable.vue'
-import ExportExcel from '../components/ExportExcel.vue'
-import ImportExcel from '../components/ImportExcel.vue'
-import DeduplicateDialog from '../components/DeduplicateDialog.vue'
+import SearchBar from '../components/base/SearchBar.vue'
+import DynamicTable from '../components/tables/DynamicTable.vue'
 import { useTableCRUD } from '../composables/useTableCRUD.js'
 import { useNotification } from '../composables/useNotification.js'
 import { resourceUrl } from '../utils/apiUrl'
+
+// 弹窗类组件懒加载：打开时才加载对应 chunk
+const ConfirmDialog = defineAsyncComponent(() => import('../components/base/ConfirmDialog.vue'))
+const ContextMenu = defineAsyncComponent(() => import('../components/base/ContextMenu.vue'))
+const ExportExcel = defineAsyncComponent(() => import('../components/import-export/ExportExcel.vue'))
+const ImportExcel = defineAsyncComponent(() => import('../components/import-export/ImportExcel.vue'))
+const DeduplicateDialog = defineAsyncComponent(() => import('../components/dialogs/DeduplicateDialog.vue'))
+
+const exportDialogVisible = ref(false)
+
+// 懒加载弹窗保活：首次打开后保持挂载，关闭只降 visible，
+// 让组件内部 <Transition> 能播放关闭的缩小淡出动画（懒加载不砍动画）
+const exportMounted = ref(false)
+const importMounted = ref(false)
+const dedupeMounted = ref(false)
+const dialogMounted = ref(false)
+const contextMenuMounted = ref(false)
 
 const API_BASE = '/api'
 const DEFAULT_FIELDS = [
@@ -234,6 +252,13 @@ const {
   onSelectionChange, onImportData, onDeleteDuplicates,
   saveCurrentOrder, deleteRowById
 } = table
+
+// 弹窗首次打开时置 mounted=true（保活），此后保持挂载，关闭仅降 visible 以播放退出动画
+watch(() => exportDialogVisible.value, v => { if (v) exportMounted.value = true })
+watch(() => importDialogVisible.value, v => { if (v) importMounted.value = true })
+watch(() => dedupeDialogVisible.value, v => { if (v) dedupeMounted.value = true })
+watch(() => dialog.value.visible, v => { if (v) dialogMounted.value = true })
+watch(() => contextMenu.value.visible, v => { if (v) contextMenuMounted.value = true })
 
 const fetchRecords = fetchRows
 const { success: notifySuccess } = useNotification()

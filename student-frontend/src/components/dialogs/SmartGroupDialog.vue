@@ -35,38 +35,20 @@
               <span class="cursor-grab select-none text-text-muted" draggable="true" @dragstart="onStageDragStart(si, $event)" title="拖动调整顺序">⠿</span>
               <!-- 特殊关系 -->
               <template v-if="st.type === 'relation'">
-                <select v-model="st.kind" class="border rounded px-1.5 py-0.5 text-xs bg-surface cursor-pointer">
-                  <option value="together">在一组</option>
-                  <option value="apart">不在一组</option>
-                </select>
-                <select v-model="st.a" class="border rounded px-1.5 py-0.5 text-xs bg-surface cursor-pointer">
-                  <option value="" disabled>选择学生</option>
-                  <option v-for="s in students" :key="'ra'+s.id" :value="s.id">{{ s.姓名 }}</option>
-                </select>
+                <AppSelect v-model="st.kind" :options="[{ value: 'together', label: '在一组' }, { value: 'apart', label: '不在一组' }]" class="w-28" />
+                <AppSelect v-model="st.a" :options="students.map(s => ({ value: s.id, label: s.姓名 }))" placeholder="选择学生" class="w-32" />
                 <span class="text-text-muted">和</span>
-                <select v-model="st.b" class="border rounded px-1.5 py-0.5 text-xs bg-surface cursor-pointer">
-                  <option value="" disabled>选择学生</option>
-                  <option v-for="s in students" :key="'rb'+s.id" :value="s.id">{{ s.姓名 }}</option>
-                </select>
+                <AppSelect v-model="st.b" :options="students.map(s => ({ value: s.id, label: s.姓名 }))" placeholder="选择学生" class="w-32" />
               </template>
               <!-- 指定身份 -->
               <template v-else-if="st.type === 'identity'">
-                <select v-model="st.kind" class="border rounded px-1.5 py-0.5 text-xs bg-surface cursor-pointer">
-                  <option value="leader">担任{{ leaderTitle }}</option>
-                  <option value="not-leader">不担任{{ leaderTitle }}</option>
-                </select>
-                <select v-model="st.studentId" class="border rounded px-1.5 py-0.5 text-xs bg-surface cursor-pointer">
-                  <option value="" disabled>选择学生</option>
-                  <option v-for="s in students" :key="'id'+s.id" :value="s.id">{{ s.姓名 }}</option>
-                </select>
+                <AppSelect v-model="st.kind" :options="[{ value: 'leader', label: '担任' + leaderTitle }, { value: 'not-leader', label: '不担任' + leaderTitle }]" class="w-32" />
+                <AppSelect v-model="st.studentId" :options="students.map(s => ({ value: s.id, label: s.姓名 }))" placeholder="选择学生" class="w-32" />
               </template>
               <!-- 性别比例 -->
               <template v-else-if="st.type === 'gender'">
                 <span class="text-text-secondary">性别比例</span>
-                <select v-model="st.mode" class="border rounded px-1.5 py-0.5 text-xs bg-surface cursor-pointer">
-                  <option value="balanced">男女尽量均匀</option>
-                  <option value="single">全为男生或女生（每组同一性别）</option>
-                </select>
+                <AppSelect v-model="st.mode" :options="[{ value: 'balanced', label: '男女尽量均匀' }, { value: 'single', label: '全为男生或女生（每组同一性别）' }]" class="w-64" />
               </template>
               <span v-if="satisfactionOf(st) !== null" class="ml-auto text-xs px-1.5 py-0.5 rounded bg-info/15 text-info border border-info/30">满足 {{ satisfactionOf(st) }}%</span>
               <button @click="removeStage(si)" class="cursor-pointer text-text-muted hover:text-text font-bold leading-none text-base">×</button>
@@ -129,8 +111,9 @@
 </template>
 
 <script>
-import '../styles/dialog-transition.css'
+import '../../styles/dialog-transition.css'
 import NewComerConfirm from './NewComerConfirm.vue'
+import AppSelect from '../base/AppSelect.vue'
 
 // Fisher-Yates 洗牌
 function shuffle(arr) {
@@ -147,7 +130,7 @@ const nextKey = () => `st-${++keySeq}`
 
 export default {
   name: 'SmartGroupDialog',
-  components: { NewComerConfirm },
+  components: { NewComerConfirm, AppSelect },
   props: {
     visible: Boolean,
     students: { type: Array, default: () => [] },

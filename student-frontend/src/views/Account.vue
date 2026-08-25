@@ -40,6 +40,7 @@
     </div>
 
     <ConfirmDialog
+      v-if="dialogMounted"
       :visible="dialog.visible"
       :message="dialog.message"
       :type="dialog.type"
@@ -52,10 +53,17 @@
 
 <script>
 import axios from 'axios';
-import ConfirmDialog from '../components/ConfirmDialog.vue';
+import { defineAsyncComponent } from 'vue';
+
+// 弹窗类组件懒加载：打开时才加载对应 chunk
+const ConfirmDialog = defineAsyncComponent(() => import('../components/base/ConfirmDialog.vue'));
 
 export default {
   components: { ConfirmDialog },
+  // 懒加载弹窗保活：首次打开后保持挂载，关闭只降 visible，保留退出动画
+  watch: {
+    'dialog.visible'(n) { if (n) this.dialogMounted = true }
+  },
   data() {
     return {
       newUsername: '',
@@ -70,6 +78,7 @@ export default {
         type: 'alert',
         showCancel: false
       },
+      dialogMounted: false,
       dialogCallback: null
     }
   },

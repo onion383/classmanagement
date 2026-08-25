@@ -78,8 +78,8 @@
 </template>
 
 <script>
-import DynamicTable from './DynamicTable.vue';
-import '../styles/dialog-transition.css'
+import DynamicTable from '../tables/DynamicTable.vue';
+import '../../styles/dialog-transition.css'
 
 export default {
   name: 'DeduplicateDialog',

@@ -30,7 +30,7 @@
 </template>
 
 <script setup>
-import { useNotification } from '../composables/useNotification'
+import { useNotification } from '../../composables/useNotification'
 
 const { notifications, remove } = useNotification()
 

@@ -14,7 +14,7 @@
               <button @click="smartArrangementVisible = true" class="bg-primary text-text-inverse px-4 py-2 rounded">🧠 智能排表</button>
               <button @click="refreshActive" class="bg-text-muted text-text-inverse px-4 py-2 rounded">🔄 刷新</button>
               <button @click="applyMasterToActive" class="bg-primary text-text-inverse px-4 py-2 rounded">📥 从模板导入</button>
-              <button @click="$refs.activeExportDialog.open()" class="bg-warning text-text-inverse px-4 py-2 rounded">📥 导出 Excel</button>
+              <button @click="activeExportVisible = true" class="bg-warning text-text-inverse px-4 py-2 rounded">📥 导出 Excel</button>
             </div>
 
             <div v-if="!activeLoaded" class="text-center py-10 text-text-muted">加载中...</div>
@@ -37,7 +37,7 @@
               @swapColumns="onActiveSwapColumns"
             />
 
-            <ExportExcel ref="activeExportDialog" :rows="activeExportRows" :fields="activeExportFields" defaultFilename="当前座位表" />
+            <ExportExcel v-if="activeExportMounted" :is-visible="activeExportVisible" :rows="activeExportRows" :fields="activeExportFields" defaultFilename="当前座位表" @update:is-visible="activeExportVisible = $event" />
           </section>
 
           <div class="mb-2"></div>
@@ -47,7 +47,7 @@
             <div class="mb-4 flex flex-wrap items-center gap-3">
               <button @click="openSettings('master')" class="bg-primary text-text-inverse px-4 py-2 rounded">⚙️ 设置</button>
               <button @click="refreshMaster" class="bg-text-muted text-text-inverse px-4 py-2 rounded">🔄 刷新</button>
-              <button @click="$refs.masterExportDialog.open()" class="bg-warning text-text-inverse px-4 py-2 rounded">📥 导出 Excel</button>
+              <button @click="masterExportVisible = true" class="bg-warning text-text-inverse px-4 py-2 rounded">📥 导出 Excel</button>
             </div>
 
             <div v-if="!masterLoaded" class="text-center py-10 text-text-muted">加载中...</div>
@@ -69,13 +69,13 @@
               @swapRows="onMasterSwapRows"
               @swapColumns="onMasterSwapColumns"
             />
-            <ExportExcel ref="masterExportDialog" :rows="masterExportRows" :fields="masterExportFields" defaultFilename="座位模板" />
+            <ExportExcel v-if="masterExportMounted" :is-visible="masterExportVisible" :rows="masterExportRows" :fields="masterExportFields" defaultFilename="座位模板" @update:is-visible="masterExportVisible = $event" />
           </section>
         </div>
 
         <div v-else-if="activeTab === 'history'">
           <div v-if="historyLoading" class="text-center py-10">加载中...</div>
-          <div v-else-if="!historySnapshot" class="text-center py-10 text-text-muted">该周暂无快照</div>
+          <EmptySnapshot v-else-if="!historySnapshot" />
           <GridView v-else :colHeaders="historyColHeaders" :rows="historyDisplayRows" :hideMetaColumns="true" :showRowNumber="true" />
           <WeekSwitcher v-model:currentWeek="historyCurrentWeek" :weeks="historyWeeks" @update:currentWeek="loadHistorySnapshot" />
           <div class="text-center mt-4">
@@ -87,6 +87,7 @@
 
     <!-- 当前座位设置弹窗 -->
     <SeatSettingsDialog
+      v-if="activeSettingsMounted"
       :visible="activeSettingsVisible"
       :rows="activeRows"
       :cols="activeCols"
@@ -98,6 +99,7 @@
 
     <!-- 座位模板设置弹窗 -->
     <SeatSettingsDialog
+      v-if="masterSettingsMounted"
       :visible="masterSettingsVisible"
       :rows="masterRows"
       :cols="masterCols"
@@ -107,8 +109,20 @@
       @cancel="masterSettingsVisible = false"
     />
 
+    <!-- 座位范围缩小确认弹窗 -->
+    <ConfirmDialog
+      v-if="shrinkConfirmMounted"
+      :visible="shrinkConfirmVisible"
+      message="你设置了较小的座位范围，但是外部还有座位数据，需要舍弃吗"
+      type="confirm"
+      :showCancel="true"
+      @confirm="confirmShrink"
+      @cancel="shrinkConfirmVisible = false"
+    />
+
     <!-- 智能排表弹窗 -->
     <SmartArrangementDialog
+      v-if="smartArrangementMounted"
       :visible="smartArrangementVisible"
       :rows="activeRows"
       :cols="activeCols"
@@ -123,16 +137,20 @@
 </template>
 
 <script setup>
-import { ref, computed, watch, onMounted } from 'vue'
+import { ref, computed, watch, onMounted, defineAsyncComponent } from 'vue'
 import axios from 'axios'
-import GridView from '../components/GridView.vue'
-import ExportExcel from '../components/ExportExcel.vue'
-import Tabs from '../components/Tabs.vue'
-import WeekSwitcher from '../components/WeekSwitcher.vue'
-import SeatSettingsDialog from '../components/SeatSettingsDialog.vue'
-import SmartArrangementDialog from '../components/SmartArrangementDialog.vue'
+import GridView from '../components/tables/GridView.vue'
+import EmptySnapshot from '../components/base/EmptySnapshot.vue'
+import Tabs from '../components/base/Tabs.vue'
+import WeekSwitcher from '../components/base/WeekSwitcher.vue'
 import { useSeatGrid } from '../composables/useSeatGrid.js'
 import { useNotification } from '../composables/useNotification.js'
+
+// 弹窗类组件懒加载：打开时才加载对应 chunk
+const ExportExcel = defineAsyncComponent(() => import('../components/import-export/ExportExcel.vue'))
+const SeatSettingsDialog = defineAsyncComponent(() => import('../components/dialogs/SeatSettingsDialog.vue'))
+const ConfirmDialog = defineAsyncComponent(() => import('../components/base/ConfirmDialog.vue'))
+const SmartArrangementDialog = defineAsyncComponent(() => import('../components/dialogs/SmartArrangementDialog.vue'))
 
 const API_BASE = '/api'
 
@@ -215,18 +233,50 @@ async function refreshMaster() {
     notifySuccess('已刷新座位表模板')
   } catch (e) { /* 错误已在 load 内部处理 */ }
 }
-const onActiveCellsUpdate = activeGrid.onCellsUpdate
-const onActiveSwapRows = activeGrid.onSwapRows
-const onActiveSwapColumns = activeGrid.onSwapColumns
-const onActiveCellDblClick = activeGrid.onCellDblClick
-const saveActiveSettings = activeGrid.saveSettings
+// ==================== 座位范围缩小确认 ====================
+// 当新的行数/列数比当前小，且被裁剪掉的区域里仍有座位数据时，弹确认框决定是否舍弃
+const shrinkConfirmVisible = ref(false)
+const shrinkPending = ref(null)
+function hasTrimmedData(grid, { rows: nr, cols: nc }) {
+  const cur = grid.seats.value
+  const curRows = cur.length
+  if (!curRows) return false
+  const curCols = cur[0].length
+  if (nr < curRows) {
+    for (let r = nr; r < curRows; r++)
+      for (let c = 0; c < curCols; c++)
+        if (cur[r]?.[c] != null && cur[r][c] !== '') return true
+  }
+  if (nc < curCols) {
+    for (let r = 0; r < curRows; r++)
+      for (let c = nc; c < curCols; c++)
+        if (cur[r]?.[c] != null && cur[r][c] !== '') return true
+  }
+  return false
+}
+async function requestSaveSettings(grid, settings) {
+  if (hasTrimmedData(grid, settings)) {
+    shrinkPending.value = { grid, settings }
+    shrinkConfirmVisible.value = true
+  } else {
+    await grid.saveSettings(settings)
+  }
+}
+function confirmShrink() {
+  const p = shrinkPending.value
+  shrinkConfirmVisible.value = false
+  shrinkPending.value = null
+  if (p) p.grid.saveSettings(p.settings)
+}
+
+const saveActiveSettings = (s) => requestSaveSettings(activeGrid, s)
 
 const loadMaster = masterGrid.load
 const onMasterCellsUpdate = masterGrid.onCellsUpdate
 const onMasterSwapRows = masterGrid.onSwapRows
 const onMasterSwapColumns = masterGrid.onSwapColumns
 const onMasterCellDblClick = masterGrid.onCellDblClick
-const saveMasterSettings = masterGrid.saveSettings
+const saveMasterSettings = (s) => requestSaveSettings(masterGrid, s)
 
 function openSettings(target) {
   if (target === 'active') {
@@ -237,6 +287,24 @@ function openSettings(target) {
 }
 
 const smartArrangementVisible = ref(false)
+
+// 导出弹窗可见状态（受控模式配合 v-if 实现懒加载）
+const activeExportVisible = ref(false)
+const masterExportVisible = ref(false)
+
+// 懒加载弹窗保活：首次打开后保持挂载，关闭只降 visible，保留退出动画
+const activeSettingsMounted = ref(false)
+const masterSettingsMounted = ref(false)
+const shrinkConfirmMounted = ref(false)
+const smartArrangementMounted = ref(false)
+const activeExportMounted = ref(false)
+const masterExportMounted = ref(false)
+watch(() => activeSettingsVisible.value, v => { if (v) activeSettingsMounted.value = true })
+watch(() => masterSettingsVisible.value, v => { if (v) masterSettingsMounted.value = true })
+watch(() => shrinkConfirmVisible.value, v => { if (v) shrinkConfirmMounted.value = true })
+watch(() => smartArrangementVisible.value, v => { if (v) smartArrangementMounted.value = true })
+watch(() => activeExportVisible.value, v => { if (v) activeExportMounted.value = true })
+watch(() => masterExportVisible.value, v => { if (v) masterExportMounted.value = true })
 
 async function applySmartArrangement(result) {
   smartArrangementVisible.value = false

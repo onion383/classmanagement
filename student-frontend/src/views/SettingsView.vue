@@ -34,15 +34,12 @@
           <!-- 主题选择 -->
           <div class="flex items-center gap-4 mb-6">
             <label class="text-sm font-medium text-text w-16 flex-shrink-0">主题</label>
-            <select v-model="selectedThemeId" @change="onThemeSelect" class="border border-border bg-surface text-text px-3 py-2 rounded w-56">
-              <option value="new">+ 新建主题</option>
-              <option disabled>──────────</option>
-              <option v-for="t in presetThemes" :key="t.id" :value="t.id">{{ t.name }}</option>
-              <template v-if="customThemes.length">
-                <option disabled>──────────</option>
-                <option v-for="t in customThemes" :key="t.id" :value="t.id">{{ t.name }}</option>
-              </template>
-            </select>
+            <AppSelect
+              v-model="selectedThemeId"
+              @change="onThemeSelect"
+              :options="themeOptions"
+              class="w-56"
+            />
           </div>
 
           <!-- 新建主题表单 -->
@@ -192,6 +189,7 @@
     </div>
 
     <ConfirmDialog
+      v-if="dialogMounted"
       :visible="dialog.visible"
       :message="dialog.message"
       :type="dialog.type"
@@ -204,14 +202,22 @@
 
 <script>
 import axios from 'axios'
-import ConfirmDialog from '../components/ConfirmDialog.vue'
+import { defineAsyncComponent } from 'vue'
+import AppSelect from '../components/base/AppSelect.vue'
 import { useThemeStore } from '../stores/theme'
 import { storeToRefs } from 'pinia'
 import { resourceUrl } from '../utils/apiUrl'
 
+// 弹窗类组件懒加载：打开时才加载对应 chunk
+const ConfirmDialog = defineAsyncComponent(() => import('../components/base/ConfirmDialog.vue'))
+
 export default {
-  components: { ConfirmDialog },
-  setup() {
+  components: { AppSelect, ConfirmDialog },
+  // 懒加载弹窗保活：首次打开后保持挂载，关闭只降 visible，保留退出动画
+  watch: {
+    'dialog.visible'(n) { if (n) this.dialogMounted = true }
+  },
+  data() {
     const themeStore = useThemeStore()
     const { currentTheme, customColors, customThemes, isPreset, bgMaskOpacity, glassOpacity } = storeToRefs(themeStore)
 
@@ -223,10 +229,6 @@ export default {
       isPreset,
       bgMaskOpacity,
       glassOpacity,
-    }
-  },
-  data() {
-    return {
       // Modal
       modalType: '',
       newUsername: '',
@@ -243,6 +245,7 @@ export default {
         type: 'alert',
         showCancel: false,
       },
+      dialogMounted: false,
       dialogCallback: null,
       // Theme
       selectedThemeId: '',
@@ -281,6 +284,18 @@ export default {
     // 预览图走 resourceUrl：补完整后端地址并追加 ?token=，保证打包版 file:// 下能通过鉴权
     bgImagePreviewUrl() {
       return this.bgImageUrl ? resourceUrl(this.bgImageUrl) : ''
+    },
+    themeOptions() {
+      const opts = [
+        { value: 'new', label: '+ 新建主题' },
+        { value: '', label: '──────────', disabled: true },
+        ...this.presetThemes.map(t => ({ value: t.id, label: t.name })),
+      ]
+      if (this.customThemes.length) {
+        opts.push({ value: '', label: '──────────', disabled: true })
+        opts.push(...this.customThemes.map(t => ({ value: t.id, label: t.name })))
+      }
+      return opts
     },
   },
   mounted() {

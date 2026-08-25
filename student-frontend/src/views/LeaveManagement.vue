@@ -164,6 +164,7 @@
 
     <!-- 添加请假弹窗 -->
     <AddLeaveDialog
+      v-if="addDialogMounted"
       :visible="addDialogVisible"
       :students="students"
       :type-options="leaveTypeOptions"
@@ -177,16 +178,19 @@
 
     <!-- 导出弹窗 -->
     <ExportExcel
-      ref="exportDialog"
+      v-if="exportMounted"
+      :is-visible="exportVisible"
       :rows="todayExportRows"
       :fields="todayExportFields"
       :tableElement="todayTableEl"
       defaultFilename="今日请假表"
       @export-finish="() => {}"
+      @update:is-visible="exportVisible = $event"
     />
 
     <!-- 确认弹窗 -->
     <ConfirmDialog
+      v-if="confirmMounted"
       :visible="confirm.visible"
       :message="confirm.message"
       type="confirm"
@@ -197,6 +201,7 @@
 
     <!-- 假期已结束未销假提示弹窗 -->
     <OverdueLeaveDialog
+      v-if="overdueDialogMounted"
       :visible="overdueDialogVisible"
       :records="overdueList"
       @not="handleOverdueNot"
@@ -207,14 +212,17 @@
 
 <script>
 import axios from 'axios'
-import Tabs from '../components/Tabs.vue'
-import DynamicTable from '../components/DynamicTable.vue'
-import AddLeaveDialog from '../components/AddLeaveDialog.vue'
-import LeaveTimeline from '../components/LeaveTimeline.vue'
-import ExportExcel from '../components/ExportExcel.vue'
-import ConfirmDialog from '../components/ConfirmDialog.vue'
-import OverdueLeaveDialog from '../components/OverdueLeaveDialog.vue'
+import { defineAsyncComponent } from 'vue'
+import Tabs from '../components/base/Tabs.vue'
+import DynamicTable from '../components/tables/DynamicTable.vue'
+import LeaveTimeline from '../components/base/LeaveTimeline.vue'
 import { useNotification } from '../composables/useNotification.js'
+
+// 弹窗类组件懒加载：打开时才加载对应 chunk
+const AddLeaveDialog = defineAsyncComponent(() => import('../components/dialogs/AddLeaveDialog.vue'))
+const ExportExcel = defineAsyncComponent(() => import('../components/import-export/ExportExcel.vue'))
+const ConfirmDialog = defineAsyncComponent(() => import('../components/base/ConfirmDialog.vue'))
+const OverdueLeaveDialog = defineAsyncComponent(() => import('../components/dialogs/OverdueLeaveDialog.vue'))
 
 const API = '/api'
 
@@ -223,6 +231,13 @@ export default {
   components: {
     Tabs, DynamicTable, AddLeaveDialog, LeaveTimeline, ExportExcel, ConfirmDialog, OverdueLeaveDialog
   },
+  // 懒加载弹窗保活：首次打开后保持挂载，关闭只降 visible，保留退出动画
+  watch: {
+    addDialogVisible(n) { if (n) this.addDialogMounted = true },
+    exportVisible(n) { if (n) this.exportMounted = true },
+    'confirm.visible'(n) { if (n) this.confirmMounted = true },
+    overdueDialogVisible(n) { if (n) this.overdueDialogMounted = true }
+  },
   data() {
     return {
       activeTab: 'today',
@@ -230,12 +245,17 @@ export default {
       students: [],
       leaves: [],
       addDialogVisible: false,
+      addDialogMounted: false,
       editingLeave: null,
       editingCell: null,
+      exportVisible: false,
+      exportMounted: false,
       confirm: { visible: false, message: '', ok: null },
+      confirmMounted: false,
       leaveTypeOptions: ['病假', '事假', '其他'],
       // 假期已结束未销假的提示弹窗
       overdueDialogVisible: false,
+      overdueDialogMounted: false,
       overdueList: [],
       // 本次会话内已提醒过（无论处理与否）的记录 id，避免重复弹窗
       promptedIds: new Set(),
@@ -527,7 +547,7 @@ export default {
       }
     },
     openExportToday() {
-      this.$refs.exportDialog.open()
+      this.exportVisible = true
     }
   }
 }

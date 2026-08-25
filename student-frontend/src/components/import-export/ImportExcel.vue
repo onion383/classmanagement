@@ -38,7 +38,7 @@
 </template>
 
 <script>
-import DynamicTable from './DynamicTable.vue';
+import DynamicTable from '../tables/DynamicTable.vue';
 
 export default {
   name: 'ImportExcel',

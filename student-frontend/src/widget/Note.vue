@@ -147,7 +147,7 @@
 
 <script setup>
 import { ref, reactive, computed, onMounted, onUnmounted, nextTick } from 'vue'
-import ColorSwatch from '../components/ColorSwatch.vue'
+import ColorSwatch from '../components/base/ColorSwatch.vue'
 import axios from 'axios'
 
 const emit = defineEmits(['close', 'ready', 'shrink'])
