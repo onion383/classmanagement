@@ -194,6 +194,14 @@
       @confirm="confirm.ok"
       @cancel="confirm.visible = false"
     />
+
+    <!-- 假期已结束未销假提示弹窗 -->
+    <OverdueLeaveDialog
+      :visible="overdueDialogVisible"
+      :records="overdueList"
+      @not="handleOverdueNot"
+      @ret="handleOverdueReturn"
+    />
   </div>
 </template>
 
@@ -205,6 +213,7 @@ import AddLeaveDialog from '../components/AddLeaveDialog.vue'
 import LeaveTimeline from '../components/LeaveTimeline.vue'
 import ExportExcel from '../components/ExportExcel.vue'
 import ConfirmDialog from '../components/ConfirmDialog.vue'
+import OverdueLeaveDialog from '../components/OverdueLeaveDialog.vue'
 import { useNotification } from '../composables/useNotification.js'
 
 const API = '/api'
@@ -212,7 +221,7 @@ const API = '/api'
 export default {
   name: 'LeaveManagement',
   components: {
-    Tabs, DynamicTable, AddLeaveDialog, LeaveTimeline, ExportExcel, ConfirmDialog
+    Tabs, DynamicTable, AddLeaveDialog, LeaveTimeline, ExportExcel, ConfirmDialog, OverdueLeaveDialog
   },
   data() {
     return {
@@ -225,6 +234,11 @@ export default {
       editingCell: null,
       confirm: { visible: false, message: '', ok: null },
       leaveTypeOptions: ['病假', '事假', '其他'],
+      // 假期已结束未销假的提示弹窗
+      overdueDialogVisible: false,
+      overdueList: [],
+      // 本次会话内已提醒过（无论处理与否）的记录 id，避免重复弹窗
+      promptedIds: new Set(),
       todayExportFields: [
         { name: '姓名' },
         { name: '类型' },
@@ -306,6 +320,13 @@ export default {
   },
   async created() {
     await this.loadAll()
+    // 打开页面后检测一次超时未销假
+    this.checkOverdue()
+    // 每 10 分钟低频检测一次（纯前端比较时间，成本极低）
+    this._overdueTimer = setInterval(() => this.checkOverdue(), 10 * 60 * 1000)
+  },
+  beforeUnmount() {
+    if (this._overdueTimer) clearInterval(this._overdueTimer)
   },
   methods: {
     // 时间段展示：同日显示 "M-D H:mm~H:mm"，跨天显示完整起止
@@ -347,9 +368,51 @@ export default {
       try {
         await this.loadAll()
         useNotification().success(this.activeTab === 'today' ? '已刷新 今日请假 数据' : '已刷新 请假记录 数据')
+        this.checkOverdue()
       } catch (err) {
         useNotification().error('刷新失败')
       }
+    },
+    // 当前时间字符串，格式与结束时间保持一致（YYYY-MM-DD HH:mm）
+    nowStr() {
+      const d = new Date()
+      const p = (n) => String(n).padStart(2, '0')
+      return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`
+    },
+    // 检测「假期已结束但尚未销假」的记录并弹出提示
+    checkOverdue() {
+      const now = this.nowStr()
+      // 状态为「请假中」且结束时间已到、且本会话未提醒过
+      const overdue = this.activeLeaves.filter(
+        (l) => l.结束时间 && l.结束时间 <= now && !this.promptedIds.has(l.id)
+      )
+      if (overdue.length === 0) return
+      // 本次会话记录已提醒，避免该同学反复弹出
+      overdue.forEach((l) => this.promptedIds.add(l.id))
+      this.overdueList = overdue.map((l) => ({
+        ...l,
+        _range: this.formatRange(l.开始时间, l.结束时间)
+      }))
+      this.overdueDialogVisible = true
+    },
+    // 「未返校」：保持请假中，仅从本次弹窗列表移除
+    handleOverdueNot(rec) {
+      this.removeOverdue(rec.id)
+    },
+    // 「已经返校并销假」：调用销假接口后从列表移除
+    async handleOverdueReturn(rec) {
+      try {
+        await axios.post(`${API}/leaves/${rec.id}/return`)
+        useNotification().success(`${rec.姓名} 已返校并销假`)
+        this.removeOverdue(rec.id)
+        await this.loadAll()
+      } catch (err) {
+        useNotification().error(err.response?.data?.error || '销假失败')
+      }
+    },
+    removeOverdue(id) {
+      this.overdueList = this.overdueList.filter((l) => l.id !== id)
+      if (this.overdueList.length === 0) this.overdueDialogVisible = false
     },
     async submitAdd(payload) {
       try {

@@ -6,17 +6,26 @@
       <h3 class="text-lg font-bold mb-3">导出选项</h3>
 
       <div class="mb-4">
-        <p class="font-semibold mb-2">选择要导出的列：</p>
-        <div class="flex flex-wrap gap-2">
+        <p class="font-semibold mb-2">{{ isGroupMode ? '选择导出的小组：' : '选择要导出的列：' }}</p>
+        <!-- 普通模式：选列 -->
+        <div v-if="!isGroupMode" class="flex flex-wrap gap-2">
           <label v-for="field in fields" :key="field.name" class="flex items-center gap-1 text-sm">
             <input type="checkbox" :value="field.name" v-model="selectedColumns" />
             {{ field.name }}
           </label>
         </div>
-        <p v-if="selectedColumns.length === 0" class="text-danger text-sm mt-1">请至少选择一列</p>
+        <!-- 分组模式：选小组 -->
+        <div v-else class="flex flex-wrap gap-2">
+          <label v-for="(g, i) in groupSource.groups" :key="i" class="flex items-center gap-1 text-sm">
+            <input type="checkbox" :value="i" v-model="selectedGroups" />
+            {{ g.name }} ({{ g.members.length }})
+          </label>
+        </div>
+        <p v-if="!isGroupMode && selectedColumns.length === 0" class="text-danger text-sm mt-1">请至少选择一列</p>
+        <p v-else-if="isGroupMode && selectedGroups.length === 0" class="text-danger text-sm mt-1">请至少选择一个小组</p>
       </div>
 
-      <div class="mb-4">
+      <div class="mb-4" v-if="!isGroupMode">
         <p class="font-semibold mb-2">导出行：</p>
         <label class="flex items-center gap-2 mb-1">
           <input type="radio" value="all" v-model="rowMode" /> 全部行
@@ -73,7 +82,9 @@ export default {
     fields: { type: Array, required: true },
     selectedRowKeys: { type: Array, default: () => [] },
     defaultFilename: { type: String, default: '导出数据' },
-    tableElement: { type: Object, default: null }
+    tableElement: { type: Object, default: null },
+    // 分组导出模式：传入后弹窗改为「选择导出的小组」，数据从该对象取
+    groupSource: { type: Object, default: null }
   },
   emits: ['export-start', 'export-finish', 'export-error'],
   setup() {
@@ -84,18 +95,21 @@ export default {
     return {
       visible: false,
       selectedColumns: [],
+      selectedGroups: [],
       rowMode: 'all',
       exportFormat: 'html',
       filename: ''
     };
   },
   computed: {
-    selectedCount() { return this.selectedRowKeys.length; }
+    selectedCount() { return this.selectedRowKeys.length; },
+    isGroupMode() { return !!(this.groupSource && Array.isArray(this.groupSource.groups) && this.groupSource.groups.length); }
   },
   watch: {
     visible(val) {
       if (val) {
         this.selectedColumns = this.fields.map(f => f.name);
+        this.selectedGroups = this.groupSource ? this.groupSource.groups.map((_, i) => i) : [];
         this.rowMode = 'all';
         this.exportFormat = 'html';
         this.filename = this.defaultFilename;
@@ -106,6 +120,35 @@ export default {
     open() { this.visible = true; this.$emit('export-start'); },
     cancel() { this.visible = false; },
     async doExport() {
+      // ---------- 分组导出模式 ----------
+      if (this.isGroupMode) {
+        if (this.selectedGroups.length === 0) { this.notifyError('请至少选择一个小组'); return; }
+        const dateStr = new Date().toISOString().slice(0, 10);
+        const finalFilename = `${this.filename}_${dateStr}`;
+        try {
+          let saved = true;
+          switch (this.exportFormat) {
+            case 'csv': saved = await this.exportGroupCSV(this.selectedGroups, finalFilename); break;
+            case 'html': saved = await this.exportGroupHTML(this.selectedGroups, finalFilename); break;
+            case 'image': saved = await this.exportGroupImage(this.selectedGroups, finalFilename); break;
+            case 'pdf': saved = await this.exportGroupPDF(this.selectedGroups, finalFilename); break;
+            case 'xlsx': saved = await this.exportGroupXLSX(this.selectedGroups, finalFilename); break;
+            default: saved = await this.exportGroupHTML(this.selectedGroups, finalFilename);
+          }
+          if (saved) {
+            this.notifySuccess(`已成功导出 ${FORMAT_LABELS[this.exportFormat] || '文件'}`)
+            this.$emit('export-finish');
+          }
+        } catch (err) {
+          console.error('导出失败:', err);
+          this.notifyError('导出失败，请重试')
+          this.$emit('export-error', err);
+        }
+        this.visible = false;
+        return;
+      }
+
+      // ---------- 普通表格导出 ----------
       if (this.selectedColumns.length === 0) return;
       let exportRows = [...this.rows];
       if (this.rowMode === 'selected') {
@@ -192,6 +235,150 @@ export default {
     // 检查某列是否为走廊列（表头为“走廊”）
     isAisleColumn(headerName) {
       return headerName === '走廊';
+    },
+
+    // ==================== 分组导出（groupSource 模式） ====================
+    // 按小组下标取小组对象
+    groupObjects(idxList) {
+      return idxList.map(i => this.groupSource.groups[i]);
+    },
+    // 拉平为二维表（用于 CSV / HTML / XLSX 标题行）
+    groupFlatRows(idxList) {
+      const leaderTitle = this.groupSource.leaderTitle || '组长';
+      const rows = [['小组', '成员', '备注', '职务']];
+      this.groupObjects(idxList).forEach(g => {
+        let first = true;
+        for (const m of g.members || []) {
+          rows.push([first ? g.name : '', m.member_name || '', m.remark || '', first ? leaderTitle : '']);
+          first = false;
+        }
+      });
+      return rows;
+    },
+    // 生成带标题、可截图/打印的分组 HTML 表格串
+    groupTableHTML(idxList, filename) {
+      const rows = this.groupFlatRows(idxList);
+      const head = rows[0];
+      const body = rows.slice(1);
+      let html = `<div style="text-align:center; font-size:20px; font-weight:bold; margin-bottom:12px;">${filename}</div>`;
+      html += '<table style="border-collapse:collapse; margin:0 auto;">';
+      html += `<thead><tr style="background-color:#4CAF50; color:white;">${head.map(h => `<th style="border:1px solid #ccc; padding:6px 12px;">${h}</th>`).join('')}</tr></thead><tbody>`;
+      for (const r of body) {
+        const cells = r.map((c, i) => {
+          let style = 'border:1px solid #ccc; padding:6px 12px; text-align:center;';
+          if (r[0] && i === 0) style += ' font-weight:bold; background-color:#BDD7EE;';
+          else if (r[3]) style += ' font-weight:bold;';
+          return `<td style="${style}">${String(c ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')}</td>`;
+        });
+        html += `<tr>${cells.join('')}</tr>`;
+      }
+      html += '</tbody></table>';
+      return html;
+    },
+    async exportGroupCSV(idxList, filename) {
+      const rows = this.groupFlatRows(idxList);
+      const esc = v => { const s = String(v == null ? '' : v); return /[",\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s; };
+      const csv = '\uFEFF' + rows.map(r => r.map(esc).join(',')).join('\r\n');
+      const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+      return await this.saveFileWithDialog(`${filename}.csv`, blob);
+    },
+    async exportGroupHTML(idxList, filename) {
+      const html = `<!DOCTYPE html><html><head><meta charset="UTF-8"><title>${filename}</title></head><body>${this.groupTableHTML(idxList, filename)}</body></html>`;
+      const blob = new Blob([html], { type: 'text/html' });
+      return await this.saveFileWithDialog(`${filename}.html`, blob);
+    },
+    async exportGroupImage(idxList, filename) {
+      const { default: html2canvas } = await import('html2canvas');
+      const tempDiv = document.createElement('div');
+      tempDiv.innerHTML = this.groupTableHTML(idxList, filename);
+      tempDiv.style.position = 'absolute';
+      tempDiv.style.left = '-9999px';
+      document.body.appendChild(tempDiv);
+      try {
+        const canvas = await html2canvas(tempDiv, { scale: 2 });
+        const blob = await new Promise(resolve => canvas.toBlob(resolve, 'image/png'));
+        if (!blob) return false;
+        return await this.saveFileWithDialog(`${filename}.png`, blob);
+      } finally { document.body.removeChild(tempDiv); }
+    },
+    async exportGroupPDF(idxList, filename) {
+      const { default: html2canvas } = await import('html2canvas');
+      const { default: jsPDF } = await import('jspdf');
+      const tempDiv = document.createElement('div');
+      tempDiv.innerHTML = this.groupTableHTML(idxList, filename);
+      tempDiv.style.position = 'absolute';
+      tempDiv.style.left = '-9999px';
+      document.body.appendChild(tempDiv);
+      try {
+        const canvas = await html2canvas(tempDiv, { scale: 2 });
+        const img = canvas.toDataURL('image/png');
+        const doc = new jsPDF({ orientation: 'landscape', unit: 'mm', format: 'a4' });
+        const pageW = doc.internal.pageSize.getWidth();
+        const pageH = doc.internal.pageSize.getHeight();
+        const ratio = canvas.width / canvas.height;
+        let w = pageW - 20;
+        let h = w / ratio;
+        if (h > pageH - 20) { h = pageH - 20; w = h * ratio; }
+        doc.addImage(img, 'PNG', (pageW - w) / 2, (pageH - h) / 2, w, h);
+        doc.save(`${filename}.pdf`);
+        return true;
+      } finally { document.body.removeChild(tempDiv); }
+    },
+    async exportGroupXLSX(idxList, filename) {
+      const { default: ExcelJS } = await import('exceljs');
+      const gs = this.groupSource;
+      const leaderTitle = gs.leaderTitle || '组长';
+      const workbook = new ExcelJS.Workbook();
+      const sheet = workbook.addWorksheet('分组表');
+      const headers = [leaderTitle, '成员', '备注'];
+      // 标题行
+      const titleRow = sheet.addRow([filename]);
+      sheet.mergeCells(1, 1, 1, headers.length);
+      titleRow.eachCell(c => {
+        c.font = { bold: true, size: 14 };
+        c.alignment = { horizontal: 'center', vertical: 'middle' };
+        c.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFE2EFDA' } };
+        c.border = { top: { style: 'thin' }, left: { style: 'thin' }, bottom: { style: 'thin' }, right: { style: 'thin' } };
+      });
+      titleRow.height = 24;
+      let r = 2;
+      this.groupObjects(idxList).forEach(g => {
+        // 组名行（合并全列）
+        sheet.addRow([]);
+        sheet.mergeCells(r, 1, r, headers.length);
+        const nc = sheet.getCell(r, 1);
+        nc.value = g.name;
+        nc.font = { bold: true };
+        nc.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFBDD7EE' } };
+        nc.alignment = { horizontal: 'left', vertical: 'middle' };
+        for (let col = 1; col <= headers.length; col++) sheet.getCell(r, col).border = { top: { style: 'thin' }, left: { style: 'thin' }, bottom: { style: 'thin' }, right: { style: 'thin' } };
+        sheet.getRow(r).height = 20;
+        r++;
+        // 表头行
+        const headRow = sheet.addRow(headers);
+        headRow.eachCell(c => {
+          c.font = { bold: true, color: { argb: 'FFFFFFFF' } };
+          c.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF4CAF50' } };
+          c.alignment = { horizontal: 'center' };
+          c.border = { top: { style: 'thin' }, left: { style: 'thin' }, bottom: { style: 'thin' }, right: { style: 'thin' } };
+        });
+        r++;
+        // 组长行 + 成员行
+        (g.members || []).forEach((m, mi) => {
+          const row = sheet.addRow([mi === 0 ? leaderTitle : '', m.member_name || '', m.remark || '']);
+          row.eachCell(c => {
+            c.border = { top: { style: 'thin' }, left: { style: 'thin' }, bottom: { style: 'thin' }, right: { style: 'thin' } };
+            c.alignment = { horizontal: 'center', vertical: 'middle' };
+          });
+          if (mi === 0) sheet.getCell(r, 1).font = { bold: true };
+          r++;
+        });
+        r++; // 空行分隔
+      });
+      for (let i = 1; i <= headers.length; i++) sheet.getColumn(i).width = 20;
+      const buffer = await workbook.xlsx.writeBuffer();
+      const blob = new Blob([buffer], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
+      return await this.saveFileWithDialog(`${filename}.xlsx`, blob);
     },
 
     // ==================== XLSX ====================

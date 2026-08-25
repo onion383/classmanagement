@@ -4,6 +4,9 @@
     <div class="bg-surface rounded-lg p-5 shadow-card dialog-card flex flex-col overflow-hidden" style="width: 960px; height: 700px; max-width: 90vw;">
       <h3 class="text-lg font-bold mb-4">🧠 智能排表</h3>
 
+      <!-- 新同学确认：座位表里有班级学生信息表不存在的名字时提示 -->
+      <NewComerConfirm :visible="showNewPrompt" :names="strangers" action="排表" @participate="onParticipate" @not="onNot" />
+
       <!-- 拒绝提示 -->
       <Transition name="dialog">
       <div v-if="rejectText" class="mb-3 px-3 py-2 rounded bg-warning/15 border border-warning/40 text-warning text-sm">
@@ -243,6 +246,7 @@
 
 <script>
 import GridView from './GridView.vue';
+import NewComerConfirm from './NewComerConfirm.vue';
 import '../styles/dialog-transition.css'
 
 // Fisher-Yates 洗牌
@@ -309,7 +313,7 @@ const OPTIONS = [
 
 export default {
   name: 'SmartArrangementDialog',
-  components: { GridView },
+  components: { GridView, NewComerConfirm },
   props: {
     visible: Boolean,
     rows: { type: Number, default: 6 },
@@ -335,10 +339,30 @@ export default {
       // 记录各区域最近一次分组（组内排表）产生的组块结构，供外层随机排表整块打乱
       blockMap: {},
       // 条件树的折叠状态（独立于条件树存储：折叠是纯 UI 操作，不应触发条件变更监听而重置排表状态）
-      collapsedMap: new Map()
+      collapsedMap: new Map(),
+      // 新同学校验：座位表里有名字不在班级学生信息表中，参与排表前弹窗确认
+      showNewPrompt: false,
+      excludeNew: false
     }
   },
   computed: {
+    // 座位表里有名字但班级学生信息表里不存在的名字集合
+    // 座位表数据：班级学生存 id(数字)，未被识别的自由文本名字(新同学)以字符串形式存储
+    strangerNames() {
+      const known = new Set(this.students.map(s => String(s.姓名 || '').trim()).filter(Boolean))
+      const out = new Set()
+      for (const row of this.initialSeats || [])
+        for (const val of row || []) {
+          let n = ''
+          if (typeof val === 'string') n = val.trim()
+          else if (val && typeof val === 'object') n = String(val.姓名 || '').trim()
+          if (n && !known.has(n)) out.add(n)
+        }
+      return out
+    },
+    strangers() {
+      return [...this.strangerNames]
+    },
     previewKey() {
       const flat = this.tree.flatMap(n => [n.key, ...n.children.map(c => c.key)]).join('-') || 'empty'
       return this.visible ? `arrange-${this.rows}-${this.cols}-${flat}-${this.previewVersion}` : 'closed'
@@ -366,6 +390,8 @@ export default {
         this.arranged = false
         this.previewSeats = this.buildInitialSeats()
         this.previewVersion++
+        this.showNewPrompt = false
+        this.excludeNew = false
       }
     },
     // 任一条件（含下拉选项）变更：重置为"开始排表"
@@ -425,12 +451,29 @@ export default {
     initGrid() {
       const grid = Array.from({ length: this.rows }, () => new Array(this.cols).fill(null))
       const used = new Set()
+      // 新同学(字符串名字)没有真实 id，给一个负 id 占位，使其能走通排表流水线
+      let pseudoId = -1
+      const pseudoCache = {}
+      const ensurePseudo = n => {
+        if (!pseudoCache[n]) pseudoCache[n] = { id: pseudoId--, 姓名: n }
+        return pseudoCache[n]
+      }
       for (let r = 0; r < this.rows; r++) {
         for (let c = 0; c < this.cols; c++) {
           const val = this.initialSeats?.[r]?.[c]
           let s = null
-          if (typeof val === 'number') s = this.students.find(x => x.id === val)
-          else if (val && typeof val === 'object') s = val
+          if (typeof val === 'number') {
+            s = this.students.find(x => x.id === val)
+          } else if (typeof val === 'string') {
+            // 班级学生存 id，字符串名字均为"新同学"（未识别的自由文本）
+            const n = val.trim()
+            if (n && !(this.excludeNew && this.strangerNames.has(n))) s = ensurePseudo(n)
+          } else if (val && typeof val === 'object') {
+            const n = String(val.姓名 || '').trim()
+            if (!(this.excludeNew && this.strangerNames.has(n))) {
+              s = n ? ensurePseudo(n) : val
+            }
+          }
           if (s) { grid[r][c] = s; used.add(s.id) }
         }
       }
@@ -1019,6 +1062,20 @@ export default {
     },
     // 开始排表 / 换一换
     startArrange() {
+      // 首次排表且座位表里有新同学时，先弹窗确认是否参与
+      if (!this.arranged && this.strangers.length > 0) { this.showNewPrompt = true; return }
+      this.generatePreview()
+      this.arranged = true
+    },
+    onParticipate() {
+      this.showNewPrompt = false
+      this.excludeNew = false
+      this.generatePreview()
+      this.arranged = true
+    },
+    onNot() {
+      this.showNewPrompt = false
+      this.excludeNew = true
       this.generatePreview()
       this.arranged = true
     },
@@ -1028,17 +1085,23 @@ export default {
       this.previewSeats = this.buildInitialSeats()
       this.previewVersion++
     },
-    // 将当前座位表（id 网格）映射为预览用的学生对象网格
+    // 将当前座位表（id/字符串网格）映射为预览用的学生对象网格
     buildInitialSeats() {
       const grid = []
       const src = this.initialSeats
+      let pseudoId = -1
+      const pseudoCache = {}
       for (let r = 0; r < this.rows; r++) {
         const row = []
         for (let c = 0; c < this.cols; c++) {
           const val = src?.[r]?.[c]
           let student = null
           if (typeof val === 'number') student = this.students.find(s => s.id === val) || null
-          else if (val && typeof val === 'object') student = val
+          else if (typeof val === 'string' && val.trim()) {
+            const n = val.trim()
+            if (!pseudoCache[n]) pseudoCache[n] = { id: pseudoId--, 姓名: n }
+            student = pseudoCache[n]
+          } else if (val && typeof val === 'object') student = val
           row.push(student)
         }
         grid.push(row)
@@ -1223,8 +1286,12 @@ export default {
 
     cancel() { this.$emit('cancel') },
     confirm() {
-      // 输出为座位表数据：二维数组，元素为学生 id 或 null
-      const seatsOut = this.previewSeats.map(row => row.map(s => (s ? s.id : null)))
+      // 输出为座位表数据：二维数组，元素为班级学生 id、新同学名字(字符串)或 null
+      const seatsOut = this.previewSeats.map(row => row.map(s => {
+        if (!s) return null
+        // 真实 id(>=0)的班级学生存 id；新同学(伪对象，负 id 或无 id 对象)存原名
+        return (s.id != null && s.id >= 0) ? s.id : (s.姓名 || null)
+      }))
       this.$emit('confirm', { seats: seatsOut })
     }
   }

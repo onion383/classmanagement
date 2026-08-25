@@ -4,6 +4,9 @@
     <div class="bg-surface rounded-lg p-5 shadow-card dialog-card flex flex-col overflow-hidden" style="width: 860px; height: 620px; max-width: 90vw;">
       <h3 class="text-lg font-bold mb-4">🧠 智能分组</h3>
 
+      <!-- 新同学确认：小组里有班级学生信息表不存在的名字时提示 -->
+      <NewComerConfirm :visible="showNewPrompt" :names="strangers" action="分组" @participate="onParticipate" @not="onNot" />
+
       <!-- 拒绝/提示 -->
       <Transition name="dialog">
       <div v-if="rejectText" class="mb-3 px-3 py-2 rounded bg-warning/15 border border-warning/40 text-warning text-sm">
@@ -108,7 +111,7 @@
                   <span class="text-info font-medium truncate">{{ g[0].姓名 }}</span>
                   <span class="text-text-muted text-[10px] flex-shrink-0">{{ leaderTitle }}</span>
                 </div>
-                <div v-for="(s, i) in g.slice(1)" :key="'pre'+s.id" class="text-text truncate">{{ s.姓名 }}</div>
+                <div v-for="(s, i) in g.slice(1)" :key="gi + '-' + i" class="text-text truncate">{{ s.姓名 }}</div>
               </template>
               <div v-else class="text-text-muted text-xs">（空组）</div>
             </div>
@@ -127,6 +130,7 @@
 
 <script>
 import '../styles/dialog-transition.css'
+import NewComerConfirm from './NewComerConfirm.vue'
 
 // Fisher-Yates 洗牌
 function shuffle(arr) {
@@ -143,6 +147,7 @@ const nextKey = () => `st-${++keySeq}`
 
 export default {
   name: 'SmartGroupDialog',
+  components: { NewComerConfirm },
   props: {
     visible: Boolean,
     students: { type: Array, default: () => [] },
@@ -162,13 +167,34 @@ export default {
       // 拖拽交互状态：stage 拖动排序 / chip 拖入添加
       _dragIdx: null,
       _overIdx: null,
-      _pendingType: null
+      _pendingType: null,
+      // 新同学校验：小组中有名字不在班级学生信息表中，参与分组前弹窗确认
+      showNewPrompt: false,
+      includeNew: false
     }
   },
   computed: {
-    // 参与分组的班级学生（去掉无名）
+    // 小组里出现但班级学生信息表里不存在的名字集合
+    strangerNames() {
+      const known = new Set(this.students.map(s => String(s.姓名 || '').trim()).filter(Boolean))
+      const out = new Set()
+      for (const g of this.groups)
+        for (const m of (g.members || [])) {
+          const n = String(m.member_name || '').trim()
+          if (n && !known.has(n)) out.add(n)
+        }
+      return out
+    },
+    strangers() {
+      return [...this.strangerNames]
+    },
+    // 参与分组的班级学生（去掉无名）；若用户选择「参与」，附上小组里的新同学一起分组
     roster() {
-      return this.students.filter(s => String(s.姓名 || '').trim())
+      const base = this.students.filter(s => String(s.姓名 || '').trim())
+      if (!this.includeNew) return base
+      const named = new Set(base.map(s => String(s.姓名).trim()))
+      const extras = [...this.strangerNames].filter(n => !named.has(n)).map(n => ({ 姓名: n }))
+      return extras.length ? base.concat(extras) : base
     },
     // 可选条件（可拖入上方，可复用）
     conditionChips() {
@@ -183,10 +209,13 @@ export default {
     visible(v) {
       if (v) {
         this.rejectText = ''
-        this.previewGroups = []
+        // 打开时先显示当前已有的分组结果（尚未排表时作为初始预览）
+        this.previewGroups = this.buildGroupsPreview()
         this.arranged = false
         this.satisfaction = {}
         this.lastResult = null
+        this.showNewPrompt = false
+        this.includeNew = false
       }
     },
     stages: {
@@ -241,7 +270,9 @@ export default {
       e.preventDefault()
       e.stopPropagation()
       const rect = e.currentTarget.getBoundingClientRect()
-      this._overIdx = e.clientY < rect.top + rect.height / 2 ? si : si + 1
+      const next = e.clientY < rect.top + rect.height / 2 ? si : si + 1
+      // 值未变化时不写响应式状态，避免拖拽过程中每帧触发整个条件列表重渲染
+      if (this._overIdx !== next) this._overIdx = next
     },
     // 松开到条件区：处理拖入新条件 / 拖动手柄调序
     boxDrop(e) {
@@ -489,6 +520,16 @@ export default {
       const sig = (members) => members.map(g => [...g].sort((x, y) => x - y).join(',')).join('|')
       return sig(a.members) === sig(b.members)
     },
+    // 把当前已有的分组数据转成预览格式（尚未排表时作为初始预览）
+    // 每组为一个成员姓名对象数组（与 toPreview 结构一致：组长排最前）
+    buildGroupsPreview() {
+      return (this.groups || []).map(g =>
+        (g.members || [])
+          .map(m => String(m.member_name || '').trim())
+          .filter(n => n)
+          .map(n => ({ 姓名: n }))
+      )
+    },
     // 转成预览：每组的【组长排最前】的学生对象数组
     toPreview(result) {
       const { members, leaders } = result
@@ -519,6 +560,18 @@ export default {
 
     // ==================== 按钮 ====================
     startArrange() {
+      // 首次排表且小组里有新同学时，先弹窗确认是否参与
+      if (!this.arranged && this.strangers.length > 0) { this.showNewPrompt = true; return }
+      this.generatePreview()
+    },
+    onParticipate() {
+      this.showNewPrompt = false
+      this.includeNew = true
+      this.generatePreview()
+    },
+    onNot() {
+      this.showNewPrompt = false
+      this.includeNew = false
       this.generatePreview()
     },
     cancel() { this.$emit('cancel') },

@@ -5,9 +5,34 @@
     <link rel="icon" type="image/svg+xml" href="/vite.svg">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>班级管理系统</title>
+    <style>
+      /* 首屏载入占位：避免窗口已出但白屏。Vue mount 时会自动替换 #app 内的这段内容。 */
+      html, body { margin: 0; height: 100%; }
+      body { background: linear-gradient(160deg, #eef2ff 0%, #e2e8ff 100%); }
+      .app-splash {
+        position: fixed; inset: 0;
+        display: flex; flex-direction: column;
+        align-items: center; justify-content: center;
+        gap: 18px; font-family: -apple-system, "Segoe UI", "Microsoft YaHei", sans-serif;
+      }
+      .app-splash .ring .spin { animation: rotate 1.4s linear infinite; transform-origin: center; }
+      .app-splash .logo { font-size: 22px; font-weight: 600; color: #1e40af; letter-spacing: 1px; }
+      .app-splash .tip { font-size: 13px; color: #6b7280; }
+      @keyframes rotate { to { transform: rotate(360deg); } }
+    </style>
   </head>
   <body>
-    <div id="app"></div> <!-- 空的组件，vue的渲染入口 -->
+    <div id="app">
+      <div class="app-splash">
+        <svg class="ring" width="34" height="34" viewBox="0 0 22 22">
+          <circle cx="11" cy="11" r="8" fill="none" stroke="rgba(30,64,175,.25)" stroke-width="3"/>
+          <circle class="spin" cx="11" cy="11" r="8" fill="none" stroke="#1e40af" stroke-width="3"
+                  stroke-dasharray="42" stroke-dashoffset="12" stroke-linecap="round"/>
+        </svg>
+        <span class="logo">校园助手</span>
+        <span class="tip">加载中，请稍候…</span>
+      </div>
+    </div>
     <script type="module" src="/src/main.js"></script>
   </body>
 </html>
