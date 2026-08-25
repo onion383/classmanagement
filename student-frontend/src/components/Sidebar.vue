@@ -1,7 +1,7 @@
 <template>
   <div class="w-60 bg-sidebar text-text-inverse min-h-screen p-4 flex flex-col">
     <h2 class="text-lg font-bold mb-6">📋 班级管理</h2>
-    <nav class="space-y-2 flex-1">
+    <nav class="space-y-2 flex-1" @pointerover="onNavOver">
       <router-link
         to="/"
         class="block px-3 py-2 rounded hover:bg-sidebar-hover transition-theme"
@@ -41,15 +41,23 @@
       >
         🛌 请假管理
       </router-link>
-
+      
       <router-link
-        to="/widget-settings"
+        to="/group-manage"
         class="block px-3 py-2 rounded hover:bg-sidebar-hover transition-theme"
         active-class="bg-sidebar-active"
       >
-        🔧 小组件设置
+        👥 分组管理
       </router-link>
-
+      
+      <router-link
+        to="/scores"
+        class="block px-3 py-2 rounded hover:bg-sidebar-hover transition-theme"
+        active-class="bg-sidebar-active"
+      >
+        🏅 加分管理
+      </router-link>
+      
       <router-link
         to="/album"
         class="block px-3 py-2 rounded hover:bg-sidebar-hover transition-theme"
@@ -59,13 +67,15 @@
       </router-link>
 
       <router-link
-        to="/group-manage"
+        to="/widget-settings"
         class="block px-3 py-2 rounded hover:bg-sidebar-hover transition-theme"
         active-class="bg-sidebar-active"
       >
-        👥 分组管理
+        🔧 小组件设置
       </router-link>
+      
 
+      
       <router-link
         to="/test"
         class="block px-3 py-2 rounded hover:bg-sidebar-hover transition-theme"
@@ -87,4 +97,15 @@
 </template>
 
 <script setup>
+import { useRouter } from 'vue-router'
+import { prefetchRoute } from '../utils/routePrefetch.js'
+
+const router = useRouter()
+
+// 鼠标移到侧边栏任一链接时，预取对应视图 chunk，加速点击切换
+function onNavOver(e) {
+  const link = e.target.closest('a[href]')
+  if (!link) return
+  prefetchRoute(router, link.getAttribute('href'))
+}
 </script>

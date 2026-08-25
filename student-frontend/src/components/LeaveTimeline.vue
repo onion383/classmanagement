@@ -2,7 +2,7 @@
   <div class="leave-timeline bg-surface border border-border rounded-xl p-5">
     <!-- 标题 -->
     <div class="flex items-center justify-between mb-4">
-      <h3 class="text-base font-bold text-text">🗓️ 请假时间轴</h3>
+      <h3 class="text-base font-bold text-text">{{ title }}</h3>
     </div>
 
     <!-- 筛选区 -->
@@ -25,7 +25,7 @@
         class="px-3 py-1.5 text-sm rounded-lg bg-surface-hover border border-border focus:outline-none focus:border-primary"
       >
         <option value="">全部事件</option>
-        <option v-for="n in NODE_TYPES" :key="n.value" :value="n.value">{{ n.label }}</option>
+        <option v-for="n in nodeTypes" :key="n.value" :value="n.value">{{ n.label }}</option>
       </select>
     </div>
 
@@ -36,14 +36,33 @@
         :key="node.key"
         class="timeline-row"
       >
-        <div class="timeline-marker" :class="`marker-${node.type}`"></div>
-        <div class="timeline-item" :class="`item-${node.type}`">
-          <div class="text-xs text-text-muted mb-0.5">{{ node.time }}</div>
-          <div class="text-sm text-text">{{ node.text }}</div>
-          <span class="inline-block mt-1 px-2 py-0.5 rounded text-xs" :class="badgeClass(node.type)">
-            {{ nodeTypeLabel(node.type) }}
-          </span>
+        <div class="timeline-marker" :style="markerStyle(node)"></div>
+        <!-- 右侧对齐模式（加分/扣分标签与操作按钮放右侧） -->
+        <div v-if="alignRight" class="timeline-item flex" :style="itemStyle(node)">
+          <div class="min-w-0 flex-1">
+            <div class="text-xs text-text-muted mb-0.5">{{ node.time }}</div>
+            <slot name="content" :node="node">
+              <div class="text-sm text-text">{{ node.text }}</div>
+            </slot>
+          </div>
+          <div class="flex items-center gap-2 shrink-0 self-center">
+            <span class="px-2 py-0.5 rounded text-xs" :class="badgeClass(node)">
+              {{ nodeTypeLabel(node.type) }}
+            </span>
+            <slot name="ops" :node="node" />
+          </div>
         </div>
+        <!-- 默认模式：内容上下堆叠，标签在下方 -->
+        <template v-else>
+          <div class="timeline-item" :style="itemStyle(node)">
+            <div class="text-xs text-text-muted mb-0.5">{{ node.time }}</div>
+            <div class="text-sm text-text">{{ node.text }}</div>
+            <span class="inline-block mt-1 px-2 py-0.5 rounded text-xs" :class="badgeClass(node)">
+              {{ nodeTypeLabel(node.type) }}
+            </span>
+            <slot name="ops" :node="node" />
+          </div>
+        </template>
       </div>
     </div>
 
@@ -56,21 +75,29 @@
 export default {
   name: 'LeaveTimeline',
   props: {
-    // 节点结构：{ type: 'apply'|'leave'|'return', time: '2026-08-15 07:30', text: 'xxx 请假 病假', category: '病假', key: 唯一标识 }
+    // 节点结构：{ type, time, text, category, key }，type 对应 nodeTypes 里的 value
     nodes: { type: Array, default: () => [] },
     // 请假类型选项（用于筛选）
-    typeOptions: { type: Array, default: () => [] }
+    typeOptions: { type: Array, default: () => [] },
+    // 标题
+    title: { type: String, default: '🗓️ 请假时间轴' },
+    // 右侧对齐：把类型标签与操作按钮放到右侧（业务时间轴如加分/扣分使用）
+    alignRight: { type: Boolean, default: false },
+    // 节点类型配置：{ value, label, colorKey: 'info'|'success'|'danger', color: hex }
+    nodeTypes: {
+      type: Array,
+      default: () => [
+        { value: 'apply', label: '已申请', colorKey: 'info', color: '#3b82f6' },
+        { value: 'leave', label: '离开校园', colorKey: 'danger', color: '#dc2626' },
+        { value: 'return', label: '返校', colorKey: 'success', color: '#16a34a' }
+      ]
+    }
   },
   data() {
     return {
       keyword: '',
       filterType: '',
-      filterNode: '',
-      NODE_TYPES: [
-        { value: 'apply', label: '已申请', color: 'info' },
-        { value: 'leave', label: '离开校园', color: 'danger' },
-        { value: 'return', label: '返校', color: 'success' }
-      ]
+      filterNode: ''
     };
   },
   computed: {
@@ -91,13 +118,24 @@ export default {
   },
   methods: {
     nodeTypeLabel(type) {
-      const t = this.NODE_TYPES.find(n => n.value === type);
+      const t = this.nodeTypes.find(n => n.value === type);
       return t ? t.label : type;
     },
-    badgeClass(type) {
-      if (type === 'apply') return 'bg-info/10 text-info';
-      if (type === 'return') return 'bg-success/10 text-success';
-      return 'bg-danger/10 text-danger';
+    nodeColor(node) {
+      const t = this.nodeTypes.find(n => n.value === node.type);
+      return t ? t.color : '#9ca3af';
+    },
+    markerStyle(node) {
+      const c = this.nodeColor(node);
+      return { color: c, background: c };
+    },
+    itemStyle(node) {
+      return { borderLeftColor: this.nodeColor(node) };
+    },
+    badgeClass(node) {
+      const t = this.nodeTypes.find(n => n.value === node.type);
+      const map = { info: 'bg-info/10 text-info', success: 'bg-success/10 text-success', danger: 'bg-danger/10 text-danger' };
+      return map[t && t.colorKey] || map.info;
     }
   }
 };
@@ -138,9 +176,6 @@ export default {
   border: 3px solid var(--color-surface, #ffffff);
   box-shadow: 0 0 0 2px currentColor;
 }
-.marker-apply { color: var(--color-primary, #3b82f6); background: var(--color-primary, #3b82f6); }
-.marker-return { color: #16a34a; background: #16a34a; }
-.marker-leave { color: #dc2626; background: #dc2626; }
 .timeline-item {
   flex: 1;
   min-width: 0;
@@ -149,7 +184,4 @@ export default {
   border-radius: 10px;
   padding: 8px 12px;
 }
-.item-leave { border-left: 3px solid #dc2626; }
-.item-apply { border-left: 3px solid var(--color-primary, #3b82f6); }
-.item-return { border-left: 3px solid #16a34a; }
 </style>

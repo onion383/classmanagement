@@ -7,6 +7,19 @@ import path from 'path'
 export default defineConfig({
   plugins: [vue(), tailwindcss()],
   server: {
+    // 预热首屏模块图：服务器启动时即预编译入口及关键依赖，
+    // 避免第一个请求才逐文件编译导致窗口白屏过长。
+    warmup: {
+      clientFiles: [
+        './src/main.js',
+        './src/App.vue',
+        './src/router/index.js',
+        './src/stores/theme.js',
+        './src/components/Sidebar.vue',
+        './src/components/NotificationToast.vue',
+        './src/styles/index.css',
+      ],
+    },
     https: {
       key: fs.readFileSync('key.pem'),
       cert: fs.readFileSync('cert.pem')

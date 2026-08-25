@@ -20,8 +20,8 @@
       <button @click="loadAll" :disabled="loading" class="bg-text-muted hover:bg-text-secondary text-text-inverse px-4 py-2 rounded transition-theme disabled:opacity-50">
         {{ loading ? '刷新中…' : '🔄 刷新' }}
       </button>
-      <button @click="exportExcel" :disabled="loading" class="bg-warning hover:bg-warning-hover text-text-inverse px-4 py-2 rounded transition-theme disabled:opacity-50">
-        📥 导出EXCEL
+      <button @click="openExport" :disabled="loading || !active?.groups?.length" class="bg-warning hover:bg-warning-hover text-text-inverse px-4 py-2 rounded transition-theme disabled:opacity-50">
+        📥 导出分组
       </button>
     </div>
 
@@ -347,6 +347,15 @@
       @cancel="showSmartGroup = false"
       @confirm="handleSmartGroupResult"
     />
+
+    <!-- ============ 导出弹窗（复用 ExportExcel，选择导出的小组） ============ -->
+    <ExportExcel
+      ref="exportDialog"
+      :rows="[]"
+      :fields="[]"
+      :default-filename="(activeDim?.name || '分组') + '-分组表'"
+      :group-source="groupExportSource"
+    />
   </div>
 </template>
 
@@ -355,6 +364,7 @@ import { ref, reactive, computed, onMounted, nextTick } from 'vue';
 import Tabs from '../components/Tabs.vue';
 import ConfirmDialog from '../components/ConfirmDialog.vue';
 import SmartGroupDialog from '../components/SmartGroupDialog.vue';
+import ExportExcel from '../components/ExportExcel.vue';
 import { useNotification } from '../composables/useNotification';
 
 const { success, error, info } = useNotification();
@@ -399,12 +409,12 @@ function buildGroupNames(rule, prefix, count) {
 }
 async function applyGroupNames(groups, names) {
   if (!names || !groups) return;
-  for (let i = 0; i < groups.length; i++) {
-    if (i >= names.length) break;
-    const g = groups[i];
-    if (String(g.name || '') === names[i]) continue;
-    await api(`/groups/${g.id}`, { method: 'PUT', body: JSON.stringify({ name: names[i] }) });
-  }
+  // 并行批量改名（无变化的跳过），比逐个 await 更高效
+  await Promise.all(groups.map((g, i) => {
+    if (i >= names.length) return;
+    if (String(g.name || '') === names[i]) return;
+    return api(`/groups/${g.id}`, { method: 'PUT', body: JSON.stringify({ name: names[i] }) });
+  }));
 }
 
 // ============ 组名覆盖确认 ============
@@ -897,99 +907,24 @@ async function handleSmartGroupResult(result) {
   }
 }
 
-// ============ 导出EXCEL ============
-async function exportExcel() {
+// ============ 导出（复用 ExportExcel 弹窗，选择导出的小组） ============
+const exportDialog = ref(null);
+// 传给导出弹窗的分组数据结构
+const groupExportSource = computed(() => {
+  if (!active.value) return null;
+  return {
+    title: `${active.value.dimension.name}-分组表`,
+    leaderTitle: active.value.dimension.leader_title || '组长',
+    groups: (active.value.groups || []).map(g => ({
+      name: g.name,
+      members: (g.members || []).map(m => ({ member_name: m.member_name, remark: m.remark }))
+    }))
+  };
+});
+async function openExport() {
   if (!active.value || active.value.groups.length === 0) return error('暂无小组可导出');
-  try {
-    const { default: ExcelJS } = await import('exceljs');
-    const workbook = new ExcelJS.Workbook();
-    const sheet = workbook.addWorksheet(active.value.dimension.name || '分组');
-    const title = `${active.value.dimension.name}-分组表`;
-    const headers = [active.value.dimension.leader_title || '组长', '成员', '备注'];
-
-    const titleRow = sheet.addRow([title]);
-    sheet.mergeCells(1, 1, 1, headers.length);
-    titleRow.eachCell(c => {
-      c.font = { bold: true, size: 14 };
-      c.alignment = { horizontal: 'center', vertical: 'middle' };
-      c.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFE2EFDA' } };
-      c.border = { top: { style: 'thin' }, left: { style: 'thin' }, bottom: { style: 'thin' }, right: { style: 'thin' } };
-    });
-    titleRow.height = 24;
-
-    let r = 2;
-    for (const g of active.value.groups) {
-      // 小组名字标题行（合并全列）
-      const nameRow = sheet.addRow([]);
-      sheet.mergeCells(r, 1, r, headers.length);
-      const nc = sheet.getCell(r, 1);
-      nc.value = g.name;
-      nc.font = { bold: true };
-      nc.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFBDD7EE' } };
-      nc.alignment = { horizontal: 'left', vertical: 'middle' };
-      for (let col = 1; col <= headers.length; col++) {
-        sheet.getCell(r, col).border = { top: { style: 'thin' }, left: { style: 'thin' }, bottom: { style: 'thin' }, right: { style: 'thin' } };
-      }
-      nameRow.height = 20;
-      r++;
-
-      // 表头
-      const headRow = sheet.addRow(headers);
-      headRow.eachCell(c => {
-        c.font = { bold: true, color: { argb: 'FFFFFFFF' } };
-        c.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF4CAF50' } };
-        c.alignment = { horizontal: 'center' };
-        c.border = { top: { style: 'thin' }, left: { style: 'thin' }, bottom: { style: 'thin' }, right: { style: 'thin' } };
-      });
-      r++;
-
-      // 组长行
-      if (g.members.length > 0) {
-        const m = g.members[0];
-        const leadRow = sheet.addRow([active.value.dimension.leader_title || '组长', m.member_name || '', m.remark || '']);
-        leadRow.eachCell(c => {
-          c.border = { top: { style: 'thin' }, left: { style: 'thin' }, bottom: { style: 'thin' }, right: { style: 'thin' } };
-          c.alignment = { horizontal: 'center', vertical: 'middle' };
-        });
-        sheet.getCell(r, 1).font = { bold: true };
-        r++;
-      }
-      // 成员行
-      for (const m of g.members.slice(1)) {
-        const row = sheet.addRow(['', m.member_name || '', m.remark || '']);
-        row.eachCell(c => {
-          c.border = { top: { style: 'thin' }, left: { style: 'thin' }, bottom: { style: 'thin' }, right: { style: 'thin' } };
-          c.alignment = { horizontal: 'center', vertical: 'middle' };
-        });
-        r++;
-      }
-      r++; // 空行分隔
-    }
-
-    for (let i = 1; i <= headers.length; i++) sheet.getColumn(i).width = 20;
-
-    const buffer = await workbook.xlsx.writeBuffer();
-    const blob = new Blob([buffer], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
-    await saveFileWithDialog(`${title}.xlsx`, blob);
-    success('导出成功');
-  } catch (e) {
-    console.error(e);
-    error('导出失败');
-  }
-}
-
-async function saveFileWithDialog(defaultName, blob) {
-  if (window.electron && typeof window.electron.invoke === 'function') {
-    const arrayBuffer = await blob.arrayBuffer();
-    return window.electron.invoke('save-file', { defaultName, data: arrayBuffer });
-  }
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement('a');
-  a.href = url;
-  a.download = defaultName;
-  a.click();
-  URL.revokeObjectURL(url);
-  return true;
+  await nextTick();
+  exportDialog.value && exportDialog.value.open();
 }
 
 onMounted(() => { loadAll(); fetchStudents(); });
