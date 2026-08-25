@@ -26,7 +26,7 @@
 </template>
 
 <script>
-import '../styles/dialog-transition.css'
+import '../../styles/dialog-transition.css'
 
 export default {
   name: 'OverdueLeaveDialog',

@@ -233,14 +233,7 @@
             <span class="text-white text-xs tabular-nums w-12">{{ fmtTime(duration) }}</span>
           </div>
           <button @click="skip(10)" class="h-10 px-3 rounded-full bg-white/10 hover:bg-white/20 text-white text-xs" title="前进 10 秒">+10s »</button>
-          <select v-model="playbackRate" @change="changeRate" class="bg-black/40 text-white text-xs px-2 py-2 rounded outline-none" title="播放倍数">
-            <option :value="0.5">0.5x</option>
-            <option :value="0.75">0.75x</option>
-            <option :value="1">1x</option>
-            <option :value="1.25">1.25x</option>
-            <option :value="1.5">1.5x</option>
-            <option :value="2">2x</option>
-          </select>
+          <AppSelect v-model="playbackRate" @change="changeRate" class="w-20" title="播放倍数" :options="[{ value: 0.5, label: '0.5x' }, { value: 0.75, label: '0.75x' }, { value: 1, label: '1x' }, { value: 1.25, label: '1.25x' }, { value: 1.5, label: '1.5x' }, { value: 2, label: '2x' }]" />
           <span class="text-white/30">|</span>
         </template>
         <!-- 图片控制 -->
@@ -266,7 +259,8 @@
 import { ref, computed, nextTick, onMounted, onBeforeUnmount } from 'vue'
 import axios from 'axios'
 import { useNotification } from '../composables/useNotification.js'
-import VideoThumb from '../components/VideoThumb.vue'
+import VideoThumb from '../components/import-export/VideoThumb.vue'
+import AppSelect from '../components/base/AppSelect.vue'
 import Sortable from 'sortablejs'
 import { resourceUrl } from '../utils/apiUrl'
 import '../styles/dialog-transition.css'

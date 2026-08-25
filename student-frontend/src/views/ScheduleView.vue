@@ -17,7 +17,7 @@
               <button @click="activeSettingsVisible = true" class="bg-primary text-text-inverse px-4 py-2 rounded">⚙️ 设置</button>
               <button @click="refreshActive" class="bg-text-muted text-text-inverse px-4 py-2 rounded">🔄 刷新</button>
               <button @click="applyMasterToActive" class="bg-primary text-text-inverse px-4 py-2 rounded">📥 从模板导入</button>
-              <button @click="$refs.activeExportDialog.open()" class="bg-warning text-text-inverse px-4 py-2 rounded">📥 导出 Excel</button>
+              <button @click="activeExportVisible = true" class="bg-warning text-text-inverse px-4 py-2 rounded">📥 导出 Excel</button>
             </div>
 
             <GridView
@@ -37,6 +37,7 @@
             />
 
             <SettingsDialog
+              v-if="activeSettingsMounted"
               :visible="activeSettingsVisible"
               :settings="activeSettings"
               :semesterStart="semesterStart"
@@ -47,11 +48,13 @@
             />
 
             <ExportExcel
-              ref="activeExportDialog"
+              v-if="activeExportMounted"
+              :is-visible="activeExportVisible"
               :rows="activeExportRows"
               :fields="activeExportFields"
               defaultFilename="实行课表"
               @export-finish="() => {}"
+              @update:is-visible="activeExportVisible = $event"
             />
           </section>
 
@@ -64,7 +67,7 @@
             <div class="mb-4 flex items-center gap-3">
               <button @click="masterSettingsVisible = true" class="bg-primary text-text-inverse px-4 py-2 rounded">⚙️ 设置</button>
               <button @click="refreshMaster" class="bg-text-muted text-text-inverse px-4 py-2 rounded">🔄 刷新</button>
-              <button @click="$refs.masterExportDialog.open()" class="bg-warning text-text-inverse px-4 py-2 rounded">📥 导出 Excel</button>
+              <button @click="masterExportVisible = true" class="bg-warning text-text-inverse px-4 py-2 rounded">📥 导出 Excel</button>
             </div>
 
             <GridView
@@ -83,6 +86,7 @@
             />
 
             <SettingsDialog
+              v-if="masterSettingsMounted"
               :visible="masterSettingsVisible"
               :settings="masterSettings"
               :semesterStart="''"
@@ -93,11 +97,13 @@
             />
 
             <ExportExcel
-              ref="masterExportDialog"
+              v-if="masterExportMounted"
+              :is-visible="masterExportVisible"
               :rows="masterExportRows"
               :fields="masterExportFields"
               defaultFilename="一般课表"
               @export-finish="() => {}"
+              @update:is-visible="masterExportVisible = $event"
             />
           </section>
         </div>
@@ -106,7 +112,7 @@
         <div v-else-if="activeTab === 'history'">
           
           <div v-if="historyLoading" class="text-center py-10">加载中...</div>
-          <div v-else-if="!historySnapshot" class="text-center py-10 text-text-muted">该周暂无快照</div>
+          <EmptySnapshot v-else-if="!historySnapshot" />
           <GridView
             v-else
             :colHeaders="historyColHeaders"
@@ -137,12 +143,16 @@
 
 <script>
 import axios from 'axios';
-import GridView from '../components/GridView.vue';
-import SettingsDialog from '../components/SettingsDialog.vue';
-import ExportExcel from '../components/ExportExcel.vue';
-import Tabs from '../components/Tabs.vue';
-import WeekSwitcher from '../components/WeekSwitcher.vue';
+import { defineAsyncComponent } from 'vue';
+import EmptySnapshot from '../components/base/EmptySnapshot.vue';
+import GridView from '../components/tables/GridView.vue';
+import Tabs from '../components/base/Tabs.vue';
+import WeekSwitcher from '../components/base/WeekSwitcher.vue';
 import { useNotification } from '../composables/useNotification.js';
+
+// 弹窗类组件懒加载：打开时才加载对应 chunk
+const SettingsDialog = defineAsyncComponent(() => import('../components/dialogs/SettingsDialog.vue'));
+const ExportExcel = defineAsyncComponent(() => import('../components/import-export/ExportExcel.vue'));
 
 const API_BASE = '/api';
 
@@ -185,7 +195,7 @@ const COURSE_CANDIDATES = [
 
 export default {
   name: 'ScheduleView',
-  components: { GridView, SettingsDialog, ExportExcel,Tabs,WeekSwitcher },
+  components: { GridView, SettingsDialog, ExportExcel,Tabs,WeekSwitcher,EmptySnapshot },
   setup() {
     const { success } = useNotification()
     return { notifySuccess: success }
@@ -201,6 +211,9 @@ export default {
         days: ['周一', '周二', '周三', '周四', '周五']
       },
       masterSettingsVisible: false,
+      masterSettingsMounted: false,
+      masterExportVisible: false,
+      masterExportMounted: false,
 
       // ========== 实行课表 ==========
       activeColHeaders: ['周一', '周二', '周三', '周四', '周五'],
@@ -211,6 +224,9 @@ export default {
         days: ['周一', '周二', '周三', '周四', '周五']
       },
       activeSettingsVisible: false,
+      activeSettingsMounted: false,
+      activeExportVisible: false,
+      activeExportMounted: false,
 
       // ========== 全局 ==========
       semesterStart: '',
@@ -245,7 +261,12 @@ export default {
           }
         }
       }
-    }
+    },
+    // 懒加载弹窗保活：首次打开后保持挂载，关闭只降 visible，保留退出动画
+    masterSettingsVisible(n) { if (n) this.masterSettingsMounted = true },
+    masterExportVisible(n) { if (n) this.masterExportMounted = true },
+    activeSettingsVisible(n) { if (n) this.activeSettingsMounted = true },
+    activeExportVisible(n) { if (n) this.activeExportMounted = true }
   },
   computed: {
     // ---- 一般课表显示行 ----

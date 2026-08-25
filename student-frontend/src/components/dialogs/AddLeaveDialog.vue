@@ -112,8 +112,8 @@
 </template>
 
 <script>
-import '../styles/dialog-transition.css'
-import { useNotification } from '../composables/useNotification.js'
+import '../../styles/dialog-transition.css'
+import { useNotification } from '../../composables/useNotification.js'
 export default {
   name: 'AddLeaveDialog',
   props: {

@@ -62,21 +62,17 @@
       <div v-if="!isEdit && mode === 'group'" class="mb-3">
         <label class="block text-sm text-text-secondary mb-1">选择小组 <span class="text-danger">*</span></label>
         <div class="grid grid-cols-2 gap-3">
-          <select
+          <AppSelect
             v-model="activeDimId"
             @change="onDimChange"
-            class="w-full px-3 py-2 text-sm rounded-lg bg-surface-hover border border-border focus:outline-none focus:border-primary"
-          >
-            <option value="0" disabled>先选择分组</option>
-            <option v-for="d in dims" :key="d.id" :value="d.id">{{ d.name }}</option>
-          </select>
-          <select
+            :options="dimOptions"
+            class="w-full"
+          />
+          <AppSelect
             v-model="selectedGroupId"
-            class="w-full px-3 py-2 text-sm rounded-lg bg-surface-hover border border-border focus:outline-none focus:border-primary"
-          >
-            <option value="0" disabled>再选择小组</option>
-            <option v-for="(g, i) in currentGroups" :key="g.id" :value="g.id">{{ groupLabel(g, i) }}</option>
-          </select>
+            :options="groupOptions"
+            class="w-full"
+          />
         </div>
         <div v-if="selectedGroup" class="mt-2">
           <div class="text-xs text-text-secondary">将给「<span class="font-bold text-text">{{ groupLabel(selectedGroup, currentGroups.indexOf(selectedGroup)) }}</span>」组内 <span class="font-bold text-text">{{ selectedGroup.members.length }}</span> 人记录一条{{ form.type === '扣分' ? '扣分' : '加分' }}：</div>
@@ -149,10 +145,12 @@
 
 <script>
 import axios from 'axios'
-import '../styles/dialog-transition.css'
-import { useNotification } from '../composables/useNotification.js'
+import AppSelect from '../base/AppSelect.vue'
+import '../../styles/dialog-transition.css'
+import { useNotification } from '../../composables/useNotification.js'
 export default {
   name: 'AddScoreDialog',
+  components: { AppSelect },
   props: {
     visible: { type: Boolean, default: false },
     students: { type: Array, default: () => [] },
@@ -204,6 +202,18 @@ export default {
       return this.dims.some(d => d.id === this.activeDimId) && this.selectedGroupId
         ? this.activeDimGroups.find(g => g.id === this.selectedGroupId) || null
         : null
+    },
+    dimOptions() {
+      return [
+        { value: 0, label: '先选择分组', disabled: true },
+        ...this.dims.map(d => ({ value: d.id, label: d.name }))
+      ]
+    },
+    groupOptions() {
+      return [
+        { value: 0, label: '再选择小组', disabled: true },
+        ...this.currentGroups.map((g, i) => ({ value: g.id, label: this.groupLabel(g, i) }))
+      ]
     }
   },
   watch: {

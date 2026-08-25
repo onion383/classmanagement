@@ -13,20 +13,8 @@
         placeholder="按学生姓名筛选"
         class="px-3 py-1.5 text-sm rounded-lg bg-surface-hover border border-border focus:outline-none focus:border-primary w-48"
       />
-      <select
-        v-model="filterType"
-        class="px-3 py-1.5 text-sm rounded-lg bg-surface-hover border border-border focus:outline-none focus:border-primary"
-      >
-        <option value="">全部类型</option>
-        <option v-for="t in typeOptions" :key="t" :value="t">{{ t }}</option>
-      </select>
-      <select
-        v-model="filterNode"
-        class="px-3 py-1.5 text-sm rounded-lg bg-surface-hover border border-border focus:outline-none focus:border-primary"
-      >
-        <option value="">全部事件</option>
-        <option v-for="n in nodeTypes" :key="n.value" :value="n.value">{{ n.label }}</option>
-      </select>
+      <div class="w-32"><AppSelect v-model="filterType" :options="filterTypeOptions" /></div>
+      <div class="w-32"><AppSelect v-model="filterNode" :options="filterNodeOptions" /></div>
     </div>
 
     <!-- 时间轴 -->
@@ -72,8 +60,11 @@
 </template>
 
 <script>
+import AppSelect from './AppSelect.vue'
+
 export default {
   name: 'LeaveTimeline',
+  components: { AppSelect },
   props: {
     // 节点结构：{ type, time, text, category, key }，type 对应 nodeTypes 里的 value
     nodes: { type: Array, default: () => [] },
@@ -101,6 +92,12 @@ export default {
     };
   },
   computed: {
+    filterTypeOptions() {
+      return [{ value: '', label: '全部类型' }, ...this.typeOptions];
+    },
+    filterNodeOptions() {
+      return [{ value: '', label: '全部事件' }, ...this.nodeTypes];
+    },
     visibleNodes() {
       const kw = this.keyword.toLowerCase();
       const type = this.filterType;

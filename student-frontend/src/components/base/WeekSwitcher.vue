@@ -15,28 +15,32 @@
     >
       下一周 ▶
     </button>
-    <select
-      v-if="weeks.length > 0"
-      :value="currentWeek"
-      @change="$emit('update:currentWeek', $event.target.value)"
-      class="border border-border rounded px-2 py-1 text-sm bg-surface text-text"
-    >
-      <option v-for="w in weeks" :key="w.week_start" :value="w.week_start">
-        {{ formatWeek(w.week_start) }}
-      </option>
-    </select>
+    <div class="w-40">
+      <AppSelect
+        v-if="weeks.length > 0"
+        :model-value="currentWeek"
+        @change="$emit('update:currentWeek', $event)"
+        :options="weekOptions"
+      />
+    </div>
   </div>
 </template>
 
 <script>
+import AppSelect from './AppSelect.vue'
+
 export default {
   name: 'WeekSwitcher',
+  components: { AppSelect },
   props: {
     currentWeek: { type: String, required: true },
     weeks: { type: Array, default: () => [] }
   },
   emits: ['update:currentWeek'],
   computed: {
+    weekOptions() {
+      return this.weeks.map(w => ({ value: w.week_start, label: this.formatWeek(w.week_start) }));
+    },
     hasPrev() {
       const idx = this.weeks.findIndex(w => w.week_start === this.currentWeek);
       return idx > 0;

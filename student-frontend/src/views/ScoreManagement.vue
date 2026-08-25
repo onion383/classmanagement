@@ -5,10 +5,7 @@
       <h1 class="text-2xl font-bold text-text">🏅 加分管理</h1>
       <div class="flex items-center gap-2">
         <span class="text-sm text-text-secondary">加分对象</span>
-        <select v-model="scoreMode" class="px-3 py-1.5 text-sm rounded-lg bg-surface-hover border border-border focus:outline-none focus:border-primary">
-          <option value="personal">个人加分</option>
-          <option value="group">小组加分</option>
-        </select>
+        <AppSelect v-model="scoreMode" :options="scoreModeOptions" class="w-32" />
       </div>
     </div>
 
@@ -49,7 +46,7 @@
       <div class="mb-4 flex items-center gap-3">
         <button @click="openAdd" class="bg-primary hover:bg-primary-hover text-text-inverse px-5 py-2 rounded">＋ 添加{{ isGroup ? '小组' : '个人' }}加分</button>
         <button @click="refresh" class="bg-text-muted hover:bg-text-secondary text-text-inverse px-4 py-2 rounded flex items-center gap-1">🔄 刷新</button>
-        <button @click="exportDialog.open()" class="bg-warning hover:bg-warning-hover text-text-inverse px-4 py-2 rounded flex items-center gap-1">📥 导出{{ isGroup ? '小组' : '个人' }}加分</button>
+        <button @click="exportVisible = true" class="bg-warning hover:bg-warning-hover text-text-inverse px-4 py-2 rounded flex items-center gap-1">📥 导出{{ isGroup ? '小组' : '个人' }}加分</button>
       </div>
 
       <!-- 今日时间轴 -->
@@ -83,11 +80,7 @@
       <div class="bg-surface border border-border rounded-xl p-5 mb-6">
         <div class="flex flex-wrap items-center justify-between gap-3 mb-5">
           <h3 class="text-base font-bold text-text">{{ isGroup ? '📊 按小组统计' : '📊 按个人统计' }}</h3>
-          <select v-model="statMode" class="px-3 py-1.5 text-sm rounded-lg bg-surface-hover border border-border focus:outline-none focus:border-primary">
-            <option value="add">按加分</option>
-            <option value="sub">按扣分</option>
-            <option value="net">净分（加-扣）</option>
-          </select>
+          <AppSelect v-model="statMode" :options="statModeOptions" class="w-32" />
         </div>
 
         <div v-if="statRows.length" class="space-y-2.5">
@@ -128,6 +121,7 @@
 
     <!-- 添加/编辑加分弹窗 -->
     <AddScoreDialog
+      v-if="addDialogMounted"
       :visible="addDialogVisible"
       :students="students"
       :mode="scoreMode"
@@ -140,6 +134,7 @@
 
     <!-- 确认删除弹窗 -->
     <ConfirmDialog
+      v-if="confirmMounted"
       :visible="confirm.visible"
       :message="confirm.message"
       type="confirm"
@@ -150,31 +145,43 @@
 
     <!-- 导出弹窗 -->
     <ExportExcel
-      ref="exportDialog"
+      v-if="exportMounted"
+      :is-visible="exportVisible"
       :rows="exportRows"
       :fields="exportFields"
       :selectedRowKeys="[]"
       :default-filename="isGroup ? '今日小组加分' : '今日个人加分'"
       @export-finish="() => {}"
+      @update:is-visible="exportVisible = $event"
     />
   </div>
 </template>
 
 <script>
 import axios from 'axios'
-import Tabs from '../components/Tabs.vue'
-import AddScoreDialog from '../components/AddScoreDialog.vue'
-import LeaveTimeline from '../components/LeaveTimeline.vue'
-import ConfirmDialog from '../components/ConfirmDialog.vue'
-import ExportExcel from '../components/ExportExcel.vue'
-import DynamicTable from '../components/DynamicTable.vue'
+import { defineAsyncComponent } from 'vue'
+import AppSelect from '../components/base/AppSelect.vue'
+import Tabs from '../components/base/Tabs.vue'
+import LeaveTimeline from '../components/base/LeaveTimeline.vue'
+import DynamicTable from '../components/tables/DynamicTable.vue'
 import { useNotification } from '../composables/useNotification.js'
+
+// 弹窗类组件懒加载：打开时才加载对应 chunk
+const AddScoreDialog = defineAsyncComponent(() => import('../components/dialogs/AddScoreDialog.vue'))
+const ConfirmDialog = defineAsyncComponent(() => import('../components/base/ConfirmDialog.vue'))
+const ExportExcel = defineAsyncComponent(() => import('../components/import-export/ExportExcel.vue'))
 
 const API = '/api'
 
 export default {
   name: 'ScoreManagement',
-  components: { Tabs, AddScoreDialog, LeaveTimeline, ConfirmDialog, ExportExcel, DynamicTable },
+  components: { AppSelect, Tabs, AddScoreDialog, LeaveTimeline, ConfirmDialog, ExportExcel, DynamicTable },
+  // 懒加载弹窗保活：首次打开后保持挂载，关闭只降 visible，保留退出动画
+  watch: {
+    addDialogVisible(n) { if (n) this.addDialogMounted = true },
+    exportVisible(n) { if (n) this.exportMounted = true },
+    'confirm.visible'(n) { if (n) this.confirmMounted = true }
+  },
   data() {
     return {
       activeTab: 'today',
@@ -186,8 +193,12 @@ export default {
       groupScores: [],  // 小组加分记录（source === 'group'）
       statMode: 'add',
       addDialogVisible: false,
+      addDialogMounted: false,
       editingRecord: null,
+      exportVisible: false,
+      exportMounted: false,
       confirm: { visible: false, message: '', ok: null },
+      confirmMounted: false,
       // 加分记录表（DynamicTable）：行数据 / 列顺序 / 当前编辑单元格
       scoreRows: [],
       scoreCols: [],
@@ -195,6 +206,20 @@ export default {
     }
   },
   computed: {
+    // 加分对象下拉选项
+    scoreModeOptions() {
+      return [
+        { value: 'personal', label: '个人加分' },
+        { value: 'group', label: '小组加分' }
+      ]
+    },
+    statModeOptions() {
+      return [
+        { value: 'add', label: '按加分' },
+        { value: 'sub', label: '按扣分' },
+        { value: 'net', label: '净分（加-扣）' }
+      ]
+    },
     isGroup() {
       return this.scoreMode === 'group'
     },

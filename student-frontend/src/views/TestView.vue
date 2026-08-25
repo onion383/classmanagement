@@ -180,11 +180,7 @@
       <div class="grid grid-cols-2 gap-4">
         <div>
           <label class="block text-sm font-medium mb-1">下拉选择</label>
-          <select class="w-full border px-3 py-2 rounded bg-surface">
-            <option>选项一</option>
-            <option>选项二</option>
-            <option>选项三</option>
-          </select>
+          <AppSelect class="w-full" :options="testOptions" />
         </div>
         <div>
           <label class="block text-sm font-medium mb-1">复选框</label>
@@ -437,9 +433,11 @@
 
 <script>
 import { useNotification } from '../composables/useNotification.js'
+import AppSelect from '../components/base/AppSelect.vue'
 
 export default {
   name: 'TestView',
+  components: { AppSelect },
   setup() {
     const { success, error, warning, info } = useNotification()
     return { notifySuccess: success, notifyError: error, notifyWarning: warning, notifyInfo: info }
@@ -451,6 +449,11 @@ export default {
         { value: 'default', label: '默认', activeClass: 'bg-primary text-white' },
         { value: 'glass', label: '毛玻璃', activeClass: 'bg-primary text-white' },
         { value: 'minimal', label: '极简', activeClass: 'bg-primary text-white' }
+      ],
+      testOptions: [
+        { value: '选项一', label: '选项一' },
+        { value: '选项二', label: '选项二' },
+        { value: '选项三', label: '选项三' }
       ]
     }
   },

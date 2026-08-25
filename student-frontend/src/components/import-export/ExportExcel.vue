@@ -1,7 +1,7 @@
 <template>
   <!-- 导出表格组件 -->
   <Transition name="dialog">
-  <div v-if="visible" class="fixed inset-0 bg-black/50 flex items-center justify-center z-[10001]">
+  <div v-if="effectiveVisible" class="fixed inset-0 bg-black/50 flex items-center justify-center z-[10001]">
     <div class="bg-surface p-5 rounded-lg min-w-[400px] max-w-xl shadow-card border border-border dialog-card">
       <h3 class="text-lg font-bold mb-3">导出选项</h3>
 
@@ -37,13 +37,7 @@
 
       <div class="mb-4">
         <p class="font-semibold mb-2">导出格式：</p>
-        <select v-model="exportFormat" class="border p-2 rounded w-full">
-          <option value="html">HTML 表格 (.html)</option>
-          <option value="xlsx">Excel (.xlsx) - 带边框</option>
-          <option value="csv">CSV (.csv) - 无样式</option>
-          <option value="image">图片 (.png)</option>
-          <option value="pdf">PDF (.pdf)</option>
-        </select>
+        <AppSelect v-model="exportFormat" class="w-full" :options="[{value:'html',label:'HTML 表格 (.html)'},{value:'xlsx',label:'Excel (.xlsx) - 带边框'},{value:'csv',label:'CSV (.csv) - 无样式'},{value:'image',label:'图片 (.png)'},{value:'pdf',label:'PDF (.pdf)'}]" />
       </div>
 
       <div class="mb-4">
@@ -61,9 +55,10 @@
 </template>
 
 <script>
-import fontUrl from '../assets/fonts/NotoSansSC-6.ttf';
-import { useNotification } from '../composables/useNotification';
-import '../styles/dialog-transition.css'
+import fontUrl from '../../assets/fonts/NotoSansSC-6.ttf';
+import AppSelect from '../base/AppSelect.vue'
+import { useNotification } from '../../composables/useNotification';
+import '../../styles/dialog-transition.css'
 
 const SECTION_NAMES = { morning: '上午', noon: '中午', afternoon: '下午', evening: '傍晚', night: '晚上' };
 
@@ -77,6 +72,7 @@ const FORMAT_LABELS = {
 
 export default {
   name: 'ExportExcel',
+  components: { AppSelect },
   props: {
     rows: { type: Array, required: true },
     fields: { type: Array, required: true },
@@ -84,9 +80,11 @@ export default {
     defaultFilename: { type: String, default: '导出数据' },
     tableElement: { type: Object, default: null },
     // 分组导出模式：传入后弹窗改为「选择导出的小组」，数据从该对象取
-    groupSource: { type: Object, default: null }
+    groupSource: { type: Object, default: null },
+    // 受控模式：传入后显示由外部 isVisible 决定（配合 v-if 可实现懒加载）；不传则用 open() 自管理，向后兼容
+    isVisible: { type: Boolean, default: undefined }
   },
-  emits: ['export-start', 'export-finish', 'export-error'],
+  emits: ['export-start', 'export-finish', 'export-error', 'update:isVisible'],
   setup() {
     const { success, error } = useNotification()
     return { notifySuccess: success, notifyError: error }
@@ -103,10 +101,12 @@ export default {
   },
   computed: {
     selectedCount() { return this.selectedRowKeys.length; },
-    isGroupMode() { return !!(this.groupSource && Array.isArray(this.groupSource.groups) && this.groupSource.groups.length); }
+    isGroupMode() { return !!(this.groupSource && Array.isArray(this.groupSource.groups) && this.groupSource.groups.length); },
+    isControlled() { return this.isVisible !== undefined; },
+    effectiveVisible() { return this.isControlled ? this.isVisible : this.visible; }
   },
   watch: {
-    visible(val) {
+    effectiveVisible(val) {
       if (val) {
         this.selectedColumns = this.fields.map(f => f.name);
         this.selectedGroups = this.groupSource ? this.groupSource.groups.map((_, i) => i) : [];
@@ -117,8 +117,16 @@ export default {
     }
   },
   methods: {
-    open() { this.visible = true; this.$emit('export-start'); },
-    cancel() { this.visible = false; },
+    open() {
+      if (this.isControlled) this.$emit('update:isVisible', true);
+      else this.visible = true;
+      this.$emit('export-start');
+    },
+    close() {
+      if (this.isControlled) this.$emit('update:isVisible', false);
+      else this.visible = false;
+    },
+    cancel() { this.close(); },
     async doExport() {
       // ---------- 分组导出模式 ----------
       if (this.isGroupMode) {
@@ -144,7 +152,7 @@ export default {
           this.notifyError('导出失败，请重试')
           this.$emit('export-error', err);
         }
-        this.visible = false;
+        this.close();
         return;
       }
 
@@ -154,7 +162,7 @@ export default {
       if (this.rowMode === 'selected') {
         exportRows = exportRows.filter(r => this.selectedRowKeys.includes(r.id) || this.selectedRowKeys.includes(r._rowKey));
       }
-      if (!exportRows.length) { alert('没有数据可以导出'); this.visible = false; return; }
+      if (!exportRows.length) { alert('没有数据可以导出'); this.close(); return; }
 
       const selectedFields = this.fields.filter(f => this.selectedColumns.includes(f.name));
       const dateStr = new Date().toISOString().slice(0, 10);
@@ -180,7 +188,7 @@ export default {
         this.notifyError('导出失败，请重试')
         this.$emit('export-error', err);
       }
-      this.visible = false;
+      this.close();
     },
 
     // 保存文件：Electron 下弹系统保存对话框，用户确认后才写入；浏览器则直接下载
