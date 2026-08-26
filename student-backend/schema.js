@@ -403,6 +403,23 @@ function initSchema(conn) {
       created_at DATETIME DEFAULT CURRENT_TIMESTAMP
     );
   `);
+
+  // ======================== 撤销历史（持久化 undo） ========================
+  // 按资源 key 分组记录编辑动作，支持跨重启后继续撤销。
+  // dir：1=可撤销（undo侧），0=已撤销（redo侧）。
+  conn.exec(`
+    CREATE TABLE IF NOT EXISTS undo_history (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      key TEXT NOT NULL,
+      type TEXT NOT NULL,
+      label TEXT NOT NULL DEFAULT '',
+      payload TEXT NOT NULL DEFAULT '{}',
+      dir INTEGER NOT NULL DEFAULT 1,
+      ts TEXT NOT NULL DEFAULT ''
+    );
+  `);
+  // 优化：按资源分组查询/删最旧记录
+  conn.exec(`CREATE INDEX IF NOT EXISTS idx_undo_key ON undo_history (key, id);`);
 }
 
 module.exports = { initSchema };

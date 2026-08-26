@@ -3,9 +3,9 @@ const fs = require('fs');
 const fsp = fs.promises;
 const path = require('path');
 const { execFile } = require('child_process');
-const { trash } = require('trash');
 const { db } = require('../db');
 const dbManager = require('../dbManager');
+const { moveToTrash, deleteThumb } = require('../albumOps');
 
 // 服务端缩略图/视频封面生成
 // 注：sharp 为重的原生库，改为用到时（genThumb 生成缩略图）才 require，避免随 app.js 顶层
@@ -356,20 +356,19 @@ router.get('/photo/:photoId/thumb', async (req, res) => {
   }
 });
 
-// DELETE /api/album/photo/:photoId 删除照片（丢进系统回收站）+ 删除索引
+// DELETE /api/album/photo/:photoId 删除照片（移入应用内可还原回收站）+ 删除索引
 router.delete('/photo/:photoId', async (req, res) => {
   try {
     const photo = db.prepare('SELECT * FROM album_photos WHERE id = ?').get(Number(req.params.photoId));
     if (!photo) return res.status(404).json({ error: '照片不存在' });
-    // 进回收站（可还源），不直接永久删除
+    // 移入应用内回收站（dataDir/album-trash），可撤销还原，不再直接丢系统回收站/永久删除
     try {
-      await trash(photo.file_path);
+      await moveToTrash(photo);
     } catch (err) {
       return res.status(500).json({ error: '移入回收站失败：' + err.message });
     }
     // 清理已生成的缩略图缓存
-    const tp = thumbOf(photo);
-    if (tp) await fsp.unlink(tp).catch(() => {});
+    await deleteThumb(photo).catch(() => {});
     db.prepare('DELETE FROM album_photos WHERE id = ?').run(photo.id);
     res.json({ message: '已移入回收站' });
   } catch (err) {
@@ -551,3 +550,15 @@ async function incrementalScan(albumId) {
 }
 
 module.exports = router;
+
+// 供 undo.js「撤销添加相册」调用：取消该相册仍在进行的扫描任务。
+router.cancelScan = (albumId) => {
+  const task = scanTasks.get(albumId);
+  if (task) task.cancelled = true;
+};
+
+// 供 undo.js「重做添加相册」调用：重新加入该文件夹，触发增量扫描（空索引会把现有文件当新增逐步索引）。
+router.startScan = (albumId) => {
+  if (scanTasks.has(albumId)) return;
+  incrementalScan(albumId).catch(() => {});
+};

@@ -144,6 +144,7 @@ import EmptySnapshot from '../components/base/EmptySnapshot.vue'
 import Tabs from '../components/base/Tabs.vue'
 import WeekSwitcher from '../components/base/WeekSwitcher.vue'
 import { useSeatGrid } from '../composables/useSeatGrid.js'
+import { useUndoShortcut, recordGridSnapshotUndo } from '../composables/useUndo.js'
 import { useNotification } from '../composables/useNotification.js'
 
 // 弹窗类组件懒加载：打开时才加载对应 chunk
@@ -184,8 +185,16 @@ async function fetchAllStudents() {
 }
 
 // ==================== 座位网格 ====================
-const activeGrid = useSeatGrid(`${API_BASE}/seats`, { getStudentName, getStudentId })
-const masterGrid = useSeatGrid(`${API_BASE}/seats/master`, { getStudentName, getStudentId })
+const activeGrid = useSeatGrid(`${API_BASE}/seats`, {
+  getStudentName, getStudentId,
+  undo: { key: '座位表', table: 'seat_layout' },
+  cellBase: `${API_BASE}/seats/cell`
+})
+const masterGrid = useSeatGrid(`${API_BASE}/seats/master`, {
+  getStudentName, getStudentId,
+  undo: { key: 'seat', table: 'seat_template' },
+  cellBase: `${API_BASE}/seats/master/cell`
+})
 
 // 保持模板兼容的别名
 const activeLoaded = activeGrid.loaded
@@ -276,6 +285,10 @@ const onMasterCellsUpdate = masterGrid.onCellsUpdate
 const onMasterSwapRows = masterGrid.onSwapRows
 const onMasterSwapColumns = masterGrid.onSwapColumns
 const onMasterCellDblClick = masterGrid.onCellDblClick
+const onActiveCellsUpdate = activeGrid.onCellsUpdate
+const onActiveSwapRows = activeGrid.onSwapRows
+const onActiveSwapColumns = activeGrid.onSwapColumns
+const onActiveCellDblClick = activeGrid.onCellDblClick
 const saveMasterSettings = (s) => requestSaveSettings(masterGrid, s)
 
 function openSettings(target) {
@@ -309,7 +322,10 @@ watch(() => masterExportVisible.value, v => { if (v) masterExportMounted.value =
 async function applySmartArrangement(result) {
   smartArrangementVisible.value = false
   try {
+    // 记录整块快照，撤销可一键恢复智能排表前的布局
+    const before = (activeGrid.seats.value || []).map(r => Array.isArray(r) ? [...r] : r)
     await activeGrid.saveSeats(result.seats)
+    recordGridSnapshotUndo('座位表', 'seat_layout', before, result.seats, '智能排表')
     notifySuccess('已应用智能排表')
   } catch (e) {
     notifySuccess('应用失败')
@@ -319,8 +335,11 @@ async function applySmartArrangement(result) {
 async function applyMasterToActive() {
   if (!confirm('确定用模板覆盖当前座位吗？')) return
   try {
+    const before = (activeGrid.seats.value || []).map(r => Array.isArray(r) ? [...r] : r)
     await axios.post(`${API_BASE}/seats/apply-master`)
     await loadActive()
+    const after = (activeGrid.seats.value || []).map(r => Array.isArray(r) ? [...r] : r)
+    recordGridSnapshotUndo('座位表', 'seat_layout', before, after, '从模板导入')
   } catch (e) { alert('应用失败') }
 }
 
@@ -427,6 +446,12 @@ async function captureHistorySnapshot() {
 }
 
 watch(activeTab, (newTab) => { if (newTab === 'history') fetchHistoryWeeks() })
+
+// Ctrl+Z / Ctrl+Shift+Z / Ctrl+Y 撤销/重做座位（当前页）
+useUndoShortcut('座位表', {
+  onAfterUndo: async (label) => { await Promise.all([loadActive(), loadMaster()]); notifySuccess(label ? `已撤销：${label}` : '已撤销') },
+  onAfterRedo: async (label) => { await Promise.all([loadActive(), loadMaster()]); notifySuccess(label ? `已重做：${label}` : '已重做') }
+})
 
 onMounted(() => {
   loadActive()

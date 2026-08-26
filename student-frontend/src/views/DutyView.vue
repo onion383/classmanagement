@@ -100,6 +100,7 @@ import EmptySnapshot from '../components/base/EmptySnapshot.vue'
 import GridView from '../components/tables/GridView.vue'
 import WeekSwitcher from '../components/base/WeekSwitcher.vue'
 import { useNotification } from '../composables/useNotification.js'
+import { useUndoShortcut, recordGridSnapshotUndo } from '../composables/useUndo.js'
 
 // 弹窗类组件懒加载：打开时才加载对应 chunk
 const DutySettingsDialog = defineAsyncComponent(() => import('../components/dialogs/DutySettingsDialog.vue'))
@@ -214,15 +215,42 @@ const loadMaster = async (silent = false) => {
 const dutyMasterRows = computed(() => buildGridRows(masterCells.value))
 
 // ==================== 网格编辑回写 ====================
+// 值日 cells 是 {项目:{星期:[人名]}} 对象，无法按行/列坐标拆格，因此用整块快照撤销：
+// 每次编辑记录前后整块 cells，并附第一条差异的可读文案作通知条详情。
+function diffCellsLabel(prev, next) {
+  const items = new Set([...Object.keys(prev), ...Object.keys(next)])
+  for (const it of items) {
+    const pd = prev[it] || {}, nd = next[it] || {}
+    const days = new Set([...Object.keys(pd), ...Object.keys(nd)])
+    for (const day of days) {
+      const pa = pd[day] || [], na = nd[day] || []
+      const len = Math.max(pa.length, na.length)
+      for (let k = 0; k < len; k++) {
+        const a = pa[k] || '', b = na[k] || ''
+        if (a !== b) return `${it}·${day}：「${a}」→「${b}」`
+      }
+    }
+  }
+  return ''
+}
 // GridView 保存/编辑单元格后会 emit 新的多行子行表格，按「项目名」分组回写
-function makeCellsUpdate(cellsRef, persist) {
+function makeCellsUpdate(cellsRef, persist, table) {
   return (newRows) => {
+    const prev = JSON.parse(JSON.stringify(cellsRef.value))
     cellsRef.value = reconstructCells(newRows, settingsDays.value)
+    const label = diffCellsLabel(prev, cellsRef.value)
+    if (label) recordGridSnapshotUndo('值日表', table, prev, JSON.parse(JSON.stringify(cellsRef.value)), label)
     persist()
   }
 }
-const onActiveCellsUpdate = makeCellsUpdate(activeCells, persistActive)
-const onMasterCellsUpdate = makeCellsUpdate(masterCells, persistMaster)
+const onActiveCellsUpdate = makeCellsUpdate(activeCells, persistActive, 'duty_layout')
+const onMasterCellsUpdate = makeCellsUpdate(masterCells, persistMaster, 'duty_template')
+
+// Ctrl+Z / Ctrl+Shift+Z / Ctrl+Y 撤销/重做值日（当前页，含当前+模板两张表）
+useUndoShortcut('值日表', {
+  onAfterUndo: async (label) => { await loadActive(true); await loadMaster(true); notifySuccess(label ? `已撤销：${label}` : '已撤销') },
+  onAfterRedo: async (label) => { await loadActive(true); await loadMaster(true); notifySuccess(label ? `已重做：${label}` : '已重做') }
+})
 
 async function persistActive() {
   try { await axios.put(`${API_BASE}/duty`, { cells: activeCells.value }) }
@@ -294,8 +322,10 @@ async function refreshMaster() { await loadMaster(true); notifySuccess('已刷�
 async function applyMasterToActive() {
   if (!confirm('确定用模板覆盖当前值日表吗？')) return
   try {
+    const before = JSON.parse(JSON.stringify(activeCells.value))
     await axios.post(`${API_BASE}/duty/apply-master`)
     await loadActive()
+    recordGridSnapshotUndo('值日表', 'duty_layout', before, JSON.parse(JSON.stringify(activeCells.value)), '从模板导入')
     notifySuccess('已应用模板')
   } catch (e) { notifyError('应用失败'); console.error(e) }
 }

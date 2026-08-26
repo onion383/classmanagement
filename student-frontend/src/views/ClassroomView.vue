@@ -122,6 +122,7 @@ import axios from 'axios'
 import SearchBar from '../components/base/SearchBar.vue'
 import DynamicTable from '../components/tables/DynamicTable.vue'
 import { useTableCRUD } from '../composables/useTableCRUD.js'
+import { useUndoShortcut } from '../composables/useUndo.js'
 import { useNotification } from '../composables/useNotification.js'
 
 // 弹窗类组件懒加载：打开时才加载对应 chunk
@@ -157,7 +158,8 @@ const dynamicTable = ref(null)
 
 const table = useTableCRUD(`${API_BASE}/students`, DEFAULT_FIELDS, {
   requiredField: '姓名',
-  protectedColumns: ['学号', '姓名']
+  protectedColumns: ['学号', '姓名'],
+  undoTableKey: 'students'
 })
 
 // 为了兼容原有模板，创建别名
@@ -188,6 +190,12 @@ watch(() => contextMenu.value.visible, v => { if (v) contextMenuMounted.value = 
 
 const fetchStudents = fetchRows
 const { success: notifySuccess } = useNotification()
+
+// Ctrl+Z / Ctrl+Shift+Z / Ctrl+Y 撤销、重做本页学生表
+useUndoShortcut('students', {
+  onAfterUndo: (label) => { fetchRows(); notifySuccess(label ? `已撤销：${label}` : '已撤销') },
+  onAfterRedo: (label) => { fetchRows(); notifySuccess(label ? `已重做：${label}` : '已重做') }
+})
 
 async function refreshStudents() {
   try {

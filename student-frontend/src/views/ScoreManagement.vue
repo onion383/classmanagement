@@ -159,12 +159,13 @@
 
 <script>
 import axios from 'axios'
-import { defineAsyncComponent } from 'vue'
+import { defineAsyncComponent, getCurrentInstance } from 'vue'
 import AppSelect from '../components/base/AppSelect.vue'
 import Tabs from '../components/base/Tabs.vue'
 import LeaveTimeline from '../components/base/LeaveTimeline.vue'
 import DynamicTable from '../components/tables/DynamicTable.vue'
 import { useNotification } from '../composables/useNotification.js'
+import { recordCellUndo, recordRowInsert, recordRowDelete, recordRowUpdate, useUndoShortcut } from '../composables/useUndo.js'
 
 // 弹窗类组件懒加载：打开时才加载对应 chunk
 const AddScoreDialog = defineAsyncComponent(() => import('../components/dialogs/AddScoreDialog.vue'))
@@ -176,6 +177,15 @@ const API = '/api'
 export default {
   name: 'ScoreManagement',
   components: { AppSelect, Tabs, AddScoreDialog, LeaveTimeline, ConfirmDialog, ExportExcel, DynamicTable },
+  // Ctrl+Z / Ctrl+Shift+Z / Ctrl+Y 撤销、重做加分表
+  setup() {
+    const inst = getCurrentInstance()
+    const { success: n } = useNotification()
+    useUndoShortcut('score_records', {
+      onAfterUndo: (label) => { inst.proxy.loadAll(); n(label ? `已撤销：${label}` : '已撤销') },
+      onAfterRedo: (label) => { inst.proxy.loadAll(); n(label ? `已重做：${label}` : '已重做') }
+    })
+  },
   // 懒加载弹窗保活：首次打开后保持挂载，关闭只降 visible，保留退出动画
   watch: {
     addDialogVisible(n) { if (n) this.addDialogMounted = true },
@@ -406,6 +416,13 @@ export default {
         原因: row.加分原因,
         ...(group ? { group_name: row.小组, 成员数: Number(row.成员数) || 0 } : { 姓名: row.姓名, 学号: row.学号 })
       }
+      // 逐个字段记录撤销（旧值来源：activeData 原始记录）
+      if (orig) {
+        for (const f of Object.keys(payload)) {
+          const ov = orig[f], nv = payload[f]
+          if (String(ov ?? '') !== String(nv ?? '')) recordCellUndo('score_records', row.id, f, ov, nv)
+        }
+      }
       try {
         await axios.put(`${API}/scores/${row.id}`, payload)
         if (orig) Object.assign(orig, payload)
@@ -436,7 +453,7 @@ export default {
     },
     async submitAdd(payload) {
       try {
-        await axios.post(`${API}/scores`, payload)
+        const res = await axios.post(`${API}/scores`, payload)
         this.addDialogVisible = false
         if (payload.source === 'group') {
           useNotification().success(`已给「${payload.group_name}」添加${payload.类型 === '扣分' ? '扣分' : '加分'}`)
@@ -444,6 +461,9 @@ export default {
           useNotification().success('已保存加分')
         }
         await this.loadAll()
+        // 记录撤销：新增后取回完整记录，撤销即删除该行
+        const added = this.activeData.find(s => s.id === res.data.id)
+        if (added) recordRowInsert('score_records', added)
       } catch (err) {
         useNotification().error(err.response?.data?.error || '保存失败')
       }
@@ -451,10 +471,13 @@ export default {
     async updateScore(payload) {
       const { id, ...fields } = payload
       try {
+        const oldRow = this.activeData.find(s => s.id === id)
         await axios.put(`${API}/scores/${id}`, fields)
         this.addDialogVisible = false
         useNotification().success('已保存')
         await this.loadAll()
+        const newRow = this.activeData.find(s => s.id === id)
+        if (oldRow && newRow) recordRowUpdate('score_records', oldRow, newRow)
       } catch (err) {
         useNotification().error(err.response?.data?.error || '保存失败')
       }
@@ -469,10 +492,13 @@ export default {
     },
     async deleteScore(id) {
       try {
+        const row = this.activeData.find(s => s.id === id)
         await axios.delete(`${API}/scores/${id}`)
         this.confirm.visible = false
         useNotification().success('已删除')
         await this.loadAll()
+        // 记录撤销：删除前保存完整记录，撤销即恢复该行
+        if (row) recordRowDelete('score_records', row)
       } catch (err) {
         useNotification().error(err.response?.data?.error || '删除失败')
       }

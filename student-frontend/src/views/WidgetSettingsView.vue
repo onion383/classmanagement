@@ -37,6 +37,20 @@
           </label>
         </div>
         <p class="text-xs text-text-muted mt-2 ml-40">仅本次运行立即显示/隐藏工具箱；重启后按上方「是否启用」决定</p>
+
+        <div class="flex items-center gap-4 mt-6">
+          <label class="text-sm font-medium text-text w-40 flex-shrink-0">新U盘插入自动打开</label>
+          <label class="inline-flex items-center cursor-pointer">
+            <input
+              type="checkbox"
+              :checked="usbAutoOpen"
+              @change="onUsbAutoOpenChange"
+              class="w-4 h-4 rounded border-border text-primary focus:ring-primary cursor-pointer"
+            />
+            <span class="ml-2 text-sm text-text-secondary">{{ usbAutoOpen ? '已开启' : '已关闭' }}</span>
+          </label>
+        </div>
+        <p class="text-xs text-text-muted mt-2 ml-40">插入新U盘时自动用文件资源管理器打开（仅Windows，即时生效）</p>
       </div>
     </div>
 
@@ -110,6 +124,7 @@ export default {
       sessionLoaded: false,
       noteSavePath: '',
       screenshotSavePath: '',
+      usbAutoOpen: false,
       loaded: false,
       _noteDebounce: null,
       _screenshotDebounce: null
@@ -118,6 +133,7 @@ export default {
   async mounted() {
     await this.loadSettings()
     this.loadSession()
+    this.loadUsbAutoOpen()
     // 监听浮窗「右键本次退出」导致会话开关变化，同步本页开关状态
     this._fromMainHandler = window.electron.on('from-main', (data) => {
       if (data && data.type === 'session-widget-changed') this.loadSession()
@@ -193,6 +209,22 @@ export default {
       if (!this.loaded) return
       clearTimeout(this._screenshotDebounce)
       this._screenshotDebounce = setTimeout(() => this.saveSettings(), 500)
+    },
+    // 读取 U盘自动打开开关状态（主进程持久化）
+    async loadUsbAutoOpen() {
+      try {
+        const res = await window.electron.invoke('get-usb-auto-open')
+        this.usbAutoOpen = !!res.enabled
+      } catch (_) {}
+    },
+    // 切换 U盘自动打开：即时生效，主进程持久化并实时启停监听
+    async onUsbAutoOpenChange(e) {
+      this.usbAutoOpen = e.target.checked
+      try {
+        await window.electron.invoke('set-usb-auto-open', this.usbAutoOpen)
+      } catch (_) {
+        this.notifyError('保存设置失败')
+      }
     },
     async selectFolder(type) {
       try {

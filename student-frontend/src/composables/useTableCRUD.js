@@ -6,12 +6,15 @@ export function useTableCRUD(apiBase, defaultFields, options = {}) {
     requiredField = null,
     protectedColumns = [],
     enableRenameColumn = false,
-    customValidate = null
+    customValidate = null,
+    undoTableKey = null
   } = options
 
   // ==================== 状态 ====================
   const rows = ref([])
   const fields = ref([...defaultFields])
+  // 撤销专用：最近一次加载的全表快照，作为单元格"旧值"来源
+  const rowsSnapshot = ref([])
   const newRow = ref(null)
   const editingCell = ref(null)
   const contextMenu = ref({ visible: false, x: 0, y: 0, items: [] })
@@ -117,6 +120,8 @@ export function useTableCRUD(apiBase, defaultFields, options = {}) {
       const result = res.data
       if (Array.isArray(result.data)) {
         rows.value = result.data
+        // 撤销用快照：独立浅拷贝，避免被后续 v-model 编辑污染
+        rowsSnapshot.value = result.data.map(r => ({ ...r }))
         if (result.fields && result.fields.length > 0) {
           fields.value = result.fields.map(f => {
             const defaultField = defaultFields.find(df => df.name === f.name)
@@ -148,13 +153,34 @@ export function useTableCRUD(apiBase, defaultFields, options = {}) {
       showAlert('输入格式错误')
       return
     }
+    // 旧值来源：编辑前的行快照
+    const snap = rowsSnapshot.value.find(r => r.id === row.id)
+    const oldVal = snap ? snap[field.name] : undefined
     try {
       await axios.put(`${apiBase}/${row.id}`, { [field.name]: val })
       await fetchRows()
+      // 值确实发生变化才记录撤销
+      if (undoTableKey && oldVal !== val) {
+        recordUndo(row.id, field.name, oldVal, val)
+      }
     } catch {
       showAlert('修改失败')
     }
     editingCell.value = null
+  }
+
+  // 记录一条持久化撤销（单元格编辑）
+  function recordUndo(rowId, fieldName, oldVal, newVal) {
+    try {
+      axios.post('/api/undo', {
+        key: undoTableKey,
+        type: 'cell_update',
+        label: `${fieldName}：「${oldVal == null ? '' : oldVal}」→「${newVal == null ? '' : newVal}」`,
+        payload: { table: undoTableKey, rowId, field: fieldName, oldValue: oldVal, newValue: newVal }
+      }).catch(() => {})
+    } catch {
+      /* 撤销记录失败不影响主流程 */
+    }
   }
 
   function validateValue(val, type) {

@@ -56,6 +56,8 @@ function ensureDir(p) { fs.mkdirSync(p, { recursive: true }); return p; }
 const uploadsDir = ensureDir(path.join(dataDir, 'uploads'));
 const backgroundDir = ensureDir(path.join(uploadsDir, 'background'));
 const thumbsDir = ensureDir(path.join(dataDir, 'album-thumbs'));
+// 相册应用内回收站目录：删除照片时的文件先移到这里（可编程撤销还原），替代系统回收站。
+const trashDir = ensureDir(path.join(dataDir, 'album-trash'));
 
 // ---------- 库密钥 包裹/解包 ----------
 // wrapped = base64(iv).base64(tag).base64(ciphertext)
@@ -334,4 +336,5 @@ module.exports = {
   uploadsDir,
   backgroundDir,
   thumbsDir,
+  trashDir,
 };
