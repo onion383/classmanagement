@@ -29,6 +29,8 @@ const validInvokeChannels = [
   'note-save',
   'open-folder',
   'get-session-widget-visible',
+  'get-usb-auto-open',
+  'set-usb-auto-open',
 ]
 
 // 白名单：仅允许以下主进程 -> 渲染进程推送通道

@@ -26,6 +26,60 @@
       </div>
     </div>
 
+    <!-- ========== 撤销记录 ========== -->
+    <div class="mb-6">
+      <div class="flex items-center justify-between mb-4">
+        <h2 class="text-xl font-semibold text-text">↩️ 撤销记录</h2>
+        <button
+          v-if="hasUndoRecords"
+          @click="clearUndo"
+          class="text-sm text-danger hover:underline disabled:opacity-40"
+          :disabled="busyUndo"
+        >清空所有撤销记录</button>
+      </div>
+
+      <div class="bg-surface rounded-lg border border-border p-6">
+
+        <div v-if="!hasUndoRecords" class="text-sm text-text-muted text-center py-8">
+          暂无编辑记录。在表格中修改数据后，这里会记录该次操作，之后可一键撤销、跨重启保留。
+        </div>
+
+        <div v-else class="space-y-6">
+          <div v-for="group in undoGroups" :key="group.key" class="border border-border rounded-lg overflow-hidden">
+            <div class="flex items-center justify-between px-4 py-2.5 bg-surface-hover border-b border-border">
+              <span class="font-medium text-text">{{ groupLabel(group.key) }}</span>
+              <span class="text-xs text-text-muted">{{ undoableCount(group) }} 步可撤销</span>
+            </div>
+            <ul class="divide-y divide-border max-h-72 overflow-auto">
+              <li v-for="rec in group.records" :key="rec.id"
+                  class="flex items-center justify-between gap-3 px-4 py-2 hover:bg-surface-hover">
+                <div class="flex items-center gap-2 min-w-0">
+                  <span class="text-xs text-text-muted flex-shrink-0">{{ fmtTs(rec.ts) }}</span>
+                  <span class="text-sm text-text truncate">{{ rec.label }}</span>
+                  <span v-if="rec.dir === 0" class="text-[11px] text-info flex-shrink-0">已撤销</span>
+                </div>
+                <div class="flex-shrink-0">
+                  <button
+                    v-if="rec.dir === 1"
+                    @click="undoOne(rec.id)"
+                    class="bg-warning hover:bg-warning-hover text-text-inverse text-xs px-3 py-1 rounded transition-theme disabled:opacity-40"
+                    :disabled="busyUndo"
+                  >撤销</button>
+                  <button
+                    v-else
+                    @click="redoOne(rec.id)"
+                    class="bg-info hover:bg-info-hover text-text-inverse text-xs px-3 py-1 rounded transition-theme disabled:opacity-40"
+                    :disabled="busyUndo"
+                  >重做</button>
+                </div>
+              </li>
+            </ul>
+          </div>
+        </div>
+
+      </div>
+    </div>
+
     <!-- ========== 主题设置 ========== -->
     <div class="mb-6">
       <h2 class="text-xl font-semibold text-text mb-4">🎨 主题设置</h2>
@@ -247,6 +301,9 @@ export default {
       },
       dialogMounted: false,
       dialogCallback: null,
+      // 撤销记录
+      undoGroups: [],
+      busyUndo: false,
       // Theme
       selectedThemeId: '',
       isCreatingNewTheme: false,
@@ -297,12 +354,76 @@ export default {
       }
       return opts
     },
+    hasUndoRecords() {
+      return this.undoGroups.length > 0
+    },
+    _undoKeyLabels() {
+      return { students: '学生表', fee_records: '收费记录', leave_records: '请假记录', score_records: '成绩记录', group_manage: '分组管理', album: '班级相册' }
+    },
   },
   mounted() {
     this.selectedThemeId = this.currentTheme
     this.bgImageUrl = this.themeStore.backgroundImage
+    this.loadUndo()
   },
   methods: {
+    // ==================== 撤销记录 ====================
+    async loadUndo() {
+      try {
+        const { data } = await axios.get('/api/undo')
+        this.undoGroups = data.groups || []
+      } catch { }
+    },
+    async undoOne(id) {
+      if (this.busyUndo) return
+      this.busyUndo = true
+      try {
+        const { data } = await axios.post(`/api/undo/${id}/undo`)
+        if (data.ok) this.showAlert(data.label ? `已撤销：${data.label}` : '已成功撤销')
+      } catch (err) {
+        this.showAlert(err.response?.data?.error || '撤销失败，可能目标数据已被删除')
+      } finally {
+        this.busyUndo = false
+        await this.loadUndo()
+      }
+    },
+    async redoOne(id) {
+      if (this.busyUndo) return
+      this.busyUndo = true
+      try {
+        const { data } = await axios.post(`/api/undo/${id}/redo`)
+        if (data.ok) this.showAlert(data.label ? `已重做：${data.label}` : '已成功重做')
+      } catch (err) {
+        this.showAlert(err.response?.data?.error || '重做失败')
+      } finally {
+        this.busyUndo = false
+        await this.loadUndo()
+      }
+    },
+    clearUndo() {
+      if (this.busyUndo) return
+      this.showConfirm('确定清空所有撤销记录吗？此操作不可恢复。', async () => {
+        this.busyUndo = true
+        try {
+          await axios.delete(`/api/undo?key=all`)
+        } finally {
+          this.busyUndo = false
+          await this.loadUndo()
+        }
+      })
+    },
+    groupLabel(key) {
+      return this._undoKeyLabels[key] || key
+    },
+    undoableCount(group) {
+      return (group.records || []).filter(r => r.dir === 1).length
+    },
+    fmtTs(ts) {
+      if (!ts) return ''
+      const d = new Date(ts)
+      const p = n => String(n).padStart(2, '0')
+      return `${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`
+    },
     // Account
     openModal(type) {
       this.modalType = type

@@ -64,6 +64,33 @@ router.put('/', (req, res) => {
   }
 });
 
+// ======================== 单格更新（供撤销/重做前的单格提交） ========================
+function updateSingleCell(table, row, col, value) {
+  const rec = db.prepare(`SELECT seats FROM "${table}" WHERE id = 1`).get()
+  const seats = rec ? JSON.parse(rec.seats) : []
+  if (!Array.isArray(seats[row])) seats[row] = []
+  seats[row][col] = value == null ? null : value
+  db.prepare(`UPDATE "${table}" SET seats = ? WHERE id = 1`).run(JSON.stringify(seats))
+}
+
+router.patch('/cell', (req, res) => {
+  try {
+    const { row, col, value } = req.body
+    if (!Number.isInteger(row) || !Number.isInteger(col)) return res.status(400).json({ error: '参数格式错误' })
+    updateSingleCell('seat_layout', row, col, value)
+    res.json({ message: '已更新' })
+  } catch (err) { res.status(500).json({ error: err.message }) }
+});
+
+router.patch('/master/cell', (req, res) => {
+  try {
+    const { row, col, value } = req.body
+    if (!Number.isInteger(row) || !Number.isInteger(col)) return res.status(400).json({ error: '参数格式错误' })
+    updateSingleCell('seat_template', row, col, value)
+    res.json({ message: '已更新' })
+  } catch (err) { res.status(500).json({ error: err.message }) }
+});
+
 // ======================== 座位模板 ========================
 router.get('/master', (req, res) => {
   try {

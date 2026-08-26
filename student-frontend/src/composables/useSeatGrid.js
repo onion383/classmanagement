@@ -1,8 +1,10 @@
 import { ref, computed } from 'vue'
 import axios from 'axios'
+import { recordGridCellUndo, recordGridSnapshotUndo } from './useUndo.js'
 
 export function useSeatGrid(apiBase, options = {}) {
-  const { getStudentName = () => '', getStudentId = () => null } = options
+  // undo.{key, table}：开启撤销记录；cellBase 为单格更新接口（如 /api/seats/master/cell）
+  const { getStudentName = () => '', getStudentId = () => null, undo = null, cellBase = null } = options
 
   const loaded = ref(false)
   const rows = ref(6)
@@ -146,18 +148,56 @@ export function useSeatGrid(apiBase, options = {}) {
     } catch (e) { console.error(e) }
   }
 
+  // 单格更新：有 cellBase（单格接口）则只提单格，否则回退到整块 save
+  async function saveSingleCell(row, col, value) {
+    if (cellBase) {
+      try {
+        await axios.patch(cellBase, { row, col, value })
+        return true
+      } catch (e) { console.error(e) }
+      return false
+    }
+    await save()
+    return true
+  }
+
   function onCellsUpdate(newRows) {
+    // 计算新座位矩阵并逐格对比旧值，只对发生变化的格子做单格提交 + 撤销记录
+    const prev = seats.value.map(r => [...r])
     syncCellsToSeats(newRows)
-    save()
+    const next = seats.value
+    const changed = []
+    const maxR = Math.max(prev.length, next.length)
+    for (let r = 0; r < maxR; r++) {
+      const pr = prev[r] || []
+      const nr = next[r] || []
+      const maxC = Math.max(pr.length, nr.length)
+      for (let c = 0; c < maxC; c++) {
+        if (pr[c] !== nr[c]) {
+          changed.push([r, c])
+          if (undo) recordGridCellUndo(undo.key, undo.table, r, c, pr[c] ?? null, nr[c] ?? null)
+        }
+      }
+    }
+    if (cellBase && changed.length) {
+      // 一次请求一个格子；完成后不重复整块 save
+      changed.forEach(([r, c], idx) => {
+        saveSingleCell(r, c, next[r]?.[c] ?? null)
+      })
+    } else {
+      save()
+    }
   }
 
   function onSwapRows(fromIdx, toIdx) {
     if (fromIdx === 0 || toIdx === 0) return
     const seatFrom = fromIdx - 1, seatTo = toIdx - 1
     if (seatFrom < 0 || seatTo < 0 || seatFrom >= seats.value.length || seatTo >= seats.value.length) return
+    const prev = seats.value.map(r => [...r])
     const s = [...seats.value]
     ;[s[seatFrom], s[seatTo]] = [s[seatTo], s[seatFrom]]
     seats.value = s
+    if (undo) recordGridSnapshotUndo(undo.key, undo.table, prev, s)
     save()
   }
 
@@ -171,12 +211,14 @@ export function useSeatGrid(apiBase, options = {}) {
     }
     const from = map[fromDisplayIdx], to = map[toDisplayIdx]
     if (from === -1 || to === -1) return
+    const prev = seats.value.map(r => [...r])
     const newSeats = seats.value.map(r => {
       const nr = [...r]
       ;[nr[from], nr[to]] = [nr[to], nr[from]]
       return nr
     })
     seats.value = newSeats
+    if (undo) recordGridSnapshotUndo(undo.key, undo.table, prev, newSeats)
     save()
   }
 

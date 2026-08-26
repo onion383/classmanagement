@@ -186,6 +186,7 @@ import axios from 'axios'
 import SearchBar from '../components/base/SearchBar.vue'
 import DynamicTable from '../components/tables/DynamicTable.vue'
 import { useTableCRUD } from '../composables/useTableCRUD.js'
+import { useUndoShortcut } from '../composables/useUndo.js'
 import { useNotification } from '../composables/useNotification.js'
 import { resourceUrl } from '../utils/apiUrl'
 
@@ -231,7 +232,8 @@ function customValidate(val, field) {
 
 const table = useTableCRUD(`${API_BASE}/fee-records`, DEFAULT_FIELDS, {
   requiredField: '收支编码',
-  customValidate
+  customValidate,
+  undoTableKey: 'fee_records'
 })
 
 const feeRecords = table.rows
@@ -262,6 +264,12 @@ watch(() => contextMenu.value.visible, v => { if (v) contextMenuMounted.value = 
 
 const fetchRecords = fetchRows
 const { success: notifySuccess } = useNotification()
+
+// Ctrl+Z / Ctrl+Shift+Z / Ctrl+Y 撤销、重做本页班费表
+useUndoShortcut('fee_records', {
+  onAfterUndo: (label) => { fetchRows(); notifySuccess(label ? `已撤销：${label}` : '已撤销') },
+  onAfterRedo: (label) => { fetchRows(); notifySuccess(label ? `已重做：${label}` : '已重做') }
+})
 
 async function refreshRecords() {
   try {

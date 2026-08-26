@@ -61,7 +61,7 @@
                 :style="cellStyle"
               >
                 <VideoThumb v-if="isVideo(p)" :src="thumbSrc(p)" />
-                <img v-else :src="thumbSrc(p)" :alt="p.file_name" class="w-full h-full object-cover" loading="lazy" />
+                <img v-else :src="thumbSrc(p)" :alt="p.file_name" class="w-full h-full object-cover" loading="lazy" @error="onThumbError" />
                 <div class="absolute inset-0 bg-black/0 group-hover:bg-black/20 transition-theme"></div>
               </div>
             </div>
@@ -259,6 +259,7 @@
 import { ref, computed, nextTick, onMounted, onBeforeUnmount } from 'vue'
 import axios from 'axios'
 import { useNotification } from '../composables/useNotification.js'
+import { useUndoShortcut } from '../composables/useUndo.js'
 import VideoThumb from '../components/import-export/VideoThumb.vue'
 import AppSelect from '../components/base/AppSelect.vue'
 import Sortable from 'sortablejs'
@@ -318,6 +319,14 @@ function photoSrc(p) {
 // 指向服务端 /thumb 小图接口（首帧封面 / 图片缩略图），稳定 URL 便于浏览器缓存
 function thumbSrc(p) {
   return resourceUrl(`/api/album/photo/${p.id}/thumb`)
+}
+
+// 缩略图生成失败/源文件缺失等导致的 404：换为中性占位图，避免网格出现破图图标
+const THUMB_PLACEHOLDER = 'data:image/svg+xml;utf8,' + encodeURIComponent(
+  `<svg xmlns="http://www.w3.org/2000/svg" width="160" height="160"><rect width="100%" height="100%" fill="#f3f4f6"/><g fill="none" stroke="#d1d5db" stroke-width="4"><circle cx="80" cy="70" r="18"/><path d="M30 132 Q52 96 82 118 T160 100" fill="none"/></g></svg>`
+)
+function onThumbError(e) {
+  if (e.target && e.target.src !== THUMB_PLACEHOLDER) e.target.src = THUMB_PLACEHOLDER
 }
 
 function fmtTime(t) {
@@ -465,6 +474,15 @@ async function addAlbum() {
     const res = await axios.post('/api/album', { name: newName.value, folder_path: newPath.value }, { headers: authHeaders() })
     showAdd.value = false
     useNotification().success('相册已添加，正在后台扫描照片…')
+    // 记录「添加相册」撤销：undo 撤销添加（删索引+缩略图），redo 重新添加
+    axios.post('/api/undo', {
+      key: 'album',
+      type: 'album_add',
+      label: `添加相册：${newName.value}`,
+      payload: {
+        album: { id: res.data.id, name: newName.value, folder_path: newPath.value, sort_order: res.data.id, created_at: '', updated_at: '' }
+      }
+    }).catch(() => {})
     await loadAlbums()
     activeAlbumId.value = res.data.id
     // 扫描是后台任务，稍后拉取
@@ -514,8 +532,18 @@ function destroySortable() {
 }
 
 async function reorderAlbums(ids) {
+  const oldOrder = albums.value.map(a => a.id)
   try {
     await axios.put('/api/album/reorder', { ids }, { headers: authHeaders() })
+    // 记录相册排序撤销（顺序确有变化才记录）
+    if (oldOrder.length && JSON.stringify(oldOrder) !== JSON.stringify(ids)) {
+      axios.post('/api/undo', {
+        key: 'album',
+        type: 'album_order',
+        label: '相册排序更新',
+        payload: { oldOrder, newOrder: ids }
+      }).catch(() => {})
+    }
     // 按新顺序重新排列本地数据
     const map = new Map(albums.value.map(a => [a.id, a]))
     albums.value = ids.map(id => map.get(id)).filter(Boolean)
@@ -524,6 +552,21 @@ async function reorderAlbums(ids) {
     loadAlbums()
   }
 }
+
+// Ctrl+Z 撤销 / Ctrl+Shift+Z、Ctrl+Y 重做相册排序、相册增删与删除照片
+// —— 撤销/重做后统一重载相册列表与当前相册照片，并拉取后台异步结果
+useUndoShortcut('album', {
+  onAfterUndo: async (label) => {
+    await loadAlbums(false)
+    useNotification().success(label ? `已撤销：${label}` : '已撤销')
+  },
+  onAfterRedo: async (label) => {
+    await loadAlbums(false)
+    // 重做（如重新加入文件夹）已在后端触发增量扫描，轮询让照片渐进显示
+    pollScan(true)
+    useNotification().success(label ? `已重做：${label}` : '已重做')
+  }
+})
 
 async function refreshAll() {
   if (!activeAlbumId.value) return
@@ -569,7 +612,27 @@ async function doRemove() {
   if (!a) return
   confirmDelete.value = null
   try {
+    // 删除前抓取相册照片索引，供撤销时还原
+    let albumPhotos = []
+    try {
+      const pr = await axios.get(`/api/album/${a.id}/photos`, { headers: authHeaders() })
+      for (const g of (pr.data.data || [])) {
+        for (const x of (g.photos || [])) {
+          albumPhotos.push({ id: x.id, album_id: a.id, file_path: x.file_path, file_name: x.file_name, file_size: x.file_size, mtime: x.mtime, photo_date: x.photo_date })
+        }
+      }
+    } catch (_) { /* 抓取失败不阻塞删除 */ }
     await axios.delete(`/api/album/${a.id}`, { headers: authHeaders() })
+    // 记录「删除相册」撤销：undo 还原相册+照片索引，redo 再次删除
+    axios.post('/api/undo', {
+      key: 'album',
+      type: 'album_delete',
+      label: `删除相册：${a.name}`,
+      payload: {
+        album: { id: a.id, name: a.name, folder_path: a.folder_path, sort_order: a.sort_order, created_at: a.created_at, updated_at: a.updated_at },
+        photos: albumPhotos
+      }
+    }).catch(() => {})
     useNotification().success('相册已删除')
     await loadAlbums()
   } catch (err) {
@@ -750,9 +813,18 @@ async function saveAs(p) {
 }
 
 async function deletePhoto(p) {
-  if (!confirm(`确定把「${p.file_name}」移入回收站吗？（可还源）`)) return
+  if (!confirm(`确定把「${p.file_name}」移入回收站吗？（可撤销还原）`)) return
   try {
     await axios.delete(`/api/album/photo/${p.id}`, { headers: authHeaders() })
+    // 记录「删除照片」撤销：undo 从回收站搬回文件+还原索引，redo 再次移入回收站
+    axios.post('/api/undo', {
+      key: 'album',
+      type: 'photo_trash',
+      label: `删除照片：${p.file_name}`,
+      payload: {
+        photo: { id: p.id, album_id: activeAlbum.value?.id, file_path: p.file_path, file_name: p.file_name, file_size: p.file_size, mtime: p.mtime, photo_date: p.photo_date }
+      }
+    }).catch(() => {})
     viewer.value = null
     useNotification().success('已移入回收站')
     loadPhotos()

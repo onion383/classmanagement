@@ -18,6 +18,7 @@ const albumRouter = require('./routes/album');
 const groupManageRouter = require('./routes/groupManage');
 const scoresRouter = require('./routes/scores');
 const dutyRouter = require('./routes/duty');
+const undoRouter = require('./routes/undo');
 
 const app = express();
 const PORT = 3000;
@@ -86,6 +87,7 @@ app.use('/api/group-manage', auth(['teacher']), groupManageRouter);
 app.use('/api/scores', auth(['teacher']), scoresRouter);
 app.use('/api/duty', auth(['teacher']), dutyRouter);
 app.use('/api/widget-settings', auth(['teacher']), widgetSettingsRouter);
+app.use('/api/undo', auth(['teacher']), undoRouter);
 
 // 托管前端静态文件（生产模式用）
 app.use(express.static(path.join(__dirname, '../dist')));

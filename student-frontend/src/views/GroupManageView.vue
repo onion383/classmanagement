@@ -48,7 +48,7 @@
             class="bg-surface rounded-xl border border-border overflow-hidden w-full flex flex-col"
           >
             <div class="flex items-center justify-between px-3 py-2 bg-primary/5 border-b border-border">
-              <input v-model="g.name" @change="renameGroup(g)" class="bg-transparent text-text font-semibold text-sm w-full mr-2 outline-none focus:bg-bg px-1 py-0.5 rounded" />
+              <input v-model="g.name" @focus="captureGroupOld(g)" @change="renameGroup(g)" class="bg-transparent text-text font-semibold text-sm w-full mr-2 outline-none focus:bg-bg px-1 py-0.5 rounded" />
               <div class="flex items-center gap-1 flex-shrink-0">
                 <button @click="addMember(g)" title="添加成员" class="text-text-secondary hover:text-primary text-base leading-none px-1 cursor-pointer">＋</button>
                 <button @click="confirmDeleteGroup(g)" title="删除小组" class="text-text-secondary hover:text-danger text-base leading-none px-1 cursor-pointer">×</button>
@@ -80,10 +80,10 @@
                       <span v-else class="text-text-muted tabular-nums">{{ i + 1 }}</span>
                     </td>
                     <td class="px-3 py-1.5">
-                      <input v-model="m.member_name" @input="onMemberInput(m, $event)" @keydown="onMemberKeydown(m, $event)" @change="commitMember(m)" :placeholder="i === 0 ? '' : '成员'" :ref="el => setMemberInput(m, el)" :class="'bg-transparent w-full outline-none focus:bg-bg px-1 py-0.5 rounded ' + (i === 0 ? 'text-text font-medium' : 'text-text')" />
+                      <input v-model="m.member_name" @input="onMemberInput(m, $event)" @focus="captureMemberOld(m)" @keydown="onMemberKeydown(m, $event)" @change="commitMember(m)" :placeholder="i === 0 ? '' : '成员'" :ref="el => setMemberInput(m, el)" :class="'bg-transparent w-full outline-none focus:bg-bg px-1 py-0.5 rounded ' + (i === 0 ? 'text-text font-medium' : 'text-text')" />
                     </td>
                     <td class="px-3 py-1.5">
-                      <input v-model="m.remark" @change="commitMember(m)" placeholder="备注" class="bg-transparent text-text-muted w-full outline-none focus:bg-bg px-1 py-0.5 rounded" />
+                      <input v-model="m.remark" @focus="captureMemberOld(m)" @change="commitMember(m)" placeholder="备注" class="bg-transparent text-text-muted w-full outline-none focus:bg-bg px-1 py-0.5 rounded" />
                     </td>
                     <td class="px-1 text-right">
                       <button @click="removeMember(g, m)" title="移除" class="text-text-secondary hover:text-danger leading-none cursor-pointer">×</button>
@@ -107,7 +107,7 @@
         class="bg-surface rounded-xl border border-border overflow-hidden w-80 flex flex-col"
       >
         <div class="flex items-center justify-between px-3 py-2 bg-primary/5 border-b border-border">
-          <input v-model="g.name" @change="renameGroup(g)" class="bg-transparent text-text font-semibold text-sm w-full mr-2 outline-none focus:bg-bg px-1 py-0.5 rounded" />
+          <input v-model="g.name" @focus="captureGroupOld(g)" @change="renameGroup(g)" class="bg-transparent text-text font-semibold text-sm w-full mr-2 outline-none focus:bg-bg px-1 py-0.5 rounded" />
           <div class="flex items-center gap-1 flex-shrink-0">
             <button @click="addMember(g)" title="添加成员" class="text-text-secondary hover:text-primary text-base leading-none px-1 cursor-pointer">＋</button>
             <button @click="confirmDeleteGroup(g)" title="删除小组" class="text-text-secondary hover:text-danger text-base leading-none px-1 cursor-pointer">×</button>
@@ -139,10 +139,10 @@
                   <span v-else class="text-text-muted tabular-nums">{{ i + 1 }}</span>
                 </td>
                 <td class="px-3 py-1.5">
-                  <input v-model="m.member_name" @input="onMemberInput(m, $event)" @keydown="onMemberKeydown(m, $event)" @change="commitMember(m)" :placeholder="i === 0 ? '' : '成员'" :ref="el => setMemberInput(m, el)" :class="'bg-transparent w-full outline-none focus:bg-bg px-1 py-0.5 rounded ' + (i === 0 ? 'text-text font-medium' : 'text-text')" />
+                  <input v-model="m.member_name" @input="onMemberInput(m, $event)" @focus="captureMemberOld(m)" @keydown="onMemberKeydown(m, $event)" @change="commitMember(m)" :placeholder="i === 0 ? '' : '成员'" :ref="el => setMemberInput(m, el)" :class="'bg-transparent w-full outline-none focus:bg-bg px-1 py-0.5 rounded ' + (i === 0 ? 'text-text font-medium' : 'text-text')" />
                 </td>
                 <td class="px-3 py-1.5">
-                  <input v-model="m.remark" @change="commitMember(m)" placeholder="备注" class="bg-transparent text-text-muted w-full outline-none focus:bg-bg px-1 py-0.5 rounded" />
+                  <input v-model="m.remark" @focus="captureMemberOld(m)" @change="commitMember(m)" placeholder="备注" class="bg-transparent text-text-muted w-full outline-none focus:bg-bg px-1 py-0.5 rounded" />
                 </td>
                 <td class="px-1 text-right">
                   <button @click="removeMember(g, m)" title="移除" class="text-text-secondary hover:text-danger leading-none cursor-pointer">×</button>
@@ -353,9 +353,11 @@
 
 <script setup>
 import { ref, reactive, computed, onMounted, nextTick, defineAsyncComponent } from 'vue';
+import axios from 'axios';
 import Tabs from '../components/base/Tabs.vue';
 import AppSelect from '../components/base/AppSelect.vue';
 import { useNotification } from '../composables/useNotification';
+import { useUndoShortcut } from '../composables/useUndo.js';
 
 // 弹窗类组件懒加载：打开时才加载对应 chunk
 const ConfirmDialog = defineAsyncComponent(() => import('../components/base/ConfirmDialog.vue'));
@@ -373,6 +375,56 @@ const api = (path, options = {}) =>
     if (!res.ok) throw new Error(data.error || '请求失败');
     return data;
   });
+
+// 记录分组管理页的单元格撤销：key 统一为 group_manage（便于 Ctrl+Z 连续撤销跨表操作），
+// table 为实际数据表名（group_members / groups / group_dimensions），需在 undo.js ALLOWED_TABLES 内。
+function recordGroupUndo(table, rowId, field, old, val) {
+  try {
+    axios.post('/api/undo', {
+      key: 'group_manage',
+      type: 'cell_update',
+      label: `${field}：「${old == null ? '' : old}」→「${val == null ? '' : val}」`,
+      payload: { table, rowId, field, oldValue: old, newValue: val }
+    }).catch(() => {});
+  } catch { /* 撤销记录失败不影响主流程 */ }
+}
+
+// 当前维度全量快照（组+成员），用于结构变更撤销对比
+function buildGroupSnapshot() {
+  return (active.value?.groups || []).map(g => ({
+    id: g.id,
+    name: g.name,
+    gender: g.gender == null ? null : g.gender,
+    sort_order: g.sort_order,
+    members: (g.members || []).map((m, i) => ({
+      id: m.id, member_name: m.member_name, remark: m.remark, sort_order: i + 1
+    }))
+  }));
+}
+// 记录一次分组结构变更（增删小组/成员、成员排序、智能分组、小组数量增减等）
+function recordGroupStructure(before, after) {
+  if (!Array.isArray(before) || !Array.isArray(after) || JSON.stringify(before) === JSON.stringify(after)) return;
+  const dimId = activeDimId.value != null ? Number(activeDimId.value) : active.value?.dimension?.id;
+  if (dimId == null) return;
+  try {
+    axios.post('/api/undo', {
+      key: 'group_manage',
+      type: 'group_snapshot',
+      label: '分组结构变更',
+      payload: { dimId, oldValue: before, newValue: after }
+    }).catch(() => {});
+  } catch { /* 撤销记录失败不影响主流程 */ }
+}
+useUndoShortcut('group_manage', {
+  onAfterUndo: (label) => {
+    if (activeDimId.value != null) selectDim(activeDimId.value);
+    success(label ? `已撤销：${label}` : '已撤销');
+  },
+  onAfterRedo: (label) => {
+    if (activeDimId.value != null) selectDim(activeDimId.value);
+    success(label ? `已重做：${label}` : '已重做');
+  }
+});
 
 const loading = ref(false);
 const dimensions = ref([]);
@@ -608,7 +660,14 @@ function openSettings() {
 
 // 保存维度设置；names 非空时在保存后按规则重命名小组
 async function doSaveSettings(form, names) {
+  const before = buildGroupSnapshot();
   try {
+    // 记录维度纯字段编辑（组名 / 组长称呼），供撤销恢复
+    const dim = active.value?.dimension;
+    if (dim) {
+      if (String(dim.name ?? '') !== String(form.name ?? '')) recordGroupUndo('group_dimensions', dim.id, 'name', dim.name ?? '', form.name ?? '');
+      if (String(dim.leader_title ?? '') !== String(form.leader_title ?? '')) recordGroupUndo('group_dimensions', dim.id, 'leader_title', dim.leader_title ?? '', form.leader_title ?? '');
+    }
     await api(`/dimensions/${activeDimId.value}`, {
       method: 'PUT',
       body: JSON.stringify(form),
@@ -617,6 +676,7 @@ async function doSaveSettings(form, names) {
     showSettings.value = false;
     await selectDim(activeDimId.value);
     success('设置已保存');
+    recordGroupStructure(before, buildGroupSnapshot());
   } catch (e) {
     error(e.message);
   }
@@ -629,6 +689,7 @@ async function submitSettings() {
     settingsForm.members_per_group = Math.min(99, Math.max(0, Number(settingsForm.members_per_group) || 0));
     settingsForm.male_group_count = Math.min(50, Math.max(0, Number(settingsForm.male_group_count) || 0));
     settingsForm.female_group_count = Math.min(50, Math.max(0, Number(settingsForm.female_group_count) || 0));
+    const before = buildGroupSnapshot();
     try {
       await api(`/dimensions/${activeDimId.value}`, {
         method: 'PUT',
@@ -642,6 +703,7 @@ async function submitSettings() {
       showSettings.value = false;
       await selectDim(activeDimId.value);
       success('设置已保存');
+      recordGroupStructure(before, buildGroupSnapshot());
     } catch (e) {
       error(e.message);
     }
@@ -683,6 +745,7 @@ function openAddGroup() {
 
 async function submitAddGroup() {
   if (!addGroupName.value.trim()) return error('请输入小组名字');
+  const before = buildGroupSnapshot();
   try {
     await api(`/dimensions/${activeDimId.value}/groups`, {
       method: 'POST',
@@ -691,6 +754,7 @@ async function submitAddGroup() {
     showAddGroup.value = false;
     success('添加成功');
     await selectDim(activeDimId.value);
+    recordGroupStructure(before, buildGroupSnapshot());
   } catch (e) {
     error(e.message);
   }
@@ -698,6 +762,9 @@ async function submitAddGroup() {
 
 async function renameGroup(g) {
   if (!g.name.trim()) return error('小组名字不能为空');
+  const oldName = g._undoName !== undefined ? g._undoName : g.name;
+  if (String(oldName ?? '') !== String(g.name ?? '')) recordGroupUndo('groups', g.id, 'name', oldName ?? '', g.name ?? '');
+  g._undoName = undefined;
   try {
     await api(`/groups/${g.id}`, { method: 'PUT', body: JSON.stringify({ name: g.name }) });
   } catch (e) {
@@ -711,6 +778,15 @@ function confirmDeleteGroup(g) {
 }
 
 // ============ 成员 ============
+// 进入行内编辑：快照当前值，供撤销对比（仅记录一次，避免连续 @input 覆盖）
+function captureMemberOld(m) {
+  if (m._undoName === undefined) m._undoName = m.member_name;
+  if (m._undoRemark === undefined) m._undoRemark = m.remark;
+}
+function captureGroupOld(g) {
+  if (g._undoName === undefined) g._undoName = g.name;
+}
+
 function addMember(g) {
   const limit = activeDim.value && activeDim.value.members_per_group;
   if (limit > 0 && g.members.length >= limit) {
@@ -802,6 +878,7 @@ function dropRowClass(g, index) {
 }
 
 async function moveMember(memberId, targetGroupId, targetIndex) {
+  const before = buildGroupSnapshot();
   try {
     const data = await api('/group-members/move', {
       method: 'POST',
@@ -809,6 +886,7 @@ async function moveMember(memberId, targetGroupId, targetIndex) {
     });
     dimensions.value = data.dimensions || [];
     if (data.dimension) active.value = { dimension: data.dimension, groups: data.groups };
+    recordGroupStructure(before, buildGroupSnapshot());
   } catch (e) {
     error(e.message);
   }
@@ -820,6 +898,7 @@ async function commitMember(m) {
     if (!m.member_name.trim()) {
       return;
     }
+    const before = buildGroupSnapshot();
     try {
       const data = await api(`/groups/${m._groupId}/members`, {
         method: 'POST',
@@ -828,11 +907,18 @@ async function commitMember(m) {
       m.id = data.id;
       delete m._local;
       await selectDim(activeDimId.value);
+      recordGroupStructure(before, buildGroupSnapshot());
     } catch (e) {
       error(e.message);
     }
     return;
   }
+  const oldName = m._undoName !== undefined ? m._undoName : m.member_name;
+  const oldRemark = m._undoRemark !== undefined ? m._undoRemark : m.remark;
+  if (String(oldName ?? '') !== String(m.member_name ?? '')) recordGroupUndo('group_members', m.id, 'member_name', oldName ?? '', m.member_name ?? '');
+  if (String(oldRemark ?? '') !== String(m.remark ?? '')) recordGroupUndo('group_members', m.id, 'remark', oldRemark ?? '', m.remark ?? '');
+  m._undoName = undefined;
+  m._undoRemark = undefined;
   try {
     await api(`/group-members/${m.id}`, {
       method: 'PUT',
@@ -852,9 +938,11 @@ function removeMember(g, m) {
 }
 
 async function doRemoveMember(g, id) {
+  const before = buildGroupSnapshot();
   try {
     await api(`/group-members/${id}`, { method: 'DELETE' });
     await selectDim(activeDimId.value);
+    recordGroupStructure(before, buildGroupSnapshot());
   } catch (e) {
     error(e.message);
   }
@@ -867,6 +955,9 @@ const pendingDelete = ref(null);
 async function doDelete() {
   const p = pendingDelete.value;
   if (!p) return;
+  const isGroup = p.type === 'group';
+  // 仅小组删除做撤销（维度删除不含在内）；快照需基于删除前的维度结构
+  const before = isGroup ? buildGroupSnapshot() : null;
   try {
     if (p.type === 'dimension') await api(`/dimensions/${p.id}`, { method: 'DELETE' });
     else await api(`/groups/${p.id}`, { method: 'DELETE' });
@@ -875,6 +966,8 @@ async function doDelete() {
     showSettings.value = false;
     success('删除成功');
     await loadAll();
+    // 小组删除后再拉一次当前维度，确保快照取自最新结构
+    if (isGroup) { await selectDim(activeDimId.value); recordGroupStructure(before, buildGroupSnapshot()); }
   } catch (e) {
     error(e.message);
   }
@@ -895,6 +988,7 @@ function onSmartGroup() {
 async function handleSmartGroupResult(result) {
   const groups = result && result.groups;
   if (!Array.isArray(groups)) return;
+  const before = buildGroupSnapshot();
   try {
     const data = await api(`/dimensions/${activeDimId.value}/apply-grouping`, {
       method: 'POST',
@@ -904,6 +998,7 @@ async function handleSmartGroupResult(result) {
     dimensions.value = data.dimensions || [];
     if (data.dimension) active.value = { dimension: data.dimension, groups: data.groups };
     success('智能分组已应用');
+    recordGroupStructure(before, buildGroupSnapshot());
   } catch (e) {
     error(e.message);
   }

@@ -212,11 +212,12 @@
 
 <script>
 import axios from 'axios'
-import { defineAsyncComponent } from 'vue'
+import { defineAsyncComponent, getCurrentInstance } from 'vue'
 import Tabs from '../components/base/Tabs.vue'
 import DynamicTable from '../components/tables/DynamicTable.vue'
 import LeaveTimeline from '../components/base/LeaveTimeline.vue'
 import { useNotification } from '../composables/useNotification.js'
+import { recordCellUndo, useUndoShortcut } from '../composables/useUndo.js'
 
 // 弹窗类组件懒加载：打开时才加载对应 chunk
 const AddLeaveDialog = defineAsyncComponent(() => import('../components/dialogs/AddLeaveDialog.vue'))
@@ -230,6 +231,15 @@ export default {
   name: 'LeaveManagement',
   components: {
     Tabs, DynamicTable, AddLeaveDialog, LeaveTimeline, ExportExcel, ConfirmDialog, OverdueLeaveDialog
+  },
+  // Ctrl+Z / Ctrl+Shift+Z / Ctrl+Y 撤销、重做请假表
+  setup() {
+    const inst = getCurrentInstance()
+    const { success: n } = useNotification()
+    useUndoShortcut('leave_records', {
+      onAfterUndo: (label) => { inst.proxy.loadAll(); n(label ? `已撤销：${label}` : '已撤销') },
+      onAfterRedo: (label) => { inst.proxy.loadAll(); n(label ? `已重做：${label}` : '已重做') }
+    })
   },
   // 懒加载弹窗保活：首次打开后保持挂载，关闭只降 visible，保留退出动画
   watch: {
@@ -520,8 +530,12 @@ export default {
     },
     async saveCell(row, field) {
       const val = row[field.name]
+      // 旧值来源：编辑前的请假记录
+      const oldLeave = this.leaves.find(l => l.id === row.id)
+      const oldVal = oldLeave ? oldLeave[field.name] : undefined
       try {
         await axios.put(`${API}/leaves/${row.id}`, { [field.name]: val })
+        if (oldVal !== val) recordCellUndo('leave_records', row.id, field.name, oldVal, val)
         useNotification().success('已保存')
       } catch (err) {
         useNotification().error('保存失败')

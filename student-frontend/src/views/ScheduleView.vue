@@ -143,12 +143,13 @@
 
 <script>
 import axios from 'axios';
-import { defineAsyncComponent } from 'vue';
+import { getCurrentInstance, defineAsyncComponent } from 'vue';
 import EmptySnapshot from '../components/base/EmptySnapshot.vue';
 import GridView from '../components/tables/GridView.vue';
 import Tabs from '../components/base/Tabs.vue';
 import WeekSwitcher from '../components/base/WeekSwitcher.vue';
 import { useNotification } from '../composables/useNotification.js';
+import { useUndoShortcut, recordGridCellUndo, recordGridSnapshotUndo } from '../composables/useUndo.js';
 
 // 弹窗类组件懒加载：打开时才加载对应 chunk
 const SettingsDialog = defineAsyncComponent(() => import('../components/dialogs/SettingsDialog.vue'));
@@ -198,6 +199,12 @@ export default {
   components: { GridView, SettingsDialog, ExportExcel,Tabs,WeekSwitcher,EmptySnapshot },
   setup() {
     const { success } = useNotification()
+    const inst = getCurrentInstance()
+    // Ctrl+Z / Ctrl+Shift+Z / Ctrl+Y 撤销/重做课表（当前页，含实行+一般两张表）
+    useUndoShortcut('课程表', {
+      onAfterUndo: async (label) => { await Promise.all([inst.proxy.loadMaster(), inst.proxy.loadActive()]); success(label ? `已撤销：${label}` : '已撤销') },
+      onAfterRedo: async (label) => { await Promise.all([inst.proxy.loadMaster(), inst.proxy.loadActive()]); success(label ? `已重做：${label}` : '已重做') }
+    })
     return { notifySuccess: success }
   },
   data() {
@@ -552,7 +559,24 @@ export default {
         settings: this.masterSettings
       });
     },
+    // 对比前后网格，逐格写入撤销记录（课表存 {course} 对象，只需比对 course 文本）
+    recordCellsDiff(table, prev, next) {
+      const maxR = Math.max(prev.length, next.length)
+      for (let r = 0; r < maxR; r++) {
+        const pr = prev[r] || [], nr = next[r] || []
+        const maxC = Math.max(pr.length, nr.length)
+        for (let c = 0; c < maxC; c++) {
+          const a = pr[c], b = nr[c]
+          const av = a && a.course !== undefined ? a.course : a
+          const bv = b && b.course !== undefined ? b.course : b
+          if (String(av ?? '') !== String(bv ?? '')) {
+            recordGridCellUndo('课程表', table, r, c, a ?? null, b ?? null)
+          }
+        }
+      }
+    },
     onMasterCellsUpdate(newRows) {
+      const prev = this.masterCells.map(r => [...r]);
       const newCells = [];
       newRows.forEach(row => {
         if (row._lessonIdx !== undefined) newCells[row._lessonIdx] = row.cells;
@@ -569,6 +593,7 @@ export default {
       }
       this.masterCells = newCells;
       this.masterCells = this.adjustCells(this.masterCells, this.masterSettings);
+      this.recordCellsDiff('master_schedule', prev, this.masterCells);
       this.saveMaster();
     },
     onMasterSwapRows(fromIdx, toIdx) {
@@ -577,12 +602,16 @@ export default {
       if (!fromRow || !toRow || fromRow._isReadonly || toRow._isReadonly) return;
       const fromLessonIdx = fromRow._lessonIdx, toLessonIdx = toRow._lessonIdx;
       if (fromLessonIdx === undefined || toLessonIdx === undefined) return;
+      const prev = JSON.parse(JSON.stringify(this.masterCells));
       const newCells = [...this.masterCells];
       [newCells[fromLessonIdx], newCells[toLessonIdx]] = [newCells[toLessonIdx], newCells[fromLessonIdx]];
       this.masterCells = newCells;
+      recordGridSnapshotUndo('课程表', 'master_schedule', prev, JSON.parse(JSON.stringify(newCells)), `交换行：${fromRow.label} ↔ ${toRow.label}`);
       this.saveMaster();
     },
     onMasterSwapColumns(fromIdx, toIdx) {
+      const fromHeader = this.masterColHeaders[fromIdx] ?? `列${fromIdx + 1}`, toHeader = this.masterColHeaders[toIdx] ?? `列${toIdx + 1}`;
+      const prev = JSON.parse(JSON.stringify(this.masterCells));
       const newCells = this.masterCells.map(row => {
         const r = [...row];
         const [m] = r.splice(fromIdx, 1);
@@ -590,6 +619,7 @@ export default {
         return r;
       });
       this.masterCells = newCells;
+      recordGridSnapshotUndo('课程表', 'master_schedule', prev, JSON.parse(JSON.stringify(newCells)), `交换列：${fromHeader} ↔ ${toHeader}`);
       this.saveMaster();
     },
     onMasterRowMeta({ rowIdx, field, value }) {
@@ -626,9 +656,11 @@ export default {
     async applyMasterToActive() {
       if (!confirm('确定将一般课表覆盖到实行课表吗？')) return;
       try {
+        const before = JSON.parse(JSON.stringify(this.activeCells));
         await axios.post(`${API_BASE}/schedule/apply-master`);
         alert('已应用');
         await this.loadActive();
+        recordGridSnapshotUndo('课程表', 'schedule', before, JSON.parse(JSON.stringify(this.activeCells)), '从模板导入');
       } catch (e) {
         alert('应用失败');
       }
@@ -676,6 +708,7 @@ export default {
       });
     },
     onActiveCellsUpdate(newRows) {
+      const prev = this.activeCells.map(r => [...r]);
       const newCells = [];
       newRows.forEach(row => {
         if (row._lessonIdx !== undefined) newCells[row._lessonIdx] = row.cells;
@@ -692,6 +725,7 @@ export default {
       }
       this.activeCells = newCells;
       this.activeCells = this.adjustCells(this.activeCells, this.activeSettings);
+      this.recordCellsDiff('schedule', prev, this.activeCells);
       this.saveActive();
     },
     onActiveSwapRows(fromIdx, toIdx) {
@@ -700,12 +734,16 @@ export default {
       if (!fromRow || !toRow || fromRow._isReadonly || toRow._isReadonly) return;
       const fromLessonIdx = fromRow._lessonIdx, toLessonIdx = toRow._lessonIdx;
       if (fromLessonIdx === undefined || toLessonIdx === undefined) return;
+      const prev = JSON.parse(JSON.stringify(this.activeCells));
       const newCells = [...this.activeCells];
       [newCells[fromLessonIdx], newCells[toLessonIdx]] = [newCells[toLessonIdx], newCells[fromLessonIdx]];
       this.activeCells = newCells;
+      recordGridSnapshotUndo('课程表', 'schedule', prev, JSON.parse(JSON.stringify(newCells)), `交换行：${fromRow.label} ↔ ${toRow.label}`);
       this.saveActive();
     },
     onActiveSwapColumns(fromIdx, toIdx) {
+      const fromHeader = this.activeColHeaders[fromIdx] ?? `列${fromIdx + 1}`, toHeader = this.activeColHeaders[toIdx] ?? `列${toIdx + 1}`;
+      const prev = JSON.parse(JSON.stringify(this.activeCells));
       const newCells = this.activeCells.map(row => {
         const r = [...row];
         const [m] = r.splice(fromIdx, 1);
@@ -713,6 +751,7 @@ export default {
         return r;
       });
       this.activeCells = newCells;
+      recordGridSnapshotUndo('课程表', 'schedule', prev, JSON.parse(JSON.stringify(newCells)), `交换列：${fromHeader} ↔ ${toHeader}`);
       this.saveActive();
     },
     onActiveRowMeta({ rowIdx, field, value }) {
