@@ -179,6 +179,28 @@ function initSchema(conn) {
       group_name TEXT,
       成员数 INTEGER DEFAULT 0
     );
+
+    -- 班级活动：活动记录（状态由「时间」动态推导：未开始/进行中/已结束）
+    CREATE TABLE IF NOT EXISTS activities (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      position INTEGER DEFAULT 1,
+      时间 TEXT,
+      主题 TEXT,
+      地点 TEXT,
+      简介 TEXT,
+      参与人员 TEXT,
+      created_at TEXT
+    );
+
+    -- 倒计时：名称 + 截止日 + 是否包含截止日当天
+    CREATE TABLE IF NOT EXISTS countdowns (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      position INTEGER DEFAULT 1,
+      名称 TEXT,
+      截止日 TEXT,
+      包含这一天 INTEGER DEFAULT 0,
+      created_at TEXT
+    );
   `);
 
   // 存量库迁移：为相册照片表补充 thumb_path 列

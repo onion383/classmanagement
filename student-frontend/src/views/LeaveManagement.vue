@@ -1,7 +1,7 @@
 <template>
   <div>
     <!-- 页面标题 -->
-    <div class="w-full bg-surface shadow-md rounded-xl mb-6 px-6 py-5 border border-border">
+    <div class="w-full bg-surface shadow-md rounded-xl mb-6 px-6 py-5 border border-border min-h-[4.5rem] flex items-center">
       <h1 class="text-2xl font-bold text-text">🛌 请假管理</h1>
     </div>
 

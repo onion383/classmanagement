@@ -14,7 +14,9 @@ const routes = [
   { path: '/group-manage', name: 'groupManage', component: () => import('../views/GroupManageView.vue'), meta: { requiresAuth: true } },
   { path: '/scores', name: 'scoreManage', component: () => import('../views/ScoreManagement.vue'), meta: { requiresAuth: true } },
   { path: '/duty', name: 'duty', component: () => import('../views/DutyView.vue'), meta: { requiresAuth: true } },
+  { path: '/activities', name: 'activities', component: () => import('../views/ActivitiesView.vue'), meta: { requiresAuth: true } },
   { path: '/test', name: 'test', component: () => import('../views/TestView.vue') },
+  { path: '/about', name: 'about', component: () => import('../views/AboutView.vue') },
 ]
 
 const router = createRouter({

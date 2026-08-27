@@ -1,7 +1,7 @@
 <template>
   <div>
-    <div class="w-full bg-surface shadow-md rounded-xl mb-6 px-6 py-5 border border-border">
-      <h1 class="text-2xl font-bold text-text">📚 班级管理</h1>
+    <div class="w-full bg-surface shadow-md rounded-xl mb-6 px-6 py-5 border border-border min-h-[4.5rem] flex items-center">
+      <h1 class="text-2xl font-bold text-text">📚 学生管理</h1>
     </div>
 
     <!-- 工具栏按钮 -->

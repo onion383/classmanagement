@@ -5,6 +5,18 @@ const path = require('path');
 const { db, getFields, renumber } = require('../db');
 const dbManager = require('../dbManager');
 
+// 校验并过滤 fee_records 的列名：只允许表中实际存在的列，防止 SQL 注入
+function filterColumns(data) {
+  const validCols = db.prepare("SELECT name FROM pragma_table_info('fee_records')").all().map(r => r.name);
+  const filtered = {};
+  Object.keys(data).forEach(k => {
+    if (validCols.includes(k)) {
+      filtered[k] = (data[k] === '' || data[k] === undefined) ? null : data[k];
+    }
+  });
+  return filtered;
+}
+
 // Multer 配置：上传目录统一指向 DATA_DIR/uploads（可写，打包后位于 userData）
 const storage = multer.diskStorage({
   destination: (req, file, cb) => cb(null, dbManager.uploadsDir),
@@ -41,13 +53,10 @@ router.post('/', (req, res) => {
     const atPosition = data.atPosition;
     delete data.atPosition;
 
-    const keys = Object.keys(data);
-    if (keys.length === 0) return res.status(400).json({ error: '没有字段' });
-
-    const cleaned = {};
-    keys.forEach(k => {
-      cleaned[k] = (data[k] === '' || data[k] === undefined) ? null : data[k];
-    });
+    // 白名单校验：只允许表中实际存在的列
+    const filtered = filterColumns(data);
+    const keys = Object.keys(filtered);
+    if (keys.length === 0) return res.status(400).json({ error: '没有有效的字段' });
 
     const maxPos = db.prepare('SELECT MAX(position) AS maxPos FROM fee_records').get().maxPos || 0;
     let insertPos;
@@ -58,10 +67,10 @@ router.post('/', (req, res) => {
       insertPos = maxPos + 1;
     }
 
-    cleaned.position = insertPos;
-    const columns = Object.keys(cleaned).map(c => `"${c}"`).join(',');
-    const placeholders = Object.keys(cleaned).map(() => '?').join(',');
-    const values = Object.values(cleaned);
+    filtered.position = insertPos;
+    const columns = Object.keys(filtered).map(c => `"${c}"`).join(',');
+    const placeholders = Object.keys(filtered).map(() => '?').join(',');
+    const values = Object.values(filtered);
 
     const result = db.prepare(`INSERT INTO fee_records (${columns}) VALUES (${placeholders})`).run(...values);
     renumber('fee_records');
@@ -75,17 +84,14 @@ router.post('/', (req, res) => {
 router.put('/:id', (req, res) => {
   try {
     const { id } = req.params;
-    const data = req.body;
-    const keys = Object.keys(data);
-    if (keys.length === 0) return res.status(400).json({ error: '没有字段' });
 
-    const cleaned = {};
-    keys.forEach(k => {
-      cleaned[k] = (data[k] === '' || data[k] === undefined) ? null : data[k];
-    });
+    // 白名单校验：只允许表中实际存在的列
+    const filtered = filterColumns(req.body);
+    const keys = Object.keys(filtered);
+    if (keys.length === 0) return res.status(400).json({ error: '没有有效的字段' });
 
-    const setClause = Object.keys(cleaned).map(k => `"${k}" = ?`).join(', ');
-    const values = Object.values(cleaned);
+    const setClause = Object.keys(filtered).map(k => `"${k}" = ?`).join(', ');
+    const values = Object.values(filtered);
     values.push(id);
 
     db.prepare(`UPDATE fee_records SET ${setClause} WHERE id = ?`).run(...values);
@@ -267,10 +273,15 @@ router.post('/import', (req, res) => {
       return res.status(400).json({ error: '缺少有效的字段或数据' });
     }
 
-    // 1. 获取现有字段
+    // 1. 校验字段名合法性（防止 SQL 注入）
+    if (!fields.every(f => /^[a-zA-Z0-9_\u4e00-\u9fa5]+$/.test(f))) {
+      return res.status(400).json({ error: '字段名包含不合法字符' });
+    }
+
+    // 2. 获取现有字段
     const existingFields = getFields('fee_records').map(f => f.name);
 
-    // 2. 自动创建不存在的字段
+    // 3. 自动创建不存在的字段（仅在字段名合法时）
     for (const f of fields) {
       if (!existingFields.includes(f)) {
         db.prepare(`ALTER TABLE fee_records ADD COLUMN "${f}" TEXT`).run();

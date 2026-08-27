@@ -134,7 +134,7 @@
                     v-model="row[field.name]"
                     :options="cellSelectOptions(field)"
                     @change="row._isNew ? $emit('updateNewRow', field.name, $event) : $emit('saveCell', row, field)"
-                    class="w-full"
+                    class="w-24"
                   />
                   <span v-else @dblclick="$emit('startEdit', row, field)" class="block w-full min-h-[24px] leading-6 px-1 cursor-default">{{ row[field.name] || '' }}</span>
                 </template>
