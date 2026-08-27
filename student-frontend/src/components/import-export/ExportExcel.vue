@@ -268,7 +268,7 @@ export default {
       const rows = this.groupFlatRows(idxList);
       const head = rows[0];
       const body = rows.slice(1);
-      let html = `<div style="text-align:center; font-size:20px; font-weight:bold; margin-bottom:12px;">${filename}</div>`;
+      let html = `<div style="text-align:center; font-size:20px; font-weight:bold; margin-bottom:12px;">${this.escapeHtml(filename)}</div>`;
       html += '<table style="border-collapse:collapse; margin:0 auto;">';
       html += `<thead><tr style="background-color:#4CAF50; color:white;">${head.map(h => `<th style="border:1px solid #ccc; padding:6px 12px;">${h}</th>`).join('')}</tr></thead><tbody>`;
       for (const r of body) {
@@ -291,7 +291,7 @@ export default {
       return await this.saveFileWithDialog(`${filename}.csv`, blob);
     },
     async exportGroupHTML(idxList, filename) {
-      const html = `<!DOCTYPE html><html><head><meta charset="UTF-8"><title>${filename}</title></head><body>${this.groupTableHTML(idxList, filename)}</body></html>`;
+      const html = `<!DOCTYPE html><html><head><meta charset="UTF-8"><title>${this.escapeHtml(filename)}</title></head><body>${this.groupTableHTML(idxList, filename)}</body></html>`;
       const blob = new Blob([html], { type: 'text/html' });
       return await this.saveFileWithDialog(`${filename}.html`, blob);
     },
@@ -575,10 +575,10 @@ export default {
       const isSchedule = this.isScheduleData(rows);
       const periodColIdx = headers.indexOf('时段');
 
-      let html = `<!DOCTYPE html><html><head><meta charset="UTF-8"><title>${filename}</title></head><body>
-        <h2 style="text-align:center;">${filename}</h2>
+      let html = `<!DOCTYPE html><html><head><meta charset="UTF-8"><title>${this.escapeHtml(filename)}</title></head><body>
+        <h2 style="text-align:center;">${this.escapeHtml(filename)}</h2>
         <table border="2" style="border-collapse:collapse; border-color:black;">
-          <thead><tr>${headers.map(h => `<th>${h}</th>`).join('')}</tr></thead><tbody>`;
+          <thead><tr>${headers.map(h => `<th>${this.escapeHtml(h)}</th>`).join('')}</tr></thead><tbody>`;
 
       for (const row of rows) {
         // ---------- 讲台行 ----------
@@ -599,15 +599,15 @@ export default {
 
         if (row.type === 'globalRest') {
           const displayText = row.label ? `${row.label} ${row.time}` : '';
-          html += `<tr><td colspan="${headers.length}" style="text-align:center; font-weight:bold; background-color:#D9D9D9;">${displayText}</td></tr>`;
+          html += `<tr><td colspan="${headers.length}" style="text-align:center; font-weight:bold; background-color:#D9D9D9;">${this.escapeHtml(displayText)}</td></tr>`;
         } else if (row.type === 'innerRest') {
           const displayText = row.label ? `${row.label} ${row.time}` : '';
           html += '<tr>';
           if (periodColIdx >= 0) {
             const remainingCols = headers.length - periodColIdx - 1;
-            html += `<td colspan="${remainingCols}" style="text-align:center; font-weight:bold; background-color:#D9D9D9;">${displayText}</td>`;
+            html += `<td colspan="${remainingCols}" style="text-align:center; font-weight:bold; background-color:#D9D9D9;">${this.escapeHtml(displayText)}</td>`;
           } else {
-            html += `<td colspan="${headers.length}" style="text-align:center; font-weight:bold; background-color:#D9D9D9;">${displayText}</td>`;
+            html += `<td colspan="${headers.length}" style="text-align:center; font-weight:bold; background-color:#D9D9D9;">${this.escapeHtml(displayText)}</td>`;
           }
           html += '</tr>';
         } else {
@@ -623,7 +623,7 @@ export default {
             } else {
               style = 'text-align:center;';
             }
-            html += `<td style="${style}">${cellVal}</td>`;
+            html += `<td style="${style}">${this.escapeHtml(cellVal)}</td>`;
           }
           html += '</tr>';
         }
@@ -686,15 +686,20 @@ export default {
       return await this.saveFileWithDialog(`${filename}.png`, blob);
     },
 
+    escapeHtml(str) {
+      const s = str == null ? '' : String(str);
+      return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#039;');
+    },
+
     buildHTMLString(rows, fields, filename) {
       const headers = fields.map(f => f.name);
       const isSchedule = this.isScheduleData(rows);
       const periodColIdx = headers.indexOf('时段');
 
-      let html = `<div style="text-align:center; font-size:20px; font-weight:bold; margin-bottom:10px;">${filename}</div>
+      let html = `<div style="text-align:center; font-size:20px; font-weight:bold; margin-bottom:12px;">${this.escapeHtml(filename)}</div>
         <table style="border-collapse:collapse; margin:0 auto;">
           <thead><tr style="background-color:#4CAF50; color:white;">
-            ${headers.map(h => `<th style="border:1px solid #ccc; padding:6px 12px; text-align:center; vertical-align:middle;">${h}</th>`).join('')}
+            ${headers.map(h => `<th style="border:1px solid #ccc; padding:6px 12px; text-align:center; vertical-align:middle;">${this.escapeHtml(h)}</th>`).join('')}
           </tr></thead><tbody>`;
 
       for (const row of rows) {
@@ -716,15 +721,15 @@ export default {
 
         if (row.type === 'globalRest') {
           const displayText = row.label ? `${row.label} ${row.time}` : '';
-          html += `<tr><td colspan="${headers.length}" style="border:1px solid #ccc; padding:6px 12px; text-align:center; vertical-align:middle; font-weight:bold; background-color:#D9D9D9;">${displayText}</td></tr>`;
+          html += `<tr><td colspan="${headers.length}" style="border:1px solid #ccc; padding:6px 12px; text-align:center; vertical-align:middle; font-weight:bold; background-color:#D9D9D9;">${this.escapeHtml(displayText)}</td></tr>`;
         } else if (row.type === 'innerRest') {
           const displayText = row.label ? `${row.label} ${row.time}` : '';
           html += '<tr>';
           if (periodColIdx >= 0) {
             const remainingCols = headers.length - periodColIdx - 1;
-            html += `<td colspan="${remainingCols}" style="border:1px solid #ccc; padding:6px 12px; text-align:center; vertical-align:middle; font-weight:bold; background-color:#D9D9D9;">${displayText}</td>`;
+            html += `<td colspan="${remainingCols}" style="border:1px solid #ccc; padding:6px 12px; text-align:center; vertical-align:middle; font-weight:bold; background-color:#D9D9D9;">${this.escapeHtml(displayText)}</td>`;
           } else {
-            html += `<td colspan="${headers.length}" style="border:1px solid #ccc; padding:6px 12px; text-align:center; vertical-align:middle; font-weight:bold; background-color:#D9D9D9;">${displayText}</td>`;
+            html += `<td colspan="${headers.length}" style="border:1px solid #ccc; padding:6px 12px; text-align:center; vertical-align:middle; font-weight:bold; background-color:#D9D9D9;">${this.escapeHtml(displayText)}</td>`;
           }
           html += '</tr>';
         } else {
@@ -738,7 +743,7 @@ export default {
             } else if (h === '走廊') {
               style += ' background-color:#D9D9D9;';
             }
-            html += `<td style="${style}">${cellVal}</td>`;
+            html += `<td style="${style}">${this.escapeHtml(cellVal)}</td>`;
           }
           html += '</tr>';
         }

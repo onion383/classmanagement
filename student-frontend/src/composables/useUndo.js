@@ -55,7 +55,7 @@ export function recordGridSnapshotUndo(key, table, oldArr, newArr, label) {
 // row 为完整记录对象（须含 id 及所有可回填列字段）。
 function pushRow(type, key, row) {
   try {
-    axios.post('/api/undo', { key, type, label: row ? `${row.姓名 || row.group_name || `#${row.id}`}` : '', payload: { table: key, row } }).catch(() => {})
+    axios.post('/api/undo', { key, type, label: row ? `${row.姓名 || row.group_name || row.主题 || row.名称 || `#${row.id}`}` : '', payload: { table: key, row } }).catch(() => {})
   } catch {
     /* 撤销记录失败不影响主流程 */
   }
@@ -72,7 +72,7 @@ export function recordRowDelete(key, row) {
 export function recordRowUpdate(key, oldRow, newRow) {
   const payload = { table: key, rowId: newRow ? newRow.id : oldRow.id, oldRow, newRow }
   try {
-    const name = (newRow || oldRow)?.姓名 || (newRow || oldRow)?.group_name || `#${payload.rowId}`
+    const name = (newRow || oldRow)?.姓名 || (newRow || oldRow)?.group_name || (newRow || oldRow)?.主题 || (newRow || oldRow)?.名称 || `#${payload.rowId}`
     axios.post('/api/undo', { key, type: 'row_update', label: `${name}`, payload }).catch(() => {})
   } catch {
     /* 撤销记录失败不影响主流程 */
@@ -82,14 +82,19 @@ export function recordRowUpdate(key, oldRow, newRow) {
 // ==================== 全局撤销/重做快捷键 ====================
 // 全局 Ctrl+Z / Ctrl+Shift+Z / Ctrl+Y。每次只作用于"当前页面/当前激活的那张表"，
 // 避免多表互相干扰：多个页面同时挂载时，只有最近注册（focus 激活）的那个生效。
-let activeKey = null
+// key 可为字符串（表 key），也可为返回字符串的函数（单个页面含多张表时按需动态切换，如班级活动/倒计时）。
+let activePageId = null
+let pageCounter = 0
 
 export function useUndoShortcut(key, options = {}) {
   const { onAfterUndo, onAfterRedo } = options
+  // 数值型"页面身份"，避免两张同页表共享一个字符串 key 时互相覆盖激活态
+  const myId = ++pageCounter
+  const resolveKey = () => (typeof key === 'function' ? key() : key)
 
   function makeHandler(postfix) {
     return async (e) => {
-      if (activeKey !== key) return
+      if (activePageId !== myId) return
       // 仅在表格/页面上生效，避免与输入框内原生 Ctrl+Z / 弹窗内操作冲突
       const t = e.target
       if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA')) return
@@ -100,7 +105,7 @@ export function useUndoShortcut(key, options = {}) {
       const redo = (k === 'z' && e.shiftKey) || (k === 'y' && !e.shiftKey)
       e.preventDefault()
       try {
-        const { data } = await axios.post(`/api/undo/table/${key}/${redo ? 'redo' : 'undo'}`)
+        const { data } = await axios.post(`/api/undo/table/${resolveKey()}/${redo ? 'redo' : 'undo'}`)
         if (data.ok) {
           if (redo) { if (onAfterRedo) onAfterRedo(data.label) }
           else if (onAfterUndo) onAfterUndo(data.label)
@@ -118,8 +123,8 @@ export function useUndoShortcut(key, options = {}) {
   // 路由视图外层被 <KeepAlive> 包裹：切换页面不会触发 onUnmounted/onMounted。
   // 因此用 onActivated/onDeactivated 来维护「当前激活视图」的正确性（KeepAlive 也会在首次挂载时触发一次 onActivated），
   // onMounted 仅负责注册全局 keydown 监听，onUnmounted 负责移除。
-  const setActive = () => { activeKey = key }
-  const clearActive = () => { if (activeKey === key) activeKey = null }
+  const setActive = () => { activePageId = myId }
+  const clearActive = () => { if (activePageId === myId) activePageId = null }
 
   onMounted(() => { setActive(); window.addEventListener('keydown', onKeydown) })
   onActivated(setActive)

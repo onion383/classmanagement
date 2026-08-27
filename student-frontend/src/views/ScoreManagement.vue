@@ -1,7 +1,7 @@
 <template>
   <div>
     <!-- 页面标题 + 加分对象下拉 -->
-    <div class="w-full bg-surface shadow-md rounded-xl mb-6 px-6 py-5 border border-border flex flex-wrap items-center justify-between gap-3">
+    <div class="w-full bg-surface shadow-md rounded-xl mb-6 px-6 py-5 border border-border min-h-[4.5rem] flex flex-wrap items-center justify-between gap-3">
       <h1 class="text-2xl font-bold text-text">🏅 加分管理</h1>
       <div class="flex items-center gap-2">
         <span class="text-sm text-text-secondary">加分对象</span>
@@ -84,13 +84,13 @@
         </div>
 
         <div v-if="statRows.length" class="space-y-2.5">
-          <div v-for="row in statRows" :key="row.name" class="flex items-center gap-3">
+          <div v-for="(row, idx) in statRows" :key="statMode + '-' + row.name" class="flex items-center gap-3">
             <span class="w-20 text-sm text-text truncate text-right shrink-0">{{ row.name }}</span>
             <div class="flex-1 h-5 bg-surface-hover rounded overflow-hidden">
               <div
-                class="h-full rounded transition-all duration-500"
+                class="h-full rounded bar-grow"
                 :class="barColor(row)"
-                :style="{ width: barWidth(row) + '%' }"
+                :style="{ width: barWidth(row) + '%', animationDelay: (idx * 90) + 'ms' }"
               ></div>
             </div>
             <span class="w-14 text-sm font-bold text-right shrink-0" :class="valueColor(row)">{{ valueText(row) }}</span>
@@ -521,3 +521,15 @@ export default {
   }
 }
 </script>
+
+<style scoped>
+/* 加分统计柱状图：从左往右非线性生长进场动画 */
+.bar-grow {
+  transform-origin: left center;
+  animation: score-bar-grow 0.5s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+@keyframes score-bar-grow {
+  from { transform: scaleX(0); }
+  to { transform: scaleX(1); }
+}
+</style>

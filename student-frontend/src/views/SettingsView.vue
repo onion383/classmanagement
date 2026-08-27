@@ -1,8 +1,8 @@
 <template>
   <div class="h-full">
     <!-- 顶部标题栏 -->
-    <div class="w-full bg-surface shadow-md rounded-xl mb-6 px-6 py-5 border border-border">
-      <h1 class="text-2xl font-bold text-text">⚙️ 设置</h1>
+    <div class="w-full bg-surface shadow-md rounded-xl mb-6 px-6 py-5 border border-border min-h-[4.5rem] flex items-center">
+      <h1 class="text-2xl font-bold text-text">⚙️ 系统设置</h1>
     </div>
 
     <!-- ========== 账号管理 ========== -->
@@ -201,6 +201,64 @@
         </div>
       </div>
 
+    <!-- ========== 工具箱设置 ========== -->
+    <div class="mb-6">
+      <h2 class="text-xl font-semibold text-text mb-4">🧰 工具箱设置</h2>
+      <div class="bg-surface rounded-lg border border-border p-6">
+        <div class="flex items-center gap-4">
+          <label class="text-sm font-medium text-text w-40 flex-shrink-0">是否启用工具箱</label>
+          <label class="inline-flex items-center cursor-pointer">
+            <input type="checkbox" :checked="toolboxEnabled" @change="onToolboxChange" class="w-4 h-4 rounded border-border text-primary focus:ring-primary cursor-pointer" />
+            <span class="ml-2 text-sm text-text-secondary">{{ toolboxEnabled ? '已启用' : '已禁用' }}</span>
+          </label>
+        </div>
+        <p class="text-xs text-text-muted mt-2 ml-40">下次启动时是否显示工具箱（本次运行不受此开关影响）</p>
+        <div class="flex items-center gap-4 mt-6">
+          <label class="text-sm font-medium text-text w-40 flex-shrink-0">本次启用工具箱</label>
+          <label class="inline-flex items-center cursor-pointer">
+            <input type="checkbox" :checked="sessionEnabled" @change="onSessionChange" class="w-4 h-4 rounded border-border text-primary focus:ring-primary cursor-pointer" />
+            <span class="ml-2 text-sm text-text-secondary">{{ sessionEnabled ? '已启用' : '已禁用' }}</span>
+          </label>
+        </div>
+        <p class="text-xs text-text-muted mt-2 ml-40">仅本次运行立即显示/隐藏工具箱；重启后按上方「是否启用」决定</p>
+        <div class="flex items-center gap-4 mt-6">
+          <label class="text-sm font-medium text-text w-40 flex-shrink-0">新U盘插入自动打开</label>
+          <label class="inline-flex items-center cursor-pointer">
+            <input type="checkbox" :checked="usbAutoOpen" @change="onUsbAutoOpenChange" class="w-4 h-4 rounded border-border text-primary focus:ring-primary cursor-pointer" />
+            <span class="ml-2 text-sm text-text-secondary">{{ usbAutoOpen ? '已开启' : '已关闭' }}</span>
+          </label>
+        </div>
+        <p class="text-xs text-text-muted mt-2 ml-40">插入新U盘时自动用文件资源管理器打开（仅Windows，即时生效）</p>
+      </div>
+    </div>
+
+    <!-- ========== 保存路径设置 ========== -->
+    <div class="mb-6">
+      <h2 class="text-xl font-semibold text-text mb-4">📁 保存路径设置</h2>
+      <div class="bg-surface rounded-lg border border-border p-6 space-y-6">
+        <div>
+          <div class="flex items-center gap-4 mb-2">
+            <label class="text-sm font-medium text-text w-40 flex-shrink-0">注释截屏保存位置</label>
+            <div class="flex-1 flex gap-2">
+              <input :value="noteSavePath" @input="onNotePathInput" placeholder="默认为图片/screenshots/" class="flex-1 border border-border bg-surface text-text px-3 py-2 rounded" />
+              <button @click="selectFolder('note')" class="bg-surface-hover text-text px-4 py-2 rounded border border-border transition-theme hover:bg-bg whitespace-nowrap">浏览...</button>
+            </div>
+          </div>
+          <p class="text-xs text-text-muted ml-40">注释工具保存截图的目录，留空则使用默认位置</p>
+        </div>
+        <div>
+          <div class="flex items-center gap-4 mb-2">
+            <label class="text-sm font-medium text-text w-40 flex-shrink-0">一键截屏保存位置</label>
+            <div class="flex-1 flex gap-2">
+              <input :value="screenshotSavePath" @input="onScreenshotPathInput" placeholder="默认为图片/screenshots/" class="flex-1 border border-border bg-surface text-text px-3 py-2 rounded" />
+              <button @click="selectFolder('screenshot')" class="bg-surface-hover text-text px-4 py-2 rounded border border-border transition-theme hover:bg-bg whitespace-nowrap">浏览...</button>
+            </div>
+          </div>
+          <p class="text-xs text-text-muted ml-40">一键截屏工具保存截图的目录，留空则使用默认位置</p>
+        </div>
+      </div>
+    </div>
+
     <!-- 内嵌弹窗：修改用户名 -->
     <div v-if="modalType === 'username'" class="fixed inset-0 bg-black/50 flex items-center justify-center z-[10001]" @click.self="closeModal">
       <div class="bg-surface rounded-lg p-6 w-96 border border-border shadow-lg">
@@ -301,6 +359,17 @@ export default {
       },
       dialogMounted: false,
       dialogCallback: null,
+      // 工具箱设置
+      toolboxEnabled: true,
+      sessionEnabled: true,
+      sessionLoaded: false,
+      noteSavePath: '',
+      screenshotSavePath: '',
+      usbAutoOpen: false,
+      loaded: false,
+      _noteDebounce: null,
+      _screenshotDebounce: null,
+      _fromMainHandler: null,
       // 撤销记录
       undoGroups: [],
       busyUndo: false,
@@ -365,6 +434,19 @@ export default {
     this.selectedThemeId = this.currentTheme
     this.bgImageUrl = this.themeStore.backgroundImage
     this.loadUndo()
+    this.loadWidgetSettings()
+    this.loadSession()
+    this.loadUsbAutoOpen()
+    this._fromMainHandler = window.electron?.on('from-main', (data) => {
+      if (data && data.type === 'session-widget-changed') this.loadSession()
+    })
+  },
+  beforeUnmount() {
+    clearTimeout(this._noteDebounce)
+    clearTimeout(this._screenshotDebounce)
+    if (this._fromMainHandler) {
+      window.electron?.off('from-main', this._fromMainHandler)
+    }
   },
   methods: {
     // ==================== 撤销记录 ====================
@@ -631,6 +713,95 @@ export default {
     },
     onGlassOpacityChange(e) {
       this.themeStore.setGlassOpacity(parseFloat(e.target.value))
+    },
+    // ==================== 工具箱设置 ====================
+    async loadWidgetSettings() {
+      try {
+        const res = await axios.get('/api/widget-settings')
+        if (res.data.success) {
+          this.toolboxEnabled = res.data.data.toolboxEnabled
+          this.noteSavePath = res.data.data.noteSavePath || ''
+          this.screenshotSavePath = res.data.data.screenshotSavePath || ''
+        }
+      } catch (err) {
+        console.error('加载工具箱设置失败:', err)
+      } finally {
+        this.loaded = true
+      }
+    },
+    async saveWidgetSettings() {
+      try {
+        await axios.put('/api/widget-settings', {
+          toolboxEnabled: this.toolboxEnabled,
+          noteSavePath: this.noteSavePath,
+          screenshotSavePath: this.screenshotSavePath
+        })
+        window.electron?.send('to-widget', { type: 'settings-changed' })
+      } catch (err) {
+        console.error('保存工具箱设置失败:', err)
+      }
+    },
+    onToolboxChange(e) {
+      this.toolboxEnabled = e.target.checked
+      if (!this.loaded) return
+      this.saveWidgetSettings()
+    },
+    async loadSession() {
+      try {
+        this.sessionEnabled = await window.electron?.invoke('get-session-widget-visible')
+      } catch (_) {}
+      if (this.sessionEnabled === null || this.sessionEnabled === undefined) {
+        this.sessionEnabled = this.toolboxEnabled
+        window.electron?.send('widget-set-session-visible', this.sessionEnabled)
+      }
+      this.sessionLoaded = true
+    },
+    onSessionChange(e) {
+      this.sessionEnabled = e.target.checked
+      if (!this.sessionLoaded) return
+      window.electron?.send('widget-set-session-visible', this.sessionEnabled)
+    },
+    onNotePathInput(e) {
+      this.noteSavePath = e.target.value
+      if (!this.loaded) return
+      clearTimeout(this._noteDebounce)
+      this._noteDebounce = setTimeout(() => this.saveWidgetSettings(), 500)
+    },
+    onScreenshotPathInput(e) {
+      this.screenshotSavePath = e.target.value
+      if (!this.loaded) return
+      clearTimeout(this._screenshotDebounce)
+      this._screenshotDebounce = setTimeout(() => this.saveWidgetSettings(), 500)
+    },
+    async loadUsbAutoOpen() {
+      try {
+        const res = await window.electron?.invoke('get-usb-auto-open')
+        this.usbAutoOpen = !!res?.enabled
+      } catch (_) {}
+    },
+    async onUsbAutoOpenChange(e) {
+      this.usbAutoOpen = e.target.checked
+      try {
+        await window.electron?.invoke('set-usb-auto-open', this.usbAutoOpen)
+      } catch (_) {
+        console.error('保存U盘自动打开设置失败')
+      }
+    },
+    async selectFolder(type) {
+      try {
+        const result = await window.electron?.invoke('select-folder')
+        if (result && result.filePaths && result.filePaths.length > 0) {
+          const path = result.filePaths[0]
+          if (type === 'note') {
+            this.noteSavePath = path
+          } else {
+            this.screenshotSavePath = path
+          }
+          this.saveWidgetSettings()
+        }
+      } catch (err) {
+        console.error('选择文件夹失败:', err)
+      }
     },
   },
 }

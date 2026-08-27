@@ -18,7 +18,7 @@
     </div>
 
     <!-- 时间轴 -->
-    <div class="timeline" v-if="visibleNodes.length">
+    <div class="timeline" v-if="visibleNodes.length" :style="{ maxHeight: maxHeight + 'px' }">
       <div
         v-for="node in visibleNodes"
         :key="node.key"
@@ -74,6 +74,8 @@ export default {
     title: { type: String, default: '🗓️ 请假时间轴' },
     // 右侧对齐：把类型标签与操作按钮放到右侧（业务时间轴如加分/扣分使用）
     alignRight: { type: Boolean, default: false },
+    // 时间轴列表最大高度（px），默认 420，业务方可按需调高
+    maxHeight: { type: Number, default: 420 },
     // 节点类型配置：{ value, label, colorKey: 'info'|'success'|'danger', color: hex }
     nodeTypes: {
       type: Array,
@@ -104,7 +106,10 @@ export default {
       const node = this.filterNode;
       return this.nodes
         .filter(n => {
-          if (kw && !n.text.toLowerCase().includes(kw)) return false;
+          if (kw) {
+            const haystack = Object.values(n).map(v => String(v || '')).join(' ').toLowerCase();
+            if (!haystack.includes(kw)) return false;
+          }
           if (type && n.category !== type) return false;
           if (node && n.type !== node) return false;
           return true;
@@ -131,7 +136,7 @@ export default {
     },
     badgeClass(node) {
       const t = this.nodeTypes.find(n => n.value === node.type);
-      const map = { info: 'bg-info/10 text-info', success: 'bg-success/10 text-success', danger: 'bg-danger/10 text-danger' };
+      const map = { info: 'bg-info/10 text-info', success: 'bg-success/10 text-success', danger: 'bg-danger/10 text-danger', muted: 'bg-surface-hover text-text-secondary border border-border' };
       return map[t && t.colorKey] || map.info;
     }
   }

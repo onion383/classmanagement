@@ -6,7 +6,7 @@ const router = express.Router()
 const MAX_PER_KEY = 50
 
 // 允许记录的动态表名（防注入）
-const ALLOWED_TABLES = ['students', 'fee_records', 'leave_records', 'score_records', 'group_members', 'groups', 'group_dimensions']
+const ALLOWED_TABLES = ['students', 'fee_records', 'leave_records', 'score_records', 'group_members', 'groups', 'group_dimensions', 'activities', 'countdowns']
 
 // 网格型数据：整块 JSON 存于单列，撤销按单格或整块处理。
 // 表名固定，杜绝注入。列名到具体网格列一一对应。
@@ -61,9 +61,9 @@ function updateRowById(table, id, row) {
   const set = keys.map(k => `"${k}" = ?`).join(', ')
   db.prepare(`UPDATE ${table} SET ${set} WHERE id = ?`).run(...keys.map(k => row[k]), id)
 }
-// 记录显示名：取姓名/小组名，否则回退 #id
+// 记录显示名：取姓名/小组名/活动主题/倒计时名称，否则回退 #id
 function rowName(row, id) {
-  return row ? (row.姓名 || row.group_name || `#${row.id ?? id}`) : `#${id}`
+  return row ? (row.姓名 || row.group_name || row.主题 || row.名称 || `#${row.id ?? id}`) : `#${id}`
 }
 
 // 相册排序：按给定 id 顺序整块重写 sort_order（1 起）。相册删除后 id 可能不再存在，跳过即可。

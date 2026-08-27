@@ -529,6 +529,13 @@ function stopUsbWatch() {
 // 读取开关状态（供设置页初始化）
 ipcMain.handle('get-usb-auto-open', () => ({ enabled: usbAutoOpenEnabled }))
 
+// 在系统默认浏览器打开外链
+ipcMain.handle('open-external', (event, url) => {
+  if (typeof url === 'string' && (url.startsWith('http://') || url.startsWith('https://'))) {
+    shell.openExternal(url)
+  }
+})
+
 // 设置开关：持久化并实时启停监听
 ipcMain.handle('set-usb-auto-open', (event, enabled) => {
   usbAutoOpenEnabled = !!enabled
