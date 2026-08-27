@@ -259,6 +259,49 @@
       </div>
     </div>
 
+    <!-- ========== AI 助手设置 ========== -->
+    <div class="mb-6">
+      <h2 class="text-xl font-semibold text-text mb-4">🧠 AI 助手设置</h2>
+      <div class="bg-surface rounded-lg border border-border p-6 space-y-5">
+        <div class="flex items-center gap-4">
+          <label class="text-sm font-medium text-text w-40 flex-shrink-0">启用 AI 助手</label>
+          <label class="inline-flex items-center cursor-pointer">
+            <input type="checkbox" :checked="ai.enabled" @change="onAiEnabledChange" class="w-4 h-4 rounded border-border text-primary focus:ring-primary cursor-pointer" />
+            <span class="ml-2 text-sm text-text-secondary">{{ ai.enabled ? '已启用' : '已禁用' }}</span>
+          </label>
+        </div>
+
+        <div class="flex items-center gap-4">
+          <label class="text-sm font-medium text-text w-40 flex-shrink-0">模型服务</label>
+          <AppSelect v-model="ai.provider" @change="onAiProviderChange" :options="aiProviderOptions" class="w-56" />
+          <a v-if="ai.provider !== 'custom'" :href="aiProviderDocs[ai.provider]" target="_blank" rel="noopener" class="text-xs text-info hover:underline">获取 API Key</a>
+        </div>
+
+        <div class="flex items-center gap-4">
+          <label class="text-sm font-medium text-text w-40 flex-shrink-0">Base URL</label>
+          <input v-model="ai.base_url" @input="onAiBaseUrlInput" placeholder="留空使用默认" class="flex-1 border border-border bg-surface text-text px-3 py-2 rounded" />
+        </div>
+
+        <div class="flex items-center gap-4">
+          <label class="text-sm font-medium text-text w-40 flex-shrink-0">模型名</label>
+          <input v-model="ai.model" @input="onAiModelInput" placeholder="留空使用默认" class="flex-1 border border-border bg-surface text-text px-3 py-2 rounded" />
+        </div>
+
+        <div class="flex items-center gap-4">
+          <label class="text-sm font-medium text-text w-40 flex-shrink-0">API Key</label>
+          <input v-model="ai.api_key" type="password" @input="onAiKeyInput" :placeholder="ai.hasApiKey ? '已配置（留空保持不变）' : '粘贴 API Key'" class="flex-1 border border-border bg-surface text-text px-3 py-2 rounded" autocomplete="off" />
+        </div>
+
+        <div class="flex items-center gap-3 ml-40">
+          <button @click="testAi" :disabled="aiTesting" class="bg-info hover:bg-info-hover text-text-inverse px-4 py-2 rounded transition-theme disabled:opacity-40">
+            {{ aiTesting ? '测试中…' : '测试连接' }}
+          </button>
+          <span v-if="aiTestResult" class="text-sm" :class="aiTestOk ? 'text-success' : 'text-danger'">{{ aiTestResult }}</span>
+        </div>
+        <p class="text-xs text-text-muted ml-40">密钥仅保存在本机加密数据库中，不会上传或进入前端界面。支持 OpenAI 兼容协议的服务均可接入。</p>
+      </div>
+    </div>
+
     <!-- 内嵌弹窗：修改用户名 -->
     <div v-if="modalType === 'username'" class="fixed inset-0 bg-black/50 flex items-center justify-center z-[10001]" @click.self="closeModal">
       <div class="bg-surface rounded-lg p-6 w-96 border border-border shadow-lg">
@@ -398,6 +441,36 @@ export default {
         { key: 'color-info', label: '信息', default: '#3b82f6' },
         { key: 'color-warning', label: '警告', default: '#f59e0b' },
       ],
+      // AI 助手设置
+      ai: {
+        enabled: false,
+        provider: 'deepseek',
+        base_url: '',
+        model: '',
+        api_key: '',
+        hasApiKey: false,
+      },
+      aiTesting: false,
+      aiTestResult: '',
+      aiTestOk: false,
+      _aiDebounce: null,
+      _aiKeyDebounce: null,
+      aiProviderPresets: {
+        deepseek: { base_url: 'https://api.deepseek.com/v1', model: 'deepseek-chat' },
+        openai: { base_url: 'https://api.openai.com/v1', model: 'gpt-4o-mini' },
+        moonshot: { base_url: 'https://api.moonshot.cn/v1', model: 'moonshot-v1-8k' },
+        qwen: { base_url: 'https://dashscope.aliyuncs.com/compatible-mode/v1', model: 'qwen-plus' },
+        glm: { base_url: 'https://open.bigmodel.cn/api/paas/v4', model: 'glm-4-flash' },
+        custom: { base_url: '', model: '' },
+      },
+      aiProviderDocs: {
+        deepseek: 'https://platform.deepseek.com/',
+        openai: 'https://platform.openai.com/',
+        moonshot: 'https://platform.moonshot.cn/',
+        qwen: 'https://dashscope.console.aliyun.com/',
+        glm: 'https://open.bigmodel.cn/',
+        custom: 'https://example.com',
+      },
     }
   },
   computed: {
@@ -429,6 +502,16 @@ export default {
     _undoKeyLabels() {
       return { students: '学生表', fee_records: '收费记录', leave_records: '请假记录', score_records: '成绩记录', group_manage: '分组管理', album: '班级相册' }
     },
+    aiProviderOptions() {
+      return [
+        { value: 'deepseek', label: 'DeepSeek（推荐）' },
+        { value: 'moonshot', label: 'Kimi（月之暗面）' },
+        { value: 'qwen', label: '通义千问' },
+        { value: 'glm', label: '智谱清言' },
+        { value: 'openai', label: 'OpenAI' },
+        { value: 'custom', label: '自定义（OpenAI 兼容）' },
+      ]
+    },
   },
   mounted() {
     this.selectedThemeId = this.currentTheme
@@ -437,6 +520,7 @@ export default {
     this.loadWidgetSettings()
     this.loadSession()
     this.loadUsbAutoOpen()
+    this.loadAiConfig()
     this._fromMainHandler = window.electron?.on('from-main', (data) => {
       if (data && data.type === 'session-widget-changed') this.loadSession()
     })
@@ -801,6 +885,77 @@ export default {
         }
       } catch (err) {
         console.error('选择文件夹失败:', err)
+      }
+    },
+    // ==================== AI 助手设置 ====================
+    async loadAiConfig() {
+      try {
+        const { data } = await axios.get('/api/ai/config')
+        if (data.success) {
+          this.ai.enabled = data.data.enabled
+          this.ai.provider = data.data.provider
+          this.ai.base_url = data.data.base_url
+          this.ai.model = data.data.model
+          this.ai.hasApiKey = data.data.hasApiKey
+        }
+      } catch (err) {
+        console.error('加载 AI 配置失败:', err)
+      }
+    },
+    async saveAiConfig() {
+      try {
+        await axios.put('/api/ai/config', {
+          enabled: this.ai.enabled,
+          provider: this.ai.provider,
+          base_url: this.ai.base_url,
+          model: this.ai.model,
+          api_key: this.ai.api_key,
+        })
+        if (this.ai.api_key) this.ai.hasApiKey = true
+        this.aiTestResult = ''
+      } catch (err) {
+        console.error('保存 AI 配置失败:', err)
+        this.aiTestResult = err.response?.data?.error || '保存失败'
+        this.aiTestOk = false
+      }
+    },
+    onAiEnabledChange(e) {
+      this.ai.enabled = e.target.checked
+      this.saveAiConfig()
+    },
+    onAiProviderChange() {
+      const preset = this.aiProviderPresets[this.ai.provider]
+      if (preset) {
+        this.ai.base_url = preset.base_url
+        this.ai.model = preset.model
+      }
+      this.saveAiConfig()
+    },
+    onAiBaseUrlInput() {
+      clearTimeout(this._aiDebounce)
+      this._aiDebounce = setTimeout(() => this.saveAiConfig(), 400)
+    },
+    onAiModelInput() {
+      clearTimeout(this._aiDebounce)
+      this._aiDebounce = setTimeout(() => this.saveAiConfig(), 400)
+    },
+    onAiKeyInput() {
+      clearTimeout(this._aiKeyDebounce)
+      this._aiKeyDebounce = setTimeout(() => this.saveAiConfig(), 400)
+    },
+    async testAi() {
+      this.aiTesting = true
+      this.aiTestResult = ''
+      this.aiTestOk = false
+      try {
+        const { data } = await axios.post('/api/ai/config/test')
+        this.aiTestOk = true
+        this.aiTestResult = data.message || '连接成功'
+      } catch (err) {
+        this.aiTestOk = false
+        this.aiTestResult = err.response?.data?.error || '连接失败'
+      } finally {
+        this.aiTesting = false
       }
     },
   },

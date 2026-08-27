@@ -60,13 +60,11 @@
 }
 .av-select--open .av-select__arrow { transform: rotate(180deg); }
 
-/* ---------- 下拉菜单与选项 ---------- */
+/* ---------- 下拉菜单与选项 ----------
+ * 注：position / top / left / width 由 AppSelect 组件的 inline style 动态设置
+ * （使用 position:fixed 避免被父容器 overflow 裁剪）
+ */
 .av-select__menu {
-  position: absolute;
-  top: calc(100% + 4px);
-  left: 0;
-  right: 0;
-  z-index: 30;
   margin: 0;
   padding: 4px;
   list-style: none;

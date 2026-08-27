@@ -29,6 +29,7 @@
 
       <!-- ===== 系统管理 ===== -->
       <div class="text-[11px] text-white/40 uppercase tracking-wider px-3 pt-1 pb-0.5">系统管理</div>
+      <router-link to="/ai-assistant" class="block px-3 py-2 rounded hover:bg-sidebar-hover transition-theme" active-class="bg-sidebar-active">🤖 AI 助手</router-link>
       <router-link to="/settings" class="block px-3 py-2 rounded hover:bg-sidebar-hover transition-theme" active-class="bg-sidebar-active">⚙️ 系统设置</router-link>
       <router-link to="/about" class="block px-3 py-2 rounded hover:bg-sidebar-hover transition-theme" active-class="bg-sidebar-active">ℹ️ 关于软件</router-link>
     </nav>

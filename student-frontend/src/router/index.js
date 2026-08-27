@@ -15,6 +15,7 @@ const routes = [
   { path: '/scores', name: 'scoreManage', component: () => import('../views/ScoreManagement.vue'), meta: { requiresAuth: true } },
   { path: '/duty', name: 'duty', component: () => import('../views/DutyView.vue'), meta: { requiresAuth: true } },
   { path: '/activities', name: 'activities', component: () => import('../views/ActivitiesView.vue'), meta: { requiresAuth: true } },
+  { path: '/ai-assistant', name: 'aiAssistant', component: () => import('../views/AiAssistant.vue'), meta: { requiresAuth: true } },
   { path: '/test', name: 'test', component: () => import('../views/TestView.vue') },
   { path: '/about', name: 'about', component: () => import('../views/AboutView.vue') },
 ]

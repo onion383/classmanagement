@@ -1,0 +1,201 @@
+<template>
+  <Transition name="dialog">
+    <div v-if="show" class="fixed inset-0 bg-black/50 flex items-center justify-center z-[10070]" @click.self="close">
+      <div class="dialog-card bg-surface rounded-lg p-6 w-[28rem] max-w-[calc(100vw-2rem)] border border-border shadow-lg">
+        <div class="flex items-center justify-between mb-5 flex-shrink-0">
+          <h3 class="text-lg font-bold text-text">添加模型</h3>
+          <button @click="close" class="text-text-muted hover:text-text text-lg leading-none cursor-pointer" title="关闭">✕</button>
+        </div>
+
+        <div class="space-y-4">
+          <div class="flex items-center gap-4">
+            <label class="text-sm font-medium text-text w-20 flex-shrink-0">服务商</label>
+            <AppSelect v-model="form.provider" @change="onProviderChange" :options="providerOptions" class="flex-1" />
+            <a
+              v-if="form.provider !== 'custom'"
+              :href="providerDocs[form.provider]"
+              target="_blank"
+              rel="noopener"
+              class="text-xs text-info hover:underline flex-shrink-0 whitespace-nowrap"
+            >获取 API Key</a>
+          </div>
+          <div class="flex items-center gap-4">
+            <label class="text-sm font-medium text-text w-20 flex-shrink-0">模型名称</label>
+            <input v-model="form.name" placeholder="用于识别，如「主模型」" class="flex-1 border border-border bg-surface text-text px-3 py-2 rounded" />
+          </div>
+          <div class="flex items-center gap-4">
+            <label class="text-sm font-medium text-text w-20 flex-shrink-0">模型名</label>
+            <template v-if="mode === 'input'">
+              <input v-model="form.model" placeholder="如 deepseek-chat" class="flex-1 border border-border bg-surface text-text px-3 py-2 rounded" />
+              <button
+                @click="discover"
+                :disabled="discovering"
+                class="flex-shrink-0 border border-border text-text px-3 py-2 rounded hover:bg-surface-hover disabled:opacity-40 text-sm cursor-pointer"
+              >{{ discovering ? '识别中…' : '识别' }}</button>
+            </template>
+            <template v-else>
+              <AppSelect v-model="form.model" :options="selectOptions" class="flex-1" />
+              <button
+                @click="mode = 'input'"
+                class="flex-shrink-0 text-xs text-info hover:underline cursor-pointer"
+              >手填</button>
+            </template>
+          </div>
+          <p v-if="discoverError" class="text-xs text-danger">{{ discoverError }}</p>
+          <div class="flex items-center gap-4">
+            <label class="text-sm font-medium text-text w-20 flex-shrink-0">Base URL</label>
+            <input v-model="form.base_url" placeholder="默认已自动填充" class="flex-1 border border-border bg-surface text-text px-3 py-2 rounded" />
+          </div>
+          <div class="flex items-center gap-4">
+            <label class="text-sm font-medium text-text w-20 flex-shrink-0">API Key</label>
+            <input v-model="form.api_key" type="password" placeholder="同一服务商已配置过可留空自动复用" class="flex-1 border border-border bg-surface text-text px-3 py-2 rounded" autocomplete="off" />
+          </div>
+
+          <p v-if="error" class="text-xs text-danger">{{ error }}</p>
+          <p class="text-xs text-text-muted">点击「确定」将自动检测模型连通性，通过后才保存；密钥仅存本机数据库，同一服务商可留空复用已有密钥。</p>
+
+          <div class="flex items-center justify-end gap-3 pt-1">
+            <button @click="close" class="border border-border text-text px-4 py-2 rounded hover:bg-surface-hover cursor-pointer">取消</button>
+            <button
+              @click="submit"
+              :disabled="testing"
+              class="bg-primary hover:bg-primary-hover text-text-inverse px-5 py-2 rounded transition-theme disabled:opacity-40 cursor-pointer"
+            >{{ testing ? '测试连接中…' : '确定' }}</button>
+          </div>
+        </div>
+      </div>
+    </div>
+  </Transition>
+</template>
+
+<script>
+import axios from 'axios'
+import AppSelect from '../base/AppSelect.vue'
+import '../../styles/dialog-transition.css'
+
+export default {
+  name: 'AddModelDialog',
+  components: { AppSelect },
+  props: {
+    show: { type: Boolean, default: false },
+  },
+  emits: ['close', 'saved'],
+  data() {
+    return {
+      testing: false,
+      error: '',
+      // 模型识别：mode=input 手填；mode=select 用识别出的下拉选择
+      mode: 'input',
+      discovering: false,
+      discoverError: '',
+      discovered: [],
+      form: {
+        name: '',
+        provider: 'deepseek',
+        base_url: '',
+        model: '',
+        api_key: '',
+      },
+      providerPresets: {
+        deepseek: { base_url: 'https://api.deepseek.com/v1', model: 'deepseek-chat' },
+        openai: { base_url: 'https://api.openai.com/v1', model: 'gpt-4o-mini' },
+        moonshot: { base_url: 'https://api.moonshot.cn/v1', model: 'moonshot-v1-8k' },
+        qwen: { base_url: 'https://dashscope.aliyuncs.com/compatible-mode/v1', model: 'qwen-plus' },
+        glm: { base_url: 'https://open.bigmodel.cn/api/paas/v4', model: 'glm-4-flash' },
+        custom: { base_url: '', model: '' },
+      },
+      providerDocs: {
+        deepseek: 'https://platform.deepseek.com/',
+        openai: 'https://platform.openai.com/',
+        moonshot: 'https://platform.moonshot.cn/',
+        qwen: 'https://dashscope.console.aliyun.com/',
+        glm: 'https://open.bigmodel.cn/',
+        custom: '',
+      },
+    }
+  },
+  computed: {
+    providerOptions() {
+      return [
+        { value: 'deepseek', label: 'DeepSeek（推荐）' },
+        { value: 'moonshot', label: 'Kimi（月之暗面）' },
+        { value: 'qwen', label: '通义千问' },
+        { value: 'glm', label: '智谱清言' },
+        { value: 'openai', label: 'OpenAI' },
+        { value: 'custom', label: '自定义（OpenAI 兼容）' },
+      ]
+    },
+    selectOptions() {
+      return this.discovered.map((mId) => ({ value: mId, label: mId }))
+    },
+  },
+  watch: {
+    show(val) {
+      // 每次打开时重置表单
+      if (val) {
+        this.error = ''
+        this.mode = 'input'
+        this.discovered = []
+        this.discoverError = ''
+        this.form = { name: '', provider: 'deepseek', base_url: this.providerPresets.deepseek.base_url, model: this.providerPresets.deepseek.model, api_key: '' }
+      }
+    },
+  },
+  methods: {
+    close() {
+      this.$emit('close')
+    },
+    onProviderChange() {
+      const preset = this.providerPresets[this.form.provider] || { base_url: '', model: '' }
+      this.form.base_url = preset.base_url
+      this.form.model = preset.model
+      this.mode = 'input'
+      this.discovered = []
+      this.discoverError = ''
+    },
+    // 点击「识别」：调用服务商 /models 接口获取可用模型，切换为下拉选择
+    async discover() {
+      this.discoverError = ''
+      this.discovering = true
+      try {
+        const res = await axios.post('/api/ai/models/discover', {
+          provider: this.form.provider,
+          base_url: this.form.base_url,
+          api_key: this.form.api_key,
+        })
+        if (res.data && res.data.success) {
+          this.discovered = res.data.models
+          this.form.model = this.discovered[0]
+          this.mode = 'select'
+        } else {
+          this.mode = 'input'
+          this.discoverError = (res.data && res.data.error) || '识别失败'
+        }
+      } catch (err) {
+        this.mode = 'input'
+        this.discoverError = (err.response && err.response.data && err.response.data.error) || '识别失败，请检查 Key'
+      } finally {
+        this.discovering = false
+      }
+    },
+    async submit() {
+      this.error = ''
+      if (!this.form.model.trim()) { this.error = '请填写模型名'; return }
+      this.testing = true
+      try {
+        const res = await axios.post('/api/ai/models', this.form)
+        if (res.data && res.data.success) {
+          this.close()
+          this.$emit('saved')
+        } else {
+          this.error = (res.data && res.data.error) || '连接失败，未保存'
+        }
+      } catch (err) {
+        this.error = (err.response && err.response.data && err.response.data.error) || '连接失败，未保存'
+      } finally {
+        this.testing = false
+      }
+    },
+  },
+}
+</script>

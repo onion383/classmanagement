@@ -8,7 +8,8 @@
  *   关闭：遮罩淡出 + 卡片淡出 + 模糊减弱 + 100%→95% 缩小
  *
  * 说明：
- *   - 卡片在动画期间强制 GPU 合成避免毛玻璃闪烁，动画结束后脱离图层保证文字清晰
+ *   - 卡片在动画期间通过 will-change 提示 GPU 合成避免毛玻璃闪烁，动画结束后脱离图层保证文字清晰
+ *   - 不使用 transform 或 will-change:transform，避免创建新的包含块导致内部 position:fixed 元素定位错乱
  *   - 毛玻璃卡片需自己带 backdrop-filter（这里用 CSS 变量 --glass-blur 控制强度）
  */
 
@@ -29,27 +30,27 @@
 .dialog-card {
   animation: dialogCardIn 0.4s ease;
 }
-/* 仅动画期间强制 GPU 合成（避免毛玻璃 backdrop-filter 闪烁），结束后脱离图层文字清晰 */
+/* 仅动画期间强制 GPU 合成（避免毛玻璃 backdrop-filter 闪烁），结束后脱离图层文字清晰
+ * 注意：不使用 transform 或 will-change: transform，避免创建新的包含块导致内部 position:fixed 元素定位错乱 */
 .dialog-enter-active .dialog-card,
 .dialog-leave-active .dialog-card {
-  will-change: opacity, transform, backdrop-filter;
-  transform: translateZ(0);
+  will-change: opacity, backdrop-filter;
   backface-visibility: hidden;
 }
 @keyframes dialogCardIn {
   0% {
     opacity: 0;
-    transform: translateZ(0) scale(0.95);
+    transform: scale(0.95);
     backdrop-filter: blur(0px) saturate(1);
     -webkit-backdrop-filter: blur(0px) saturate(1);
   }
   70% {
     opacity: 1;
-    transform: translateZ(0) scale(1.02);
+    transform: scale(1.02);
   }
   100% {
     opacity: 1;
-    transform: translateZ(0) scale(1);
+    transform: scale(1);
     backdrop-filter: blur(var(--glass-blur, 20px)) saturate(1.1);
     -webkit-backdrop-filter: blur(var(--glass-blur, 20px)) saturate(1.1);
   }
@@ -62,13 +63,13 @@
 @keyframes dialogCardOut {
   from {
     opacity: 1;
-    transform: translateZ(0) scale(1);
+    transform: scale(1);
     backdrop-filter: blur(var(--glass-blur, 20px)) saturate(1.1);
     -webkit-backdrop-filter: blur(var(--glass-blur, 20px)) saturate(1.1);
   }
   to {
     opacity: 0;
-    transform: translateZ(0) scale(0.95);
+    transform: scale(0.95);
     backdrop-filter: blur(0px) saturate(1);
     -webkit-backdrop-filter: blur(0px) saturate(1);
   }

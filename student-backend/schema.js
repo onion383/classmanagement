@@ -109,6 +109,50 @@ function initSchema(conn) {
     );
     INSERT OR IGNORE INTO widget_settings (id) VALUES (1);
 
+    -- AI 助手：模型接入配置（密钥存在已加密的教师库内，仅后端使用）
+    CREATE TABLE IF NOT EXISTS ai_settings (
+      id INTEGER PRIMARY KEY CHECK (id = 1),
+      enabled INTEGER DEFAULT 0,
+      provider TEXT DEFAULT 'deepseek',
+      base_url TEXT DEFAULT '',
+      model TEXT DEFAULT '',
+      api_key TEXT DEFAULT ''
+    );
+    INSERT OR IGNORE INTO ai_settings (id) VALUES (1);
+
+    -- AI 助手：模型管理（多模型列表，is_active 标记当前选中，密钥仅存本机）
+    CREATE TABLE IF NOT EXISTS ai_models (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      name TEXT DEFAULT '',
+      provider TEXT DEFAULT 'deepseek',
+      base_url TEXT DEFAULT '',
+      model TEXT DEFAULT '',
+      api_key TEXT DEFAULT '',
+      is_active INTEGER DEFAULT 0
+    );
+    -- 将旧的单模型配置迁移为第一条已选模型（仅当旧配置曾填写过模型名/密钥/地址）
+    INSERT INTO ai_models (name, provider, base_url, model, api_key, is_active)
+    SELECT '主模型', provider, base_url, model, api_key, 1
+    FROM ai_settings
+    WHERE (COALESCE(model,'') != '' OR COALESCE(api_key,'') != '' OR COALESCE(base_url,'') != '')
+      AND NOT EXISTS (SELECT 1 FROM ai_models);
+
+    -- AI 助手：对话记录（会话 + 消息）
+    CREATE TABLE IF NOT EXISTS ai_conversations (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      title TEXT DEFAULT '新对话',
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    );
+    CREATE TABLE IF NOT EXISTS ai_messages (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      conversation_id INTEGER NOT NULL,
+      role TEXT NOT NULL,
+      content TEXT DEFAULT '',
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    );
+    CREATE INDEX IF NOT EXISTS idx_ai_messages_conv ON ai_messages (conversation_id, id);
+
     -- 班级相册：相册（文件夹）登记表
     CREATE TABLE IF NOT EXISTS albums (
       id INTEGER PRIMARY KEY AUTOINCREMENT,

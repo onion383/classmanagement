@@ -17,8 +17,9 @@
       <span class="av-select__arrow" aria-hidden="true"><svg width="12" height="12" viewBox="0 0 16 16" fill="none"><path d="M4 6l4 4 4-4" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg></span>
     </button>
 
-    <!-- 下拉菜单 -->
-    <ul v-if="open" class="av-select__menu" role="listbox">
+    <!-- 下拉菜单（Teleport 到 body 避免被父容器 overflow/transform/backdrop-filter 裁剪） -->
+    <Teleport to="body">
+      <ul v-if="open" class="av-select__menu" :style="menuStyle" role="listbox">
         <li
           v-for="(opt, i) in list"
           :key="opt.value == null ? i : opt.value"
@@ -32,6 +33,7 @@
         </li>
         <li v-if="!list.length" class="av-select__option av-select__option--empty">无选项</li>
       </ul>
+    </Teleport>
   </div>
 </template>
 
@@ -52,7 +54,7 @@ export default {
   },
   emits: ['update:modelValue', 'change'],
   data() {
-    return { open: false, hoverIdx: -1 }
+    return { open: false, hoverIdx: -1, menuPos: { left: 0, top: 0, width: 0 } }
   },
   computed: {
     list() {
@@ -68,6 +70,21 @@ export default {
       if (this.resolved) return this.resolved.label
       if (this.modelValue !== '' && this.modelValue != null) return String(this.modelValue)
       return this.placeholder
+    },
+    menuStyle() {
+      if (!this.open) return {}
+      // Teleport 到 body 后无法继承父级字号，主动读取组件自身字号同步给菜单
+      const fs = this.$refs.rootRef && getComputedStyle(this.$refs.rootRef).fontSize
+      const style = {
+        position: 'fixed',
+        left: this.menuPos.left + 'px',
+        top: this.menuPos.top + 'px',
+        width: this.menuPos.width + 'px',
+        minWidth: '120px',
+        zIndex: 10010,
+      }
+      if (fs) style.fontSize = fs
+      return style
     }
   },
   methods: {
@@ -75,6 +92,12 @@ export default {
       if (this.disabled) return
       this.open = !this.open
       this.hoverIdx = this.open ? this.list.findIndex(o => o.value === this.modelValue) : -1
+      if (this.open) {
+        const rect = this.$refs.rootRef?.getBoundingClientRect()
+        if (rect) {
+          this.menuPos = { left: rect.left, top: rect.bottom + 4, width: rect.width }
+        }
+      }
     },
     move(step) {
       if (!this.open) { this.open = true; return }
