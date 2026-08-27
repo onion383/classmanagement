@@ -2,7 +2,7 @@
   <div class="h-full flex flex-col">
     <!-- 顶部标题栏 -->
     <div class="w-full bg-surface shadow-md rounded-xl mb-6 px-6 py-5 border border-border min-h-[4.5rem] flex items-center">
-      <div class="flex items-center justify-between">
+      <div class="flex-1 flex items-center justify-between">
         <h1 class="text-2xl font-bold text-text">📷 学生相册</h1>
         <div class="flex gap-3">
           <button @click="openAdd" class="bg-primary hover:bg-primary-hover text-text-inverse px-4 py-2 rounded transition-theme">添加文件夹</button>
