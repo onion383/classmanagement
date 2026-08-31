@@ -29,11 +29,10 @@
 /* ---------- 卡片：淡入 + 模糊增强 + 回弹缩放 ---------- */
 .dialog-card {
   animation: dialogCardIn 0.4s ease;
-}
-/* 仅动画期间强制 GPU 合成（避免毛玻璃 backdrop-filter 闪烁），结束后脱离图层文字清晰
- * 注意：不使用 transform 或 will-change: transform，避免创建新的包含块导致内部 position:fixed 元素定位错乱 */
-.dialog-enter-active .dialog-card,
-.dialog-leave-active .dialog-card {
+  /* 始终提示 GPU 合成，避免动画期间频繁创建/销毁合成层。
+     will-change: opacity/backdrop-filter 不会创建新的包含块（与 transform 不同），
+     因此内部 position:fixed 元素定位不受影响。
+     毛玻璃文字清晰度不受 will-change 影响，动画前后保持一致。 */
   will-change: opacity, backdrop-filter;
   backface-visibility: hidden;
 }

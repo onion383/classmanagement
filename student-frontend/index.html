@@ -4,6 +4,11 @@
     <meta charset="UTF-8">
     <link rel="icon" type="image/svg+xml" href="/vite.svg">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <link rel="preconnect" href="http://localhost:3000">
+    <!-- modulepreload：在 HTML 解析阶段就预下载 main.js 及其静态依赖图（Vue/Pinia/Router 等），
+         避免等到 <script> 执行时才串行加载，与 CSS/图片下载并行进行 -->
+    <link rel="modulepreload" href="/src/main.js">
+    
     <title>班级管理系统</title>
     <style>
       /* 首屏载入占位：避免窗口已出但白屏。Vue mount 时会自动替换 #app 内的这段内容。 */

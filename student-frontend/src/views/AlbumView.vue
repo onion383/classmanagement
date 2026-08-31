@@ -262,7 +262,6 @@ import { useNotification } from '../composables/useNotification.js'
 import { useUndoShortcut } from '../composables/useUndo.js'
 import VideoThumb from '../components/import-export/VideoThumb.vue'
 import AppSelect from '../components/base/AppSelect.vue'
-import Sortable from 'sortablejs'
 import { resourceUrl } from '../utils/apiUrl'
 import '../styles/dialog-transition.css'
 
@@ -498,7 +497,7 @@ function openManage() {
   nextTick(() => initSortable())
 }
 
-function initSortable() {
+async function initSortable() {
   destroySortable()
   const el = albumListRef.value
   if (!el) return
@@ -507,6 +506,7 @@ function initSortable() {
   for (let i = 0; i < children.length; i++) {
     children[i].dataset.id = String(albums.value[i]?.id || '')
   }
+  const Sortable = await import('sortablejs').then(m => m.default || m)
   sortableInstance = new Sortable(el, {
     handle: '.drag-handle',
     animation: 200,
@@ -583,6 +583,8 @@ async function refreshAll() {
   } finally { busyScan.value = false }
 }
 
+const pollTimers = ref([])
+
 function pollScan(progressive = false) {
   const id = activeAlbumId.value
   return new Promise(resolve => {
@@ -590,15 +592,23 @@ function pollScan(progressive = false) {
       try {
         const res = await axios.get(`/api/album/${id}/status`, { headers: authHeaders() })
         if (res.data.scanning) {
-          // 渐进刷新：扫描中逐步显示已索引的照片（同时刷新相册数字）
           if (progressive && activeAlbumId.value === id) {
             await loadAlbums(false)
           }
         } else {
-          clearInterval(timer); resolve()
+          clearInterval(timer)
+          const idx = pollTimers.value.indexOf(timer)
+          if (idx !== -1) pollTimers.value.splice(idx, 1)
+          resolve()
         }
-      } catch (_) { clearInterval(timer); resolve() }
+      } catch (_) {
+        clearInterval(timer)
+        const idx = pollTimers.value.indexOf(timer)
+        if (idx !== -1) pollTimers.value.splice(idx, 1)
+        resolve()
+      }
     }, 800)
+    pollTimers.value.push(timer)
   })
 }
 
@@ -693,15 +703,23 @@ function pollScanFor(id, progressive = false) {
         const res = await axios.get(`/api/album/${id}/status`, { headers: authHeaders() })
         if (res.data.scanning) {
           scanProgress.value = { scanned: res.data.scanned || 0, total: res.data.total || 0 }
-          // 渐进刷新：全量更新时逐步显示已索引的照片（同时刷新相册数字）
           if (progressive && activeAlbumId.value === id) {
             await loadAlbums(false)
           }
         } else {
-          clearInterval(timer); resolve()
+          clearInterval(timer)
+          const idx = pollTimers.value.indexOf(timer)
+          if (idx !== -1) pollTimers.value.splice(idx, 1)
+          resolve()
         }
-      } catch (_) { clearInterval(timer); resolve() }
+      } catch (_) {
+        clearInterval(timer)
+        const idx = pollTimers.value.indexOf(timer)
+        if (idx !== -1) pollTimers.value.splice(idx, 1)
+        resolve()
+      }
     }, 800)
+    pollTimers.value.push(timer)
   })
 }
 
@@ -843,6 +861,9 @@ onMounted(async () => {
 onBeforeUnmount(() => {
   window.removeEventListener('resize', onResize)
   if (rafId) { cancelAnimationFrame(rafId); rafId = 0 }
+  // 清理所有轮询定时器，避免页面切走后仍在发请求
+  for (const t of pollTimers.value) clearInterval(t)
+  pollTimers.value = []
 })
 </script>
 

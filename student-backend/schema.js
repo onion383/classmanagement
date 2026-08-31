@@ -247,6 +247,13 @@ function initSchema(conn) {
     );
   `);
 
+  // 存量库迁移：为 widget_settings 补充 desktop_apps（桌面小组件常用软件列表，JSON 数组文本）
+  {
+    const widgetCols = conn.prepare('PRAGMA table_info(widget_settings)').all().map(c => c.name);
+    if (!widgetCols.includes('desktop_apps')) {
+      conn.exec(`ALTER TABLE widget_settings ADD COLUMN desktop_apps TEXT DEFAULT '[]'`);
+    }
+  }
   // 存量库迁移：为相册照片表补充 thumb_path 列
   {
     const photoCols = conn.prepare('PRAGMA table_info(album_photos)').all().map(c => c.name);
@@ -289,6 +296,8 @@ function initSchema(conn) {
   conn.exec(`CREATE INDEX IF NOT EXISTS idx_fee_time ON fee_records (收支时间);`);
   // 优化：加分按学生过滤 + 时间排序展示
   conn.exec(`CREATE INDEX IF NOT EXISTS idx_score_student_time ON score_records (student_id, 加分时间);`);
+  // 优化：学生按姓名搜索（搜索栏/下拉候选）
+  conn.exec(`CREATE INDEX IF NOT EXISTS idx_students_name ON students (姓名);`);
   // 存量库迁移：为相册表补充 sort_order 列
   {
     const albumCols = conn.prepare('PRAGMA table_info(albums)').all().map(c => c.name);

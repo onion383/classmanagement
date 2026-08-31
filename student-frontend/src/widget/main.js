@@ -15,4 +15,21 @@ axios.interceptors.request.use(config => {
   return config
 })
 
+// 响应拦截器：后端稍慢于窗口时，首屏请求可能遇到「连接被拒」网络错误，自动退避重试。
+axios.interceptors.response.use(
+  res => res,
+  async (error) => {
+    const config = error.config
+    if (!error.response && config) {
+      const retryCount = config.__retryCount || 0
+      if (retryCount < 6) {
+        config.__retryCount = retryCount + 1
+        await new Promise(r => setTimeout(r, 500 * config.__retryCount))
+        return axios(config)
+      }
+    }
+    return Promise.reject(error)
+  }
+)
+
 createApp(WidgetApp).mount('#widget-app')

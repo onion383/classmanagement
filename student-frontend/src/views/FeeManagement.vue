@@ -87,6 +87,7 @@
               :src="getFullUrl(img)"
               @click="previewImage(img)"
               class="w-full h-full object-cover cursor-pointer"
+              loading="lazy"
               @error="$event.target.style.display='none'; $event.target.nextElementSibling.style.display='flex'"
             />
             <div class="w-full h-full items-center justify-center bg-border text-text-muted text-xs" style="display:none;">
@@ -280,7 +281,11 @@ async function refreshRecords() {
 
 // ==================== 看板统计 ====================
 const balance = computed(() => {
-  return feeRecords.value.reduce((sum, r) => sum + (parseFloat(r['收支金额']) || 0), 0).toFixed(2)
+  // 收入为正，支出为负
+  return feeRecords.value.reduce((sum, r) => {
+    const amount = parseFloat(r['收支金额']) || 0
+    return sum + (r['收支类型'] === '支出' ? -Math.abs(amount) : Math.abs(amount))
+  }, 0).toFixed(2)
 })
 
 const monthlyIncome = computed(() => {
@@ -289,15 +294,13 @@ const monthlyIncome = computed(() => {
   const month = now.getMonth() + 1
   return feeRecords.value
     .filter(r => {
+      if (r['收支类型'] !== '收入') return false
       const time = r['收支时间']
       if (!time) return false
       const [y, m] = time.split('-').map(Number)
       return y === year && m === month
     })
-    .reduce((sum, r) => {
-      const amount = parseFloat(r['收支金额']) || 0
-      return sum + (amount > 0 ? amount : 0)
-    }, 0)
+    .reduce((sum, r) => sum + (Math.abs(parseFloat(r['收支金额'])) || 0), 0)
     .toFixed(2)
 })
 
@@ -307,15 +310,13 @@ const monthlyExpense = computed(() => {
   const month = now.getMonth() + 1
   return feeRecords.value
     .filter(r => {
+      if (r['收支类型'] !== '支出') return false
       const time = r['收支时间']
       if (!time) return false
       const [y, m] = time.split('-').map(Number)
       return y === year && m === month
     })
-    .reduce((sum, r) => {
-      const amount = parseFloat(r['收支金额']) || 0
-      return sum + (amount < 0 ? Math.abs(amount) : 0)
-    }, 0)
+    .reduce((sum, r) => sum + (Math.abs(parseFloat(r['收支金额'])) || 0), 0)
     .toFixed(2)
 })
 

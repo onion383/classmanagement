@@ -10,7 +10,7 @@
         :options="roleOptions"
       />
       <input v-model="username" placeholder="账号" class="border p-2 w-full mb-2 rounded-xl" autocomplete="username" />
-      <input v-model="password" type="password" placeholder="密码" autocomplete="current-password" class="border p-2 w-full mb-4 rounded-xl" />
+      <input v-model="password" type="password" placeholder="密码（留空则无密码登录）" autocomplete="current-password" class="border p-2 w-full mb-4 rounded-xl" />
       <div class="flex gap-2">
         <button type="submit" :disabled="busy" class="bg-info text-text-inverse px-4 py-2 flex-1 disabled:opacity-50">
           {{ busy ? '登录中…' : '登录' }}
@@ -68,7 +68,7 @@
         :options="roleOptions"
       />
       <input v-model="username" placeholder="账号" class="border p-2 w-full mb-2 rounded-xl" autocomplete="username" />
-      <input v-model="password" type="password" placeholder="密码（至少 6 位）" autocomplete="new-password" class="border p-2 w-full mb-2 rounded-xl" />
+      <input v-model="password" type="password" placeholder="密码（留空则无密码登录）" autocomplete="new-password" class="border p-2 w-full mb-2 rounded-xl" />
       <input v-model="confirm" type="password" placeholder="确认密码" autocomplete="new-password" class="border p-2 w-full mb-4 rounded-xl" />
       <button type="submit" :disabled="busy" class="bg-info text-text-inverse px-4 py-2 rounded w-full disabled:opacity-50">
         {{ busy ? '创建中…' : '注册并生成恢复密钥' }}
@@ -196,8 +196,8 @@ export default {
     register() {
       if (!this.role) return useNotification().warning('请选择角色');
       if (this.role !== 'teacher') return useNotification().warning('该角色正在开发中，请使用「班主任」注册');
-      if (!this.username || !this.password) return useNotification().warning('请填写账号和密码');
-      if (this.password.length < 6) return useNotification().warning('密码长度至少 6 位');
+      if (!this.username) return useNotification().warning('请填写账号');
+      if (this.password && this.password.length < 6) return useNotification().warning('密码长度至少 6 位');
       if (this.password !== this.confirm) return useNotification().warning('两次输入的密码不一致');
       this.busy = true;
       axios.post('/api/register', { username: this.username, password: this.password, role: this.role }).then(res => {

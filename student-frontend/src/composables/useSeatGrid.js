@@ -180,10 +180,12 @@ export function useSeatGrid(apiBase, options = {}) {
       }
     }
     if (cellBase && changed.length) {
-      // 一次请求一个格子；完成后不重复整块 save
-      changed.forEach(([r, c], idx) => {
-        saveSingleCell(r, c, next[r]?.[c] ?? null)
-      })
+      // 串行提交每个格子，避免并发 PATCH 到达顺序乱序导致数据覆盖
+      ;(async () => {
+        for (const [r, c] of changed) {
+          await saveSingleCell(r, c, next[r]?.[c] ?? null)
+        }
+      })()
     } else {
       save()
     }

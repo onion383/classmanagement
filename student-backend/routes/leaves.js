@@ -26,6 +26,7 @@ function listOrders() {
 // GET /api/leaves 全量列表
 router.get('/', (req, res) => {
   try {
+    res.set('Cache-Control', 'private, max-age=30');
     res.json({ data: listOrders() });
   } catch (err) {
     res.status(500).json({ error: err.message });

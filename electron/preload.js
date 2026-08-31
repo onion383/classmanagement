@@ -17,6 +17,12 @@ const validSendChannels = [
   'widget-context-menu',
   'to-main',
   'to-widget',
+  // 无边框自绘标题栏：窗口控制（单向发送）
+  'win-minimize',
+  'win-maximize-toggle',
+  'win-close',
+  // Win11 主题：主窗口窗外亚克力开关
+  'theme-chrome',
 ]
 
 // 白名单：仅允许以下请求-响应式动请求通道（对应 ipcMain.handle）
@@ -32,6 +38,11 @@ const validInvokeChannels = [
   'get-usb-auto-open',
   'set-usb-auto-open',
   'open-external',
+  'get-main-token',
+  'get-desktop-wallpaper',
+  // 桌面小组件·常用软件（选文件/启动；列表读写已改走后端数据库）
+  'apps-select-file',
+  'apps-launch',
 ]
 
 // 白名单：仅允许以下主进程 -> 渲染进程推送通道

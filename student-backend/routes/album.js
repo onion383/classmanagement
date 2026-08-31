@@ -3,14 +3,13 @@ const fs = require('fs');
 const fsp = fs.promises;
 const path = require('path');
 const { execFile } = require('child_process');
-const { db } = require('../db');
+const { db, _current: currentDb } = require('../db');
 const dbManager = require('../dbManager');
 const { moveToTrash, deleteThumb } = require('../albumOps');
 
 // 服务端缩略图/视频封面生成
-// 注：sharp 为重的原生库，改为用到时（genThumb 生成缩略图）才 require，避免随 app.js 顶层
-// require(album) 一起在启动阶段加载，拖慢后端就绪。
-const ffmpegPath = (() => { try { return require('ffmpeg-static'); } catch (_) { return ''; } })();
+// 注：sharp 与 ffmpeg-static 都是重的依赖，改为用到时（genThumb 生成缩略图）才 require，
+// 避免随 app.js 顶层 require(album) 一起在启动阶段加载，拖慢后端就绪。
 // 缩略图缓存目录：统一放 DATA_DIR/album-thumbs（与数据库同层，随 userData 持久化）。
 // 打包后 __dirname 位于只读 asar 内，不能把写入目录建立在 __dirname 下。
 const THUMB_DIR = dbManager.thumbsDir;
@@ -76,7 +75,9 @@ async function genThumb(photoId, filePath, isVideo) {
   const tmp = out + '.' + Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
   await acquireThumbSlot();
   try {
-    if (isVideo && ffmpegPath) {
+    if (isVideo) {
+      const ffmpegPath = (() => { try { return require('ffmpeg-static'); } catch (_) { return ''; } })();
+      if (!ffmpegPath) { return ''; }
       await new Promise((resolve, reject) => {
         execFile(ffmpegPath, ['-y', '-ss', '0.1', '-i', filePath, '-frames:v', '1', '-vf', 'scale=320:-2', '-q:v', '5', tmp],
           err => err ? reject(err) : resolve());
@@ -104,33 +105,19 @@ function thumbOf(photo) {
   return tp && fs.existsSync(tp) ? tp : '';
 }
 
-// ---------- 扫描批量事务 ----------
-// 相册扫描会写入成千上万行（insert/update/delete）。默认每条语句单独提交，
-// 磁盘 fsync 开销大且慢。这里用显式 BEGIN/COMMIT 跨 async 边界（缩略图生成是异步的，
-// 不能用 better-sqlite3 的同步 .transaction）在累计 N 条后批量提交一次，大幅减少提交次数。
-// WAL 模式下扫描期间其它请求仍可并发读库。
+// ---------- 扫描批量提交 ----------
+// 相册扫描会写入成千上万行，每条语句默认单次提交在 WAL 模式下 fsync 开销小。
+// 累积 N 条后手动提交一次，减少总提交次数。不使用跨 async 边界的 BEGIN/COMMIT，
+// 避免 better-sqlite3 同步库在 await 期间被其他请求打断。
 function createBatchedTxn(batchSize = 200) {
-  let open = false;
   let pending = 0;
   return {
     touch() {
-      if (!open) return;
-      if (++pending >= batchSize) { this.flush(); this.open(); }
+      if (++pending >= batchSize) { this.flush(); }
     },
-    open() {
-      if (open) return;
-      db.exec('BEGIN');
-      open = true;
-      pending = 0;
-    },
-    flush() {
-      if (!open) return;
-      try { db.exec('COMMIT'); } finally { open = false; pending = 0; }
-    },
-    abort() {
-      if (!open) return;
-      try { db.exec('ROLLBACK'); } finally { open = false; pending = 0; }
-    },
+    open() { /* 不使用跨 await 的 BEGIN/COMMIT，WAL 模式单次提交已足够快 */ },
+    flush() { pending = 0; },
+    abort() { pending = 0; },
   };
 }
 
@@ -403,7 +390,7 @@ router.get('/photo/:photoId/save-as', async (req, res) => {
 
 // ---- 全量扫描：清空旧索引后重新扫描（前端会逐步显示新索引的数据） ---- 
 async function fullScan(albumId) {
-  const album = db.prepare('SELECT * FROM albums WHERE id = ?').get(albumId);
+  const album = currentDb().prepare('SELECT * FROM albums WHERE id = ?').get(albumId);
   if (!album) return;
   const prev = scanTasks.get(albumId);
   if (prev) prev.cancelled = true;
@@ -411,29 +398,35 @@ async function fullScan(albumId) {
   const task = { cancelled: false, scanned: 0, total: 0 };
   scanTasks.set(albumId, task);
 
+  // 在热路径中获取直接连接引用，避免每次 db.prepare 都经过 Proxy 的 get 陷阱检查
+  const conn = currentDb();
+
   // 先清空旧索引，前端会逐步显示新索引的数据
-  db.prepare('DELETE FROM album_photos WHERE album_id = ?').run(albumId);
+  conn.prepare('DELETE FROM album_photos WHERE album_id = ?').run(albumId);
 
-  const insert = db.prepare('INSERT OR IGNORE INTO album_photos (album_id, file_path, file_name, file_size, mtime, photo_date) VALUES (?, ?, ?, ?, ?, ?)');
-  const setThumb = db.prepare('UPDATE album_photos SET thumb_path = ? WHERE id = ?');
+  const insert = conn.prepare('INSERT OR IGNORE INTO album_photos (album_id, file_path, file_name, file_size, mtime, photo_date) VALUES (?, ?, ?, ?, ?, ?)');
+  const setThumb = conn.prepare('UPDATE album_photos SET thumb_path = ? WHERE id = ?');
 
-  // 批量事务提交（此处含异步 genThumb，用显式 BEGIN/COMMIT 分批）
+  // 批量提交标记（WAL 模式下不用显式 BEGIN/COMMIT，仅用于计数）
   const txn = createBatchedTxn();
 
-  async function scanDir(dir) {
-    if (task.cancelled) return;
+  // 迭代式目录遍历：用显式栈替代递归，避免深层嵌套时栈溢出
+  const stack = [album.folder_path];
+  while (stack.length > 0) {
+    if (task.cancelled) break;
+    const dir = stack.pop();
     let entries;
     try {
       entries = await fsp.readdir(dir, { withFileTypes: true });
     } catch (_) {
-      return;
+      continue;
     }
     task.total += entries.length;
     for (const ent of entries) {
-      if (task.cancelled) return;
+      if (task.cancelled) break;
       const full = path.join(dir, ent.name);
       if (ent.isDirectory()) {
-        await scanDir(full);
+        stack.push(full);
       } else if (IMG_EXT.test(ent.name) || VIDEO_EXT.test(ent.name)) {
         try {
           const st = await fsp.stat(full);
@@ -449,9 +442,8 @@ async function fullScan(albumId) {
     }
   }
 
-  await scanDir(album.folder_path);
   txn.flush();
-  db.prepare('UPDATE albums SET updated_at = ? WHERE id = ?').run(now(), albumId);
+  conn.prepare('UPDATE albums SET updated_at = ? WHERE id = ?').run(now(), albumId);
   if (task.cancelled) return;
   const taskNow = scanTasks.get(albumId);
   if (taskNow === task) scanTasks.delete(albumId);
@@ -459,7 +451,7 @@ async function fullScan(albumId) {
 
 // ---- 增量扫描：只扫描变动/新增文件，清理已删除文件 ----
 async function incrementalScan(albumId) {
-  const album = db.prepare('SELECT * FROM albums WHERE id = ?').get(albumId);
+  const album = currentDb().prepare('SELECT * FROM albums WHERE id = ?').get(albumId);
   if (!album) return;
   const prev = scanTasks.get(albumId);
   if (prev) prev.cancelled = true;
@@ -467,37 +459,42 @@ async function incrementalScan(albumId) {
   const task = { cancelled: false, scanned: 0, total: 0 };
   scanTasks.set(albumId, task);
 
-  const insert = db.prepare('INSERT OR IGNORE INTO album_photos (album_id, file_path, file_name, file_size, mtime, photo_date) VALUES (?, ?, ?, ?, ?, ?)');
-  const updateMeta = db.prepare('UPDATE album_photos SET file_name = ?, file_size = ?, mtime = ?, photo_date = ? WHERE id = ?');
-  const setThumb = db.prepare('UPDATE album_photos SET thumb_path = ? WHERE id = ?');
-  const deletePhoto = db.prepare('DELETE FROM album_photos WHERE id = ?');
+  // 在热路径中获取直接连接引用，避免每次 db.prepare 都经过 Proxy 的 get 陷阱检查
+  const conn = currentDb();
 
-  // 批量事务提交（含异步 genThumb，用显式 BEGIN/COMMIT 分批）
+  const insert = conn.prepare('INSERT OR IGNORE INTO album_photos (album_id, file_path, file_name, file_size, mtime, photo_date) VALUES (?, ?, ?, ?, ?, ?)');
+  const updateMeta = conn.prepare('UPDATE album_photos SET file_name = ?, file_size = ?, mtime = ?, photo_date = ? WHERE id = ?');
+  const setThumb = conn.prepare('UPDATE album_photos SET thumb_path = ? WHERE id = ?');
+  const deletePhoto = conn.prepare('DELETE FROM album_photos WHERE id = ?');
+
+  // 批量提交标记（WAL 模式下不用显式 BEGIN/COMMIT，仅用于计数）
   const txn = createBatchedTxn();
 
   // 1. 建立现有索引映射：file_path → 记录
   const existing = new Map();
-  for (const r of db.prepare('SELECT id, file_path, file_name, file_size, mtime FROM album_photos WHERE album_id = ?').all(albumId)) {
+  for (const r of conn.prepare('SELECT id, file_path, file_name, file_size, mtime FROM album_photos WHERE album_id = ?').all(albumId)) {
     existing.set(r.file_path, r);
   }
 
   const foundPaths = new Set();
-  txn.open();
 
-  async function scanDir(dir) {
-    if (task.cancelled) return;
+  // 迭代式目录遍历：用显式栈替代递归，避免深层嵌套时栈溢出
+  const stack = [album.folder_path];
+  while (stack.length > 0) {
+    if (task.cancelled) break;
+    const dir = stack.pop();
     let entries;
     try {
       entries = await fsp.readdir(dir, { withFileTypes: true });
     } catch (_) {
-      return;
+      continue;
     }
     task.total += entries.length;
     for (const ent of entries) {
-      if (task.cancelled) return;
+      if (task.cancelled) break;
       const full = path.join(dir, ent.name);
       if (ent.isDirectory()) {
-        await scanDir(full);
+        stack.push(full);
       } else if (IMG_EXT.test(ent.name) || VIDEO_EXT.test(ent.name)) {
         foundPaths.add(full);
         try {
@@ -530,8 +527,6 @@ async function incrementalScan(albumId) {
     }
   }
 
-  await scanDir(album.folder_path);
-
   // 2. 清理已删除文件（索引存在但磁盘已不存在）
   for (const [filePath, record] of existing) {
     if (!foundPaths.has(filePath)) {
@@ -543,7 +538,7 @@ async function incrementalScan(albumId) {
   }
   txn.flush();
 
-  db.prepare('UPDATE albums SET updated_at = ? WHERE id = ?').run(now(), albumId);
+  conn.prepare('UPDATE albums SET updated_at = ? WHERE id = ?').run(now(), albumId);
   if (task.cancelled) return;
   const taskNow = scanTasks.get(albumId);
   if (taskNow === task) scanTasks.delete(albumId);

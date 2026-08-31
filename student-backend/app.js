@@ -1,27 +1,16 @@
 const express = require('express');
 const path = require('path');
 const cors = require('cors');
-const multer = require('multer');
+
 const { auth, authStatic } = require('./middleware/auth');
 const { createDynamicTableRouter } = require('./routes/dynamicTable');
 
 require('./db');
 const dbManager = require('./dbManager');
 
+// 关键路由：启动时立即加载（登录必需）
 const authRoutes = require('./routes/auth');
 const accountRoutes = require('./routes/account');
-const scheduleRouter = require('./routes/schedule');
-const seatsRouter = require('./routes/seats');
-const widgetSettingsRouter = require('./routes/widgetSettings');
-const leavesRouter = require('./routes/leaves');
-const albumRouter = require('./routes/album');
-const groupManageRouter = require('./routes/groupManage');
-const scoresRouter = require('./routes/scores');
-const dutyRouter = require('./routes/duty');
-const undoRouter = require('./routes/undo');
-const activitiesRouter = require('./routes/activities');
-const countdownsRouter = require('./routes/countdowns');
-const aiRouter = require('./routes/ai');
 
 const app = express();
 const PORT = 3000;
@@ -35,69 +24,99 @@ app.use(express.json({ limit: '200mb' }));
 app.use('/uploads', authStatic(), express.static(dbManager.uploadsDir));
 app.use('/api/background', authStatic(), express.static(dbManager.backgroundDir));
 
-// Multer 配置（供上传收据使用）：仅允许图片，限制大小 10MB
-const ALLOWED_EXT = /\.(jpg|jpeg|png|gif|webp|bmp)$/i;
-const ALLOWED_MIME = /^image\/(jpeg|png|gif|webp|bmp)$/;
-const storage = multer.diskStorage({
-  destination: (req, file, cb) => cb(null, dbManager.uploadsDir),
-  filename: (req, file, cb) => {
-    const ext = (path.extname(file.originalname) || '.jpg').toLowerCase();
-    const uniqueSuffix = Date.now() + '-' + Math.round(Math.random() * 1E9);
-    cb(null, uniqueSuffix + ext);
-  }
-});
-const upload = multer({
-  storage,
-  limits: { fileSize: 10 * 1024 * 1024 }, // 单文件 10MB
-  fileFilter: (req, file, cb) => {
-    const ok = ALLOWED_MIME.test(file.mimetype) && ALLOWED_EXT.test(file.originalname);
-    // 必须传第二个参数 includeFile（true=接受），否则 multer 视作拒绝并丢弃文件
-    cb(ok ? null : new Error('仅支持图片文件（jpg/png/gif/webp/bmp），且大小不超过 10MB'), ok);
-  }
-});
-
-// ===================== 动态表路由（通用 CRUD） =====================
+// ===================== 关键路由（登录页必需） =====================
+app.use('/api', authRoutes);
+app.use('/api/account', accountRoutes);
 app.use('/api/students', auth(['teacher']), createDynamicTableRouter('students', {
   minCount: 1,
   protectedColumns: ['学号', '姓名']
 }));
 
-app.use('/api/fee-records', auth(['teacher']), createDynamicTableRouter('fee_records', {
-  minCount: 1,
-  fieldTypeOverrides: { '收支金额': '小数', '收支时间': '日期' },
-  extraRoutes: (router) => {
-    router.post('/upload-receipt', upload.array('receipts', 10), (req, res) => {
-      if (!req.files || req.files.length === 0) {
-        return res.status(400).json({ error: '没有上传文件' });
-      }
-      const urls = req.files.map(f => `/uploads/${f.filename}`);
-      res.json({ urls });
-    }, (err, req, res, next) => {
-      // 处理文件类型/大小被 multer 拒绝的情况（fileFilter/limits）
-      res.status(400).json({ error: err && err.message ? err.message : '图片上传失败' });
-    });
-  }
-}));
-
-// ===================== 独立路由 =====================
-app.use('/api', authRoutes);
-app.use('/api/account', accountRoutes);
-app.use('/api/schedule', auth(['teacher']), scheduleRouter);
-app.use('/api/seats', auth(['teacher']), seatsRouter);
-app.use('/api/leaves', auth(['teacher']), leavesRouter);
-app.use('/api/album', auth(['teacher']), albumRouter);
-app.use('/api/group-manage', auth(['teacher']), groupManageRouter);
-app.use('/api/scores', auth(['teacher']), scoresRouter);
-app.use('/api/duty', auth(['teacher']), dutyRouter);
-app.use('/api/widget-settings', auth(['teacher']), widgetSettingsRouter);
-app.use('/api/undo', auth(['teacher']), undoRouter);
-app.use('/api/activities', auth(['teacher']), activitiesRouter);
-app.use('/api/countdowns', auth(['teacher']), countdownsRouter);
-app.use('/api/ai', auth(['teacher']), aiRouter);
-
 // 托管前端静态文件（生产模式用）
 app.use(express.static(path.join(__dirname, '../dist')));
 
-app.listen(PORT, () => {
-  console.log(`✅ 服务器已启动：http://localhost:${PORT}`);
-});
+// ===================== 启动服务器 =====================
+// 端口冲突时自动重试（应用退出后旧进程可能未完全释放端口）
+function startServer(port) {
+  const server = app.listen(port, () => {
+    console.log(`✅ 服务器已启动：http://localhost:${port}`);
+
+    // 非关键路由懒加载：服务器就绪后再逐个注册，不阻塞就绪信号。
+    // 每个路由的 require() 在 setImmediate 回调中执行，分散到不同事件循环 tick，
+    // 避免启动时加载大量 JS 文件与 .node 原生模块（如 album 的 sharp、ai 的 pdf-parse 等）。
+    // 用户登录后导航到对应页面时，路由早已注册完毕，无感知。
+    const deferredLoaders = [
+      () => { app.use('/api/schedule', auth(['teacher']), require('./routes/schedule')); },
+      () => { app.use('/api/seats', auth(['teacher']), require('./routes/seats')); },
+      () => { app.use('/api/leaves', auth(['teacher']), require('./routes/leaves')); },
+      () => { app.use('/api/album', auth(['teacher']), require('./routes/album')); },
+      () => { app.use('/api/group-manage', auth(['teacher']), require('./routes/groupManage')); },
+      () => { app.use('/api/scores', auth(['teacher']), require('./routes/scores')); },
+      () => { app.use('/api/duty', auth(['teacher']), require('./routes/duty')); },
+      () => { app.use('/api/widget-settings', auth(['teacher']), require('./routes/widgetSettings')); },
+      () => { app.use('/api/undo', auth(['teacher']), require('./routes/undo')); },
+      () => { app.use('/api/activities', auth(['teacher']), require('./routes/activities')); },
+      () => { app.use('/api/countdowns', auth(['teacher']), require('./routes/countdowns')); },
+      () => { app.use('/api/ai', auth(['teacher']), require('./routes/ai')); },
+      // fee-records 含 multer（文件上传处理），一起延迟加载
+      () => {
+        const multer = require('multer');
+        const ALLOWED_EXT = /\.(jpg|jpeg|png|gif|webp|bmp)$/i;
+        const ALLOWED_MIME = /^image\/(jpeg|png|gif|webp|bmp)$/;
+        const storage = multer.diskStorage({
+          destination: (req, file, cb) => cb(null, dbManager.uploadsDir),
+          filename: (req, file, cb) => {
+            const ext = (path.extname(file.originalname) || '.jpg').toLowerCase();
+            const uniqueSuffix = Date.now() + '-' + Math.round(Math.random() * 1E9);
+            cb(null, uniqueSuffix + ext);
+          }
+        });
+        const upload = multer({
+          storage,
+          limits: { fileSize: 10 * 1024 * 1024 }, // 单文件 10MB
+          fileFilter: (req, file, cb) => {
+            const ok = ALLOWED_MIME.test(file.mimetype) && ALLOWED_EXT.test(file.originalname);
+            // 必须传第二个参数 includeFile（true=接受），否则 multer 视作拒绝并丢弃文件
+            cb(ok ? null : new Error('仅支持图片文件（jpg/png/gif/webp/bmp），且大小不超过 10MB'), ok);
+          }
+        });
+        app.use('/api/fee-records', auth(['teacher']), createDynamicTableRouter('fee_records', {
+          minCount: 1,
+          fieldTypeOverrides: { '收支金额': '小数', '收支时间': '日期' },
+          extraRoutes: (router) => {
+            router.post('/upload-receipt', upload.array('receipts', 10), (req, res) => {
+              if (!req.files || req.files.length === 0) {
+                return res.status(400).json({ error: '没有上传文件' });
+              }
+              const urls = req.files.map(f => `/uploads/${f.filename}`);
+              res.json({ urls });
+            }, (err, req, res, next) => {
+              // 处理文件类型/大小被 multer 拒绝的情况（fileFilter/limits）
+              res.status(400).json({ error: err && err.message ? err.message : '图片上传失败' });
+            });
+          }
+        }));
+      },
+    ];
+
+    // 逐个注册，每个 defer 到下一个事件循环 tick
+    for (const loader of deferredLoaders) {
+      setImmediate(loader);
+    }
+  });
+
+  server.on('error', (err) => {
+    if (err.code === 'EADDRINUSE') {
+      console.log(`端口 ${port} 被占用，等待 1s 后重试...`);
+      setTimeout(() => server.close(() => startServer(port)), 1000);
+    } else {
+      console.error('服务器启动失败:', err);
+      process.exit(1);
+    }
+  });
+
+  // 优雅退出：收到 SIGTERM 时关闭服务器
+  process.on('SIGTERM', () => server.close(() => process.exit(0)));
+}
+
+startServer(PORT);

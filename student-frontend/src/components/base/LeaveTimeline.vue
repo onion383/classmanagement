@@ -22,7 +22,7 @@
       <div
         v-for="node in visibleNodes"
         :key="node.key"
-        class="timeline-row"
+        class="timeline-row content-visibility-auto"
       >
         <div class="timeline-marker" :style="markerStyle(node)"></div>
         <!-- 右侧对齐模式（加分/扣分标签与操作按钮放右侧） -->

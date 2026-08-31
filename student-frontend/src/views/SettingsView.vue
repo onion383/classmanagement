@@ -427,6 +427,7 @@ export default {
       presetThemes: [
         { id: 'base', name: '彩色色块主题' },
         { id: 'glass', name: '毛玻璃主题' },
+        { id: 'win11', name: 'Win11 主题' },
         { id: 'minimal', name: '极简主题' },
       ],
       colorItems: [

@@ -1,6 +1,6 @@
 <template>
   <Transition name="dialog">
-  <div v-if="visible" class="fixed inset-0 bg-black/50 flex items-center justify-center z-[10003] pointer-events-auto" @click.self="handleOverlayClick">
+  <div v-if="visible" class="fixed inset-0 bg-black/50 flex items-center justify-center z-[10006] pointer-events-auto" @click.self="handleOverlayClick">
     <div class="bg-surface p-5 rounded-lg min-w-[300px] text-center shadow-card dialog-card">
       <p v-if="message" class="mb-3">{{ message }}</p>
 

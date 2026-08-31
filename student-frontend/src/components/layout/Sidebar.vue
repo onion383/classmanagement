@@ -1,7 +1,7 @@
 <template>
-  <div class="w-60 bg-sidebar text-text-inverse min-h-screen p-4 flex flex-col">
+  <div class="w-60 bg-sidebar text-text-inverse h-screen p-4 flex flex-col">
     <h2 class="text-lg font-bold mb-6">📋 校园助手</h2>
-    <nav class="space-y-2 flex-1" @pointerover="onNavOver">
+    <nav class="space-y-2 flex-1 min-h-0 overflow-y-auto sidebar-scroll" @pointerover="onNavOver">
       <!-- ===== 基础信息 ===== -->
       <div class="text-[11px] text-white/40 uppercase tracking-wider px-3 pt-1 pb-0.5">基础信息</div>
       <router-link to="/" class="block px-3 py-2 rounded hover:bg-sidebar-hover transition-theme" active-class="bg-sidebar-active">📚 学生管理</router-link>
@@ -48,3 +48,20 @@ function onNavOver(e) {
   prefetchRoute(router, link.getAttribute('href'))
 }
 </script>
+
+<style scoped>
+/* 侧边栏细滚动条：窗口过高时导航区独立滚动，标题行固定不滚 */
+.sidebar-scroll::-webkit-scrollbar {
+  width: 6px;
+}
+.sidebar-scroll::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.25);
+  border-radius: 3px;
+}
+.sidebar-scroll::-webkit-scrollbar-thumb:hover {
+  background: rgba(255, 255, 255, 0.4);
+}
+.sidebar-scroll::-webkit-scrollbar-track {
+  background: transparent;
+}
+</style>

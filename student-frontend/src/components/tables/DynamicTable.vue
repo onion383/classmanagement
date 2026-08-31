@@ -78,7 +78,7 @@
             @dragend="onRowDragEnd"
             @contextmenu.prevent="$emit('contextmenu', $event, row._isNew ? 'newRow' : 'row', row)"
             :class="[
-              'data-drag-item',
+              'data-drag-item content-visibility-auto',
               { 'opacity-30': dragIndex === rowIndex },
               rowDropIndicatorClass(rowIndex),
               { 'bg-surface-hover': isRowSelected(row._rowKey) && !editingCell },

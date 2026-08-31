@@ -1,6 +1,13 @@
 const express = require('express');
 const router = express.Router();
 const { db } = require('../db');
+const multer = require('multer');
+const path = require('path');
+const fs = require('fs');
+const os = require('os');
+
+// 文件上传中间件：临时存储在系统临时目录
+const upload = multer({ dest: path.join(os.tmpdir(), 'ai-uploads') });
 
 // =========================================================================
 // AI 助手后端
@@ -676,6 +683,83 @@ router.post('/chat/stream', async (req, res) => {
   } catch (err) {
     send({ type: 'err', message: err.message || 'AI 请求失败' });
     return res.end();
+  }
+});
+
+// =========================================================================
+// 文件上传解析接口：提取文本（PDF/Excel/Word/TXT/CSV等）返回给前端
+// =========================================================================
+router.post('/upload', upload.single('file'), async (req, res) => {
+  try {
+    if (!req.file) {
+      return res.json({ success: false, error: '未上传文件' });
+    }
+    const { originalname, path: tempPath, mimetype } = req.file;
+    let text = '';
+
+    try {
+      const ext = path.extname(originalname).toLowerCase();
+      
+      // TXT / CSV 纯文本：直接读取
+      if (ext === '.txt' || ext === '.csv' || ext === '.md' || ext === '.json' || ext === '.xml' || ext === '.html') {
+        text = fs.readFileSync(tempPath, 'utf-8');
+      }
+      // PDF：用 pdf-parse 提取文本
+      else if (ext === '.pdf') {
+        const pdf = require('pdf-parse');
+        const dataBuffer = fs.readFileSync(tempPath);
+        const data = await pdf(dataBuffer);
+        text = data.text;
+      }
+      // Word (.docx)：用 mammoth 提取文本
+      else if (ext === '.docx' || ext === '.doc') {
+        const mammoth = require('mammoth');
+        const result = await mammoth.extractRawText({ path: tempPath });
+        text = result.value;
+      }
+      // Excel (.xlsx/.xls/.csv)：用 xlsx 提取所有单元格文本
+      else if (ext === '.xlsx' || ext === '.xls') {
+        const XLSX = require('xlsx');
+        const workbook = XLSX.readFile(tempPath);
+        const lines = [];
+        workbook.SheetNames.forEach((sheetName) => {
+          const sheet = workbook.Sheets[sheetName];
+          const json = XLSX.utils.sheet_to_json(sheet, { header: 1 });
+          lines.push(`=== Sheet: ${sheetName} ===`);
+          json.forEach((row) => {
+            lines.push(row.map(String).join('\t'));
+          });
+        });
+        text = lines.join('\n');
+      }
+      // 默认：尝试按文本读取
+      else {
+        text = fs.readFileSync(tempPath, 'utf-8');
+      }
+
+      // 限制总长度：AI 有 context 限制，这里截一下
+      const MAX_LEN = 100000; // ~100KB，足够一般使用
+      if (text.length > MAX_LEN) {
+        text = text.slice(0, MAX_LEN) + `\n\n...（文件太长，已截断至 ${MAX_LEN} 字符）`;
+      }
+    } catch (err) {
+      // 提取失败，直接返回文件名 + 错误提示
+      text = `文件名：${originalname}\n\n错误：提取文本失败 (${err.message})`;
+    } finally {
+      // 删除临时文件
+      try { fs.unlinkSync(tempPath); } catch (_) {}
+    }
+
+    return res.json({
+      success: true,
+      data: {
+        filename: originalname,
+        text: text,
+        length: text.length,
+      },
+    });
+  } catch (err) {
+    return res.json({ success: false, error: err.message || '解析文件失败' });
   }
 });
 

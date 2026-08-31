@@ -45,12 +45,8 @@ export function useNotification() {
     if (idx === -1) return
     const item = notifications[idx]
     clearTimeout(item.timer)
-    item.leaving = true
-    // 等动画结束后移除
-    setTimeout(() => {
-      const i = notifications.findIndex(n => n.id === id)
-      if (i !== -1) notifications.splice(i, 1)
-    }, 300)
+    // TransitionGroup 在 splice 移除时会自动触发离开动画，无需额外延迟
+    notifications.splice(idx, 1)
   }
 
   function success(message, duration) {

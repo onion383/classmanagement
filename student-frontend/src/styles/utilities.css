@@ -19,3 +19,14 @@
   transition-duration: 200ms;
   transition-timing-function: ease-in-out;
 }
+
+/* 内容可见性优化：仅渲染视口内的元素，降低长列表的 DOM 开销 */
+@utility content-visibility-auto {
+  content-visibility: auto;
+  contain-intrinsic-size: 1px 120px;
+}
+
+/* 绘制边界约束：限制子元素不超出父容器绘制，减少 backdrop-filter 的无效重绘面积 */
+@utility contain-paint {
+  contain: paint;
+}
