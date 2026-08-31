@@ -4,6 +4,7 @@
 @import "./theme-base.css";
 @import "./theme-glass.css";
 @import "./theme-minimal.css";
+@import "./theme-win11.css";
 @import "./utilities.css";
 
 /* 注册 Tailwind 主题变量，让 class 可用 */

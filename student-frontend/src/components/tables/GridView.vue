@@ -35,7 +35,7 @@
             <tr
               v-for="(row, rowIdx) in rows"
               :key="row._rowKey || rowIdx"
-              :class="[{ 'opacity-30': rowDragIdx === rowIdx }, rowDropIndicatorClass(rowIdx), row._isSeparator ? 'bg-border h-8' : '', row._isPodium ? 'bg-warning/20 h-10' : '']"
+              :class="[{ 'opacity-30': rowDragIdx === rowIdx, 'content-visibility-auto': true }, rowDropIndicatorClass(rowIdx), row._isSeparator ? 'bg-border h-8' : '', row._isPodium ? 'bg-warning/20 h-10' : '']"
               @dragover.prevent="onRowDragOver($event, rowIdx, row)"
               @dragleave="onRowDragLeave($event, rowIdx)"
               @drop="onRowDrop($event, rowIdx, row)"
@@ -396,7 +396,13 @@ export default {
     getCellColor(cell) { if (cell._isAisle) return '#d1d5db'; return COURSE_COLORS[cell.course] || '#FFFFFF'; },
   },
   mounted() { document.addEventListener('mouseup', this.handleGlobalMouseUp); },
-  beforeUnmount() { document.removeEventListener('mouseup', this.handleGlobalMouseUp); this.clearLongPress(); this.removeCellGhost(); if (this._rowGhost) document.body.removeChild(this._rowGhost); },
+  beforeUnmount() {
+    document.removeEventListener('mouseup', this.handleGlobalMouseUp);
+    this.clearLongPress();
+    this.removeCellGhost();
+    if (this._rowGhost) document.body.removeChild(this._rowGhost);
+    this.cellRefs = {}; // 清除 DOM 引用，避免内存泄漏
+  },
 };
 </script>
 

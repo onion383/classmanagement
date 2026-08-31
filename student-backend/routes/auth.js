@@ -20,7 +20,7 @@ router.get('/accounts', (req, res) => {
 // ---------------------------------------------------------------------------
 router.post('/login', (req, res) => {
   const { username, password } = req.body;
-  if (!username || !password) return res.status(400).json({ error: '请输入账号和密码' });
+  if (!username) return res.status(400).json({ error: '请输入账号' });
 
   // 用 index.db 定位账号对应的班主任库，打开它并校验密码（账号存于各库内的 users）
   let resolved;
@@ -32,7 +32,9 @@ router.post('/login', (req, res) => {
   if (!resolved) return res.status(401).json({ error: '账号或密码错误' });
 
   const user = resolved.conn.prepare('SELECT id, username, role, db_slug, password FROM users WHERE username = ?').get(username);
-  if (!user || !bcrypt.compareSync(password, user.password)) {
+  if (!user) return res.status(401).json({ error: '账号或密码错误' });
+  // 无密码用户：直接放行；有密码用户：校验密码哈希
+  if (user.password && !bcrypt.compareSync(password, user.password)) {
     return res.status(401).json({ error: '账号或密码错误' });
   }
 
@@ -69,14 +71,20 @@ router.post('/register', (req, res) => {
   const uname = String(username || '').trim();
   if (uname.length < 2 || uname.length > 30) return res.status(400).json({ error: '账号长度需在 2-30 字符之间' });
   if (!/^[\w\u4e00-\u9fa5@.-]+$/.test(uname)) return res.status(400).json({ error: '账号包含非法字符' });
-  if (!password || String(password).length < 6) return res.status(400).json({ error: '密码长度至少 6 位' });
+
+  // 密码为空视为无密码登录，不加密；有密码则校验长度并加密存储
+  const passwordHash = !password ? '' : (
+    String(password).length < 6
+      ? res.status(400).json({ error: '密码长度至少 6 位' })
+      : bcrypt.hashSync(String(password), 10)
+  );
+  if (res.headersSent) return; // 校验失败已返回错误
 
   // 检查账号唯一（跨所有库）
   if (dbManager.registryFindByUsername(uname)) {
     return res.status(409).json({ error: '该账号已被注册' });
   }
 
-  const passwordHash = bcrypt.hashSync(String(password), 10);
   // 生成恢复密钥
   const phrase = pickPhrase();
   const restoreHash = deriveRestoreHash(phrase);

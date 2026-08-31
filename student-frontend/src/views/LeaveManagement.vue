@@ -64,7 +64,7 @@
             <tr
               v-for="(item, idx) in activeLeaves"
               :key="item.id"
-              class="border-t border-border hover:bg-surface-hover"
+              class="border-t border-border hover:bg-surface-hover content-visibility-auto"
             >
               <td class="px-3 py-2 text-center text-text-muted">{{ idx + 1 }}</td>
               <td class="px-3 py-2 text-center text-text">{{ item.姓名 }}</td>
@@ -107,7 +107,7 @@
             <tr
               v-for="(item, idx) in todayReturned"
               :key="item.id"
-              class="border-t border-border hover:bg-surface-hover"
+              class="border-t border-border hover:bg-surface-hover content-visibility-auto"
             >
               <td class="px-3 py-2 text-center text-text-muted">{{ idx + 1 }}</td>
               <td class="px-3 py-2 text-center text-text">{{ item.姓名 }}</td>

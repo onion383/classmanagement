@@ -13,89 +13,198 @@
       </div>
     </div>
 
+    <!-- 加载中骨架 -->
+    <div v-if="enabled === null" class="flex-1 flex items-center justify-center text-sm text-text-muted rounded-xl border border-border bg-white/55 backdrop-blur-md">
+      <div class="text-center space-y-2">
+        <div class="animate-pulse">加载中…</div>
+      </div>
+    </div>
+
     <!-- 配置未就绪提示 -->
-    <div v-if="!enabled" class="flex-1 flex items-center justify-center text-sm text-text-muted rounded-xl border border-border bg-white/55 backdrop-blur-md">
+    <div v-else-if="!enabled" class="flex-1 flex items-center justify-center text-sm text-text-muted rounded-xl border border-border bg-white/55 backdrop-blur-md">
       <div class="text-center space-y-2">
         <div>AI 助手尚未启用</div>
         <button @click="showSettings = true" class="text-info hover:underline inline-block cursor-pointer">点击【⚙️ 设置】填写 API Key 并启用</button>
       </div>
     </div>
 
-    <template v-else>
-      <!-- 大毛玻璃框：把消息区与输入区一起框住（页面模式生效；悬浮模式复用浮窗自身毛玻璃） -->
-      <div class="flex-1 flex flex-col min-h-0" :class="floating ? 'px-1' : 'bg-white/55 backdrop-blur-md border border-border rounded-xl p-3'">
-      <!-- 消息区 -->
-      <div ref="msgBox" class="flex-1 overflow-auto space-y-3 pr-1">
-        <div v-if="!messages.length" class="h-full flex items-center justify-center">
-          <div class="text-center text-text-muted text-sm space-y-2">
-            <div class="text-3xl">🤖</div>
-            <div>你可以问我班级数据，例如：</div>
-            <div class="space-y-1 text-xs">
-              <div>「这个月班费支出了多少」</div>
-              <div>「有多少同学在请病假」</div>
-              <div>「新增一个学生 张三」</div>
-            </div>
+    <template v-else-if="enabled">
+      <div class="flex-1 flex gap-3 min-h-0">
+        <!-- 左侧会话列表 -->
+        <div class="w-56 flex-shrink-0 bg-white/55 backdrop-blur-md border border-border rounded-xl p-2 flex flex-col min-h-0">
+          <div class="flex items-center justify-between mb-2 px-1">
+            <span class="text-sm font-medium text-text">对话列表</span>
+            <button
+              @click="newConversation"
+              :disabled="busy"
+              class="text-text-muted hover:text-text text-lg leading-none cursor-pointer disabled:opacity-40"
+              title="新建对话"
+            >＋</button>
           </div>
-        </div>
-
-        <div v-for="(m, i) in messages" :key="i" class="flex" :class="m.role === 'user' ? 'justify-end' : 'justify-start'">
-          <div class="max-w-[85%]" :class="m.role === 'user' ? 'text-right' : ''">
+          <div class="flex-1 overflow-y-auto min-h-0 space-y-1">
             <div
-              class="px-4 py-2.5 text-sm border"
-              :class="m.role === 'user'
-                ? 'user-bubble bg-primary text-text-inverse border-transparent whitespace-pre-wrap break-words'
-                : 'assistant-bubble bg-surface text-text border-border whitespace-pre-wrap break-words'"
+              v-for="conv in conversationList"
+              :key="conv.id"
+              @click="switchConversation(conv.id)"
+              class="flex items-center justify-between px-2 py-1.5 rounded cursor-pointer transition-theme group"
+              :class="conv.id === conversationId ? 'bg-primary/10 border border-primary' : 'hover:bg-surface-hover border border-transparent'"
             >
-              <span v-if="m.loading">思考中…</span>
-              <span v-else-if="m.role === 'user'">{{ m.content || '（无内容）' }}</span>
-              <!-- 助手消息渲染 markdown（加粗/斜体/表格等），已用 DOMPurify 清洗 -->
-              <div v-else class="markdown-body whitespace-pre-wrap break-words" v-html="renderMarkdown(m.content)"></div>
+              <div class="min-w-0 flex-1">
+                <div class="text-sm text-text truncate">{{ conv.title }}</div>
+                <div class="text-[10px] text-text-muted">
+                  {{ conv.msg_count }} 条消息 · {{ formatTime(conv.updated_at) }}
+                </div>
+              </div>
+              <button
+                @click.stop="deleteConversation(conv.id)"
+                class="text-text-muted hover:text-danger opacity-0 group-hover:opacity-100 transition-opacity text-sm leading-none px-1"
+                title="删除对话"
+              >✕</button>
             </div>
-            <!-- 写提案卡片 -->
-            <div v-if="m.proposal" class="mt-2 text-left rounded-lg border border-warning/40 bg-surface p-3">
-              <div class="flex items-center gap-2 text-xs text-warning mb-2">
-                <span class="font-semibold">{{ m.proposal.label }}</span>
-                <span class="text-text-muted">将写入「{{ tableLabel(m.proposal.table) }}」</span>
-              </div>
-              <pre class="text-xs text-text-secondary bg-surface-hover rounded p-2 overflow-auto max-h-40 whitespace-pre-wrap">{{ proposalPreview(m.proposal) }}</pre>
-              <div class="flex gap-2 mt-2">
-                <button
-                  v-if="!m.proposal.executed && !m.proposal.executing"
-                  @click="executeProposal(m, i)"
-                  class="bg-primary hover:bg-primary-hover text-text-inverse text-xs px-3 py-1.5 rounded transition-theme"
-                >确认执行</button>
-                <span v-if="m.proposal.executing" class="text-xs text-text-muted">执行中…</span>
-                <span v-if="m.proposal.executed" class="text-xs text-success">✅ 已执行</span>
-              </div>
+            <div v-if="!conversationList.length" class="text-center text-xs text-text-muted py-4">
+              暂无历史对话
             </div>
           </div>
         </div>
-      </div>
 
-      <!-- 输入区 -->
-      <div class="mt-3 flex gap-2 items-start flex-shrink-0">
-        <button
-          v-if="!busy"
-          title="开始新对话（保留历史，可恢复）"
-          @click="newConversation"
-          class="border border-border bg-surface text-text px-2.5 py-2 rounded-lg hover:bg-surface-hover transition-theme flex-shrink-0"
-        >＋</button>
-        <textarea
-          v-model="input"
-          :placeholder="busy ? 'AI 正在回复…' : '输入问题，回车发送（Shift+Enter 换行）'"
-          :disabled="busy"
-          rows="1"
-          class="flex-1 border border-border bg-surface text-text px-3 py-2 rounded-lg resize-none focus:outline-none focus:ring-2 focus:ring-primary/40 disabled:opacity-50"
-          @keydown.enter.exact.prevent="send"
-        />
-        <button
-          @click="send"
-          :disabled="busy || !input.trim()"
-          class="bg-primary hover:bg-primary-hover text-text-inverse px-4 py-2 rounded-lg transition-theme disabled:opacity-40 flex-shrink-0"
-        >发送</button>
-      </div>
+        <!-- 右侧聊天区 -->
+        <div class="flex-1 flex flex-col min-h-0 bg-white/55 backdrop-blur-md border border-border rounded-xl p-3">
+          <!-- 消息区 -->
+          <div ref="msgBox" class="flex-1 overflow-auto space-y-3 pr-1">
+            <div v-if="!messages.length" class="h-full flex items-center justify-center">
+              <div class="text-center text-text-muted text-sm space-y-2">
+                <div class="text-3xl">🤖</div>
+                <div>你可以问我班级数据，例如：</div>
+                <div class="space-y-1 text-xs">
+                  <div>「这个月班费支出了多少」</div>
+                  <div>「有多少同学在请病假」</div>
+                  <div>「新增一个学生 张三」</div>
+                </div>
+                <button v-if="!busy" @click="newConversation" class="text-info hover:underline">开始新对话</button>
+              </div>
+            </div>
+
+            <div v-for="(m, i) in messages" :key="i" class="flex content-visibility-auto" :class="m.role === 'user' ? 'justify-end' : 'justify-start'">
+              <div class="max-w-[85%]" :class="m.role === 'user' ? 'text-right' : ''">
+                <!-- 用户消息中的图片 -->
+                <div v-if="m.role === 'user' && m.images && m.images.length" class="mb-1 flex flex-wrap gap-1 justify-end">
+                  <img
+                    v-for="(img, idx) in m.images"
+                    :key="idx"
+                    :src="img"
+                    loading="lazy"
+                    class="max-w-48 max-h-36 rounded-lg border border-border object-cover"
+                  />
+                </div>
+                <div
+                  class="px-4 py-2.5 text-sm border"
+                  :class="m.role === 'user'
+                    ? 'user-bubble bg-primary text-text-inverse border-transparent whitespace-pre-wrap break-words'
+                    : 'assistant-bubble bg-surface text-text border-border whitespace-pre-wrap break-words'"
+                >
+                  <span v-if="m.loading">思考中…</span>
+                  <template v-else-if="m.role === 'user'">
+                    <!-- 含文件内容的消息：显示文件标签 + 用户文字 -->
+                    <template v-if="m.content && m.content.startsWith('文件「')">
+                      <div class="flex items-center gap-1 text-primary/80 text-xs mb-1">
+                        <span class="text-xs">📄</span>
+                        <span class="font-medium truncate max-w-40">{{ extractFileName(m.content) }}</span>
+                      </div>
+                      <span>{{ extractUserText(m.content) || '（无内容）' }}</span>
+                    </template>
+                    <span v-else>{{ m.content || '（无内容）' }}</span>
+                  </template>
+                  <!-- 助手消息渲染 markdown（加粗/斜体/表格等），已用 DOMPurify 清洗 -->
+                  <div v-else class="markdown-body whitespace-pre-wrap break-words" v-html="m._html || m.content"></div>
+                </div>
+                <!-- 写提案卡片 -->
+                <div v-if="m.proposal" class="mt-2 text-left rounded-lg border border-warning/40 bg-surface p-3">
+                  <div class="flex items-center gap-2 text-xs text-warning mb-2">
+                    <span class="font-semibold">{{ m.proposal.label }}</span>
+                    <span class="text-text-muted">将写入「{{ tableLabel(m.proposal.table) }}」</span>
+                  </div>
+                  <pre class="text-xs text-text-secondary bg-surface-hover rounded p-2 overflow-auto max-h-40 whitespace-pre-wrap">{{ proposalPreview(m.proposal) }}</pre>
+                  <div class="flex gap-2 mt-2">
+                    <button
+                      v-if="!m.proposal.executed && !m.proposal.executing"
+                      @click="executeProposal(m, i)"
+                      class="bg-primary hover:bg-primary-hover text-text-inverse text-xs px-3 py-1.5 rounded transition-theme"
+                    >确认执行</button>
+                    <span v-if="m.proposal.executing" class="text-xs text-text-muted">执行中…</span>
+                    <span v-if="m.proposal.executed" class="text-xs text-success">✅ 已执行</span>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- 附件预览 -->
+          <div v-if="attachedFile" class="mb-2 flex items-center gap-2">
+            <!-- 图片预览 -->
+            <div v-if="attachedFile.isImage" class="relative border border-border rounded-lg overflow-hidden inline-block">
+              <img :src="attachedFile.dataUrl" class="max-h-32 max-w-64" />
+              <button
+                @click="clearAttachment"
+                class="absolute -top-1.5 -right-1.5 w-5 h-5 bg-danger text-white rounded-full flex items-center justify-center text-xs leading-none cursor-pointer hover:bg-danger-hover"
+                title="移除"
+              >✕</button>
+            </div>
+            <!-- 文件预览 -->
+            <div v-else class="relative border border-border rounded-lg bg-surface px-3 py-2 inline-flex items-center gap-2 max-w-full">
+              <span class="text-sm">📄</span>
+              <span class="text-sm font-medium text-text truncate max-w-40">{{ attachedFile.name }}</span>
+              <span class="text-xs text-text-muted flex-shrink-0">({{ attachedFile.sizeLabel }})</span>
+              <button
+                @click="clearAttachment"
+                class="text-text-muted hover:text-danger text-sm leading-none cursor-pointer flex-shrink-0"
+                title="移除"
+              >✕</button>
+            </div>
+          </div>
+
+          <!-- 输入区 -->
+          <div class="mt-0 flex gap-2 items-start flex-shrink-0">
+            <input
+              ref="fileInput"
+              type="file"
+              accept="image/*,.pdf,.docx,.xlsx,.xls,.csv,.txt,.md"
+              class="hidden"
+              @change="onFileSelected"
+            />
+            <button
+              v-if="!busy"
+              @click="triggerFileSelect"
+              class="border border-border bg-surface text-text px-2.5 py-2 rounded-lg hover:bg-surface-hover transition-theme flex-shrink-0"
+              title="上传图片/PDF/Excel/Word/文本（支持粘贴图片）"
+            >📎</button>
+            <textarea
+              ref="textareaRef"
+              v-model="input"
+              :placeholder="busy ? 'AI 正在回复…' : '输入问题，回车发送（Shift+Enter 换行），可粘贴图片'"
+              :disabled="busy"
+              rows="1"
+              class="flex-1 border border-border bg-surface text-text px-3 py-2 rounded-lg resize-none focus:outline-none focus:ring-2 focus:ring-primary/40 disabled:opacity-50"
+              @keydown.enter.exact.prevent="send"
+              @paste="onPaste"
+            />
+            <button
+              @click="send"
+              :disabled="busy || (!input.trim() && !attachedFile)"
+              class="bg-primary hover:bg-primary-hover text-text-inverse px-4 py-2 rounded-lg transition-theme disabled:opacity-40 flex-shrink-0"
+            >发送</button>
+          </div>
+        </div>
       </div>
     </template>
+
+    <!-- 删除确认弹窗 -->
+    <ConfirmDialog
+      :visible="confirmDeleteShow"
+      message="确定删除该对话？删除后无法恢复。"
+      :show-cancel="true"
+      @confirm="onDeleteConfirm"
+      @cancel="confirmDeleteShow = false"
+    />
 
     <!-- AI 助手设置弹窗 -->
     <AiSettingsDialog :show="showSettings" @close="showSettings = false" @saved="onSettingsSaved" />
@@ -158,17 +267,27 @@
 
 <script>
 import axios from 'axios'
-import { marked } from 'marked'
-import DOMPurify from 'dompurify'
 import { useNotification } from '../composables/useNotification.js'
 import { recordRowInsert } from '../composables/useUndo.js'
 import AiSettingsDialog from '../components/dialogs/AiSettingsDialog.vue'
+import ConfirmDialog from '../components/base/ConfirmDialog.vue'
 
-// markdown 配置：开启 GFM（表格），异步关闭以保证同步渲染
-marked.setOptions({ gfm: true, breaks: true })
-DOMPurify.addHook('afterSanitizeAttributes', (node) => {
-  if (node.tagName === 'A') node.setAttribute('target', '_blank')
-})
+// marked / DOMPurify 异步懒加载（减少页面 chunk 大小，降低 LCP）
+let _marked = null
+let _purify = null
+async function ensureMarkdown() {
+  if (_marked) return
+  const [markedModule, purifyModule] = await Promise.all([
+    import('marked'),
+    import('dompurify'),
+  ])
+  _marked = markedModule.marked
+  _purify = purifyModule.default
+  _marked.setOptions({ gfm: true, breaks: true })
+  _purify.addHook('afterSanitizeAttributes', (node) => {
+    if (node.tagName === 'A') node.setAttribute('target', '_blank')
+  })
+}
 
 // 可写表的执行端点（与后端 propose_write 白名单保持一致）
 const EXEC = {
@@ -181,7 +300,7 @@ const LABELS = { students: '学生', fee_records: '班费记录', activities: '�
 
 export default {
   name: 'AiAssistant',
-  components: { AiSettingsDialog },
+  components: { AiSettingsDialog, ConfirmDialog },
   props: {
     // 页面模式 / 悬浮呼出模式（紧凑）
     floating: { type: Boolean, default: false },
@@ -189,15 +308,21 @@ export default {
   emits: ['close'],
   data() {
     return {
-      enabled: false,
+      enabled: null, // null=加载中, false=未启用, true=已启用
       busy: false,
       messages: [],
       input: '',
       conversationId: null, // 当前会话 id（持久化用），null 表示尚未创建
+      conversationList: [], // 会话列表
       showSettings: false, // AI 设置弹窗
+      confirmDeleteShow: false, // 删除确认弹窗
+      confirmDeleteId: null, // 待删除的会话 id
+      attachedFile: null,    // 当前待发送的附件：{name, isImage, dataUrl, textContent, sizeLabel}
     }
   },
   mounted() {
+    // 后台预加载 markdown 库（不阻塞首次渲染）
+    ensureMarkdown().then(() => this._computeAllHtml())
     this.loadEnabled()
   },
   methods: {
@@ -205,7 +330,10 @@ export default {
       try {
         const { data } = await axios.get('/api/ai/config')
         this.enabled = data.success && data.data.enabled
-        if (this.enabled) await this.restoreConversation()
+        if (this.enabled) {
+          await this.loadConversationList()
+          await this.restoreConversation()
+        }
       } catch (_) { this.enabled = false }
     },
     // 设置弹窗保存成功后刷新启用状态
@@ -214,27 +342,226 @@ export default {
     },
     renderMarkdown(text) {
       if (!text) return ''
-      return DOMPurify.sanitize(marked.parse(text))
+      if (!_marked || !_purify) return text // 库未加载完时回退到纯文本
+      return _purify.sanitize(_marked.parse(text))
+    },
+    // 预计算助手消息的 HTML（在后台异步加载库后重算）
+    async _computeHtml(msg) {
+      if (msg.role !== 'assistant' || !msg.content || msg._html) return
+      await ensureMarkdown()
+      msg._html = _purify.sanitize(_marked.parse(msg.content))
+    },
+    _computeAllHtml() {
+      this.messages.forEach((m) => {
+        if (m.role === 'assistant' && m.content && !m._html) {
+          if (_marked && _purify) {
+            m._html = _purify.sanitize(_marked.parse(m.content))
+          }
+        }
+      })
+    },
+    // 加载会话列表
+    async loadConversationList() {
+      try {
+        const { data } = await axios.get('/api/ai/conversations')
+        this.conversationList = data.data || []
+      } catch (_) { /* 忽略 */ }
+    },
+    // 从数据库加载的消息反序列化：支持多模态 JSON 数组
+    parseMessage(m) {
+      if (m.role === 'user' && m.content && m.content.startsWith('[')) {
+        try {
+          const parts = JSON.parse(m.content)
+          if (Array.isArray(parts)) {
+            const text = parts.find((p) => p.type === 'text')?.text || ''
+            const images = parts.filter((p) => p.type === 'image_url').map((p) => p.image_url.url)
+            return { role: 'user', content: text, images }
+          }
+        } catch (_) { /* 解析失败则当普通文本 */ }
+      }
+      return { role: m.role, content: m.content || '' }
     },
     // 恢复最近一次会话
     async restoreConversation() {
+      if (!this.conversationList.length) return
+      // 如果当前已有会话且在列表中，不切换；否则切到最新
+      const current = this.conversationList.find((c) => c.id === this.conversationId)
+      if (current) return
+      const latest = this.conversationList[0]
+      this.conversationId = latest.id
       try {
-        const { data: list } = await axios.get('/api/ai/conversations')
-        const latest = list.data && list.data.length ? list.data[0] : null
-        if (!latest) return
-        this.conversationId = latest.id
         const { data } = await axios.get(`/api/ai/conversations/${latest.id}/messages`)
         this.messages = (data.data || []).filter((m) => m.role === 'user' || m.role === 'assistant')
-          .map((m) => ({ role: m.role, content: m.content }))
-        this.scrollBottom()
-      } catch (_) { /* 无法恢复则从空开始 */ }
+          .map((m) => this.parseMessage(m))
+        this._computeAllHtml()
+        this.$nextTick(() => this.scrollBottom())
+      } catch (_) { this.messages = [] }
     },
-    // 新建会话：保留旧会话在数据库中，只是切换到新的空上下文
+    // 切换会话
+    async switchConversation(id) {
+      if (id === this.conversationId || this.busy) return
+      this.conversationId = id
+      this.messages = []
+      this.input = ''
+      try {
+        const { data } = await axios.get(`/api/ai/conversations/${id}/messages`)
+        this.messages = (data.data || []).filter((m) => m.role === 'user' || m.role === 'assistant')
+          .map((m) => this.parseMessage(m))
+        this._computeAllHtml()
+        this.$nextTick(() => this.scrollBottom())
+      } catch (_) { /* 忽略 */ }
+    },
+    // 新建会话
     async newConversation() {
       if (this.busy) return
       this.messages = []
       this.conversationId = null
       this.input = ''
+      this.attachedFile = null
+    },
+    // 删除会话
+    deleteConversation(id) {
+      this.confirmDeleteId = id
+      this.confirmDeleteShow = true
+    },
+    async onDeleteConfirm() {
+      const id = this.confirmDeleteId
+      if (!id) return
+      this.confirmDeleteShow = false
+      this.confirmDeleteId = null
+      try {
+        await axios.delete(`/api/ai/conversations/${id}`)
+        // 如果删除的是当前会话，切到空状态
+        if (this.conversationId === id) {
+          this.conversationId = null
+          this.messages = []
+        }
+        await this.loadConversationList()
+      } catch (_) { /* 忽略 */ }
+    },
+    formatTime(t) {
+      if (!t) return ''
+      const d = new Date(t)
+      const now = new Date()
+      const diff = now - d
+      // 今天
+      if (diff < 86400000 && d.getDate() === now.getDate()) {
+        return d.toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' })
+      }
+      // 昨天
+      const yesterday = new Date(now)
+      yesterday.setDate(yesterday.getDate() - 1)
+      if (d.getDate() === yesterday.getDate() && d.getMonth() === yesterday.getMonth() && d.getFullYear() === yesterday.getFullYear()) {
+        return '昨天 ' + d.toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' })
+      }
+      // 今年
+      if (d.getFullYear() === now.getFullYear()) {
+        return (d.getMonth() + 1) + '/' + d.getDate()
+      }
+      return d.getFullYear() + '/' + (d.getMonth() + 1) + '/' + d.getDate()
+    },
+    // 文件上传相关
+    triggerFileSelect() {
+      this.$refs.fileInput.click()
+    },
+    async onFileSelected(e) {
+      const file = e.target.files && e.target.files[0]
+      if (!file) return
+      e.target.value = ''
+      this.attachedFile = await this.readFile(file)
+    },
+    // 读取文件提取文本内容
+    async readFile(file) {
+      const name = file.name
+      const ext = name.split('.').pop().toLowerCase()
+      const sizeLabel = file.size > 1048576
+        ? (file.size / 1048576).toFixed(1) + ' MB'
+        : (file.size / 1024).toFixed(0) + ' KB'
+
+      // 图片：保持 data URL，用于 vision API
+      if (file.type.startsWith('image/')) {
+        const dataUrl = await this.readAsDataURL(file)
+        return { name, isImage: true, dataUrl, textContent: '', sizeLabel }
+      }
+
+      // 文本类文件：直接在前端读取
+      const textExts = ['txt', 'csv', 'md', 'json', 'xml', 'html', 'htm', 'js', 'py', 'rb', 'php', 'java', 'ts', 'tsx', 'jsx', 'css', 'scss', 'less', 'yaml', 'yml', 'log', 'sh', 'bat', 'env', 'ini', 'cfg', 'conf', 'sql', 'r', 'go', 'rs', 'swift', 'kt', 'toml']
+      if (textExts.includes(ext)) {
+        const text = await this.readAsText(file)
+        const truncated = text.length > 100000 ? text.slice(0, 100000) + '\n\n...（文件太长，已截断）' : text
+        return { name, isImage: false, dataUrl: '', textContent: truncated, sizeLabel }
+      }
+
+      // PDF / Excel / Word：上传到后端解析
+      const result = await this.uploadAndParse(file)
+      return { name, isImage: false, dataUrl: '', textContent: result.text, sizeLabel }
+    },
+    readAsDataURL(file) {
+      return new Promise((resolve) => {
+        const reader = new FileReader()
+        reader.onload = (e) => resolve(e.target.result)
+        reader.readAsDataURL(file)
+      })
+    },
+    readAsText(file) {
+      return new Promise((resolve) => {
+        const reader = new FileReader()
+        reader.onload = (e) => resolve(e.target.result)
+        reader.readAsText(file)
+      })
+    },
+    async uploadAndParse(file) {
+      const form = new FormData()
+      form.append('file', file)
+      try {
+        const { data } = await axios.post('/api/ai/upload', form, {
+          headers: { 'Content-Type': 'multipart/form-data' },
+        })
+        if (data.success) return data.data
+        return { text: `文件名：${file.name}\n\n错误：${data.error || '解析失败'}` }
+      } catch (err) {
+        return { text: `文件名：${file.name}\n\n错误：${err.message || '上传失败'}` }
+      }
+    },
+    onPaste(e) {
+      const items = e.clipboardData && e.clipboardData.items
+      if (!items) return
+      for (const item of items) {
+        if (item.kind === 'file' && item.type.startsWith('image/')) {
+          const file = item.getAsFile()
+          if (file) {
+            const reader = new FileReader()
+            reader.onload = (event) => {
+              const name = file.name || '粘贴图片.png'
+              const sizeLabel = file.size > 1048576
+                ? (file.size / 1048576).toFixed(1) + ' MB'
+                : (file.size / 1024).toFixed(0) + ' KB'
+              this.attachedFile = { name, isImage: true, dataUrl: event.target.result, textContent: '', sizeLabel }
+            }
+            reader.readAsDataURL(file)
+          }
+          e.preventDefault()
+          return
+        }
+      }
+    },
+    clearAttachment() {
+      this.attachedFile = null
+    },
+    // 从文件消息内容中提取文件名
+    extractFileName(content) {
+      const m = content && content.match(/^文件「(.+?)」/)
+      return m ? m[1] : ''
+    },
+    // 从文件消息内容中提取用户文字
+    extractUserText(content) {
+      if (!content) return ''
+      // 去掉文件内容部分，只保留用户文字
+      const idx = content.indexOf('\n```\n')
+      if (idx === -1) return ''
+      const after = content.slice(idx + 5).trim() // 跳过 ```\n
+      // 去掉末尾可能的截断标记
+      return after.replace(/^(\n|$)/, '')
     },
     // 惰性创建会话：首次发送时才建
     async ensureConversation() {
@@ -243,10 +570,17 @@ export default {
       this.conversationId = data.id
       return data.id
     },
-    async persistMessage(role, content) {
+    async persistMessage(role, content, images) {
       if (!this.conversationId) return
+      // 多模态消息：存为 JSON 数组
+      const payload = (images && images.length)
+        ? JSON.stringify([
+            { type: 'text', text: content || '' },
+            ...images.map((url) => ({ type: 'image_url', image_url: { url } })),
+          ])
+        : content
       try {
-        await axios.post(`/api/ai/conversations/${this.conversationId}/messages`, { role, content })
+        await axios.post(`/api/ai/conversations/${this.conversationId}/messages`, { role, content: payload })
       } catch (_) { /* 持久化失败不阻塞对话 */ }
     },
     tableLabel(t) { return LABELS[t] || t },
@@ -257,20 +591,48 @@ export default {
     },
     async send() {
       const text = this.input.trim()
-      if (!text || this.busy) return
+      const file = this.attachedFile
+      if (!text && !file) return
+      if (this.busy) return
       this.input = ''
+      this.attachedFile = null
       try {
         this.conversationId = await this.ensureConversation()
       } catch (_) { /* 建会话失败也继续，流式端若无 conversationId 则不落库 */ }
-      await this.persistMessage('user', text)
-      this.messages.push({ role: 'user', content: text })
+
+      // 构建消息内容和图片列表
+      let messageContent = text
+      let images = []
+      if (file) {
+        if (file.isImage) {
+          // 图片：走 vision API 多模态
+          images = [file.dataUrl]
+        } else if (file.textContent) {
+          // 文本类文件：文件内容拼到提问中
+          messageContent = `文件「${file.name}」的内容：\n\`\`\`\n${file.textContent}\n\`\`\`\n${text ? '\n' + text : ''}`
+        }
+      }
+
+      await this.persistMessage('user', messageContent, images)
+      this.messages.push({ role: 'user', content: messageContent, images })
       this.messages.push({ role: 'assistant', loading: true, content: '' })
       this.busy = true
       this.scrollBottom()
       try {
         const history = this.messages
           .filter((m) => !m.loading && !m.proposal)
-          .map((m) => ({ role: m.role, content: m.content || '' }))
+          .map((m) => {
+            if (m.role === 'user' && m.images && m.images.length) {
+              return {
+                role: 'user',
+                content: [
+                  { type: 'text', text: m.content || '' },
+                  ...m.images.map((url) => ({ type: 'image_url', image_url: { url } })),
+                ],
+              }
+            }
+            return { role: m.role, content: m.content || '' }
+          })
         const resp = await fetch('/api/ai/chat/stream', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -309,6 +671,8 @@ export default {
         }
         if (this.conversationId && last.content) await this.persistMessage('assistant', last.content)
         if (last.content === '' && !last.proposal) last.content = last.content || '⚠️ 未收到回复'
+        // 后台预计算 markdown HTML（不阻塞 UI）
+        this._computeHtml(last)
       } catch (err) {
         const last = this.messages[this.messages.length - 1]
         last.loading = false
@@ -316,6 +680,8 @@ export default {
       } finally {
         this.busy = false
         this.scrollBottom()
+        // 刷新会话列表（更新标题和消息数）
+        await this.loadConversationList()
       }
     },
     async executeProposal(m, i) {

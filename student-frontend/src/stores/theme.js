@@ -11,11 +11,15 @@ const GLASS_KEY = 'app-glass-opacity'
 
 // 毛玻璃主题的内置默认背景图：放于 public/ 下，随前端一起打包，属前端静态资源，
 // 不经 resourceUrl/鉴权直接加载。用户选择本地图片后由 backgroundImage 覆盖它；清除则回此图。
-const DEFAULT_GLASS_BG = `${import.meta.env.BASE_URL}glass-bg.jpg`
+// 生产环境下用 window.location.origin 构造绝对 URL（app:// 协议），避免相对路径解析问题。
+const DEFAULT_GLASS_BG = import.meta.env.PROD
+  ? window.location.origin + '/glass-bg-opt.jpg'
+  : `${import.meta.env.BASE_URL}glass-bg-opt.jpg`
 
 const PRESETS = [
   { id: 'base', name: '彩色色块主题', editable: false },
   { id: 'glass', name: '毛玻璃主题', editable: true },
+  { id: 'win11', name: 'Win11 主题', editable: true },
   { id: 'minimal', name: '极简主题', editable: true },
 ]
 
@@ -47,8 +51,14 @@ export const useThemeStore = defineStore('theme', () => {
     // resourceUrl 会补完整后端地址并追加 ?token=，保证 file:// 打包版下背景图能通过鉴权加载。
     // 毛玻璃主题无自定义图时使用内置默认背景（前端静态资源，无需鉴权，直接引用）；
     // 自定义图仍走 resourceUrl。其余主题保持无背景。
+    const isWin11 = currentTheme.value === 'win11'
+    // Win11 主题：由主进程对窗口开启窗外亚克力模糊，页面自身保持透明让模糊透出，
+    // 因此不设背景图、不画底色。切换走 IPC 通知主进程。
+    if (!isWin11) {
+      document.documentElement.classList.remove('win11-acrylic')
+    }
     const isCustomBg = Boolean(backgroundImage.value)
-    const bg = backgroundImage.value || (currentTheme.value === 'glass' ? DEFAULT_GLASS_BG : '')
+    const bg = (!isWin11 && backgroundImage.value) || (currentTheme.value === 'glass' ? DEFAULT_GLASS_BG : '')
     if (bg) {
       const bgUrl = isCustomBg ? resourceUrl(bg) : bg
       document.documentElement.style.setProperty('--bg-image', `url('${bgUrl}')`)
@@ -60,6 +70,11 @@ export const useThemeStore = defineStore('theme', () => {
     // 应用透明度设置
     document.documentElement.style.setProperty('--bg-mask-opacity', bgMaskOpacity.value)
     document.documentElement.style.setProperty('--glass-opacity', glassOpacity.value)
+    // 通知主进程：切换窗口边框类型（原生/无边框亚克力）。
+    // 仅当目标类型与当前不同时，主进程才会重建窗口（见 electron/main.js theme-chrome）。
+    if (window.electron?.send) {
+      window.electron.send('theme-chrome', { mode: isWin11 ? 'frameless' : 'native' })
+    }
   }
 
   const setTheme = (themeId) => {

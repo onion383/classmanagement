@@ -430,9 +430,8 @@ export function useTableCRUD(apiBase, defaultFields, options = {}) {
     const selectedIds = rows.value.filter(s => keys.includes(s.id)).map(s => s.id)
     showConfirm(`确定删除选中的 ${selectedIds.length} 条记录吗？`, async () => {
       try {
-        for (const id of selectedIds) {
-          await axios.delete(`${apiBase}/${id}`)
-        }
+        // 并行删除所有选中行，替代逐个串行
+        await Promise.all(selectedIds.map(id => axios.delete(`${apiBase}/${id}`).catch(() => {})))
         await fetchRows()
         selectedCount.value = 0
         selectedRowKeys.value = []

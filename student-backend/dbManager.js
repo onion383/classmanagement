@@ -19,9 +19,16 @@ const crypto = require('crypto');
 const fs = require('fs');
 const path = require('path');
 const { AsyncLocalStorage } = require('async_hooks');
-const Database = require('better-sqlite3-multiple-ciphers');
 const { initSchema } = require('./schema');
 const { normalizePhrase } = require('./services/recoveryKey');
+
+// 原生模块懒加载：后端子进程启动时不加载 .node 二进制，首次真正需要打开
+// 数据库时才 require，缩短 app.listen 就绪信号的时间，让主窗口更早出现。
+let Database = null;
+function getDatabase() {
+  if (!Database) Database = require('better-sqlite3-multiple-ciphers');
+  return Database;
+}
 
 // 加载 .env（若存在），使密钥可从配置文件读取而不硬编码
 (function loadEnvFile() {
@@ -130,6 +137,7 @@ let indexDb = null;
 function ensureIndex() {
   if (indexDb) return indexDb;
   const indexPath = path.join(dataDir, 'index.db');
+  const Database = getDatabase();
   indexDb = new Database(indexPath);
   indexDb.pragma(`key = '${sqlKey(MASTER_KEY)}'`);
   applyPerfPragmas(indexDb);
@@ -157,6 +165,7 @@ function applyPerfPragmas(conn) {
 }
 
 function openFile(dbPath, passphrase) {
+  const Database = getDatabase();
   const conn = new Database(dbPath);
   conn.pragma(`key = '${sqlKey(passphrase)}'`);
   applyPerfPragmas(conn);

@@ -98,16 +98,16 @@
 }
 
 /* ---------- 毛玻璃主题（glass）轻薄磨砂覆盖 ---------- */
-:root[data-theme="glass"] .av-select__trigger {
+:root:is([data-theme="glass"], [data-theme="win11"]) .av-select__trigger {
   background-color: rgba(255, 255, 255, 0.82) !important;
   border-color: rgba(0, 0, 0, 0.08) !important;
   backdrop-filter: blur(8px) saturate(1.15);
   -webkit-backdrop-filter: blur(8px) saturate(1.15);
 }
-:root[data-theme="glass"] .av-select--open .av-select__trigger {
+:root:is([data-theme="glass"], [data-theme="win11"]) .av-select--open .av-select__trigger {
   background-color: rgba(255, 255, 255, 0.95) !important;
 }
-:root[data-theme="glass"] .av-select__menu {
+:root:is([data-theme="glass"], [data-theme="win11"]) .av-select__menu {
   background-color: rgba(255, 255, 255, 0.88) !important;
   border-color: rgba(0, 0, 0, 0.08) !important;
   backdrop-filter: blur(var(--glass-blur, 18px)) saturate(1.2);

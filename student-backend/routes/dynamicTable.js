@@ -24,6 +24,8 @@ function createDynamicTableRouter(tableName, options = {}) {
           }
         });
       }
+      // 短时缓存：数据可能在 30 秒内不变，减少重复查询
+      res.set('Cache-Control', 'private, max-age=30');
       res.json(result);
     } catch (err) {
       res.status(500).json({ error: err.message });

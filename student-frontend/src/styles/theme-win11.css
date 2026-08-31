@@ -1,0 +1,85 @@
+/* ==================== Win11 主题 ====================
+   Win11 = 「毛玻璃」+ 透明背景：除页面背景外，全部组件样式（按钮/输入框/表格/
+   卡片/通知/下拉框/滚动条等）与毛玻璃主题完全一致——
+   见 theme-glass.css / select.css 中的联合选择器
+   :root:is([data-theme="glass"], [data-theme="win11"])。
+   页面自身背景完全透明，由主进程对窗口开启窗外亚克力（electron-acrylic-window），
+   让桌面背景模糊透出。本文件只保留 win11 专属覆盖。 */
+
+:root[data-theme="win11"] {
+  /* 品牌主色（与毛玻璃一致） */
+  --color-primary: #3b82f6;
+  --color-primary-hover: #2563eb;
+  --color-primary-active: #1d4ed8;
+  --color-primary-light: rgba(59, 130, 246, 0.12);
+
+  /* 背景透明，让桌面亚克力透出（与毛玻璃唯一的变量差异） */
+  --color-bg: transparent;
+  /* 其余变量与毛玻璃保持一致 */
+  --color-surface: rgba(255, 255, 255, 0.92);
+  --color-surface-hover: rgba(255, 255, 255, 0.98);
+  --color-sidebar: rgba(255, 255, 255, 0.7);
+  --color-sidebar-hover: rgba(255, 255, 255, 0.85);
+  --color-sidebar-active: rgba(255, 255, 255, 0.95);
+
+  /* 文字色 */
+  --color-text: #1e293b;
+  --color-text-secondary: #475569;
+  --color-text-muted: #64748b;
+  --color-text-inverse: #ffffff;
+
+  /* 边框 */
+  --color-border: rgba(0, 0, 0, 0.06);
+  --color-border-strong: rgba(0, 0, 0, 0.12);
+
+  /* 阴影 */
+  --shadow-sm: 0 1px 2px rgba(15, 23, 42, 0.04);
+  --shadow-md: 0 4px 12px rgba(15, 23, 42, 0.06);
+  --shadow-lg: 0 8px 28px rgba(15, 23, 42, 0.1);
+  --shadow-card: 0 2px 10px rgba(15, 23, 42, 0.05);
+
+  /* 圆角 */
+  --radius-sm: 6px;
+  --radius-md: 10px;
+  --radius-lg: 14px;
+  --radius-card: 12px;
+}
+
+/* ========== 全局背景完全透明（其余样式继承毛玻璃） ========== */
+:root[data-theme="win11"] body {
+  background: transparent !important;
+}
+:root[data-theme="win11"] main {
+  background: transparent !important;
+}
+:root[data-theme="win11"] main::before,
+:root[data-theme="win11"] main::after {
+  display: none !important;
+}
+
+/* ========== 登录页：不叠加页面级磨砂遮罩，让桌面亚克力透出 ========== */
+:root[data-theme="win11"] .login-bg::before {
+  display: none !important;
+}
+
+/* ========== 自绘标题栏：透明，仅靠亚克力透出，带细分隔线 ========== */
+:root[data-theme="win11"] .window-title-bar {
+  background: transparent;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.2);
+}
+
+/* ========== 磨砂噪点纹理 ==========
+   原生亚克力 blur 半径由系统固化，只能用「叠 grain」增强磨砂感。
+   在窗口顶层叠一层细颗粒噪点（fractalNoise），叠在原生亚克力之上、内容之下：
+   - 去掉桌面锐利边角，更贴近 Win11 原生 Acrylic 的磨砂质感；
+   - 低不透明度 + overlay 混合，保留桌面透出感。强度可用 --win11-frost 调节。 */
+:root[data-theme="win11"] body::after {
+  content: "";
+  position: fixed;
+  inset: 0;
+  z-index: -1; /* 内容之下、原生亚克力之上 */
+  pointer-events: none;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+  opacity: var(--win11-frost, 0.3);
+  mix-blend-mode: overlay;
+}

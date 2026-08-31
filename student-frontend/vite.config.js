@@ -1,6 +1,7 @@
 import { defineConfig } from 'vite'
 import vue from '@vitejs/plugin-vue'
 import tailwindcss from '@tailwindcss/vite'
+
 import fs from 'fs'
 import path from 'path'
 
@@ -18,6 +19,8 @@ export default defineConfig({
         './src/components/layout/Sidebar.vue',
         './src/components/base/NotificationToast.vue',
         './src/styles/index.css',
+        './src/desktop-widget/main.js',
+        './src/desktop-widget/DesktopWidget.vue',
       ],
     },
     https: {
@@ -43,6 +46,7 @@ export default defineConfig({
       input: {
         main: path.resolve(__dirname, 'index.html'),
         widget: path.resolve(__dirname, 'widget.html'),
+        'desktop-widget': path.resolve(__dirname, 'desktop-widget.html'),
       },
       output: {
         // 大依赖单独拆包，延迟到使用时才被加载
@@ -55,6 +59,9 @@ export default defineConfig({
           }
           if (id.includes('node_modules/jspdf')) {
             return 'jspdf';
+          }
+          if (id.includes('node_modules/sortablejs')) {
+            return 'sortablejs';
           }
         }
       }

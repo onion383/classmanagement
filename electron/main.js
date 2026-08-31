@@ -1,11 +1,91 @@
-const { app, BrowserWindow, ipcMain, desktopCapturer, screen, dialog, shell, protocol, Menu } = require('electron')
+const { app, BrowserWindow, ipcMain, desktopCapturer, screen, dialog, shell, protocol, Menu, globalShortcut, Notification } = require('electron')
 const path = require('path')
 const fs = require('fs')
 const { Readable } = require('stream')
+const { exec } = require('child_process')
+const startupTimer = require('./startup-timer')
+
+// electron-acrylic-window：原生模块，走 Win32 SetWindowCompositionAttribute 启用真·亚克力毛玻璃，
+// 不受 Win11「节能器」影响（Electron 原生 setBackgroundMaterial 会被节能器干扰变灰）。
+//
+// 注意：该包的 package.json main 指向 dist/index.js，但 dist/ 未编译产物（只有 src TS 源码 + 编译好的
+// build/Release/vibrancy-wrapper.node），直接 require('electron-acrylic-window') 会失败。
+// 因此绕开 JS 层，直接加载已编译的 N-API 原生模块，并自行封装 setVibrancy（解析 theme 的 AARRGGBB，
+// 把 alpha 正确传给 Win32 —— 原库 vibrancy.ts 恒传 currentOpacity=0 导致模糊不可见）。
+//
+// 启动优化：原生模块**延迟到首次真正使用亚克力时**才 require（懒加载）。亚克力只对
+// 无边框(Win11)主窗口和桌面小组件有效，放到文件顶部同步加载会额外占用启动关键路径；
+// 改为首次 setVibrancy 时才加载 .node 二进制，命中模块缓存后后续调用零成本。
+let acrylicNative = null
+let setVibrancy = null
+
+function getAcrylicNative() {
+  if (acrylicNative === null) {
+    try {
+      // 原库编译产物：build/Release/vibrancy-wrapper.node（N-API 模块，跨 Electron 版本 ABI 稳定）
+      const nativePath = path.join(__dirname, '..', 'node_modules', 'electron-acrylic-window', 'build', 'Release', 'vibrancy-wrapper.node')
+      if (fs.existsSync(nativePath)) {
+        acrylicNative = require(nativePath)
+      }
+    } catch (err) {
+      console.error('[acrylic] 原生模块加载失败，亚克力降级为 CSS 回退:', err?.message || err)
+    }
+    // 懒加载只执行一次：无论成功与否都记录"已尝试"，避免每次调用都走 fs.existsSync/require
+    if (typeof acrylicNative !== 'object' || typeof acrylicNative?.setVibrancy !== 'function') {
+      acrylicNative = false
+    }
+  }
+  return acrylicNative || null
+}
+
+// theme 形如 'AARRGGBB'（alpha 在前，与原生 gradientColor 的 ARGB 一致）
+function parseARGB(theme) {
+  let hex = String(theme || '80FFFFFF').replace(/^#/, '')
+  if (hex.length === 6) hex = 'FF' + hex // 无 alpha 时默认不透明
+  const a = parseInt(hex.slice(0, 2), 16)
+  const r = parseInt(hex.slice(2, 4), 16)
+  const g = parseInt(hex.slice(4, 6), 16)
+  const b = parseInt(hex.slice(6, 8), 16)
+  return { r, g, b, a }
+}
+
+// 惰性设置亚克力：首次调用触发原生模块加载，返回 true 表示亚克力已成功开启
+setVibrancy = (win, options = {}) => {
+  const native = getAcrylicNative()
+  if (!native) return false
+  const { r, g, b, a } = parseARGB(options.theme)
+  const effect = options.effect === 'blur' ? 0 : 1 // 1 = acrylic（isRS4OrGreater 语义）
+  // 取原生窗口句柄（int32），供 Win32 SetWindowCompositionAttribute 使用
+  let hwnd
+  try {
+    hwnd = win.getNativeWindowHandle().readInt32LE(0)
+  } catch (_) {
+    throw new TypeError('NOT_VALID_WINDOW')
+  }
+  native.setVibrancy(hwnd, effect, r, g, b, a)
+  return true
+}
+
+const disableVibrancy = (win) => {
+  const native = getAcrylicNative()
+  if (!native || typeof native.disableVibrancy !== 'function') return
+  let hwnd
+  try {
+    hwnd = win.getNativeWindowHandle().readInt32LE(0)
+  } catch (_) {
+    return
+  }
+  native.disableVibrancy(hwnd)
+}
+
+console.log('[acrylic] 亚克力原生模块已进入懒加载（首次使用时才 require）')
 
 let mainWindow
+// 当前主窗口的边框模式：'native'（毛玻璃等其他主题，系统原生标题栏）| 'frameless'（Win11 主题，无边框自绘标题栏）。
+// 边框无法在运行中切换，故跨模式切换时重建主窗口。
+let mainWindowChrome = 'native'
 let widgetWindow
-let startupWindow
+let desktopWidgetWindow
 let backendProcess
 
 // 「本次启用工具箱」会话级开关：仅影响本次运行浮窗显隐（不持久）。
@@ -61,13 +141,75 @@ function loadUrlWithRetry(win, url, retries = 30) {
   })
 }
 
-function createMainWindow() {
-  mainWindow = new BrowserWindow({
+// 开发模式：先加载本地 inline loading 页面，不等 Vite 就绪。
+// 这样窗口能在 < 1s 内弹出（显示 loading 动画），
+// 后台轮询 Vite 就绪后自动跳转到热更新页面。
+const DEV_LOADING_HTML = `<!DOCTYPE html>
+<html>
+<head><meta charset="UTF-8">
+<style>
+html,body{margin:0;height:100%}
+body{background:linear-gradient(160deg,#eef2ff 0%,#e2e8ff 100%)}
+.s{position:fixed;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:18px;font-family:-apple-system,"Segoe UI","Microsoft YaHei",sans-serif}
+.spin{animation:r 1.4s linear infinite;transform-origin:center}
+.l{font-size:22px;font-weight:600;color:#1e40af;letter-spacing:1px}
+.t{font-size:13px;color:#6b7280}
+@keyframes r{to{transform:rotate(360deg)}}
+</style></head>
+<body><div class="s">
+<svg width="34" height="34" viewBox="0 0 22 22">
+<circle cx="11" cy="11" r="8" fill="none" stroke="rgba(30,64,175,.25)" stroke-width="3"/>
+<circle class="spin" cx="11" cy="11" r="8" fill="none" stroke="#1e40af" stroke-width="3" stroke-dasharray="42" stroke-dashoffset="12" stroke-linecap="round"/>
+</svg>
+<span class="l">校园助手</span>
+<span class="t">启动开发服务器…</span>
+</div></body></html>`
+
+// 轮询 Vite 开发服务器：用 https.get 轻量探测，不阻塞渲染进程。
+// Vite 就绪后导航到其 URL，并打开 DevTools。
+function pollViteAndNavigate(win, retries = 30) {
+  const https = require('https')
+  const req = https.get('https://127.0.0.1:5173/', { rejectUnauthorized: false }, (res) => {
+    res.resume() // 消耗响应体，避免内存泄漏
+    startupTimer.mark('Vite 就绪，开始跳转')
+    if (win && !win.isDestroyed()) {
+      win.loadURL('https://127.0.0.1:5173/')
+      win.webContents.openDevTools()
+      win.webContents.once('did-finish-load', () => {
+        startupTimer.mark('Vite 页面加载完成')
+      })
+    }
+  })
+  req.on('error', () => {
+    if (retries > 0 && win && !win.isDestroyed()) {
+      setTimeout(() => pollViteAndNavigate(win, retries - 1), 100)
+    }
+  })
+  req.end()
+}
+
+// 主窗口边框模式：'native'（毛玻璃等其他主题，系统原生标题栏）| 'frameless'（Win11 主题，无边框自绘标题栏）。
+// 边框无法在运行中切换，故跨模式切换时重建主窗口（此前 createMainWindow 已固定 no 边框）。
+function createMainWindow(mode = 'native') {
+  const isFrameless = mode === 'frameless'
+  mainWindowChrome = mode
+  const win = new BrowserWindow({
     width: 1280,
     height: 800,
     minWidth: 900,
     minHeight: 600,
     title: '校园助手',
+    // 边框模式随主题切换（切到不同边框类型时由 recreateMainWindow 重建，见 theme-chrome）：
+    //   - 毛玻璃等其他主题 → 系统原生边框，带最小化/最大化/关闭；
+    //   - Win11 主题 → 无边框 + 透明，用自绘标题栏，靠窗外亚克力模糊透出桌面。
+    frame: !isFrameless,
+    transparent: isFrameless,
+    // 启动消除白屏：原生边框窗口等首帧渲染完成（ready-to-show）再显示；
+    // 无边框(Win11)透明+亚克力窗口则用 show:true 立即显示——透明窗口在
+    // show:false+ready-to-show 下会因渲染太快而无法正常上屏（见组件移植经验）。
+    // backgroundColor 兜底防原生窗口白屏。
+    show: isFrameless,
+    backgroundColor: isFrameless ? '#00000000' : '#f9fafb',
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
       contextIsolation: true,
@@ -83,20 +225,93 @@ function createMainWindow() {
       backgroundThrottling: true,
       // 关闭拼写检查，节省渲染进程内存
       spellcheck: false,
-      // 生产模式关闭 DevTools，进一步缩小暴露面与内存开销
-      devTools: isDev,
+      // 支持开发者工具（生产模式亦可手动打开，用于调试）
+      devTools: true,
     }
   })
 
-  if (isDev) {
-    loadUrlWithRetry(mainWindow, 'https://127.0.0.1:5173/')
-    mainWindow.webContents.openDevTools()
-  } else {
-    mainWindow.loadURL('app://local/index.html')
+  // 立即绑定全局（供 theme-chrome 重建等判断）；内部事件全部用局部 win 引用，
+  // 避免重建时旧窗口的 'closed' 事件把 mainWindow 置空，影响到刚创建的新窗口。
+  mainWindow = win
+
+  // Win11 主题（无边框透明窗口）：开启窗外亚克力模糊。
+  // 其他主题为不透明的原生边框窗口，页面直接绘制背景，无需亚克力。
+  // 注意：必须「立即」调用而非等 ready-to-show——透明窗口在 Windows 上 ready-to-show
+  // 不可靠（小组件因此改用 show:true），等它可能永远不触发导致亚克力失效。
+  // 模块内部会 getNativeWindowHandle()，窗口同步创建后 handle 已有效，直接调用即可。
+  if (isFrameless && process.platform === 'win32' && setVibrancy) {
+    try {
+      setVibrancy(win, {
+        // AARRGGBB：alpha 不能为 0（否则亚克力模糊不可见，窗口呈不通透实体）。
+        // 用适度的白色着色（≈50% 白），让桌面背景模糊透出，同时保留磨砂质感。
+        theme: '80FFFFFF',
+        effect: 'acrylic',
+        disableOnBlur: false,
+        useCustomWindowRefreshMethod: false,
+      })
+      console.log('[acrylic] 主窗口亚克力已开启 (mode=frameless)')
+    } catch (err) {
+      // 若 handle 尚未就绪，交给 ready-to-show 兜底重试
+      console.error('[acrylic] 主窗口亚克力立即开启失败，等待 ready-to-show 重试:', err?.message || err)
+    }
   }
 
-  mainWindow.on('closed', () => {
-    mainWindow = null
+  if (isDev) {
+    // 第一步：加载本地 inline 页面，窗口立即显示（< 1s）
+    win.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(DEV_LOADING_HTML)}`)
+    startupTimer.mark('开始加载 loading 页面')
+    // 第二步：后台轮询 Vite，就绪后自动跳转（不阻塞窗口显示）
+    win.webContents.once('did-finish-load', () => {
+      startupTimer.mark('loading 页面加载完成')
+      pollViteAndNavigate(win)
+    })
+  } else {
+    win.loadURL('app://local/index.html')
+    // 生产模式：监听渲染进程的 [startup] 日志，记录 Vue 挂载时间
+    win.webContents.on('console-message', (event, level, message) => {
+      if (message.startsWith('[startup]')) {
+        startupTimer.mark(message.replace('[startup] ', ''))
+      }
+    })
+  }
+
+  // 监听渲染进程的 [startup] 日志（开发模式也监听，Vite 页面跳转后生效）
+  win.webContents.on('console-message', (event, level, message) => {
+    if (message.startsWith('[startup]')) {
+      startupTimer.mark(message.replace('[startup] ', ''))
+    }
+  })
+
+  // 首帧渲染完成后再显示窗口，消除「先白屏再渲染」的启动观感。
+  // 用局部 win 判断/显示，避免重建时 mainWindow 被旧窗口 closed 置空导致新窗口无法显示。
+  win.once('ready-to-show', () => {
+    startupTimer.mark('ready-to-show（窗口首次显示）')
+
+    // 无边框(Win11)透明窗口：此时 native handle 已就绪，开启窗外亚克力模糊透出桌面。
+    if (isFrameless && process.platform === 'win32' && setVibrancy) {
+      console.log('[acrylic] ready-to-show，开启窗外亚克力')
+      try {
+        setVibrancy(win, {
+          theme: '00FFFFFF', // alpha=0：只负责模糊，不染色、不画系统边框，边框/底色全交渲染层
+          effect: 'acrylic',
+          disableOnBlur: false,
+          useCustomWindowRefreshMethod: false,
+        })
+        console.log('[acrylic] 主窗口亚克力已开启')
+      } catch (err) {
+        // handle 异常或系统不支持时降级为 CSS 半透明回退
+        console.error('[acrylic] 主窗口亚克力开启失败，降级 CSS:', err?.message || err)
+      }
+    }
+
+    if (!win.isDestroyed()) win.show()
+  })
+
+  win.on('closed', () => {
+    // 仅当关闭的是当前引用的窗口时才清空，避免重建时旧窗口的 closed 事件误清新窗口
+    if (mainWindow === win) {
+      mainWindow = null
+    }
   })
 }
 
@@ -169,6 +384,69 @@ function createWidgetWindow() {
   })
 }
 
+// 创建桌面小组件：常驻桌面、鼠标穿透、不挡应用
+function createDesktopWidgetWindow() {
+  if (desktopWidgetWindow && !desktopWidgetWindow.isDestroyed()) return
+  desktopWidgetWindow = new BrowserWindow({
+    width: 320,
+    height: 540,
+    frame: false,
+    // 需要 transparent: true 才能让 Win32 亚克力效果透出桌面背景
+    transparent: true,
+    backgroundColor: '#00000000',
+    alwaysOnTop: false,
+    skipTaskbar: true,
+    resizable: false,
+    hasShadow: false,
+    maximizable: false,
+    minimizable: false,
+    fullscreenable: false,
+    show: true,
+    webPreferences: {
+      preload: path.join(__dirname, 'preload.js'),
+      contextIsolation: true,
+      nodeIntegration: false,
+      sandbox: false,
+      webSecurity: !isDev,
+      backgroundThrottling: true,
+      spellcheck: false,
+      devTools: true,
+    }
+  })
+
+  // Windows 10/11 原生亚克力毛玻璃：走 Win32 API，不受 Win11「节能器」影响。
+  // 颜色 alpha 置 0，让 CSS 边框/底色成为唯一可见边框；关闭库的自定义刷新避免额外边框。
+  if (process.platform === 'win32' && setVibrancy) {
+    try {
+      setVibrancy(desktopWidgetWindow, {
+        theme: '00FFFFFF',
+        effect: 'acrylic',
+        disableOnBlur: false,
+        useCustomWindowRefreshMethod: false,
+      })
+    } catch (_) { /* 编译产物异常时忽略，走 CSS 半透明回退 */ }
+  }
+  // 初始位置：屏幕右上角，高度接近屏幕高度
+  const { width: screenW, height: screenH } = screen.getPrimaryDisplay().workAreaSize
+  const widgetHeight = Math.round(screenH * 0.95)
+  desktopWidgetWindow.setContentSize(320, widgetHeight)
+  desktopWidgetWindow.setPosition(screenW - 340, Math.round((screenH - widgetHeight) / 2))
+
+  if (process.platform === 'darwin') {
+    desktopWidgetWindow.setWindowButtonVisibility(false)
+  }
+
+  if (isDev) {
+    desktopWidgetWindow.loadURL('https://127.0.0.1:5173/desktop-widget.html')
+  } else {
+    desktopWidgetWindow.loadURL('app://local/desktop-widget.html')
+  }
+
+  desktopWidgetWindow.on('closed', () => {
+    desktopWidgetWindow = null
+  })
+}
+
 // 后端日志文件：位于用户数据目录，用于持久化记录后端启动/崩溃原因，方便排查无需再抓终端
 let backendLogStream = null
 
@@ -197,10 +475,8 @@ function backendLog(text) {
 let backendRestartCount = 0
 let backendRestartTimer = null
 
-// 窗口创建由后端就绪信号触发（不再写死延迟）；以下为就绪检测状态
-let windowsCreated = false
-let backendReadyFallbackTimer = null
-let startupShownTimer = null
+// 后端就绪检测：仅用于 stdout 分片匹配 + 日志，不再作为建窗信号
+// （主窗口在 whenReady 后立即创建，与后端并行启动）
 let readyBuffer = ''
 
 // 项目根目录（含 node_modules 里的 electron 等）
@@ -373,16 +649,20 @@ function setupAppProtocol() {
       if (p === '/' || p === '') p = '/index.html'
       // 防目录穿越
       const file = path.normalize(path.join(root, p))
+      console.log(`[app://] 请求: ${p} → ${file}`)
       if (file !== root && !file.startsWith(root + path.sep)) {
+        console.log(`[app://] 禁止访问: ${file}`)
         return new Response('Forbidden', { status: 403 })
       }
       // 目录或缺失：SPA 路由回退 index.html
       if (!fs.existsSync(file) || fs.statSync(file).isDirectory()) {
+        console.log(`[app://] 文件不存在，回退 index.html: ${file}`)
         return new Response(Readable.toWeb(fs.createReadStream(path.join(root, 'index.html'))), {
           headers: { 'content-type': 'text/html; charset=utf-8' },
         })
       }
       const ct = MIME[path.extname(file).toLowerCase()] || 'application/octet-stream'
+      console.log(`[app://] 已提供: ${file} (${ct})`)
       return new Response(Readable.toWeb(fs.createReadStream(file)), { headers: { 'content-type': ct } })
     } catch (_) {
       return new Response('Not Found', { status: 404 })
@@ -390,86 +670,80 @@ function setupAppProtocol() {
   })
 }
 
-// 启动壳：在后端起好、主窗口就绪前先弹一个轻量「启动中…」窗，让用户立刻有响应。
-// 独立于前端产物，纯静态启动页，开发/打包都用 loadFile 加载本地 html，无框架无依赖。
-function createStartupWindow() {
-  startupWindow = new BrowserWindow({
-    width: 280,
-    height: 90,
-    frame: false,
-    transparent: true,
-    resizable: false,
-    movable: true,
-    minimizable: false,
-    maximizable: false,
-    fullscreenable: false,
-    alwaysOnTop: false,
-    skipTaskbar: true,
-    hasShadow: false,
-    backgroundColor: '#00000000',
-    webPreferences: {
-      contextIsolation: true,
-      nodeIntegration: false,
-      sandbox: false,
-      backgroundThrottling: true,
-      spellcheck: false,
-      devTools: isDev,
-    }
-  })
-  startupWindow.center()
-  startupWindow.loadFile(path.join(__dirname, 'startup.html'))
-  startupWindow.on('closed', () => { startupWindow = null })
-}
-
-// 先建主窗口，等其页面加载完毕后再错峰建 widget（避免启动瞬间两个渲染进程并行抢占资源）
-function openMainThenWidget() {
-  createMainWindow()
+// 在主窗口页面加载完成后错峰创建 widget 和桌面小组件，避免启动瞬间多个渲染进程并行抢占资源
+function createWidgetAfterMainLoad() {
   mainWindow?.webContents.once('did-finish-load', () => {
-    setTimeout(() => { if (!widgetWindow || widgetWindow.isDestroyed()) createWidgetWindow() }, 300)
+    // 浮窗小组件：短延迟后创建
+    setTimeout(() => {
+      if (!widgetWindow || widgetWindow.isDestroyed()) {
+        createWidgetWindow()
+        startupTimer.mark('widget 创建完成')
+      }
+    }, 300)
+    // 桌面小组件：比浮窗更晚错峰，让主窗口先完成首帧渲染再分流资源
+    setTimeout(() => {
+      if (!desktopWidgetWindow || desktopWidgetWindow.isDestroyed()) {
+        createDesktopWidgetWindow()
+        startupTimer.mark('桌面组件创建完成')
+      }
+    }, 900)
   })
-  // 主窗口已接上，回收启动壳
-  if (startupWindow && !startupWindow.isDestroyed()) startupWindow.close()
-  startupWindow = null
 }
 
-// 后端就绪检测：后端 app.listen 回调会打印「服务器已启动」，作为建窗信号。
-// stdout 可能被分片，这里做滚动缓冲 + 子串匹配，触发后只建一次窗。
+// 后端就绪检测：后端 app.listen 回调会打印「服务器已启动」，这里仅作日志提示，
+// 不再触发建窗（主窗口已提前创建）。stdout 可能被分片，做滚动缓冲 + 子串匹配。
 function detectBackendReady(chunk) {
-  if (windowsCreated) return
   readyBuffer += String(chunk)
   if (readyBuffer.length > 4096) readyBuffer = readyBuffer.slice(-4096)
   if (!/服务器已启动|listening|server started/i.test(readyBuffer)) return
   readyBuffer = ''
-  windowsCreated = true
-  clearTimeout(backendReadyFallbackTimer)
-  clearTimeout(startupShownTimer)
-  openMainThenWidget()
+  startupTimer.mark('后端就绪')
+  console.log('[main] 后端已就绪')
 }
 
 app.whenReady().then(() => {
+  startupTimer.mark('app.whenReady 就绪')
+
   // 未拿到单实例锁：说明已有另一个实例在运行，本实例直接退出
   if (!gotSingleInstanceLock) {
     app.quit()
     return
   }
 
-  setupAppProtocol()
-  // 启动壳改为「慢启动保护」：1.5s 内后端仍未就绪（说明机器慢）才弹「启动中…」，
-  // 否则完全不显示，避免快启动下壳一闪而过造成的闪屏。
-  startupShownTimer = setTimeout(() => {
-    if (!windowsCreated) createStartupWindow()
-  }, 1500)
-  startBackend()
+  try {
+    setupAppProtocol()
+    startupTimer.mark('协议注册完成')
 
-  // 不再写死固定延迟：后端一旦就绪就建主窗口。
-  // 兜底：若就绪信号因异常缺失（如日志被吞），预留超时仍建窗，避免卡在无窗口状态。
-  backendReadyFallbackTimer = setTimeout(() => {
-    if (!windowsCreated) { windowsCreated = true; openMainThenWidget() }
-  }, 20000)
+    // 主窗口立即创建：它加载的静态前端（app://local/index.html 或 dev 的 Vite）
+    // 不依赖后端，后端在后台并行启动。登录页/首页骨架无需后端即可渲染，
+    // 前端通过 axios 响应重试兜底「后端未就绪」的短暂窗口。
+    createMainWindow()
+    startupTimer.mark('createMainWindow 完成')
+    // 主窗口加载完成后错峰建 widget / 桌面小组件：启动瞬间仅保留主窗口一个渲染进程，
+    // 避免多个渲染进程并行抢占 CPU/GPU（桌面小组件同样依赖 axios 重试，晚建无碍）。
+    createWidgetAfterMainLoad()
 
-  // U盘自动打开：启动时读取持久化开关；已开启则立即开始监听
-  loadUsbAutoOpenConfig()
-  if (usbAutoOpenEnabled) startUsbWatch()
+    // 后端后台启动（就绪信号不再决定主窗口创建）
+    startBackend()
+    startupTimer.mark('startBackend 完成')
+
+    // 5s 后输出启动时间线并保存日志
+    setTimeout(() => {
+      startupTimer.report()
+      startupTimer.saveLog()
+    }, 5000)
+
+    // U盘自动打开非启动关键路径：延后到主窗口创建后再读配置/开监听，
+    // 避免 loadUsbAutoOpenConfig 读盘与 getDriveLetters 同步遍历盘符阻塞主窗口创建。
+    setTimeout(() => {
+      loadUsbAutoOpenConfig()
+      if (usbAutoOpenEnabled) startUsbWatch()
+    }, 0)
+  } catch (err) {
+    console.error('[main] app.whenReady 初始化失败:', err)
+  }
+}).catch(err => {
+  console.error('[main] app.whenReady 未捕获错误:', err)
 })
 
 // ========== U盘自动打开 ==========
@@ -534,6 +808,45 @@ ipcMain.handle('open-external', (event, url) => {
   if (typeof url === 'string' && (url.startsWith('http://') || url.startsWith('https://'))) {
     shell.openExternal(url)
   }
+})
+
+// ========== 桌面小组件·常用软件 ==========
+// 列表已改由后端数据库持久化（/api/widget-settings/apps），主进程仅负责
+// 「选择软件文件+提取图标」和「点击启动」两项平台能力。
+// 每项：{ id, name, path, icon }（icon 为提取自 exe/.lnk 图标的 dataURL，可为空）。
+
+// 打开"选择软件程序/快捷方式"对话框，并提取其图标为 dataURL 返回
+ipcMain.handle('apps-select-file', async () => {
+  if (!mainWindow || mainWindow.isDestroyed()) return { canceled: true, error: '无主窗口' }
+  const result = await dialog.showOpenDialog(mainWindow, {
+    title: '选择常用软件',
+    properties: ['openFile'],
+    defaultPath: lastDialogDir || undefined,
+    filters: [
+      { name: '可执行程序与快捷方式', extensions: ['exe', 'lnk', 'bat', 'cmd'] },
+      { name: '所有文件', extensions: ['*'] },
+    ],
+  })
+  if (result.canceled || result.filePaths.length === 0) return { canceled: true }
+  const filePath = result.filePaths[0]
+  lastDialogDir = path.dirname(filePath)
+  let icon = ''
+  try {
+    const img = await app.getFileIcon(filePath, { size: 'large' })
+    icon = img.toDataURL()
+  } catch (_) { /* 图标提取失败则留空 */ }
+  const ext = path.extname(filePath).toLowerCase()
+  let name = path.basename(filePath, ext) || filePath
+  // bat/cmd 显示名字会带扩展名，去掉小尾巴，更整洁
+  if (['.bat', '.cmd'].includes(ext)) name = path.basename(filePath, ext)
+  return { canceled: false, filePath, name, icon }
+})
+
+// 点击启动常用软件（.lnk/.exe/.bat 均可走 shell.openPath）
+ipcMain.handle('apps-launch', (event, filePath) => {
+  if (typeof filePath !== 'string' || !filePath) return { error: '路径为空' }
+  shell.openPath(filePath)
+  return {}
 })
 
 // 设置开关：持久化并实时启停监听
@@ -703,6 +1016,60 @@ ipcMain.on('widget-set-session-visible', (event, enabled) => {
 
 // 读取会话级开关；未初始化（尚未注入本次默认值）返回 null
 ipcMain.handle('get-session-widget-visible', () => sessionWidgetEnabled)
+
+// 桌面组件获取主窗口的 token（跨渲染进程共享，避免 cookie/localStorage 隔离）
+ipcMain.handle('get-main-token', () => {
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    return mainWindow.webContents.executeJavaScript('localStorage.getItem("token")', true)
+  }
+  return null
+})
+
+// ============ 无边框自绘标题栏的窗口控制 ============
+// 最小化
+ipcMain.on('win-minimize', (event) => {
+  const win = BrowserWindow.fromWebContents(event.sender)
+  if (win) win.minimize()
+})
+// 最大化 / 还原
+ipcMain.on('win-maximize-toggle', (event) => {
+  const win = BrowserWindow.fromWebContents(event.sender)
+  if (!win) return
+  if (win.isMaximized()) win.unmaximize()
+  else win.maximize()
+})
+// 关闭
+ipcMain.on('win-close', (event) => {
+  const win = BrowserWindow.fromWebContents(event.sender)
+  if (win) win.close()
+})
+
+// ============ 主题 → 窗口边框/亚克力开关 ============
+// 渲染进程在切换主题时上报所需的边框类型：
+//   - 毛玻璃等其他主题 → 'native'：重建为系统原生边框（标题栏/最小化/最大化/关闭回归原生）；
+//   - Win11 主题 → 'frameless'：重建为无边框透明窗口，并在 createMainWindow 内开启窗外亚克力。
+// 边框无法在运行中切换，仅当目标类型与当前不同时才重建，避免重复刷新。
+// 重建会重载页面：主题、登录态均持久化在 localStorage，重载后由渲染层 applyTheme 恢复。
+function recreateMainWindow(mode) {
+  if (!mainWindow || mainWindow.isDestroyed()) return
+  if (mainWindowChrome === mode) return
+  // 记住旧窗口的位置、大小、最大化状态，重建后恢复，避免窗口跳位
+  const bounds = mainWindow.getBounds()
+  const wasMaximized = mainWindow.isMaximized()
+  mainWindow.destroy()
+  createMainWindow(mode)
+  if (!mainWindow.isDestroyed()) {
+    mainWindow.setBounds(bounds)
+    if (wasMaximized) mainWindow.maximize()
+  }
+}
+
+ipcMain.on('theme-chrome', (event, { mode }) => {
+  const win = BrowserWindow.fromWebContents(event.sender)
+  if (!win || win !== mainWindow) return
+  const desired = mode === 'frameless' ? 'frameless' : 'native'
+  recreateMainWindow(desired)
+})
 
 // 拖动中：使用 setContentBounds 与 setContentSize 保持一致，避免 setBounds/setSize 边界计算差异
 ipcMain.on('widget-drag-move', (event, { screenX, screenY }) => {
@@ -936,9 +1303,6 @@ function shutdownBackend() {
     try { backendLogStream.end() } catch (_) {}
     backendLogStream = null
   }
-  // 退出时若启动壳还开着，一并回收，避免残留
-  if (startupWindow && !startupWindow.isDestroyed()) startupWindow.destroy()
-  startupWindow = null
 }
 
 app.on('window-all-closed', () => {

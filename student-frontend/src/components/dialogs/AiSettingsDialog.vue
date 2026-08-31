@@ -73,9 +73,9 @@
 
   <!-- 删除确认弹窗 -->
   <ConfirmDialog
-    :show="confirmShow"
-    :title="confirmTitle"
+    :visible="confirmShow"
     :message="confirmMessage"
+    :show-cancel="true"
     @confirm="onRemoveConfirm"
     @cancel="confirmShow = false"
   />

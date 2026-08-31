@@ -1,19 +1,43 @@
 <template>
-  <!-- 登录页：全屏、无侧边栏 -->
-  <div v-if="$route.path === '/login'" class="h-screen">
-    <router-view />
-  </div>
+  <div class="flex flex-col h-screen overflow-hidden">
+    <!-- 无边框自绘标题栏：仅当「Win11 主题」（无边框透明窗口）时渲染，
+         其余主题为系统原生边框，自带标题栏/最小化/最大化/关闭。 -->
+    <div v-if="isWin11" class="window-title-bar flex-shrink-0 select-none" style="height:36px;">
+      <div class="flex items-center" style="height:100%;">
+        <span class="px-3 text-sm font-semibold truncate" style="line-height:36px;">校园助手</span>
+      </div>
+      <div class="window-controls flex items-center" style="height:100%;">
+        <button class="win-btn" title="最小化" @click="winMinimize">
+          <svg width="10" height="10" viewBox="0 0 10 10"><path d="M0 5h10" stroke="currentColor" stroke-width="1"/></svg>
+        </button>
+        <button class="win-btn" title="最大化/还原" @click="winMaximizeToggle">
+          <svg width="10" height="10" viewBox="0 0 10 10"><path d="M0.5 0.5h9v9h-9z" fill="none" stroke="currentColor" stroke-width="1"/></svg>
+        </button>
+        <button class="win-btn win-btn-close" title="关闭" @click="winClose">
+          <svg width="10" height="10" viewBox="0 0 10 10"><path d="M0 0l10 10M10 0L0 10" stroke="currentColor" stroke-width="1"/></svg>
+        </button>
+      </div>
+    </div>
 
-  <!-- 其他页面：带侧边栏布局 -->
-  <div v-else class="flex h-screen">
-    <Sidebar />
-    <main class="flex-1 p-6 bg-bg overflow-auto">
-      <router-view v-slot="{ Component }">
-        <KeepAlive :max="10">
-          <component :is="Component" />
-        </KeepAlive>
-      </router-view>
-    </main>
+    <!-- 内容区：占满标题栏以下的剩余高度 -->
+    <div class="flex-1 flex overflow-hidden">
+      <!-- 登录页：全屏、无侧边栏 -->
+      <div v-if="$route.path === '/login'" class="h-full flex-1 w-full">
+        <router-view />
+      </div>
+
+      <!-- 其他页面：带侧边栏布局 -->
+      <div v-else class="flex w-full">
+        <Sidebar />
+        <main class="flex-1 p-6 bg-bg overflow-auto">
+          <router-view v-slot="{ Component }">
+            <KeepAlive :max="10">
+              <component :is="Component" />
+            </KeepAlive>
+          </router-view>
+        </main>
+      </div>
+    </div>
   </div>
 
   <!-- 全局通知弹窗 -->
@@ -70,6 +94,7 @@
 <script>
 import Sidebar from './components/layout/Sidebar.vue'
 import NotificationToast from './components/base/NotificationToast.vue'
+import { useThemeStore } from './stores/theme'
 import { defineAsyncComponent, h } from 'vue'
 
 // 异步组件：加载中/失败展示占位文案，避免浮窗点开就消失却毫无反馈
@@ -88,6 +113,7 @@ export default {
   components: { Sidebar, NotificationToast, AiAssistant },
   data() {
     return {
+      themeStore: null,
       assistantOpen: false,
       assistantPos: { x: null, y: null },
       assistantDrag: null,
@@ -98,6 +124,10 @@ export default {
     }
   },
   computed: {
+    // 仅「Win11 主题」使用无边框透明窗口，需要自绘标题栏；其余主题由系统原生边框接管
+    isWin11() {
+      return this.themeStore.currentTheme === 'win11'
+    },
     // 图标用 right/bottom 基准 + transform 偏移，拖动时只改 transform，不触发布局，也不回弹
     // 显式写 position: fixed，覆盖 theme-glass.css 中 button { position: relative }
     iconStyle() {
@@ -120,6 +150,9 @@ export default {
   },
   mounted() {
     window.addEventListener('resize', this.onWindowResize)
+  },
+  created() {
+    this.themeStore = useThemeStore()
   },
   beforeUnmount() {
     window.removeEventListener('resize', this.onWindowResize)
@@ -218,6 +251,54 @@ export default {
       window.removeEventListener('mousemove', this.onDragAssistant)
       window.removeEventListener('mouseup', this.stopDragAssistant)
     },
+
+    // ---- 无边框窗口控制（经 preload 白名单通道通知主进程） ----
+    winMinimize() {
+      window.electron?.send('win-minimize')
+    },
+    winMaximizeToggle() {
+      window.electron?.send('win-maximize-toggle')
+    },
+    winClose() {
+      window.electron?.send('win-close')
+    },
   },
 }
 </script>
+
+<style>
+/* 无边框自绘标题栏：拖拽区 + 右侧窗口控制按钮。
+   用全局样式而非 scoped，确保对登录页与主体布局一致生效。 */
+.window-title-bar {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  background: transparent;
+  -webkit-app-region: drag; /* 整条可拖动窗口 */
+  user-select: none;
+  border-bottom: 1px solid rgba(0, 0, 0, 0.06);
+}
+/* 右侧三个控制按钮及其容器必须可点击（脱离拖拽区） */
+.window-controls {
+  -webkit-app-region: no-drag;
+}
+.window-controls .win-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 46px;
+  height: 34px;
+  border: none;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+}
+.window-controls .win-btn:hover {
+  background: rgba(0, 0, 0, 0.06);
+}
+.window-controls .win-btn-close:hover {
+  background: #e81123;
+  color: #fff;
+}
+</style>

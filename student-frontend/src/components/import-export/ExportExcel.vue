@@ -55,7 +55,6 @@
 </template>
 
 <script>
-import fontUrl from '../../assets/fonts/NotoSansSC-6.ttf';
 import AppSelect from '../base/AppSelect.vue'
 import { useNotification } from '../../composables/useNotification';
 import '../../styles/dialog-transition.css'
@@ -761,7 +760,7 @@ export default {
 
       let fontLoaded = false;
       try {
-        const response = await fetch(fontUrl);
+        const response = await fetch('/NotoSansSC-6.ttf');
         if (!response.ok) throw new Error('字体文件加载失败');
         const blob = await response.blob();
         const fontBase64 = await new Promise((resolve, reject) => {
