@@ -201,10 +201,17 @@ export default {
       if (this.password !== this.confirm) return useNotification().warning('两次输入的密码不一致');
       this.busy = true;
       axios.post('/api/register', { username: this.username, password: this.password, role: this.role }).then(res => {
-        this.recoveryPhrase = res.data.recovery.phrase;
-        this.recoveryHash = res.data.recovery.hash;
         this.restoredUsername = res.data.user.username;
-        this.mode = 'recovery';
+        if (res.data.recovery) {
+          // 有密码：需展示恢复密钥并抄写前 3 词
+          this.recoveryPhrase = res.data.recovery.phrase;
+          this.recoveryHash = res.data.recovery.hash;
+          this.mode = 'recovery';
+        } else {
+          // 无密码：无需恢复密钥，直接完成注册
+          useNotification().success('注册成功！请登录账号 ' + this.restoredUsername + ' 使用系统。');
+          this.switchMode('login');
+        }
       }).catch(err => {
         useNotification().error(err.response?.data?.error || '注册失败');
       }).finally(() => { this.busy = false; });
@@ -257,13 +264,15 @@ export default {
     async restore() {
       const b = this.restoreBundle;
       if (!b) return useNotification().warning('请先选择备份文件');
-      if (!this.password && !this.recoverPhrase) return useNotification().warning('请至少输入密码或助记词之一');
+      // 无密码账号的备份包已带明文 key，无需密码/助记词；有密码包才需其一
+      if (!b.key && !this.password && !this.recoverPhrase) return useNotification().warning('请至少输入密码或助记词之一');
       const payload = {
         data: b.data,
         slug: b.slug,
         username: b.username,
         wrappedByPassword: b.wrappedByPassword,
         wrappedByMnemonic: b.wrappedByMnemonic,
+        key: b.key,
         password: this.password || undefined,
         mnemonic: this.recoverPhrase || undefined,
       };

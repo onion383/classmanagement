@@ -21,8 +21,14 @@ const validSendChannels = [
   'win-minimize',
   'win-maximize-toggle',
   'win-close',
+  // 关闭选择弹窗：渲染层把用户选择的关闭范围回传给主进程
+  'shutdown-action',
   // Win11 主题：主窗口窗外亚克力开关
   'theme-chrome',
+  // 渲染层回报/切换「桌面小组件」启用状态（主进程据此按需创建/关闭桌面小组件窗口）
+  'desktop-widget-enabled',
+  // 主窗口渲染层「首帧真正空闲」回报：主进程据此建工具箱浮窗与（如启用）桌面小组件
+  'widgets-ready',
 ]
 
 // 白名单：仅允许以下请求-响应式动请求通道（对应 ipcMain.handle）
@@ -39,6 +45,7 @@ const validInvokeChannels = [
   'set-usb-auto-open',
   'open-external',
   'get-main-token',
+  'get-master-key',
   'get-desktop-wallpaper',
   // 桌面小组件·常用软件（选文件/启动；列表读写已改走后端数据库）
   'apps-select-file',
@@ -55,6 +62,10 @@ const validReceiveChannels = [
 // 作用：on 注册时保存「用户 callback」与「实际注册到 ipcRenderer 的 wrapper」的映射，
 // off 时据此取出真正的 wrapper 才能 removeListener，避免因引用不同而无法解绑（内存泄漏）。
 const listenerMap = new Map()
+
+// 渲染进程全局标记：主进程通过 additionalArguments 传入 --secure-channel。
+// 前端只在置位后才对业务 JSON API 启用加密传输（见 composables/secureAxios.js）。
+contextBridge.exposeInMainWorld('__SECURE_CHANNEL__', process.argv.includes('--secure-channel'))
 
 contextBridge.exposeInMainWorld('electron', {
   // 向主进程发送消息（单向）

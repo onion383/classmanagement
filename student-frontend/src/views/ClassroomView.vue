@@ -1,35 +1,43 @@
-<template>
+﻿<template>
   <div>
-    <div class="w-full bg-surface shadow-md rounded-xl mb-6 px-6 py-5 border border-border min-h-[4.5rem] flex items-center">
-      <h1 class="text-2xl font-bold text-text">📚 学生管理</h1>
+    <div class="w-full bg-surface shadow-md rounded-xl mb-6 px-5 py-3 border border-border min-h-[4.5rem] flex items-center">
+      <h1 class="text-2xl font-bold text-text flex items-center gap-2"><IconGlyph name="students" /> 学生管理</h1>
     </div>
 
+    <!-- 学生信息 / 班干部管理 Tab 切换 -->
+    <Tabs :tabs="tabsList" v-model="activeTab" class="mb-4" />
+
+    <!-- 班干部管理 -->
+    <CadreManage v-if="activeTab === 'cadres'" />
+
+    <!-- 学生信息 -->
+    <template v-else>
     <!-- 工具栏按钮 -->
     <div class="mb-4 flex items-center gap-3">
       <button @click="addNewRowAtBottom" class="bg-primary hover:bg-primary-hover text-text-inverse px-5 py-2 rounded">
         ＋ 添加学生
       </button>
       <button @click="refreshStudents" class="bg-text-muted hover:bg-text-secondary text-text-inverse px-4 py-2 rounded flex items-center gap-1" title="刷新表格">
-        🔄 刷新
+        <IconGlyph name="refresh" :size="14" tint="current" /> 刷新
       </button>
       <button
         @click="onBatchDelete"
         :disabled="selectedCount === 0"
-        class="bg-danger hover:bg-danger-hover text-text-inverse px-4 py-2 rounded disabled:opacity-50 disabled:cursor-not-allowed"
+        class="bg-danger hover:bg-danger-hover text-text-inverse px-4 py-2 rounded disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-1.5"
       >
-        🗑️ 批量删除 ({{ selectedCount }})
+        <IconGlyph name="trash" :size="14" tint="current" /> 批量删除 ({{ selectedCount }})
       </button>
-      <button @click="importDialogVisible = true" class="bg-warning hover:bg-warning-hover text-text-inverse px-4 py-2 rounded">
-        📥 从 Excel 导入
+      <button @click="importDialogVisible = true" class="bg-warning hover:bg-warning-hover text-text-inverse px-4 py-2 rounded flex items-center gap-1.5">
+        <IconGlyph name="download" :size="14" tint="current" /> 从 Excel 导入
       </button>
       <button
         @click="exportDialogVisible = true"
-        class="bg-warning hover:bg-warning-hover text-text-inverse px-4 py-2 rounded"
+        class="bg-warning hover:bg-warning-hover text-text-inverse px-4 py-2 rounded flex items-center gap-1.5"
       >
-        📥 导出 Excel
+        <IconGlyph name="download" :size="14" tint="current" /> 导出 Excel
       </button>
-      <button @click="dedupeDialogVisible = true" class="bg-danger hover:bg-danger-hover text-text-inverse px-4 py-2 rounded">
-        🔍 去除重复数据
+      <button @click="dedupeDialogVisible = true" class="bg-danger hover:bg-danger-hover text-text-inverse px-4 py-2 rounded flex items-center gap-1.5">
+        <IconGlyph name="search" :size="14" tint="current" /> 去除重复数据
       </button>
     </div>
 
@@ -113,6 +121,7 @@
       @delete-rows="onDeleteDuplicates"
       @cancel="dedupeDialogVisible = false"
     />
+    </template>
    </div>
 </template>
 
@@ -121,9 +130,17 @@ import { ref, computed, watch, defineAsyncComponent } from 'vue'
 import axios from 'axios'
 import SearchBar from '../components/base/SearchBar.vue'
 import DynamicTable from '../components/tables/DynamicTable.vue'
+import Tabs from '../components/base/Tabs.vue'
 import { useTableCRUD } from '../composables/useTableCRUD.js'
 import { useUndoShortcut } from '../composables/useUndo.js'
 import { useNotification } from '../composables/useNotification.js'
+
+// 学生信息 / 班干部管理 Tab
+const tabsList = [
+  { value: 'students', label: '学生信息' },
+  { value: 'cadres', label: '班干部管理' }
+]
+const activeTab = ref('students')
 
 // 弹窗类组件懒加载：打开时才加载对应 chunk
 const ConfirmDialog = defineAsyncComponent(() => import('../components/base/ConfirmDialog.vue'))
@@ -131,6 +148,9 @@ const ContextMenu = defineAsyncComponent(() => import('../components/base/Contex
 const ExportExcel = defineAsyncComponent(() => import('../components/import-export/ExportExcel.vue'))
 const ImportExcel = defineAsyncComponent(() => import('../components/import-export/ImportExcel.vue'))
 const DeduplicateDialog = defineAsyncComponent(() => import('../components/dialogs/DeduplicateDialog.vue'))
+
+// 班干部管理：切到该 Tab 时才下载其代码 chunk 并实例化（v-if 控制挂载）
+const CadreManage = defineAsyncComponent(() => import('../components/CadreManage.vue'))
 
 const exportDialogVisible = ref(false)
 

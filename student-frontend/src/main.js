@@ -5,6 +5,7 @@ import router from './router'
 import axios from 'axios'   // 必须导入
 import './styles/index.css'
 import { useThemeStore } from './stores/theme'
+import { setupSecureAxios } from './composables/secureAxios'
 
 // 生产模式（file:// 协议）下无 Vite 代理，需指定完整后端地址
 if (import.meta.env.PROD) {
@@ -38,6 +39,9 @@ axios.interceptors.response.use(
     return Promise.reject(error)
   }
 )
+
+// 安全通道：请求体加密 + 响应体解密（仅 JSON API；无开关时直通）
+setupSecureAxios(axios)
 
 // ===== 关键路径优化：在 Vue 初始化之前就设置主题和预加载资源 =====
 
@@ -77,8 +81,13 @@ if (savedTheme === 'glass') {
   if (bg) { const img = new Image(); img.src = bg }
 }
 
-// 3. 预加载默认路由组件（首页 ClassroomView），与 Vue 初始化并行执行
-import('./views/ClassroomView.vue').catch(() => {})
+// 3. 预加载默认落地页组件（已登录→业务首页 DashboardView；未登录→登录页 Login），
+//    与 Vue 初始化并行执行，命中路由实际首帧，避免首屏首帧多等一次 chunk 下载。
+//    必须用静态字符串导入，保证 Vite/Rollup 能静态分析生成对应 chunk。
+const landingPreload = localStorage.getItem('token')
+  ? import('./views/DashboardView.vue')
+  : import('./views/Login.vue')
+landingPreload.catch(() => {})
 
 // ===== Vue 应用初始化 =====
 const app = createApp(App)
@@ -86,11 +95,20 @@ const pinia = createPinia()
 app.use(pinia)
 app.use(router)
 
+// 全局注册 IconGlyph：页面主标题图标跟随「图标样式」设置（彩色 lucide / emoji）
+import IconGlyph from './components/base/IconGlyph.vue'
+app.component('IconGlyph', IconGlyph)
+
 // 用 Pinia 的 themeStore 与 localStorage 同步（仅覆盖变量，不重复设置背景图）
 const themeStore = useThemeStore()
 themeStore.applyTheme()
 
 // 记录 Vue 挂载耗时（主进程通过 console-message 事件捕获 [startup] 前缀的日志）
+// 全局橡皮筋滚动（轻回弹）：正常滚动保持原生，仅滚到顶/底越界时才弹性回弹
+import { startElasticScroll } from './composables/useElasticScroll'
+startElasticScroll()
+
 const mountStart = performance.now()
 app.mount('#app')
 console.log(`[startup] Vue 挂载完成: ${Math.round(performance.now() - mountStart)}ms`)
+

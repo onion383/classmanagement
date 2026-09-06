@@ -1,17 +1,28 @@
 /* ==================== 主题相关工具类 ==================== */
 
+/* 加载骨架屏：固定高度 + 轻微流光，替换“加载中...”文字占位。
+   目的：加载占位与下方表格/空态切换时，容器高度不再跳变（消除布局偏移）。 */
+.skeleton-block {
+  box-sizing: border-box;
+  height: 320px;
+  border-radius: var(--radius-md, 0.5rem);
+  background: linear-gradient(90deg,
+    rgba(127, 127, 127, 0.07) 25%,
+    rgba(127, 127, 127, 0.14) 50%,
+    rgba(127, 127, 127, 0.07) 75%);
+  background-size: 200% 100%;
+  animation: skeleton-shimmer 1.4s ease-in-out infinite;
+}
+@keyframes skeleton-shimmer {
+  from { background-position: 200% 0; }
+  to   { background-position: -200% 0; }
+}
+
 @utility glass {
   backdrop-filter: blur(12px);
   -webkit-backdrop-filter: blur(12px);
   background: rgba(255, 255, 255, 0.65);
   border: 1px solid rgba(255, 255, 255, 0.35);
-}
-
-@utility glass-dark {
-  backdrop-filter: blur(16px);
-  -webkit-backdrop-filter: blur(16px);
-  background: rgba(17, 24, 39, 0.75);
-  border: 1px solid rgba(255, 255, 255, 0.1);
 }
 
 @utility transition-theme {
@@ -24,9 +35,4 @@
 @utility content-visibility-auto {
   content-visibility: auto;
   contain-intrinsic-size: 1px 120px;
-}
-
-/* 绘制边界约束：限制子元素不超出父容器绘制，减少 backdrop-filter 的无效重绘面积 */
-@utility contain-paint {
-  contain: paint;
 }

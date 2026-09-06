@@ -1,8 +1,8 @@
 <template>
   <div class="h-full flex flex-col">
     <!-- 顶部标题栏（与其他页面统一） -->
-    <div class="w-full bg-surface shadow-md rounded-xl mb-6 px-6 py-5 border border-border min-h-[4.5rem] flex items-center">
-      <h1 class="text-2xl font-bold text-text">👥 分组管理</h1>
+    <div class="w-full bg-surface shadow-md rounded-xl mb-6 px-5 py-3 border border-border min-h-[4.5rem] flex items-center">
+      <h1 class="text-2xl font-bold text-text flex items-center gap-2"><IconGlyph name="group" /> 分组管理</h1>
     </div>
 
     <!-- 维度 tab 切换（用 Tabs 组件） + 添加组 -->
@@ -12,24 +12,24 @@
       </template>
     </Tabs>
 
-    <!-- 小组管理标题 + 操作按钮行 -->
-    <h2 class="text-xl font-semibold text-text mb-4">🗂️ 小组管理</h2>
-    <div class="flex flex-wrap items-center gap-3 mb-4">
-      <button v-if="activeDim" @click="openSettings" class="bg-primary hover:bg-primary-hover text-text-inverse px-4 py-2 rounded transition-theme" title="当前维度设置">⚙️ 设置</button>
+    <!-- 小组管理标题 + 操作按钮行（预留固定高度，避免 v-if 按钮加载后填充/换行引起下方位移/CLS） -->
+    <h2 class="text-xl font-semibold text-text mb-4 flex items-center gap-2 min-h-7"><IconGlyph name="box" :size="20" /> 小组管理</h2>
+    <div class="flex flex-nowrap items-center gap-3 mb-4 overflow-x-auto">
+      <button v-if="activeDim" @click="openSettings" class="bg-primary hover:bg-primary-hover text-text-inverse px-4 py-2 rounded transition-theme flex items-center gap-1.5" title="当前维度设置"><IconGlyph name="settings" :size="14" tint="current" /> 设置</button>
       <button @click="onSmartGroup" class="bg-primary hover:bg-primary-hover text-text-inverse px-4 py-2 rounded transition-theme">🧠 智能分组</button>
-      <button @click="loadAll" :disabled="loading" class="bg-text-muted hover:bg-text-secondary text-text-inverse px-4 py-2 rounded transition-theme disabled:opacity-50">
-        {{ loading ? '刷新中…' : '🔄 刷新' }}
+      <button @click="loadAll" :disabled="loading" class="bg-text-muted hover:bg-text-secondary text-text-inverse px-4 py-2 rounded transition-theme disabled:opacity-50 flex items-center gap-1.5">
+        <IconGlyph name="refresh" :size="14" tint="current" /> 刷新
       </button>
-      <button @click="openExport" :disabled="loading || !active?.groups?.length" class="bg-warning hover:bg-warning-hover text-text-inverse px-4 py-2 rounded transition-theme disabled:opacity-50">
-        📥 导出分组
+      <button @click="openExport" :disabled="loading || !active?.groups?.length" class="bg-warning hover:bg-warning-hover text-text-inverse px-4 py-2 rounded transition-theme disabled:opacity-50 flex items-center gap-1.5">
+        <IconGlyph name="download" :size="14" tint="current" /> 导出分组
       </button>
     </div>
 
     <!-- 玻璃面板：仅含小组内容 -->
     <div class="bg-surface shadow-md rounded-xl border border-border px-6 py-5 flex-1 min-h-0 flex flex-col overflow-hidden">
 
-    <!-- 空状态 -->
-    <div v-if="dimensions.length === 0" class="text-center text-text-muted py-12">
+    <!-- 空状态：占满 flex-1 区域，与有数据网格同高，避免 空态↔数据 切换引起 CLS -->
+    <div v-if="dimensions.length === 0" class="flex-1 flex flex-col items-center justify-center text-center text-text-muted">
       <p class="text-lg mb-2">还没有任何分组维度</p>
       <p class="text-sm">点击上方「添加组」创建一个分组维度（如：宿舍管理、学习小组）。</p>
     </div>

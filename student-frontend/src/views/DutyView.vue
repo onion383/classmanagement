@@ -1,22 +1,26 @@
-<template>
+﻿<template>
   <div>
-    <div class="w-full bg-surface shadow-md rounded-xl mb-6 px-6 py-5 border border-border min-h-[4.5rem] flex items-center">
-      <h1 class="text-2xl font-bold text-text">🧹 卫生值日</h1>
+    <div class="w-full bg-surface shadow-md rounded-xl mb-6 px-5 py-3 border border-border min-h-[4.5rem] flex items-center justify-between">
+      <h1 class="text-2xl font-bold text-text flex items-center gap-2">
+        <IconGlyph name="duty" /> 卫生值日
+      </h1>
+      <AppSelect v-model="dutyMode" :options="dutyModes" class="w-32" @change="onDutyModeChange" />
     </div>
 
     <Tabs :tabs="tabItems" v-model="activeTab">
       <template #default="{ activeTab }">
         <div v-if="activeTab === 'manage'">
           <section class="mb-8">
-            <h2 class="text-xl font-semibold mb-4">📋 当前值日表</h2>
+            <h2 class="text-xl font-semibold mb-4 flex items-center gap-2"><IconGlyph name="clipboard" :size="20" /> 当前值日表</h2>
             <div class="mb-4 flex flex-wrap items-center gap-3">
-              <button @click="settingsVisible = true" class="bg-primary text-text-inverse px-4 py-2 rounded">⚙️ 设置</button>
-              <button @click="refreshActive" class="bg-text-muted text-text-inverse px-4 py-2 rounded">🔄 刷新</button>
-              <button @click="applyMasterToActive" class="bg-primary text-text-inverse px-4 py-2 rounded">📥 从模板导入</button>
-              <button @click="activeExportVisible = true" class="bg-warning text-text-inverse px-4 py-2 rounded">📥 导出值日表</button>
+              <button @click="settingsVisible = true" class="bg-primary text-text-inverse px-4 py-2 rounded flex items-center gap-1.5"><IconGlyph name="settings" :size="14" tint="current" /> 设置</button>
+              <button @click="arrangeVisible = true" class="bg-primary text-text-inverse px-4 py-2 rounded flex items-center gap-1.5"><IconGlyph name="zap" :size="14" tint="current" /> 智能排表</button>
+              <button @click="refreshActive" class="bg-text-muted text-text-inverse px-4 py-2 rounded flex items-center gap-1.5"><IconGlyph name="refresh" :size="14" tint="current" /> 刷新</button>
+              <button @click="applyMasterToActive" class="bg-primary text-text-inverse px-4 py-2 rounded flex items-center gap-1.5"><IconGlyph name="download" :size="14" tint="current" /> 从模板导入</button>
+              <button @click="activeExportVisible = true" class="bg-warning text-text-inverse px-4 py-2 rounded flex items-center gap-1.5"><IconGlyph name="download" :size="14" tint="current" /> 导出值日表</button>
             </div>
 
-            <div v-if="!activeLoaded" class="text-center py-10 text-text-muted">加载中...</div>
+            <div v-if="!activeLoaded" class="skeleton-block"></div>
             <GridView
               v-else
               :col-headers="settingsDays"
@@ -39,13 +43,13 @@
           </section>
 
           <section>
-            <h2 class="text-xl font-semibold mb-4">🗂️ 值日模板</h2>
+            <h2 class="text-xl font-semibold mb-4 flex items-center gap-2"><IconGlyph name="box" :size="20" /> 值日模板</h2>
             <div class="mb-4 flex flex-wrap items-center gap-3">
-              <button @click="refreshMaster" class="bg-text-muted text-text-inverse px-4 py-2 rounded">🔄 刷新</button>
-              <button @click="masterExportVisible = true" class="bg-warning text-text-inverse px-4 py-2 rounded">📥 导出值日表</button>
+              <button @click="refreshMaster" class="bg-text-muted text-text-inverse px-4 py-2 rounded flex items-center gap-1.5"><IconGlyph name="refresh" :size="14" tint="current" /> 刷新</button>
+              <button @click="masterExportVisible = true" class="bg-warning text-text-inverse px-4 py-2 rounded flex items-center gap-1.5"><IconGlyph name="download" :size="14" tint="current" /> 导出值日表</button>
             </div>
 
-            <div v-if="!masterLoaded" class="text-center py-10 text-text-muted">加载中...</div>
+            <div v-if="!masterLoaded" class="skeleton-block"></div>
             <GridView
               v-else
               :col-headers="settingsDays"
@@ -69,7 +73,7 @@
         </div>
 
         <div v-else-if="activeTab === 'history'">
-          <div v-if="historyLoading" class="text-center py-10">加载中...</div>
+          <div v-if="historyLoading" class="skeleton-block"></div>
           <EmptySnapshot v-else-if="!historySnapshot" />
           <GridView v-else :col-headers="historyDays" :rows="historyRows" :hide-meta-columns="true" :show-row-number="true" row-header-label="劳动项目" :min-table-height="200" />
           <WeekSwitcher v-model:currentWeek="historyCurrentWeek" :weeks="historyWeeks" @update:currentWeek="loadHistorySnapshot" />
@@ -89,6 +93,17 @@
       @save="saveSettings"
       @cancel="settingsVisible = false"
     />
+
+    <!-- 值日智能排表弹窗 -->
+    <DutyArrangementDialog
+      v-if="arrangeMounted"
+      :visible="arrangeVisible"
+      :days="settingsDays"
+      :items="settingsItems"
+      :students="allStudents"
+      @cancel="arrangeVisible = false"
+      @confirm="onArrangeConfirm"
+    />
   </div>
 </template>
 
@@ -99,11 +114,14 @@ import Tabs from '../components/base/Tabs.vue'
 import EmptySnapshot from '../components/base/EmptySnapshot.vue'
 import GridView from '../components/tables/GridView.vue'
 import WeekSwitcher from '../components/base/WeekSwitcher.vue'
+import AppSelect from '../components/base/AppSelect.vue'
 import { useNotification } from '../composables/useNotification.js'
 import { useUndoShortcut, recordGridSnapshotUndo } from '../composables/useUndo.js'
+import { syncStudentNamesFromRows, syncStudentNames } from '../composables/useSyncStudentNames.js'
 
 // 弹窗类组件懒加载：打开时才加载对应 chunk
 const DutySettingsDialog = defineAsyncComponent(() => import('../components/dialogs/DutySettingsDialog.vue'))
+const DutyArrangementDialog = defineAsyncComponent(() => import('../components/dialogs/DutyArrangementDialog.vue'))
 const ExportExcel = defineAsyncComponent(() => import('../components/import-export/ExportExcel.vue'))
 
 const API_BASE = '/api'
@@ -111,6 +129,7 @@ const { success: notifySuccess, error: notifyError } = useNotification()
 
 const activeTab = ref('manage')
 const settingsVisible = ref(false)
+const arrangeVisible = ref(false)
 
 // 导出弹窗可见状态（受控模式配合 v-if 实现懒加载）
 const activeExportVisible = ref(false)
@@ -120,9 +139,11 @@ const masterExportVisible = ref(false)
 const settingsMounted = ref(false)
 const activeExportMounted = ref(false)
 const masterExportMounted = ref(false)
+const arrangeMounted = ref(false)
 watch(() => settingsVisible.value, v => { if (v) settingsMounted.value = true })
 watch(() => activeExportVisible.value, v => { if (v) activeExportMounted.value = true })
 watch(() => masterExportVisible.value, v => { if (v) masterExportMounted.value = true })
+watch(() => arrangeVisible.value, v => { if (v) arrangeMounted.value = true })
 const tabItems = [
   { label: '值日管理', value: 'manage' },
   { label: '历史记录', value: 'history' }
@@ -177,10 +198,26 @@ function reconstructCells(newRows, dayList) {
 
 async function fetchSettings() {
   try {
-    const res = await axios.get(`${API_BASE}/duty/settings`)
+    const res = await axios.get(`${API_BASE}/duty/settings?mode=${dutyMode.value}`)
     settingsDays.value = (res.data.days && res.data.days.length) ? res.data.days : ['周一', '周二', '周三', '周四', '周五']
     settingsItems.value = res.data.items || []
   } catch (e) { console.error(e) }
+}
+
+// ==================== 模式：日常值日 / 大扫除（数据各自独立） ====================
+const dutyModes = [
+  { value: 'daily', label: '日常值日' },
+  { value: 'big', label: '大扫除' },
+]
+const dutyMode = ref(localStorage.getItem('class-duty-mode') || 'daily')
+function onDutyModeChange() {
+  localStorage.setItem('class-duty-mode', dutyMode.value)
+  reloadAll()
+}
+async function reloadAll() {
+  await fetchSettings()
+  // 静默加载：切换模式时不清空 loading 层，避免下方表格出现“加载中→内容”的闪动
+  await Promise.all([loadActive(true), loadMaster(true)])
 }
 
 async function fetchAllStudents() {
@@ -190,14 +227,30 @@ async function fetchAllStudents() {
   } catch (e) { console.error(e) }
 }
 
+// 值日 cells 是 {项目:{星期:[人名]}} 对象，扫描其中所有人名，同步给学生管理
+function syncCellsNames(cellsObj) {
+  const names = []
+  Object.values(cellsObj || {}).forEach(dayObj =>
+    Object.values(dayObj || {}).forEach(list =>
+      (list || []).forEach(n => n && names.push(String(n).trim()))
+    )
+  )
+  syncStudentNames([...new Set(names)], {
+    getKnown: () => allStudents.value,
+    refresh: fetchAllStudents,
+    notify: notifySuccess
+  })
+}
+
 // ==================== 当前值日表 ====================
 const activeCells = ref({})
 const activeLoaded = ref(false)
 const loadActive = async (silent = false) => {
   if (!silent) activeLoaded.value = false
   try {
-    const res = await axios.get(`${API_BASE}/duty`)
+    const res = await axios.get(`${API_BASE}/duty?mode=${dutyMode.value}`)
     activeCells.value = res.data.cells || {}
+    syncCellsNames(activeCells.value) // 加载后检测未收录姓名
   } catch (e) { console.error(e) } finally { activeLoaded.value = true }
 }
 const dutyActiveRows = computed(() => buildGridRows(activeCells.value))
@@ -208,8 +261,9 @@ const masterLoaded = ref(false)
 const loadMaster = async (silent = false) => {
   if (!silent) masterLoaded.value = false
   try {
-    const res = await axios.get(`${API_BASE}/duty/template`)
+    const res = await axios.get(`${API_BASE}/duty/template?mode=${dutyMode.value}`)
     masterCells.value = res.data.cells || {}
+    syncCellsNames(masterCells.value) // 加载后检测未收录姓名
   } catch (e) { console.error(e) } finally { masterLoaded.value = true }
 }
 const dutyMasterRows = computed(() => buildGridRows(masterCells.value))
@@ -233,9 +287,19 @@ function diffCellsLabel(prev, next) {
   }
   return ''
 }
+// 值日表格中出现的人名，若不在学生管理中，自动新增到学生（复用共享工具）
+function syncNewNamesFromRows(newRows) {
+  syncStudentNamesFromRows(newRows, {
+    getKnown: () => allStudents.value,
+    refresh: fetchAllStudents,
+    notify: notifySuccess
+  })
+}
+
 // GridView 保存/编辑单元格后会 emit 新的多行子行表格，按「项目名」分组回写
 function makeCellsUpdate(cellsRef, persist, table) {
   return (newRows) => {
+    syncNewNamesFromRows(newRows) // 输入的人名自动同步到学生管理
     const prev = JSON.parse(JSON.stringify(cellsRef.value))
     cellsRef.value = reconstructCells(newRows, settingsDays.value)
     const label = diffCellsLabel(prev, cellsRef.value)
@@ -253,19 +317,28 @@ useUndoShortcut('值日表', {
 })
 
 async function persistActive() {
-  try { await axios.put(`${API_BASE}/duty`, { cells: activeCells.value }) }
+  try { await axios.put(`${API_BASE}/duty`, { cells: activeCells.value, mode: dutyMode.value }) }
   catch (e) { notifyError('保存失败'); console.error(e) }
 }
+
+// 智能排表确认：写回当前值日表（当前模式）
+function onArrangeConfirm({ cells }) {
+  if (!cells || !Object.keys(cells).length) { notifyError('请先点击「开始排表」生成结果'); return }
+  activeCells.value = cells
+  persistActive()
+  arrangeVisible.value = false
+  notifySuccess('已应用智能排表')
+}
 async function persistMaster() {
-  try { await axios.put(`${API_BASE}/duty/template`, { cells: masterCells.value }) }
+  try { await axios.put(`${API_BASE}/duty/template`, { cells: masterCells.value, mode: dutyMode.value }) }
   catch (e) { notifyError('保存失败'); console.error(e) }
 }
 
 // ==================== 行/列拖拽 & 删除（作用于设置） ====================
 function persistSettings(extra) {
-  const tasks = [axios.put(`${API_BASE}/duty/settings`, { days: settingsDays.value, items: settingsItems.value })]
-  if (extra && extra.active !== undefined) tasks.push(axios.put(`${API_BASE}/duty`, { cells: activeCells.value }))
-  if (extra && extra.master !== undefined) tasks.push(axios.put(`${API_BASE}/duty/template`, { cells: masterCells.value }))
+  const tasks = [axios.put(`${API_BASE}/duty/settings`, { days: settingsDays.value, items: settingsItems.value, mode: dutyMode.value })]
+  if (extra && extra.active !== undefined) tasks.push(axios.put(`${API_BASE}/duty`, { cells: activeCells.value, mode: dutyMode.value }))
+  if (extra && extra.master !== undefined) tasks.push(axios.put(`${API_BASE}/duty/template`, { cells: masterCells.value, mode: dutyMode.value }))
   return Promise.all(tasks)
 }
 
@@ -323,7 +396,7 @@ async function applyMasterToActive() {
   if (!confirm('确定用模板覆盖当前值日表吗？')) return
   try {
     const before = JSON.parse(JSON.stringify(activeCells.value))
-    await axios.post(`${API_BASE}/duty/apply-master`)
+    await axios.post(`${API_BASE}/duty/apply-master?mode=${dutyMode.value}`)
     await loadActive()
     recordGridSnapshotUndo('值日表', 'duty_layout', before, JSON.parse(JSON.stringify(activeCells.value)), '从模板导入')
     notifySuccess('已应用模板')

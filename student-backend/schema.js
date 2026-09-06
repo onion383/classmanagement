@@ -254,6 +254,13 @@ function initSchema(conn) {
       conn.exec(`ALTER TABLE widget_settings ADD COLUMN desktop_apps TEXT DEFAULT '[]'`);
     }
   }
+  // 存量库迁移：为 widget_settings 补充 class_info（首页班级信息：班名/口号/班风/学风，JSON 文本）
+  {
+    const widgetCols = conn.prepare('PRAGMA table_info(widget_settings)').all().map(c => c.name);
+    if (!widgetCols.includes('class_info')) {
+      conn.exec(`ALTER TABLE widget_settings ADD COLUMN class_info TEXT DEFAULT '{}'`);
+    }
+  }
   // 存量库迁移：为相册照片表补充 thumb_path 列
   {
     const photoCols = conn.prepare('PRAGMA table_info(album_photos)').all().map(c => c.name);
@@ -495,6 +502,26 @@ function initSchema(conn) {
   `);
   // 优化：按资源分组查询/删最旧记录
   conn.exec(`CREATE INDEX IF NOT EXISTS idx_undo_key ON undo_history (key, id);`);
+
+  // ======================== 班干部 ========================
+  // cadres：职务树节点。parent_id=0 表示顶级（直接挂在根下，如班主任/班长）。
+  // cadre_members：职务的担任学生（一个职务可多人，一人也可任多职）。
+  conn.exec(`
+    CREATE TABLE IF NOT EXISTS cadres (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      name TEXT NOT NULL,
+      parent_id INTEGER NOT NULL DEFAULT 0,
+      max_count INTEGER NOT NULL DEFAULT 1,
+      sort_order INTEGER NOT NULL DEFAULT 0
+    );
+    CREATE TABLE IF NOT EXISTS cadre_members (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      cadre_id INTEGER NOT NULL,
+      student_id INTEGER,
+      student_name TEXT NOT NULL,
+      sort_order INTEGER NOT NULL DEFAULT 0
+    );
+  `);
 }
 
 module.exports = { initSchema };

@@ -1,13 +1,13 @@
 <template>
   <div class="h-full">
     <!-- 顶部标题栏 -->
-    <div class="w-full bg-surface shadow-md rounded-xl mb-6 px-6 py-5 border border-border min-h-[4.5rem] flex items-center">
-      <h1 class="text-2xl font-bold text-text">⚙️ 系统设置</h1>
+    <div class="w-full bg-surface shadow-md rounded-xl mb-6 px-5 py-3 border border-border min-h-[4.5rem] flex items-center">
+      <h1 class="text-2xl font-bold text-text flex items-center gap-2"><IconGlyph name="settings" /> 系统设置</h1>
     </div>
 
     <!-- ========== 账号管理 ========== -->
     <div class="mb-6">
-      <h2 class="text-xl font-semibold text-text mb-4">👤 账号管理</h2>
+      <h2 class="text-xl font-semibold text-text mb-4 flex items-center gap-2"><IconGlyph name="user" :size="20" /> 账号管理</h2>
 
       <div class="bg-surface rounded-lg border border-border p-6">
         <h3 class="text-lg font-semibold text-text mb-4">账号信息</h3>
@@ -29,7 +29,7 @@
     <!-- ========== 撤销记录 ========== -->
     <div class="mb-6">
       <div class="flex items-center justify-between mb-4">
-        <h2 class="text-xl font-semibold text-text">↩️ 撤销记录</h2>
+        <h2 class="text-xl font-semibold text-text flex items-center gap-2"><IconGlyph name="undo" :size="20" /> 撤销记录</h2>
         <button
           v-if="hasUndoRecords"
           @click="clearUndo"
@@ -44,7 +44,7 @@
           暂无编辑记录。在表格中修改数据后，这里会记录该次操作，之后可一键撤销、跨重启保留。
         </div>
 
-        <div v-else class="space-y-6">
+        <div v-else class="space-y-6 max-h-[22rem] overflow-y-auto pr-1">
           <div v-for="group in undoGroups" :key="group.key" class="border border-border rounded-lg overflow-hidden">
             <div class="flex items-center justify-between px-4 py-2.5 bg-surface-hover border-b border-border">
               <span class="font-medium text-text">{{ groupLabel(group.key) }}</span>
@@ -82,10 +82,10 @@
 
     <!-- ========== 主题设置 ========== -->
     <div class="mb-6">
-      <h2 class="text-xl font-semibold text-text mb-4">🎨 主题设置</h2>
+      <h2 class="text-xl font-semibold text-text mb-4 flex items-center gap-2"><IconGlyph name="palette" :size="20" /> 主题设置</h2>
 
       <div class="bg-surface rounded-lg border border-border p-6">
-          <!-- 主题选择 -->
+          <!-- 主题设置区：主题选择 + 图标样式 -->
           <div class="flex items-center gap-4 mb-6">
             <label class="text-sm font-medium text-text w-16 flex-shrink-0">主题</label>
             <AppSelect
@@ -96,52 +96,21 @@
             />
           </div>
 
-          <!-- 新建主题表单 -->
-          <div v-if="isCreatingNewTheme" class="border-t border-border pt-6 mb-6">
-            <h3 class="text-lg font-semibold text-text mb-4">新建主题</h3>
-            <div class="flex items-center gap-4 mb-4">
-              <label class="text-sm font-medium text-text w-16 flex-shrink-0">主题名</label>
-              <input v-model="newThemeName" placeholder="输入主题名称" class="border border-border bg-surface text-text px-3 py-2 rounded w-64" />
-            </div>
-            <div class="flex items-center gap-4 mb-4">
-              <label class="text-sm font-medium text-text w-16 flex-shrink-0">主色</label>
-              <input type="color" v-model="newThemePrimary" class="w-10 h-10 p-0 border-0 rounded overflow-hidden cursor-pointer" />
-              <span class="text-sm text-text-secondary">{{ newThemePrimary }}</span>
-            </div>
-            <div class="flex gap-3">
-              <button @click="saveNewTheme" class="bg-primary hover:bg-primary-hover text-text-inverse px-4 py-2 rounded transition-theme">保存主题</button>
-              <button @click="cancelNewTheme" class="bg-surface-hover text-text px-4 py-2 rounded border border-border transition-theme">取消</button>
-            </div>
-          </div>
-
-          <!-- 颜色调整（非默认主题） -->
-          <div v-if="showColorSettings" class="border-t border-border pt-6">
-            <div class="flex items-center justify-between mb-4">
-              <h3 class="text-lg font-semibold text-text">颜色调整</h3>
-              <button v-if="!isPreset" @click="deleteCurrentCustomTheme" class="text-sm text-danger hover:underline">删除此主题</button>
-            </div>
-            <div class="grid grid-cols-3 gap-4">
-              <div v-for="item in colorItems" :key="item.key" class="flex items-center gap-3 p-3 rounded border border-border bg-surface-hover">
-                <input
-                  type="color"
-                  :value="currentColor(item.key, item.default)"
-                  @input="updateColor(item.key, $event.target.value)"
-                  class="w-8 h-8 p-0 border-0 rounded overflow-hidden cursor-pointer flex-shrink-0"
-                />
-                <div>
-                  <div class="text-sm font-medium text-text">{{ item.label }}</div>
-                  <div class="text-xs text-text-muted">{{ currentColor(item.key, item.default) }}</div>
-                </div>
-              </div>
-            </div>
-            <div class="flex gap-3 mt-4">
-              <button @click="resetThemeColors" class="bg-surface-hover text-text px-4 py-2 rounded border border-border transition-theme">重置为默认</button>
-            </div>
+          <!-- 图标样式切换 -->
+          <div class="flex items-center gap-4 mb-6">
+            <label class="text-sm font-medium text-text w-16 flex-shrink-0">图标样式</label>
+            <AppSelect
+              v-model="iconStyle"
+              @change="onIconStyleChange"
+              :options="iconStyleOptions"
+              class="w-56"
+            />
+            <span class="text-xs text-text-muted">影响侧边栏导航图标显示风格</span>
           </div>
 
           <!-- 背景图片（仅毛玻璃主题） -->
           <div v-if="currentTheme === 'glass'" class="border-t border-border pt-6 mt-6">
-            <h3 class="text-lg font-semibold text-text mb-4">🖼️ 背景图片</h3>
+            <h3 class="text-lg font-semibold text-text mb-4 flex items-center gap-2"><IconGlyph name="image" :size="18" /> 背景图片</h3>
             <div class="flex items-center gap-3 mb-2">
               <input
                 ref="bgImageInput"
@@ -150,7 +119,7 @@
                 @change="onBgImageFileChange"
                 class="hidden"
               />
-              <button @click="$refs.bgImageInput.click()" class="bg-info hover:bg-info-hover text-text-inverse px-4 py-2 rounded transition-theme whitespace-nowrap">📁 选择本地图片</button>
+              <button @click="$refs.bgImageInput.click()" class="bg-info hover:bg-info-hover text-text-inverse px-4 py-2 rounded transition-theme whitespace-nowrap flex items-center gap-1.5"><IconGlyph name="folder" :size="14" tint="current" /> 选择本地图片</button>
               <span v-if="bgImageFileName" class="text-sm text-text-secondary">已选: {{ bgImageFileName }}</span>
               <button v-if="bgImageUrl" @click="clearBgImage" class="text-sm text-danger hover:underline">清除</button>
             </div>
@@ -162,7 +131,7 @@
 
           <!-- 透明度设置（仅毛玻璃主题） -->
           <div v-if="currentTheme === 'glass'" class="border-t border-border pt-6 mt-6">
-            <h3 class="text-lg font-semibold text-text mb-4">🎚️ 透明度设置</h3>
+            <h3 class="text-lg font-semibold text-text mb-4 flex items-center gap-2"><IconGlyph name="sliders" :size="18" /> 透明度设置</h3>
             <div class="space-y-5">
               <div>
                 <div class="flex items-center justify-between mb-1">
@@ -203,7 +172,7 @@
 
     <!-- ========== 工具箱设置 ========== -->
     <div class="mb-6">
-      <h2 class="text-xl font-semibold text-text mb-4">🧰 工具箱设置</h2>
+      <h2 class="text-xl font-semibold text-text mb-4 flex items-center gap-2"><IconGlyph name="toolbox" :size="20" /> 工具箱设置</h2>
       <div class="bg-surface rounded-lg border border-border p-6">
         <div class="flex items-center gap-4">
           <label class="text-sm font-medium text-text w-40 flex-shrink-0">是否启用工具箱</label>
@@ -234,7 +203,7 @@
 
     <!-- ========== 保存路径设置 ========== -->
     <div class="mb-6">
-      <h2 class="text-xl font-semibold text-text mb-4">📁 保存路径设置</h2>
+      <h2 class="text-xl font-semibold text-text mb-4 flex items-center gap-2"><IconGlyph name="folder" :size="20" /> 保存路径设置</h2>
       <div class="bg-surface rounded-lg border border-border p-6 space-y-6">
         <div>
           <div class="flex items-center gap-4 mb-2">
@@ -256,49 +225,6 @@
           </div>
           <p class="text-xs text-text-muted ml-40">一键截屏工具保存截图的目录，留空则使用默认位置</p>
         </div>
-      </div>
-    </div>
-
-    <!-- ========== AI 助手设置 ========== -->
-    <div class="mb-6">
-      <h2 class="text-xl font-semibold text-text mb-4">🧠 AI 助手设置</h2>
-      <div class="bg-surface rounded-lg border border-border p-6 space-y-5">
-        <div class="flex items-center gap-4">
-          <label class="text-sm font-medium text-text w-40 flex-shrink-0">启用 AI 助手</label>
-          <label class="inline-flex items-center cursor-pointer">
-            <input type="checkbox" :checked="ai.enabled" @change="onAiEnabledChange" class="w-4 h-4 rounded border-border text-primary focus:ring-primary cursor-pointer" />
-            <span class="ml-2 text-sm text-text-secondary">{{ ai.enabled ? '已启用' : '已禁用' }}</span>
-          </label>
-        </div>
-
-        <div class="flex items-center gap-4">
-          <label class="text-sm font-medium text-text w-40 flex-shrink-0">模型服务</label>
-          <AppSelect v-model="ai.provider" @change="onAiProviderChange" :options="aiProviderOptions" class="w-56" />
-          <a v-if="ai.provider !== 'custom'" :href="aiProviderDocs[ai.provider]" target="_blank" rel="noopener" class="text-xs text-info hover:underline">获取 API Key</a>
-        </div>
-
-        <div class="flex items-center gap-4">
-          <label class="text-sm font-medium text-text w-40 flex-shrink-0">Base URL</label>
-          <input v-model="ai.base_url" @input="onAiBaseUrlInput" placeholder="留空使用默认" class="flex-1 border border-border bg-surface text-text px-3 py-2 rounded" />
-        </div>
-
-        <div class="flex items-center gap-4">
-          <label class="text-sm font-medium text-text w-40 flex-shrink-0">模型名</label>
-          <input v-model="ai.model" @input="onAiModelInput" placeholder="留空使用默认" class="flex-1 border border-border bg-surface text-text px-3 py-2 rounded" />
-        </div>
-
-        <div class="flex items-center gap-4">
-          <label class="text-sm font-medium text-text w-40 flex-shrink-0">API Key</label>
-          <input v-model="ai.api_key" type="password" @input="onAiKeyInput" :placeholder="ai.hasApiKey ? '已配置（留空保持不变）' : '粘贴 API Key'" class="flex-1 border border-border bg-surface text-text px-3 py-2 rounded" autocomplete="off" />
-        </div>
-
-        <div class="flex items-center gap-3 ml-40">
-          <button @click="testAi" :disabled="aiTesting" class="bg-info hover:bg-info-hover text-text-inverse px-4 py-2 rounded transition-theme disabled:opacity-40">
-            {{ aiTesting ? '测试中…' : '测试连接' }}
-          </button>
-          <span v-if="aiTestResult" class="text-sm" :class="aiTestOk ? 'text-success' : 'text-danger'">{{ aiTestResult }}</span>
-        </div>
-        <p class="text-xs text-text-muted ml-40">密钥仅保存在本机加密数据库中，不会上传或进入前端界面。支持 OpenAI 兼容协议的服务均可接入。</p>
       </div>
     </div>
 
@@ -332,8 +258,13 @@
     <div v-if="modalType === 'export'" class="fixed inset-0 bg-black/50 flex items-center justify-center z-[10001]" @click.self="closeModal">
       <div class="bg-surface rounded-lg p-6 w-96 border border-border shadow-lg">
         <h3 class="text-lg font-bold text-text mb-4">导出数据库</h3>
-        <p class="text-xs text-text-muted mb-3">输入你的登录密码即可导出当前库（业务数据 + 应用设置 + 账号），换机后可用同一密码恢复。</p>
-        <input v-model="exportPassword" type="password" placeholder="登录密码" autocomplete="current-password" class="border border-border bg-surface text-text p-2 w-full mb-4 rounded" />
+        <p class="text-xs text-text-muted mb-3">导出当前库（业务数据 + 应用设置 + 账号），换机后用对应的密码恢复。</p>
+        <input v-model="exportPassword" type="password" placeholder="登录密码（未设密码可留空）" autocomplete="current-password" class="border border-border bg-surface text-text p-2 w-full mb-3 rounded" />
+        <label class="flex items-center gap-2 text-sm text-text mb-2 cursor-pointer select-none">
+          <input type="checkbox" v-model="exportEncrypt" class="w-4 h-4 accent-warning" />
+          数据库密码加密导出
+        </label>
+        <input v-model="exportDbPwd" type="password" :disabled="!exportEncrypt" placeholder="数据库密码（有密码账号留空则默认用账号密码）" autocomplete="new-password" class="border border-border bg-surface text-text p-2 w-full mb-4 rounded disabled:opacity-50" />
         <div class="flex justify-end gap-2">
           <button @click="closeModal" class="bg-surface-hover text-text px-4 py-2 rounded border border-border transition-theme">取消</button>
           <button @click="exportDb" :disabled="busyExport" class="bg-warning hover:bg-warning-hover text-text-inverse px-4 py-2 rounded transition-theme disabled:opacity-50">
@@ -362,6 +293,7 @@ import AppSelect from '../components/base/AppSelect.vue'
 import { useThemeStore } from '../stores/theme'
 import { storeToRefs } from 'pinia'
 import { resourceUrl } from '../utils/apiUrl'
+import { createDebouncedSave } from '../composables/useDebouncedSave'
 
 // 弹窗类组件懒加载：打开时才加载对应 chunk
 const ConfirmDialog = defineAsyncComponent(() => import('../components/base/ConfirmDialog.vue'))
@@ -374,16 +306,19 @@ export default {
   },
   data() {
     const themeStore = useThemeStore()
-    const { currentTheme, customColors, customThemes, isPreset, bgMaskOpacity, glassOpacity } = storeToRefs(themeStore)
+    const { currentTheme, bgMaskOpacity, glassOpacity, iconStyle } = storeToRefs(themeStore)
 
     return {
       themeStore,
       currentTheme,
-      customColors,
-      customThemes,
-      isPreset,
       bgMaskOpacity,
       glassOpacity,
+      iconStyle,
+      // 图标样式选项：彩色图标 / Emoji
+      iconStyleOptions: [
+        { value: 'color', label: '彩色图标' },
+        { value: 'emoji', label: 'Emoji' },
+      ],
       // Modal
       modalType: '',
       newUsername: '',
@@ -392,6 +327,8 @@ export default {
       newPassword: '',
       // Export database
       exportPassword: '',
+      exportEncrypt: true,
+      exportDbPwd: '',
       busyExport: false,
       // Dialog
       dialog: {
@@ -410,17 +347,12 @@ export default {
       screenshotSavePath: '',
       usbAutoOpen: false,
       loaded: false,
-      _noteDebounce: null,
-      _screenshotDebounce: null,
       _fromMainHandler: null,
       // 撤销记录
       undoGroups: [],
       busyUndo: false,
       // Theme
       selectedThemeId: '',
-      isCreatingNewTheme: false,
-      newThemeName: '',
-      newThemePrimary: '#22c55e',
       // Background image
       bgImageUrl: '',
       bgImageFileName: '',
@@ -430,72 +362,18 @@ export default {
         { id: 'win11', name: 'Win11 主题' },
         { id: 'minimal', name: '极简主题' },
       ],
-      colorItems: [
-        { key: 'color-primary', label: '主色', default: '#22c55e' },
-        { key: 'color-bg', label: '背景', default: '#f9fafb' },
-        { key: 'color-surface', label: '卡片', default: '#ffffff' },
-        { key: 'color-sidebar', label: '侧边栏', default: '#1f2937' },
-        { key: 'color-text', label: '文字', default: '#111827' },
-        { key: 'color-border', label: '边框', default: '#e5e7eb' },
-        { key: 'color-success', label: '成功', default: '#22c55e' },
-        { key: 'color-danger', label: '危险', default: '#ef4444' },
-        { key: 'color-info', label: '信息', default: '#3b82f6' },
-        { key: 'color-warning', label: '警告', default: '#f59e0b' },
-      ],
-      // AI 助手设置
-      ai: {
-        enabled: false,
-        provider: 'deepseek',
-        base_url: '',
-        model: '',
-        api_key: '',
-        hasApiKey: false,
-      },
-      aiTesting: false,
-      aiTestResult: '',
-      aiTestOk: false,
-      _aiDebounce: null,
-      _aiKeyDebounce: null,
-      aiProviderPresets: {
-        deepseek: { base_url: 'https://api.deepseek.com/v1', model: 'deepseek-chat' },
-        openai: { base_url: 'https://api.openai.com/v1', model: 'gpt-4o-mini' },
-        moonshot: { base_url: 'https://api.moonshot.cn/v1', model: 'moonshot-v1-8k' },
-        qwen: { base_url: 'https://dashscope.aliyuncs.com/compatible-mode/v1', model: 'qwen-plus' },
-        glm: { base_url: 'https://open.bigmodel.cn/api/paas/v4', model: 'glm-4-flash' },
-        custom: { base_url: '', model: '' },
-      },
-      aiProviderDocs: {
-        deepseek: 'https://platform.deepseek.com/',
-        openai: 'https://platform.openai.com/',
-        moonshot: 'https://platform.moonshot.cn/',
-        qwen: 'https://dashscope.console.aliyun.com/',
-        glm: 'https://open.bigmodel.cn/',
-        custom: 'https://example.com',
-      },
     }
   },
   computed: {
     user() {
       return JSON.parse(localStorage.getItem('currentUser') || '{}')
     },
-    showColorSettings() {
-      return !this.isCreatingNewTheme && this.currentTheme !== 'base'
+    themeOptions() {
+      return this.presetThemes.map(t => ({ value: t.id, label: t.name }))
     },
     // 预览图走 resourceUrl：补完整后端地址并追加 ?token=，保证打包版 file:// 下能通过鉴权
     bgImagePreviewUrl() {
       return this.bgImageUrl ? resourceUrl(this.bgImageUrl) : ''
-    },
-    themeOptions() {
-      const opts = [
-        { value: 'new', label: '+ 新建主题' },
-        { value: '', label: '──────────', disabled: true },
-        ...this.presetThemes.map(t => ({ value: t.id, label: t.name })),
-      ]
-      if (this.customThemes.length) {
-        opts.push({ value: '', label: '──────────', disabled: true })
-        opts.push(...this.customThemes.map(t => ({ value: t.id, label: t.name })))
-      }
-      return opts
     },
     hasUndoRecords() {
       return this.undoGroups.length > 0
@@ -503,32 +381,24 @@ export default {
     _undoKeyLabels() {
       return { students: '学生表', fee_records: '收费记录', leave_records: '请假记录', score_records: '成绩记录', group_manage: '分组管理', album: '班级相册' }
     },
-    aiProviderOptions() {
-      return [
-        { value: 'deepseek', label: 'DeepSeek（推荐）' },
-        { value: 'moonshot', label: 'Kimi（月之暗面）' },
-        { value: 'qwen', label: '通义千问' },
-        { value: 'glm', label: '智谱清言' },
-        { value: 'openai', label: 'OpenAI' },
-        { value: 'custom', label: '自定义（OpenAI 兼容）' },
-      ]
-    },
   },
   mounted() {
+    // 路径输入的防抖保存调度器
+    this._noteSaver = createDebouncedSave(() => this.saveWidgetSettings())
+    this._screenshotSaver = createDebouncedSave(() => this.saveWidgetSettings())
     this.selectedThemeId = this.currentTheme
     this.bgImageUrl = this.themeStore.backgroundImage
     this.loadUndo()
     this.loadWidgetSettings()
     this.loadSession()
     this.loadUsbAutoOpen()
-    this.loadAiConfig()
     this._fromMainHandler = window.electron?.on('from-main', (data) => {
       if (data && data.type === 'session-widget-changed') this.loadSession()
     })
   },
   beforeUnmount() {
-    clearTimeout(this._noteDebounce)
-    clearTimeout(this._screenshotDebounce)
+    this._noteSaver?.teardown()
+    this._screenshotSaver?.teardown()
     if (this._fromMainHandler) {
       window.electron?.off('from-main', this._fromMainHandler)
     }
@@ -599,6 +469,8 @@ export default {
       this.oldPassword = ''
       this.newPassword = ''
       this.exportPassword = ''
+      this.exportEncrypt = true
+      this.exportDbPwd = ''
     },
     closeModal() {
       this.modalType = ''
@@ -652,14 +524,24 @@ export default {
       })
     },
     async exportDb() {
-      const pwd = this.exportPassword
-      if (!pwd) {
+      const needsPassword = !!this.user.hasPassword
+      const loginPwd = this.exportPassword
+      // 有密码账号：必须先校验登录密码
+      if (needsPassword && !loginPwd) {
         this.showAlert('请输入登录密码以导出数据库')
+        return
+      }
+      // 勾选加密：无密码账号必须提供一个导出密码（否则没有口令可供包裹库钥匙）
+      if (this.exportEncrypt && !needsPassword && !this.exportDbPwd) {
+        this.showAlert('该账号未设置密码，请设置一个导出密码以加密备份')
         return
       }
       this.busyExport = true
       try {
-        const res = await axios.get('/api/account/export', { params: { password: pwd } })
+        const body = { encrypt: this.exportEncrypt ? '1' : '0' }
+        if (needsPassword) body.password = loginPwd
+        if (this.exportEncrypt && this.exportDbPwd) body.dbPassword = this.exportDbPwd
+        const res = await axios.post('/api/account/export', body)
         const blob = new Blob([JSON.stringify(res.data, null, 2)], { type: 'application/json' })
         const url = URL.createObjectURL(blob)
         const a = document.createElement('a')
@@ -670,79 +552,18 @@ export default {
         document.body.removeChild(a)
         URL.revokeObjectURL(url)
         this.closeModal()
-        this.showAlert('导出成功。请保管好备份文件与你在本页填写的密码/助记词（线上明文不保存）')
+        this.showAlert('导出成功。请保管好备份文件与本次使用的数据库密码（线上明文不保存）')
       } catch (err) {
         this.showAlert(err.response?.data?.error || '导出失败')
       } finally { this.busyExport = false }
     },
     // Theme
     onThemeSelect() {
-      if (this.selectedThemeId === 'new') {
-        this.isCreatingNewTheme = true
-        this.newThemeName = ''
-        this.newThemePrimary = '#22c55e'
-      } else {
-        this.isCreatingNewTheme = false
-        this.themeStore.setTheme(this.selectedThemeId)
-        // 如果是自定义主题，加载其颜色
-        const custom = this.customThemes.find(t => t.id === this.selectedThemeId)
-        if (custom && custom.colors) {
-          this.themeStore.resetCustomColors()
-          Object.entries(custom.colors).forEach(([key, value]) => {
-            this.themeStore.setCustomColor(key, value)
-          })
-        } else if (['base', 'glass', 'minimal'].includes(this.selectedThemeId)) {
-          this.themeStore.resetCustomColors()
-        }
-      }
+      this.themeStore.setTheme(this.selectedThemeId)
     },
-    saveNewTheme() {
-      if (!this.newThemeName.trim()) {
-        this.showAlert('请输入主题名称')
-        return
-      }
-      const colors = {
-        'color-primary': this.newThemePrimary,
-      }
-      const id = this.themeStore.createCustomTheme(this.newThemeName.trim(), colors)
-      this.themeStore.setTheme(id)
-      this.themeStore.resetCustomColors()
-      Object.entries(colors).forEach(([key, value]) => {
-        this.themeStore.setCustomColor(key, value)
-      })
-      this.isCreatingNewTheme = false
-      this.selectedThemeId = id
-      this.showAlert('主题创建成功')
-    },
-    cancelNewTheme() {
-      this.isCreatingNewTheme = false
-      this.selectedThemeId = this.currentTheme
-    },
-    currentColor(key, defaultVal) {
-      return this.customColors[key] || defaultVal
-    },
-    updateColor(key, value) {
-      this.themeStore.setCustomColor(key, value)
-      // 如果当前是自定义主题，同步更新主题的颜色配置
-      const custom = this.customThemes.find(t => t.id === this.currentTheme)
-      if (custom) {
-        const newColors = { ...(custom.colors || {}), [key]: value }
-        this.themeStore.updateCustomTheme(custom.id, { colors: newColors })
-      }
-    },
-    resetThemeColors() {
-      this.themeStore.resetCustomColors()
-      // 如果当前是自定义主题，清空其颜色配置
-      const custom = this.customThemes.find(t => t.id === this.currentTheme)
-      if (custom) {
-        this.themeStore.updateCustomTheme(custom.id, { colors: {} })
-      }
-    },
-    deleteCurrentCustomTheme() {
-      this.showConfirm('确定要删除此自定义主题吗？', () => {
-        this.themeStore.deleteCustomTheme(this.currentTheme)
-        this.selectedThemeId = 'base'
-      })
+    // 图标样式：线性图标 / Emoji
+    onIconStyleChange() {
+      this.themeStore.setIconStyle(this.iconStyle)
     },
     // Background image
     async onBgImageFileChange(e) {
@@ -849,14 +670,12 @@ export default {
     onNotePathInput(e) {
       this.noteSavePath = e.target.value
       if (!this.loaded) return
-      clearTimeout(this._noteDebounce)
-      this._noteDebounce = setTimeout(() => this.saveWidgetSettings(), 500)
+      this._noteSaver.schedule()
     },
     onScreenshotPathInput(e) {
       this.screenshotSavePath = e.target.value
       if (!this.loaded) return
-      clearTimeout(this._screenshotDebounce)
-      this._screenshotDebounce = setTimeout(() => this.saveWidgetSettings(), 500)
+      this._screenshotSaver.schedule()
     },
     async loadUsbAutoOpen() {
       try {
@@ -886,77 +705,6 @@ export default {
         }
       } catch (err) {
         console.error('选择文件夹失败:', err)
-      }
-    },
-    // ==================== AI 助手设置 ====================
-    async loadAiConfig() {
-      try {
-        const { data } = await axios.get('/api/ai/config')
-        if (data.success) {
-          this.ai.enabled = data.data.enabled
-          this.ai.provider = data.data.provider
-          this.ai.base_url = data.data.base_url
-          this.ai.model = data.data.model
-          this.ai.hasApiKey = data.data.hasApiKey
-        }
-      } catch (err) {
-        console.error('加载 AI 配置失败:', err)
-      }
-    },
-    async saveAiConfig() {
-      try {
-        await axios.put('/api/ai/config', {
-          enabled: this.ai.enabled,
-          provider: this.ai.provider,
-          base_url: this.ai.base_url,
-          model: this.ai.model,
-          api_key: this.ai.api_key,
-        })
-        if (this.ai.api_key) this.ai.hasApiKey = true
-        this.aiTestResult = ''
-      } catch (err) {
-        console.error('保存 AI 配置失败:', err)
-        this.aiTestResult = err.response?.data?.error || '保存失败'
-        this.aiTestOk = false
-      }
-    },
-    onAiEnabledChange(e) {
-      this.ai.enabled = e.target.checked
-      this.saveAiConfig()
-    },
-    onAiProviderChange() {
-      const preset = this.aiProviderPresets[this.ai.provider]
-      if (preset) {
-        this.ai.base_url = preset.base_url
-        this.ai.model = preset.model
-      }
-      this.saveAiConfig()
-    },
-    onAiBaseUrlInput() {
-      clearTimeout(this._aiDebounce)
-      this._aiDebounce = setTimeout(() => this.saveAiConfig(), 400)
-    },
-    onAiModelInput() {
-      clearTimeout(this._aiDebounce)
-      this._aiDebounce = setTimeout(() => this.saveAiConfig(), 400)
-    },
-    onAiKeyInput() {
-      clearTimeout(this._aiKeyDebounce)
-      this._aiKeyDebounce = setTimeout(() => this.saveAiConfig(), 400)
-    },
-    async testAi() {
-      this.aiTesting = true
-      this.aiTestResult = ''
-      this.aiTestOk = false
-      try {
-        const { data } = await axios.post('/api/ai/config/test')
-        this.aiTestOk = true
-        this.aiTestResult = data.message || '连接成功'
-      } catch (err) {
-        this.aiTestOk = false
-        this.aiTestResult = err.response?.data?.error || '连接失败'
-      } finally {
-        this.aiTesting = false
       }
     },
   },

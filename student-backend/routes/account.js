@@ -22,18 +22,43 @@ router.get('/recovery-key', auth(), (req, res) => {
 // 备份导出：一次导出当前班主任库（业务数据 + 应用设置 + 账号 全带走）。
 // v2 便携包：仅在「输入正确登录密码」时放行导出，防止他人偷导。
 // 库钥匙用该登录密码派生钥匙包裹进包，换机后仍可用同一登录密码解包恢复。
-router.get('/export', auth(), (req, res) => {
+router.post('/export', auth(), (req, res) => {
   try {
     const slug = req.user && req.user.dbSlug ? req.user.dbSlug : 'default';
-    const { password } = req.query || {};
-    if (!password) {
-      return res.status(400).json({ error: '请输入登录密码以导出数据库' });
-    }
+    // 密码走请求体而非 URL query：配合加密通道，避免 GET 明文 URL 泄露密码
+    const { password, encrypt = '1', dbPassword } = req.body || {};
     // 校验必须是当前账号的登录密码，未通过直接拒绝，保证只有本人能导出
     const user = db.prepare('SELECT * FROM users WHERE id = ?').get(req.user.userId);
-    if (!user || !bcrypt.compareSync(password, user.password)) {
-      return res.status(401).json({ error: '密码错误，只有本人能导出数据库' });
+    if (!user) return res.status(401).json({ error: '账号不存在' });
+
+    const hasPassword = !!user.password;
+    const wantEncrypt = encrypt === '1';
+    // 有密码账号：必须提供并校验正确的登录密码
+    if (hasPassword) {
+      if (!password) return res.status(400).json({ error: '请输入登录密码以导出数据库' });
+      if (!bcrypt.compareSync(password, user.password)) {
+        return res.status(401).json({ error: '密码错误，只有本人能导出数据库' });
+      }
     }
+    // 无密码账号：无需密码校验。
+
+    // 解析用于包裹库钥匙的「导出密码」：
+    //   - 勾选加密：
+    //       有密码账号：dbPassword 留空则默认用账号密码；填了则以输入框为准。
+    //       无密码账号：必须提供 dbPassword（否则没有口令可供派生包裹钥匙）。
+    //   - 不勾选加密：库钥匙明文随包带回，换机免密恢复。
+    let wrapPwd = null;
+    if (wantEncrypt) {
+      if (hasPassword) {
+        wrapPwd = dbPassword && dbPassword.length ? dbPassword : password;
+      } else {
+        if (!dbPassword || !dbPassword.length) {
+          return res.status(400).json({ error: '该账号未设置密码，请设置一个导出密码以加密备份' });
+        }
+        wrapPwd = dbPassword;
+      }
+    }
+
     const bundle = dbManager.exportBundle(slug);
     const data = require('fs').readFileSync(bundle.filePath).toString('base64');
     const out = {
@@ -41,8 +66,14 @@ router.get('/export', auth(), (req, res) => {
       slug: bundle.slug,
       username: bundle.username,
       data,
-      wrappedByPassword: dbManager.wrapKeyBySecret(bundle.key, password),
     };
+    if (wantEncrypt) {
+      // 库钥匙用导出密码派生钥匙包裹，换机后可用该密码解包恢复
+      out.wrappedByPassword = dbManager.wrapKeyBySecret(bundle.key, wrapPwd);
+    } else {
+      // 未加密：库钥匙明文随包带回，换机免密恢复
+      out.key = bundle.key;
+    }
     res.json(out);
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -53,9 +84,9 @@ router.get('/export', auth(), (req, res) => {
 // 校验库身份：仅允许与当前登录账号一致的备份包。
 router.post('/restore', auth(), (req, res) => {
   try {
-    const { data, wrappedByPassword, wrappedByMnemonic, password, mnemonic } = req.body || {};
+    const { data, wrappedByPassword, wrappedByMnemonic, password, mnemonic, key } = req.body || {};
     const curSlug = req.user && req.user.dbSlug ? req.user.dbSlug : 'default';
-    const dbKey = dbManager.decryptBundleKey({ wrappedByPassword, wrappedByMnemonic, password, mnemonic });
+    const dbKey = dbManager.decryptBundleKey({ key, wrappedByPassword, wrappedByMnemonic, password, mnemonic });
     const result = dbManager.restoreBundle({ slug: curSlug, username: req.user.username, data, dbKey });
     res.json({ message: '恢复成功', slug: result.slug });
   } catch (err) {
@@ -69,8 +100,8 @@ router.post('/restore', auth(), (req, res) => {
 // 以免误恢复盖掉本机已有数据。前端确认后带 confirm:true 才会真正落盘。
 router.post('/restore-offline', (req, res) => {
   try {
-    const { data, slug, wrappedByPassword, wrappedByMnemonic, password, mnemonic } = req.body || {};
-    const dbKey = dbManager.decryptBundleKey({ wrappedByPassword, wrappedByMnemonic, password, mnemonic });
+    const { data, slug, wrappedByPassword, wrappedByMnemonic, password, mnemonic, key } = req.body || {};
+    const dbKey = dbManager.decryptBundleKey({ key, wrappedByPassword, wrappedByMnemonic, password, mnemonic });
     // 用备份包自带的账号名登记（index 中该账号才可登录）
     const username = req.body && req.body.username;
 

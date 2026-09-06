@@ -1,7 +1,7 @@
-<template>
+﻿<template>
   <div>
-    <div class="w-full bg-surface shadow-md rounded-xl mb-6 px-6 py-5 border border-border min-h-[4.5rem] flex items-center">
-      <h1 class="text-2xl font-bold text-text">ℹ️ 关于软件</h1>
+    <div class="w-full bg-surface shadow-md rounded-xl mb-6 px-5 py-3 border border-border min-h-[4.5rem] flex items-center">
+      <h1 class="text-2xl font-bold text-text flex items-center gap-2"><IconGlyph name="about" /> 关于软件</h1>
     </div>
 
     <div class="grid grid-cols-1 md:grid-cols-3 gap-6">
@@ -10,12 +10,12 @@
         <div class="flex items-center gap-4 mb-4">
           <div class="w-14 h-14 rounded-xl bg-primary/10 flex items-center justify-center text-3xl">🏫</div>
           <div>
-            <div class="text-xl font-bold text-text">校园助手</div>
+            <div class="text-xl font-bold text-text">班级管理系统</div>
             <div class="text-sm text-text-muted">班级管理一站式桌面应用</div>
           </div>
         </div>
         <p class="text-text-secondary text-sm leading-relaxed">
-          校园助手是一个面向班级日常管理的轻量化桌面应用，整合了班级管理、班费、课程表、座位安排、
+          班级管理系统是一个面向班级日常管理的轻量化桌面应用，整合了班级管理、班费、课程表、座位安排、
           请假考勤、班级相册等常用功能，帮助班主任与班委高效完成日常事务。
         </p>
 
@@ -37,19 +37,19 @@
         <h2 class="font-semibold text-text mb-4">功能特性</h2>
         <ul class="space-y-3 text-sm text-text-secondary">
           <li class="flex items-center gap-2">
-            <span class="text-emerald-500">✅</span> 简洁的界面和操作
+            <span class="text-emerald-500"><IconGlyph name="check" :size="16" /></span> 简洁的界面和操作
           </li>
           <li class="flex items-center gap-2">
-            <span class="text-emerald-500">✅</span> 班级管理的定制化功能
+            <span class="text-emerald-500"><IconGlyph name="check" :size="16" /></span> 班级管理的定制化功能
           </li>
           <li class="flex items-center gap-2">
-            <span class="text-emerald-500">✅</span> 智能排表算法
+            <span class="text-emerald-500"><IconGlyph name="check" :size="16" /></span> 智能排表算法
           </li>
           <li class="flex items-center gap-2">
-            <span class="text-emerald-500">✅</span> 优美简洁的主题
+            <span class="text-emerald-500"><IconGlyph name="check" :size="16" /></span> 优美简洁的主题
           </li>
           <li class="flex items-center gap-2">
-            <span class="text-emerald-500">✅</span> 分布计算性能优化
+            <span class="text-emerald-500"><IconGlyph name="check" :size="16" /></span> 分布计算性能优化
           </li>
         </ul>
       </div>
@@ -57,7 +57,7 @@
 
     <!-- 技术栈（毛玻璃卡片） -->
     <div class="mt-6 bg-surface shadow-md rounded-xl border border-border p-6">
-      <h2 class="font-semibold text-text mb-4">🛠️ 使用的开源项目</h2>
+      <h2 class="font-semibold text-text mb-4 flex items-center gap-2"><IconGlyph name="wrench" :size="20" /> 使用的开源项目</h2>
       <p class="text-xs text-text-muted mb-3 px-1 leading-relaxed">感谢所有开源提供者，本项目基于众多优秀开源项目构建，第三方组件遵循各自开源许可证。</p>
       <div class="max-h-64 overflow-y-auto pr-1 scroll-smooth">
         <div v-for="group in libGroups" :key="group.category" class="mb-3 last:mb-0">
@@ -260,6 +260,8 @@ const libGroups = [
     category: '桌面壳',
     items: [
       { desc: '桌面框架', name: 'Electron', url: 'https://github.com/electron/electron', license: 'MIT' },
+      { desc: '无边框亚克力', name: 'electron-acrylic-window', url: 'https://github.com/wizo06/electron-acrylic-window', license: 'MIT' },
+      { desc: '应用打包', name: 'electron-builder', url: 'https://github.com/electron-userland/electron-builder', license: 'MIT' },
     ],
   },
   {
@@ -271,15 +273,25 @@ const libGroups = [
       { desc: '构建工具', name: 'Vite', url: 'https://github.com/vitejs/vite', license: 'MIT' },
       { desc: 'CSS 框架', name: 'Tailwind CSS', url: 'https://github.com/tailwindlabs/tailwindcss', license: 'MIT' },
       { desc: 'HTTP 请求', name: 'Axios', url: 'https://github.com/axios/axios', license: 'MIT' },
+      { desc: '图标库', name: 'lucide', url: 'https://github.com/lucide-icons/lucide', license: 'ISC' },
+      { desc: 'XSS 过滤', name: 'DOMPurify', url: 'https://github.com/cure53/DOMPurify', license: 'Apache-2.0' },
+      { desc: 'Markdown 解析', name: 'marked', url: 'https://github.com/markedjs/marked', license: 'MIT' },
     ],
   },
   {
     category: '后端',
     items: [
       { desc: '后端框架', name: 'Express', url: 'https://github.com/expressjs/express', license: 'MIT' },
-      { desc: '数据库引擎', name: 'better-sqlite3', url: 'https://github.com/WiseLibs/better-sqlite3', license: 'MIT' },
+      { desc: '加密数据库', name: 'better-sqlite3-multiple-ciphers', url: 'https://github.com/m4heshd/better-sqlite3-multiple-ciphers', license: 'MIT' },
+      { desc: '关系数据库', name: 'mysql2', url: 'https://github.com/sidorares/node-mysql2', license: 'MIT' },
       { desc: '图片处理', name: 'Sharp', url: 'https://github.com/lovell/sharp', license: 'Apache-2.0' },
       { desc: '跨域支持', name: 'cors', url: 'https://github.com/expressjs/cors', license: 'MIT' },
+      { desc: '文件上传', name: 'Multer', url: 'https://github.com/expressjs/multer', license: 'MIT' },
+      { desc: '视频抽帧', name: 'FFmpeg（LGPL 构建）', url: 'https://github.com/BtbN/FFmpeg-Builds', license: 'LGPL' },
+      { desc: '压缩包解压', name: 'extract-zip', url: 'https://github.com/inchingorg/extract-zip', license: 'MIT' },
+      { desc: 'Word 转换', name: 'Mammoth', url: 'https://github.com/mwilliamson/mammoth.js', license: 'BSD-2-Clause' },
+      { desc: 'PDF 解析', name: 'pdf-parse', url: 'https://github.com/PhilippKurz30/node-pdf-parse', license: 'MIT' },
+      { desc: '回收站删除', name: 'trash', url: 'https://github.com/sindresorhus/trash', license: 'MIT' },
     ],
   },
   {
@@ -295,6 +307,7 @@ const libGroups = [
       { desc: '表格导出', name: 'ExcelJS', url: 'https://github.com/exceljs/exceljs', license: 'MIT' },
       { desc: '电子表格', name: 'SheetJS (xlsx)', url: 'https://github.com/SheetJS/sheetjs', license: 'Apache-2.0' },
       { desc: 'PDF 生成', name: 'jsPDF', url: 'https://github.com/parallax/jsPDF', license: 'MIT' },
+      { desc: 'PDF 表格', name: 'jsPDF-AutoTable', url: 'https://github.com/simonbengtsson/jsPDF-AutoTable', license: 'MIT' },
       { desc: '截图渲染', name: 'html2canvas', url: 'https://github.com/niklasvh/html2canvas', license: 'MIT' },
       { desc: '拖拽排序', name: 'SortableJS', url: 'https://github.com/SortableJS/Sortable', license: 'MIT' },
     ],

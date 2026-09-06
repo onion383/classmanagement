@@ -1,7 +1,9 @@
 import { createRouter, createWebHistory, createWebHashHistory } from 'vue-router'
+import { ensureDashboardData } from '../composables/useDashboardData'
 
 const routes = [
-  { path: '/', name: 'classroom', component: () => import('../views/ClassroomView.vue') },
+  { path: '/', name: 'dashboard', component: () => import('../views/DashboardView.vue') },
+  { path: '/students', name: 'classroom', component: () => import('../views/ClassroomView.vue') },
   { path: '/fee', name: 'fee', component: () => import('../views/FeeManagement.vue') },
   { path: '/login', name: 'login', component: () => import('../views/Login.vue') },
   { path: '/settings', name: 'settings', component: () => import('../views/SettingsView.vue'), meta: { requiresAuth: true } },
@@ -16,7 +18,6 @@ const routes = [
   { path: '/duty', name: 'duty', component: () => import('../views/DutyView.vue'), meta: { requiresAuth: true } },
   { path: '/activities', name: 'activities', component: () => import('../views/ActivitiesView.vue'), meta: { requiresAuth: true } },
   { path: '/ai-assistant', name: 'aiAssistant', component: () => import('../views/AiAssistant.vue'), meta: { requiresAuth: true } },
-  { path: '/test', name: 'test', component: () => import('../views/TestView.vue') },
   { path: '/about', name: 'about', component: () => import('../views/AboutView.vue') },
 ]
 
@@ -30,6 +31,8 @@ const router = createRouter({
 router.beforeEach((to, from) => {
   const token = localStorage.getItem('token')
   if (token) {
+    // 已登录进入首页：提前并发拉取 Dashboard 数据，让数据与组件下载/挂载并行，减少首屏等待
+    if (to.path === '/') ensureDashboardData()
     return to.path === '/login' ? '/' : true
   } else {
     return to.path === '/login' ? true : '/login'

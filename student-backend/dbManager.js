@@ -109,8 +109,9 @@ function unwrapKeyBySecret(wrapped, secret) {
   return Buffer.concat([decipher.update(Buffer.from(encB, 'base64')), decipher.final()]).toString('utf8');
 }
 
-// 从 v2 备份包里解出库钥匙：密码或助记词任一对上即可（AES-GCM 校验失败的密文在 try 里直接跳过）。
-function decryptBundleKey({ wrappedByPassword, wrappedByMnemonic, password, mnemonic }) {
+// 从 v2 备份包里解出库钥匙：明文 key（无密码账号）优先级最高，否则用密码或助记词任一对上即可（AES-GCM 校验失败的密文在 try 里直接跳过）。
+function decryptBundleKey({ key, wrappedByPassword, wrappedByMnemonic, password, mnemonic }) {
+  if (key) return key;
   if (wrappedByPassword && password) {
     try { return unwrapKeyBySecret(wrappedByPassword, password); } catch (_) { /* 密码不对，尝试助记词 */ }
   }
@@ -128,8 +129,32 @@ function sqlKey(passphrase) {
 const als = new AsyncLocalStorage();
 // 缓存已打开的库连接：slug -> { db, key }
 const connCache = new Map();
+// 缓存连接数量上限（LRU 驱逐策略：超过上限时关闭并移出最久未使用的连接）
+const CONN_CACHE_MAX = 10;
 // 缓存「default」的库连接
 let defaultConn = null;
+
+// 记录对某连接的访问（命中时刷新 LRU 顺序）
+function touchConn(slug) {
+  if (connCache.has(slug)) {
+    const conn = connCache.get(slug);
+    connCache.delete(slug);
+    connCache.set(slug, conn);
+  }
+}
+
+// 写入缓存，超限时按 LRU 驱逐最久未使用的连接
+function setCachedConn(slug, conn) {
+  connCache.set(slug, conn);
+  while (connCache.size > CONN_CACHE_MAX) {
+    const oldestKey = connCache.keys().next().value;
+    // 始终保留 default 连接，避免关闭当前会话所用库
+    if (oldestKey === DEFAULT_SLUG || oldestKey == null) break;
+    const evicted = connCache.get(oldestKey);
+    connCache.delete(oldestKey);
+    try { evicted.close(); } catch (_) { /* 关闭失败可忽略 */ }
+  }
+}
 
 // ---------- index.db（主密钥加密的登记表） ----------
 let indexDb = null;
@@ -174,10 +199,13 @@ function openFile(dbPath, passphrase) {
 
 // 打开（或打开后初始化）某个 slug 对应的库并缓存
 function getConn(slug, passphrase) {
-  if (connCache.has(slug)) return connCache.get(slug);
+  if (connCache.has(slug)) {
+    touchConn(slug);
+    return connCache.get(slug);
+  }
   const conn = openFile(path.join(dataDir, `${slug}.db`), passphrase);
   initSchema(conn);
-  connCache.set(slug, conn);
+  setCachedConn(slug, conn);
   return conn;
 }
 
@@ -323,6 +351,17 @@ function restoreBundle({ slug, username, data, dbKey }) {
   return { slug };
 }
 
+// 后端就绪后的后台暖机：把一次性冷启动成本（require 原生 sqlite 模块、打开 index.db、
+// 若存在 default 库则打开并 initSchema）放到 listen 就绪信号之后、用户首个请求到达之前悄悄完成，
+// 让首个请求落在已缓存连接的库上，消除登录/首屏出现的「转圈」等待。
+// 暖机失败不抛出，正常走懒加载兜底（与原先行为一致）。
+function warmup() {
+  try {
+    ensureIndex();
+    if (!defaultConn && DB_KEY) initDefault();
+  } catch (_) { /* 暖机失败不影响正常懒加载路径 */ }
+}
+
 module.exports = {
   ensureIndex,
   createTeacher,
@@ -340,6 +379,7 @@ module.exports = {
   exportBundle,
   restoreBundle,
   registryList,
+  warmup,
   // 可写资源目录（与数据库同层，随 userData 持久化）
   dataDir,
   uploadsDir,

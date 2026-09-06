@@ -2,8 +2,8 @@
 <template>
   <!-- 表头切换组件 -->
   <div>
-    <!-- 标签头 -->
-    <div class="flex gap-2 mb-6 items-center">
+    <!-- 标签头：预留一行按钮高度，避免 tab 数据加载后填充/换行改变行高，造成下方内容位移（CLS） -->
+    <div class="flex gap-2 mb-6 items-center min-h-[2.5rem]">
       <button
         v-for="tab in tabs"
         :key="tab.value"

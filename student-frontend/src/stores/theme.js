@@ -8,6 +8,7 @@ const CUSTOM_THEMES_KEY = 'app-custom-themes'
 const BG_IMAGE_KEY = 'app-bg-image'
 const BG_MASK_KEY = 'app-bg-mask-opacity'
 const GLASS_KEY = 'app-glass-opacity'
+const ICON_STYLE_KEY = 'app-icon-style'
 
 // 毛玻璃主题的内置默认背景图：放于 public/ 下，随前端一起打包，属前端静态资源，
 // 不经 resourceUrl/鉴权直接加载。用户选择本地图片后由 backgroundImage 覆盖它；清除则回此图。
@@ -32,6 +33,8 @@ export const useThemeStore = defineStore('theme', () => {
   const bgMaskOpacity = ref(parseFloat(localStorage.getItem(BG_MASK_KEY)) || 0.65)
   // 组件透明玻璃层不透明度（0~1，卡片基准值）
   const glassOpacity = ref(parseFloat(localStorage.getItem(GLASS_KEY)) || 0.5)
+  // 图标样式：'color'（彩色图标）| 'emoji'（Emoji）
+  const iconStyle = ref(localStorage.getItem(ICON_STYLE_KEY) || 'color')
 
   const allThemes = computed(() => [
     ...PRESETS,
@@ -138,6 +141,11 @@ export const useThemeStore = defineStore('theme', () => {
     applyTheme()
   }
 
+  const setIconStyle = (value) => {
+    iconStyle.value = value
+    localStorage.setItem(ICON_STYLE_KEY, value)
+  }
+
   watch(currentTheme, applyTheme)
   watch(backgroundImage, (val) => {
     localStorage.setItem(BG_IMAGE_KEY, val)
@@ -150,6 +158,7 @@ export const useThemeStore = defineStore('theme', () => {
     backgroundImage,
     bgMaskOpacity,
     glassOpacity,
+    iconStyle,
     allThemes,
     currentThemeMeta,
     isPreset,
@@ -163,5 +172,6 @@ export const useThemeStore = defineStore('theme', () => {
     setBackgroundImage,
     setBgMaskOpacity,
     setGlassOpacity,
+    setIconStyle,
   }
 })

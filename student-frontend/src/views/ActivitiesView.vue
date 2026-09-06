@@ -1,8 +1,8 @@
 <template>
   <div>
     <!-- 页面标题 -->
-    <div class="w-full bg-surface shadow-md rounded-xl mb-6 px-6 py-5 border border-border min-h-[4.5rem] flex items-center">
-      <h1 class="text-2xl font-bold text-text">🎉 班级活动</h1>
+    <div class="w-full bg-surface shadow-md rounded-xl mb-6 px-5 py-3 border border-border min-h-[4.5rem] flex items-center">
+      <h1 class="text-2xl font-bold text-text flex items-center gap-2"><IconGlyph name="activity" /> 班级活动</h1>
     </div>
 
     <!-- 双 tab -->
@@ -13,7 +13,7 @@
       <!-- 工具栏 -->
       <div class="mb-4 flex items-center gap-3">
         <button @click="openAddActivity" class="bg-primary hover:bg-primary-hover text-text-inverse px-5 py-2 rounded">＋ 新增活动</button>
-        <button @click="refreshActivities" class="bg-text-muted hover:bg-text-secondary text-text-inverse px-4 py-2 rounded flex items-center gap-1">🔄 刷新</button>
+        <button @click="refreshActivities" class="bg-text-muted hover:bg-text-secondary text-text-inverse px-4 py-2 rounded flex items-center gap-1"><IconGlyph name="refresh" :size="14" tint="current" /> 刷新</button>
         <button @click="openActivityExport" class="bg-warning hover:bg-warning-hover text-text-inverse px-4 py-2 rounded flex items-center gap-1">📥 导出活动</button>
       </div>
 
@@ -29,7 +29,7 @@
           <div class="text-sm text-text">
             <span class="font-medium">{{ node.subject }}</span>
             <span v-if="node.location" class="text-text-secondary"> · {{ node.location }}</span>
-            <span v-if="node.participants" class="text-text-secondary text-xs ml-1">· 👥 {{ node.participants }}</span>
+            <span v-if="node.participants" class="text-text-secondary text-xs ml-1 inline-flex items-center">· <IconGlyph name="users" :size="13" tint="current" /> {{ node.participants }}</span>
           </div>
         </template>
         <template #ops="{ node }">
@@ -48,7 +48,7 @@
       <div class="mb-4 flex items-center gap-3">
         <button @click="openAddCountdown" class="bg-primary hover:bg-primary-hover text-text-inverse px-5 py-2 rounded">＋ 添加倒计时</button>
         <button @click="refreshCountdowns" class="bg-text-muted hover:bg-text-secondary text-text-inverse px-4 py-2 rounded flex items-center gap-1">🔄 刷新</button>
-        <button @click="openCountdownExport" class="bg-warning hover:bg-warning-hover text-text-inverse px-4 py-2 rounded flex items-center gap-1">📥 导出 EXCEL 表格</button>
+        <button @click="openCountdownExport" class="bg-warning hover:bg-warning-hover text-text-inverse px-4 py-2 rounded flex items-center gap-1"><IconGlyph name="download" :size="14" tint="current" /> 导出 EXCEL 表格</button>
       </div>
 
       <!-- 数据看板（最近 3 个） -->
@@ -200,11 +200,11 @@ export default {
   // Ctrl+Z / Ctrl+Shift+Z / Ctrl+Y 撤销、重做：活动与倒计时各自独立，按当前 tab 切换对应历史栈
   setup() {
     const inst = getCurrentInstance()
-    const { success: n } = useNotification()
+    const { success } = useNotification()
     const resolveKey = () => (inst.proxy.activeTab === 'countdown' ? 'countdowns' : 'activities')
     useUndoShortcut(resolveKey, {
-      onAfterUndo: (label) => { inst.proxy.loadAll(); n(label ? `已撤销：${label}` : '已撤销') },
-      onAfterRedo: (label) => { inst.proxy.loadAll(); n(label ? `已重做：${label}` : '已重做') }
+      onAfterUndo: (label) => { inst.proxy.loadAll(); success(label ? `已撤销：${label}` : '已撤销') },
+      onAfterRedo: (label) => { inst.proxy.loadAll(); success(label ? `已重做：${label}` : '已重做') }
     })
   },
   data() {

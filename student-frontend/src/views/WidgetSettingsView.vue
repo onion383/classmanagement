@@ -1,13 +1,13 @@
 <template>
   <div class="h-full">
     <!-- 顶部标题栏 -->
-    <div class="w-full bg-surface shadow-md rounded-xl mb-6 px-6 py-5 border border-border min-h-[4.5rem] flex items-center">
-      <h1 class="text-2xl font-bold text-text">🔧 小组件设置</h1>
+    <div class="w-full bg-surface shadow-md rounded-xl mb-6 px-5 py-3 border border-border min-h-[4.5rem] flex items-center">
+      <h1 class="text-2xl font-bold text-text flex items-center gap-2"><IconGlyph name="wrench" :size="24" /> 小组件设置</h1>
     </div>
 
     <!-- ========== 工具箱设置 ========== -->
     <div class="mb-6">
-      <h2 class="text-xl font-semibold text-text mb-4">🧰 工具箱设置</h2>
+      <h2 class="text-xl font-semibold text-text mb-4 flex items-center gap-2"><IconGlyph name="toolbox" :size="20" /> 工具箱设置</h2>
 
       <div class="bg-surface rounded-lg border border-border p-6">
         <div class="flex items-center gap-4">
@@ -54,9 +54,30 @@
       </div>
     </div>
 
+    <!-- ========== 桌面小组件设置 ========== -->
+    <div class="mb-6">
+      <h2 class="text-xl font-semibold text-text mb-4 flex items-center gap-2"><IconGlyph name="monitor" :size="20" /> 桌面小组件设置</h2>
+
+      <div class="bg-surface rounded-lg border border-border p-6">
+        <div class="flex items-center gap-4">
+          <label class="text-sm font-medium text-text w-40 flex-shrink-0">启用桌面小组件</label>
+          <label class="inline-flex items-center cursor-pointer">
+            <input
+              type="checkbox"
+              :checked="desktopWidgetEnabled"
+              @change="onDesktopWidgetChange"
+              class="w-4 h-4 rounded border-border text-primary focus:ring-primary cursor-pointer"
+            />
+            <span class="ml-2 text-sm text-text-secondary">{{ desktopWidgetEnabled ? '已启用' : '已禁用' }}</span>
+          </label>
+        </div>
+        <p class="text-xs text-text-muted mt-2 ml-40">关闭后启动不创建桌面小组件窗口（更省资源），并可立即关闭当前窗口；开启立即显示</p>
+      </div>
+    </div>
+
     <!-- ========== 保存路径设置 ========== -->
     <div class="mb-6">
-      <h2 class="text-xl font-semibold text-text mb-4">📁 保存路径设置</h2>
+      <h2 class="text-xl font-semibold text-text mb-4 flex items-center gap-2"><IconGlyph name="folder" :size="20" /> 保存路径设置</h2>
 
       <div class="bg-surface rounded-lg border border-border p-6 space-y-6">
         <!-- 注释截屏保存位置 -->
@@ -110,6 +131,7 @@
 <script>
 import axios from 'axios'
 import { useNotification } from '../composables/useNotification'
+import { createDebouncedSave } from '../composables/useDebouncedSave'
 
 export default {
   name: 'WidgetSettingsView',
@@ -126,11 +148,14 @@ export default {
       screenshotSavePath: '',
       usbAutoOpen: false,
       loaded: false,
-      _noteDebounce: null,
-      _screenshotDebounce: null
+      // 桌面小组件启用状态：localStorage 持久化，默认启用（主进程据此按需创建桌面小组件窗口）
+      desktopWidgetEnabled: (localStorage.getItem('desktopWidgetEnabled') ?? '1') !== '0'
     }
   },
   async mounted() {
+    // 路径输入的防抖保存调度器
+    this._noteSaver = createDebouncedSave(() => this.saveSettings())
+    this._screenshotSaver = createDebouncedSave(() => this.saveSettings())
     await this.loadSettings()
     this.loadSession()
     this.loadUsbAutoOpen()
@@ -140,13 +165,18 @@ export default {
     })
   },
   beforeUnmount() {
-    clearTimeout(this._noteDebounce)
-    clearTimeout(this._screenshotDebounce)
+    this._noteSaver?.teardown()
+    this._screenshotSaver?.teardown()
     if (this._fromMainHandler) {
       window.electron.off('from-main', this._fromMainHandler)
     }
   },
   methods: {
+    // 切换「启用桌面小组件」：持久化到 localStorage，并即时通知主进程创建/关闭桌面小组件窗口
+    onDesktopWidgetChange() {
+      try { localStorage.setItem('desktopWidgetEnabled', this.desktopWidgetEnabled ? '1' : '0') } catch (_) {}
+      if (window.electron?.send) window.electron.send('desktop-widget-enabled', this.desktopWidgetEnabled)
+    },
     async loadSettings() {
       try {
         const res = await axios.get('/api/widget-settings')
@@ -201,14 +231,12 @@ export default {
     onNotePathInput(e) {
       this.noteSavePath = e.target.value
       if (!this.loaded) return
-      clearTimeout(this._noteDebounce)
-      this._noteDebounce = setTimeout(() => this.saveSettings(), 500)
+      this._noteSaver.schedule()
     },
     onScreenshotPathInput(e) {
       this.screenshotSavePath = e.target.value
       if (!this.loaded) return
-      clearTimeout(this._screenshotDebounce)
-      this._screenshotDebounce = setTimeout(() => this.saveSettings(), 500)
+      this._screenshotSaver.schedule()
     },
     // 读取 U盘自动打开开关状态（主进程持久化）
     async loadUsbAutoOpen() {

@@ -2,6 +2,7 @@ import { createApp } from 'vue'
 import DesktopWidget from './DesktopWidget.vue'
 import axios from 'axios'
 import '../styles/index.css'
+import { setupSecureAxios } from '../composables/secureAxios'
 
 // 桌面组件在桌面常驻，不依赖主窗口的登录态同步。
 // 通过 IPC 从主进程获取当前 token（主窗口保存的），避免 cookie 跨域读取问题。
@@ -48,5 +49,8 @@ axios.interceptors.response.use(
     return Promise.reject(error)
   }
 )
+
+// 安全通道：请求体加密 + 响应体解密（仅 JSON API；无开关时直通）
+setupSecureAxios(axios)
 
 createApp(DesktopWidget).mount('#desktop-widget-app')

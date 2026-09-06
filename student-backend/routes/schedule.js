@@ -6,8 +6,25 @@ const { db } = require('../db');
 router.get('/', (req, res) => {
   try {
     const row = db.prepare('SELECT cells, settings FROM schedule WHERE id = 1').get();
-    const cells = row ? JSON.parse(row.cells) : [];
-    const settings = row ? JSON.parse(row.settings) : {};
+    let cells = row ? JSON.parse(row.cells) : [];
+    let settings = row ? JSON.parse(row.settings) : {};
+    // 活动课表为空时，回退到主课表，保证首页/桌面小组件也能显示已排课程
+    if (!Array.isArray(cells) || cells.length === 0) {
+      const master = db.prepare('SELECT cells, settings FROM master_schedule WHERE id = 1').get();
+      if (master) {
+        const mCells = JSON.parse(master.cells);
+        if (Array.isArray(mCells) && mCells.length > 0) {
+          cells = mCells;
+          settings = JSON.parse(master.settings) || settings;
+        }
+      }
+    }
+    // 若 cells 是「按节次键的对象」而非数组，规范化为数组，避免首页/桌面小组件按行索引取不到
+    if (!Array.isArray(cells) && cells && typeof cells === 'object') {
+      cells = Object.keys(cells)
+        .sort((a, b) => Number(a) - Number(b))
+        .map(k => cells[k]);
+    }
     res.json({ cells, settings });
   } catch (err) {
     res.status(500).json({ error: err.message });

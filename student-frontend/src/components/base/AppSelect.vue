@@ -1,5 +1,5 @@
 <template>
-  <div class="av-select" :class="{ 'av-select--open': open, 'av-select--disabled': disabled }" ref="rootRef">
+  <div class="av-select" :class="{ 'av-select--open': open, 'av-select--disabled': disabled, 'av-select--compact': compact }" ref="rootRef">
     <!-- 触发区：圆角 + 毛玻璃底 + 点击按下反馈 -->
     <button
       type="button"
@@ -14,7 +14,7 @@
       <span class="av-select__value" :class="{ 'av-select__value--placeholder': !resolved || resolved.value == null }">
         {{ display }}
       </span>
-      <span class="av-select__arrow" aria-hidden="true"><svg width="12" height="12" viewBox="0 0 16 16" fill="none"><path d="M4 6l4 4 4-4" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg></span>
+      <span class="av-select__arrow" aria-hidden="true"><ChevronDown :size="14" stroke-width="1.8" /></span>
     </button>
 
     <!-- 下拉菜单（Teleport 到 body 避免被父容器 overflow/transform/backdrop-filter 裁剪） -->
@@ -29,7 +29,7 @@
           @click="commit(i)"
         >
           <span class="av-select__option-label">{{ opt.label }}</span>
-          <svg v-if="opt.value === resolved?.value" class="av-select__check" width="12" height="12" viewBox="0 0 16 16" fill="none"><path d="M3.5 8.5l3 3 5-6" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
+          <Check v-if="opt.value === resolved?.value" class="av-select__check" :size="14" stroke-width="1.8" />
         </li>
         <li v-if="!list.length" class="av-select__option av-select__option--empty">无选项</li>
       </ul>
@@ -42,15 +42,19 @@
 // 用法：
 //   <AppSelect v-model="xxx" :options="[{value:'a', label:'A'}, 'B']" placeholder="请选择" />
 import '../../styles/select.css'
+import { ChevronDown, Check } from '@lucide/vue'
 
 export default {
   name: 'AppSelect',
+  components: { ChevronDown, Check },
   props: {
     modelValue: { type: [String, Number], default: '' },
     // 支持字符串数组：['A','B']；或对象数组：[{value, label, disabled}]，省略 value 时取 label 本身。
     options: { type: Array, default: () => [] },
     placeholder: { type: String, default: '请选择' },
-    disabled: { type: Boolean, default: false }
+    disabled: { type: Boolean, default: false },
+    // 紧凑模式：缩小 trigger 高度，用于标题条等高度受限场景
+    compact: { type: Boolean, default: false }
   },
   emits: ['update:modelValue', 'change'],
   data() {
