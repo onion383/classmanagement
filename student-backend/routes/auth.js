@@ -51,7 +51,7 @@ router.post('/login', (req, res) => {
   });
   res.json({
     token,
-    user: { id: user.id, username: user.username, role: user.role, dbSlug: user.db_slug || resolved.slug }
+    user: { id: user.id, username: user.username, role: user.role, dbSlug: user.db_slug || resolved.slug, hasPassword: !!user.password }
   });
 });
 
@@ -85,23 +85,21 @@ router.post('/register', (req, res) => {
     return res.status(409).json({ error: '该账号已被注册' });
   }
 
-  // 生成恢复密钥
-  const phrase = pickPhrase();
-  const restoreHash = deriveRestoreHash(phrase);
+  // 无密码注册无需恢复密钥（恢复密钥仅用于「忘记密码」重置，无密码不存在该场景）
+  const hasPassword = !!passwordHash;
+  const phrase = hasPassword ? pickPhrase() : null;
+  const restoreHash = hasPassword ? deriveRestoreHash(phrase) : null;
 
   const { slug } = dbManager.createTeacher(uname, passwordHash, 'teacher');
-  // 把恢复密钥哈希写入新库的账号
+  // 有密码才把恢复密钥哈希写入新库的账号
   const resolved = dbManager.resolveByUsername(uname);
-  if (resolved) {
+  if (resolved && restoreHash) {
     resolved.conn.prepare('UPDATE users SET recovery_hash = ? WHERE username = ?').run(restoreHash, uname);
   }
 
   res.json({
     message: '注册成功',
-    recovery: {
-      phrase: formatPhrase(phrase),
-      hash: restoreHash,
-    },
+    recovery: hasPassword ? { phrase: formatPhrase(phrase), hash: restoreHash } : null,
     user: { username: uname, role: 'teacher', dbSlug: slug },
   });
 });

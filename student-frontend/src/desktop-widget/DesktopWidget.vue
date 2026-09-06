@@ -2,12 +2,7 @@
   <div class="desktop-widget">
     <!-- 时钟区域（拖动手柄） -->
     <div class="clock-area glass-panel drag-handle">
-      <div class="time">
-        <span v-for="(c, i) in timeChars" :key="'t'+i" class="time-char" :class="{ 'char-animate': c.anim }">{{ c.char }}</span>
-      </div>
-      <div class="date">
-        <span v-for="(c, i) in dateChars" :key="'d'+i" class="date-char" :class="{ 'char-animate': c.anim }">{{ c.char }}</span>
-      </div>
+      <AnimatedClock date-format="{Y}-{M}-{D} 星期{W}" />
     </div>
 
     <!-- 倒计时区域 -->
@@ -50,7 +45,8 @@
               class="table-row"
               :class="{ 'row-empty': row.isEmpty }"
             >
-              <span class="col-full">{{ row.text }}</span>
+              <span class="duty-task">{{ row.task }}</span>
+              <span class="duty-names">{{ row.names }}</span>
             </div>
           </div>
         </div>
@@ -110,54 +106,10 @@
 <script setup>
 import { ref, computed, onMounted, onUnmounted } from 'vue'
 import axios from 'axios'
+import AnimatedClock from '../components/AnimatedClock.vue'
 
-// ========== 时钟 ==========
+// ========== 时钟：逐字符动画已抽取为 AnimatedClock 组件 ==========
 const now = ref(new Date())
-const DAY_NAMES = ['日', '一', '二', '三', '四', '五', '六']
-const WEEK_MAP = { '周一': 0, '周二': 1, '周三': 2, '周四': 3, '周五': 4, '周六': 5, '周日': 6 }
-
-// 逐字符动画跟踪：使用 ref 数组，watch 驱动
-const timeChars = ref([])
-const dateChars = ref([])
-let prevTimeStr = ''
-let prevDateStr = ''
-let timeAnimTimer = null
-let dateAnimTimer = null
-
-function updateTimeChars() {
-  const d = now.value
-  const p = n => String(n).padStart(2, '0')
-  const str = `${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}`
-  const prev = prevTimeStr
-  prevTimeStr = str
-  const arr = str.split('').map((ch, i) => {
-    return { char: ch, anim: prev && ch !== prev[i] ? true : false }
-  })
-  timeChars.value = arr
-  if (arr.some(c => c.anim)) {
-    if (timeAnimTimer) clearTimeout(timeAnimTimer)
-    timeAnimTimer = setTimeout(() => {
-      timeChars.value = timeChars.value.map(c => ({ char: c.char, anim: false }))
-    }, 400)
-  }
-}
-
-function updateDateChars() {
-  const d = now.value
-  const str = `${d.getFullYear()}-${d.getMonth() + 1}-${d.getDate()} 星期${DAY_NAMES[d.getDay()]}`
-  const prev = prevDateStr
-  prevDateStr = str
-  const arr = str.split('').map((ch, i) => {
-    return { char: ch, anim: prev && ch !== prev[i] ? true : false }
-  })
-  dateChars.value = arr
-  if (arr.some(c => c.anim)) {
-    if (dateAnimTimer) clearTimeout(dateAnimTimer)
-    dateAnimTimer = setTimeout(() => {
-      dateChars.value = dateChars.value.map(c => ({ char: c.char, anim: false }))
-    }, 400)
-  }
-}
 
 // 当前星期几（0=周一，1=周二，...，4=周五），-1=周末
 const todayWeekIndex = computed(() => {
@@ -189,13 +141,18 @@ const todayDuties = computed(() => {
   const cells = duty.value.cells
   const items = duty.value.settings.items || []
   if (!Array.isArray(items) || items.length === 0) return []
-  const dayOfWeek = WEEK_MAP[duty.value.settings.days?.[todayWeekIndex.value]] ?? todayWeekIndex.value
+  let dayOfWeek = todayWeekIndex.value
+  if (dayOfWeek < 0) return []
+  // 值日 cells 的键是中文星期名（如 '周二'），优先用 settings.days 取星期名，缺失时回退数字索引（与主程序一致）
+  const days = duty.value.settings.days || ['周一', '周二', '周三', '周四', '周五']
+  const todayDayName = days[dayOfWeek]
   const result = []
   for (const item of items) {
-    const task = typeof item === 'string' ? item : (item.名称 || item)
+    const task = typeof item === 'string' ? item : (item.名称 || item.name || item)
     let people = []
-    if (cells && cells[task] && cells[task][dayOfWeek] && Array.isArray(cells[task][dayOfWeek])) {
-      people = cells[task][dayOfWeek]
+    if (cells && cells[task]) {
+      const dayCell = todayDayName ? cells[task][todayDayName] : null
+      people = (dayCell !== undefined && dayCell !== null) ? dayCell : (cells[task][dayOfWeek] || [])
     }
     result.push({ task, people })
   }
@@ -337,10 +294,23 @@ const courseGroups = computed(() => {
   return sectionDefs.filter(g => g.rows.length > 0)
 })
 
-// 今日值日面板行：值日任务列表（包含所有项目占位，无人时显示空）
+// 把值日人员解析成可读姓名（兼容：学生 id / 姓名字符串 / 含 id 或姓名的对象）
+function resolveName(v) {
+  if (v == null) return ''
+  if (typeof v === 'object') {
+    const s = students.value.find(st => st.id === v.id)
+    if (s) return s.姓名
+    return v.姓名 || v.name || ''
+  }
+  const s = students.value.find(st => st.id === Number(v) || st.id === v)
+  return s ? s.姓名 : String(v)
+}
+
+// 今日值日面板行：值日任务列表（任务名/人名单列，包含所有项目占位，无人时显示空）
 const dutyRows = computed(() => {
   return todayDuties.value.map(d => ({
-    text: `${d.task}：${d.people.join(' ')}`,
+    task: d.task,
+    names: d.people.map(resolveName).filter(Boolean).join(' '),
     isEmpty: d.people.length === 0,
   }))
 })
@@ -449,25 +419,19 @@ async function loadAll() {
 }
 
 // ========== 生命周期 ==========
-let clockTimer = null
+let refreshClock = null
 
 onMounted(() => {
   loadAll()
   loadApps()
-  updateTimeChars()
-  clockTimer = setInterval(() => {
-    now.value = new Date()
-    updateTimeChars()
-    updateDateChars()
-  }, 1000)
+  // every 5 分钟刷新数据；now 仅驱动倒计时/课程等分钟级状态，秒级走 AnimatedClock
   refreshTimer = setInterval(loadAll, 5 * 60 * 1000)
+  refreshClock = setInterval(() => { now.value = new Date() }, 60000)
 })
 
 onUnmounted(() => {
-  if (clockTimer) clearInterval(clockTimer)
   if (refreshTimer) clearInterval(refreshTimer)
-  if (timeAnimTimer) clearTimeout(timeAnimTimer)
-  if (dateAnimTimer) clearTimeout(dateAnimTimer)
+  if (refreshClock) clearInterval(refreshClock)
 })
 </script>
 
@@ -520,46 +484,10 @@ onUnmounted(() => {
   -webkit-user-select: none;
 }
 
-.time {
-  font-size: 40px;
-  font-weight: 700;
-  line-height: 1.2;
-  letter-spacing: 1px;
-  color: #000000;
-}
-
-.time-char {
-  display: inline-block;
-  transition: none;
-}
-
-.date-char {
-  display: inline-block;
-  transition: none;
-}
-
-/* 字符变化动画：从下方模糊进入 */
-.char-animate {
-  animation: charFlipIn 0.35s cubic-bezier(0.4, 0, 0.2, 1);
-}
-
-@keyframes charFlipIn {
-  0% {
-    filter: blur(4px);
-    transform: translateY(10px);
-    opacity: 0.2;
-  }
-  100% {
-    filter: blur(0px);
-    transform: translateY(0);
-    opacity: 1;
-  }
-}
-
-.date {
-  font-size: 15px;
-  color: #4b5563;
-  margin-top: 2px;
+/* 常用软件：编辑排序用 HTML5 拖拽，需覆盖全局 -webkit-user-drag:none。
+   应用图标本身仍不可拖（详见 .app-icon）。 */
+.app-item {
+  -webkit-user-drag: auto;
 }
 
 /* 倒计时区域：面板已有毛玻璃底，不再画上下横线 */
@@ -696,6 +624,26 @@ onUnmounted(() => {
   text-overflow: ellipsis;
   white-space: nowrap;
   color: #1f2937;
+}
+
+/* 今日值日：任务名定宽列 + 人名列，保证人名起点对齐 */
+.col-duty-panel .duty-task {
+  flex: 0 0 auto;
+  min-width: 4.5em;
+  max-width: 8em;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  margin-right: 0.5em;
+  color: #1f2937;
+  font-weight: 500;
+}
+.col-duty-panel .duty-names {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: #374151;
 }
 
 /* 节次号固定宽度 + 等宽数字，让个/十位数与课程名校对齐 */

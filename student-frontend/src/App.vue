@@ -4,17 +4,17 @@
          其余主题为系统原生边框，自带标题栏/最小化/最大化/关闭。 -->
     <div v-if="isWin11" class="window-title-bar flex-shrink-0 select-none" style="height:36px;">
       <div class="flex items-center" style="height:100%;">
-        <span class="px-3 text-sm font-semibold truncate" style="line-height:36px;">校园助手</span>
+        <span class="px-3 text-sm font-semibold truncate" style="line-height:36px;">班级管理系统</span>
       </div>
       <div class="window-controls flex items-center" style="height:100%;">
         <button class="win-btn" title="最小化" @click="winMinimize">
-          <svg width="10" height="10" viewBox="0 0 10 10"><path d="M0 5h10" stroke="currentColor" stroke-width="1"/></svg>
+          <Minus :size="14" stroke-width="1.5" />
         </button>
         <button class="win-btn" title="最大化/还原" @click="winMaximizeToggle">
-          <svg width="10" height="10" viewBox="0 0 10 10"><path d="M0.5 0.5h9v9h-9z" fill="none" stroke="currentColor" stroke-width="1"/></svg>
+          <Square :size="12" stroke-width="1.5" />
         </button>
         <button class="win-btn win-btn-close" title="关闭" @click="winClose">
-          <svg width="10" height="10" viewBox="0 0 10 10"><path d="M0 0l10 10M10 0L0 10" stroke="currentColor" stroke-width="1"/></svg>
+          <X :size="14" stroke-width="1.5" />
         </button>
       </div>
     </div>
@@ -43,6 +43,15 @@
   <!-- 全局通知弹窗 -->
   <NotificationToast />
 
+  <!-- 关闭选择弹窗：点主窗口关闭按钮时居中弹出（复用 dialog-transition 动画） -->
+  <ShutdownMenuDialog
+    :visible="shutdownMenuVisible"
+    :has-toolbox="shutdownHasToolbox"
+    :has-desktop="shutdownHasDesktop"
+    @choose="onShutdownChoose"
+    @cancel="onShutdownCancel"
+  />
+
   <!-- AI 助手：悬浮呼出按钮与浮窗（登录页不显示） -->
   <template v-if="$route.path !== '/login'">
     <Teleport to="body">
@@ -60,7 +69,6 @@
         ref="assistantPanel"
         class="fixed z-[20001] border border-border rounded-xl shadow-2xl flex flex-col overflow-hidden"
         style="background-color: rgba(255,255,255,0.72); backdrop-filter: blur(28px) saturate(1.5); -webkit-backdrop-filter: blur(28px) saturate(1.5);"
-        @mousedown="onPanelMouseDown"
         :style="{
           width: '24rem',
           maxWidth: 'calc(100vw - 2rem)',
@@ -94,8 +102,10 @@
 <script>
 import Sidebar from './components/layout/Sidebar.vue'
 import NotificationToast from './components/base/NotificationToast.vue'
+import ShutdownMenuDialog from './components/base/ShutdownMenuDialog.vue'
 import { useThemeStore } from './stores/theme'
 import { defineAsyncComponent, h } from 'vue'
+import { Minus, Square, X } from '@lucide/vue'
 
 // 异步组件：加载中/失败展示占位文案，避免浮窗点开就消失却毫无反馈
 const AiAssistant = defineAsyncComponent({
@@ -110,7 +120,7 @@ const AiAssistant = defineAsyncComponent({
 })
 
 export default {
-  components: { Sidebar, NotificationToast, AiAssistant },
+  components: { Sidebar, NotificationToast, ShutdownMenuDialog, Minus, Square, X, AiAssistant },
   data() {
     return {
       themeStore: null,
@@ -121,6 +131,12 @@ export default {
       iconTranslate: { x: 0, y: 0 },
       iconDrag: null,
       iconMoved: false,
+      // 关闭选择弹窗状态
+      shutdownMenuVisible: false,
+      shutdownHasToolbox: false,
+      shutdownHasDesktop: false,
+      // 主进程消息监听（on 返回的 wrapper，供 beforeUnmount off）
+      ipcFromMain: null,
     }
   },
   computed: {
@@ -150,14 +166,30 @@ export default {
   },
   mounted() {
     window.addEventListener('resize', this.onWindowResize)
+    // 启动回报「桌面小组件启用状态 + 首帧真正空闲」：主进程据此错峰创建工具箱浮窗与（如启用）桌面小组件。
+    // 延迟到主窗口首帧「真正空闲」时回报，避免与首屏渲染抢占资源；不用固定延迟。
+    const reportWidgetsReady = () => {
+      try {
+        const enabled = (localStorage.getItem('desktopWidgetEnabled') ?? '1') !== '0'
+        if (window.electron?.send) window.electron.send('widgets-ready', enabled)
+      } catch (_) {}
+    }
+    if (typeof window.requestIdleCallback === 'function') {
+      // 双重 idle：确保首帧渲染与首屏请求都让出一段空闲后才上报
+      window.requestIdleCallback(() => window.requestIdleCallback(reportWidgetsReady))
+    } else {
+      reportWidgetsReady()
+    }
   },
   created() {
     this.themeStore = useThemeStore()
+    this.setupShutdownIpc()
   },
   beforeUnmount() {
     window.removeEventListener('resize', this.onWindowResize)
     this.stopDragAssistant()
     this.stopDragIcon()
+    this.teardownShutdownIpc()
   },
   methods: {
     onWindowResize() {
@@ -222,7 +254,6 @@ export default {
 
     // ---- 浮窗拖拽 ----
     // 面板整体 mousedown 不拦截点击；真正的拖拽只由标题栏 startDragAssistant 触发
-    onPanelMouseDown() {},
     startDragAssistant(e) {
       if (e.button !== 0) return
       this.assistantDrag = { startX: e.clientX, startY: e.clientY, x: this.assistantPos.x, y: this.assistantPos.y }
@@ -261,6 +292,55 @@ export default {
     },
     winClose() {
       window.electron?.send('win-close')
+    },
+
+    // ---- 关闭选择弹窗（复用现有弹窗动画，替代主进程原生菜单） ----
+    setupShutdownIpc() {
+      // 告知主进程：渲染层已就绪，可接管关闭菜单（弹窗生命周期内有 IPC 时此标记生效）
+      window.electron?.send('shutdown-action', { type: 'ready' })
+      this.ipcFromMain = window.electron?.on('from-main', (data) => {
+        if (data && data.type === 'shutdown-menu') {
+          // 若用户上次选了「下次不再提示」，则直接按上次的范围执行，不再弹窗
+          const remembered = this.getRememberedShutdown()
+          if (remembered && remembered.action) {
+            window.electron?.send('shutdown-action', { action: remembered.action, remember: true })
+            return
+          }
+          this.shutdownHasToolbox = !!data.hasToolbox
+          this.shutdownHasDesktop = !!data.hasDesktop
+          this.shutdownMenuVisible = true
+        }
+      })
+    },
+    teardownShutdownIpc() {
+      if (window.electron?.off && this.ipcFromMain) {
+        window.electron.off('from-main', this.ipcFromMain)
+        this.ipcFromMain = null
+      }
+    },
+    onShutdownChoose(payload) {
+      const { action, remember } = payload || {}
+      this.shutdownMenuVisible = false
+      if (remember) this.setRememberedShutdown(action)
+      else this.clearRememberedShutdown()
+      window.electron?.send('shutdown-action', { action })
+    },
+    onShutdownCancel() {
+      this.shutdownMenuVisible = false
+      window.electron?.send('shutdown-action', { action: 'cancel' })
+    },
+    // 持久化「下次不再提示」的选择：仅前端 localStorage（同主窗口会话内有效）
+    getRememberedShutdown() {
+      try {
+        const raw = localStorage.getItem('shutdown-remember')
+        return raw ? JSON.parse(raw) : null
+      } catch (_) { return null }
+    },
+    setRememberedShutdown(action) {
+      try { localStorage.setItem('shutdown-remember', JSON.stringify({ action })) } catch (_) {}
+    },
+    clearRememberedShutdown() {
+      try { localStorage.removeItem('shutdown-remember') } catch (_) {}
     },
   },
 }

@@ -81,4 +81,37 @@ router.put('/apps', (req, res) => {
   }
 });
 
+// 首页班级信息（班名/口号/班风/学风）
+router.get('/class-info', (req, res) => {
+  try {
+    const row = db.prepare('SELECT class_info FROM widget_settings WHERE id = 1').get();
+    let ci = {};
+    try { ci = JSON.parse(row.class_info || '{}'); } catch (_) { ci = {}; }
+    res.json({ success: true, data: {
+      name: ci.name || '',
+      motto: ci.motto || '',
+      mottoStyle: ci.mottoStyle || '',
+      xuefeng: ci.xuefeng || '',
+    }});
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+router.put('/class-info', (req, res) => {
+  try {
+    const { name, motto, mottoStyle, xuefeng } = req.body || {};
+    const clean = {
+      name: String(name ?? '').trim().slice(0, 50),
+      motto: String(motto ?? '').trim().slice(0, 500),
+      mottoStyle: String(mottoStyle ?? '').trim().slice(0, 500),
+      xuefeng: String(xuefeng ?? '').trim().slice(0, 500),
+    };
+    db.prepare('UPDATE widget_settings SET class_info = ? WHERE id = 1').run(JSON.stringify(clean));
+    res.json({ success: true, data: clean });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 module.exports = router;

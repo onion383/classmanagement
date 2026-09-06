@@ -1,9 +1,19 @@
 const { app, BrowserWindow, ipcMain, desktopCapturer, screen, dialog, shell, protocol, Menu, globalShortcut, Notification } = require('electron')
 const path = require('path')
 const fs = require('fs')
+const crypto = require('crypto')
 const { Readable } = require('stream')
 const { exec } = require('child_process')
 const startupTimer = require('./startup-timer')
+
+// 安全通道主密钥（方案 A 的认证锚点 K_master）：本次运行周期内生成一次并复用于
+// 「后端 fork env 注入」+「preload IPC 提供渲染层」。只参与前后端 HKDF 派生态，
+// 不进线上传输。后端崩溃自动重启时复用同一值，保证已建立会话/前端持有的密钥仍一致。
+let channelMasterKey = null
+function getMasterKey() {
+  if (!channelMasterKey) channelMasterKey = crypto.randomBytes(32).toString('hex')
+  return channelMasterKey
+}
 
 // electron-acrylic-window：原生模块，走 Win32 SetWindowCompositionAttribute 启用真·亚克力毛玻璃，
 // 不受 Win11「节能器」影响（Electron 原生 setBackgroundMaterial 会被节能器干扰变灰）。
@@ -88,6 +98,12 @@ let widgetWindow
 let desktopWidgetWindow
 let backendProcess
 
+// 关闭确认菜单状态：
+//   shutdownMenuOpen —— 菜单已弹出时不再重复弹（close 事件可能反复触发）；
+//   allowMainClose  —— 用户已从菜单选择关闭主窗口，放行本次 close（绕过弹出菜单）。
+let shutdownMenuOpen = false
+let allowMainClose = false
+
 // 「本次启用工具箱」会话级开关：仅影响本次运行浮窗显隐（不持久）。
 // null = 尚未由浮窗初始化（浮窗会以持久「是否启用工具箱」作为本次默认注入）。
 let sessionWidgetEnabled = null
@@ -161,7 +177,7 @@ body{background:linear-gradient(160deg,#eef2ff 0%,#e2e8ff 100%)}
 <circle cx="11" cy="11" r="8" fill="none" stroke="rgba(30,64,175,.25)" stroke-width="3"/>
 <circle class="spin" cx="11" cy="11" r="8" fill="none" stroke="#1e40af" stroke-width="3" stroke-dasharray="42" stroke-dashoffset="12" stroke-linecap="round"/>
 </svg>
-<span class="l">校园助手</span>
+<span class="l">班级管理系统</span>
 <span class="t">启动开发服务器…</span>
 </div></body></html>`
 
@@ -191,6 +207,12 @@ function pollViteAndNavigate(win, retries = 30) {
 // 主窗口边框模式：'native'（毛玻璃等其他主题，系统原生标题栏）| 'frameless'（Win11 主题，无边框自绘标题栏）。
 // 边框无法在运行中切换，故跨模式切换时重建主窗口（此前 createMainWindow 已固定 no 边框）。
 function createMainWindow(mode = 'native') {
+  // （新窗口）关闭菜单状态复位：allowMainClose 不会在旧窗口关闭后自动清掉，
+  // 若不清零，重建后的新主窗口点关闭会被静默放行、不再弹菜单。
+  allowMainClose = false
+  shutdownMenuOpen = false
+  // 新窗口渲染层未加载完成，待其 ready 回报后才允许渲染层接管关闭菜单
+  mainRendererShutdownReady = false
   const isFrameless = mode === 'frameless'
   mainWindowChrome = mode
   const win = new BrowserWindow({
@@ -198,7 +220,7 @@ function createMainWindow(mode = 'native') {
     height: 800,
     minWidth: 900,
     minHeight: 600,
-    title: '校园助手',
+    title: '班级管理系统',
     // 边框模式随主题切换（切到不同边框类型时由 recreateMainWindow 重建，见 theme-chrome）：
     //   - 毛玻璃等其他主题 → 系统原生边框，带最小化/最大化/关闭；
     //   - Win11 主题 → 无边框 + 透明，用自绘标题栏，靠窗外亚克力模糊透出桌面。
@@ -214,10 +236,13 @@ function createMainWindow(mode = 'native') {
       preload: path.join(__dirname, 'preload.js'),
       contextIsolation: true,
       nodeIntegration: false,
-      // 禁用 sandbox：Electron 43 的 sandboxed renderer 存在启动崩溃
-      // （binding.startupData 为 null），导致 preload 无法注入 window.electron。
-      // contextIsolation + nodeIntegration:false 仍保证渲染层隔离。
-      sandbox: false,
+      // 标记渲染进程启用安全通道（preload 据此暴露 window.__SECURE_CHANNEL__，
+      // 前端只在置位后才对业务 JSON API 启用加密传输）
+      additionalArguments: ['--secure-channel'],
+      // 开启 OS 级沙箱：即使注入成功也跑不出渲染进程安全边界。
+      // 若 Electron 版本回退出现沙箱启动崩溃（binding.startupData 为 null），
+      // 再回退为 false：contextIsolation + nodeIntegration:false 仍是软件层兜底。
+      sandbox: true,
       // webSecurity 仅开发模式关闭（用于加载自签名 https 的 Vite 服务）；
       // 生产环境必须保持开启，禁止在打包后关闭网页安全策略。
       webSecurity: !isDev,
@@ -307,6 +332,21 @@ function createMainWindow(mode = 'native') {
     if (!win.isDestroyed()) win.show()
   })
 
+  // 主窗口关闭拦截：点击关闭时不直接关闭，而在窗口中央弹出"怎样关闭"菜单。
+  // 覆盖系统 ✕ 与无边框自绘标题栏的关闭按钮（二者最终都触发 close 事件）。
+  // 正在整体退出（app.quit）或用户已在菜单里选定关闭主窗口时不拦截。
+  win.on('close', (e) => {
+    if (app.isQuitting || allowMainClose) return
+    e.preventDefault()
+    if (shutdownMenuOpen) return
+    shutdownMenuOpen = true
+    // 关闭菜单由渲染层（主页面）弹出，复用现有弹窗组件与动画；
+    // 仅当渲染层尚未就绪/不可用时回退到主进程原生菜单。
+    if (!requestShutdownMenu(win)) {
+      showShutdownMenu(win) // —— 由 requestShutdownMenu 内部针对未就绪的情况再置回 false
+    }
+  })
+
   win.on('closed', () => {
     // 仅当关闭的是当前引用的窗口时才清空，避免重建时旧窗口的 closed 事件误清新窗口
     if (mainWindow === win) {
@@ -332,7 +372,8 @@ function createWidgetWindow() {
       preload: path.join(__dirname, 'preload.js'),
       contextIsolation: true,
       nodeIntegration: false,
-      sandbox: false,
+      sandbox: true,
+      additionalArguments: ['--secure-channel'],
       webSecurity: !isDev,
       backgroundThrottling: true,
       spellcheck: false,
@@ -406,7 +447,8 @@ function createDesktopWidgetWindow() {
       preload: path.join(__dirname, 'preload.js'),
       contextIsolation: true,
       nodeIntegration: false,
-      sandbox: false,
+      sandbox: true,
+      additionalArguments: ['--secure-channel'],
       webSecurity: !isDev,
       backgroundThrottling: true,
       spellcheck: false,
@@ -534,30 +576,35 @@ function compileBackendProcess() {
     // 开发模式：托管系统 node。注意：Electron 主进程中 child_process.fork 默认
     // execPath 是 process.execPath（electron.exe），会导致子进程用 Electron 内置
     // Node 运行后端并崩溃。必须显式指定系统 node 的可执行文件路径。
-    const { fork, execFileSync } = require('child_process')
-    let systemNode = process.env.NODE_EXEC_PATH
-    if (!systemNode) {
-      try {
-        systemNode = execFileSync('node', ['-p', 'process.execPath'], { encoding: 'utf8' }).trim()
-      } catch (_) {
-        systemNode = 'node'
-      }
+    // 用异步 exec 探测系统 node（而非 execFileSync 同步阻塞主线程），
+    // 让后端 fork 与 createMainWindow 的初始化真正并行推进。
+    const { fork, execFile } = require('child_process')
+    const spawnDev = (execPath) => {
+      const child = fork(backendPath, [], {
+        cwd: backendDir,
+        execPath,
+        stdio: ['ignore', 'pipe', 'pipe', 'ipc'],
+        env: {
+          ...process.env,
+          DATA_DIR: dataDir,
+          SECURE_MASTER: getMasterKey(),
+        },
+      })
+      backendProcess = child
+      child.stdout?.on('data', onData)
+      child.stderr?.on('data', onErrData)
+      child.on('error', onProcessorError)
+      child.on('exit', onExit)
+      child.on('exit', scheduleBackendRestart)
+      child.on('disconnect', onDisconnect)
     }
-    const child = fork(backendPath, [], {
-      cwd: backendDir,
-      execPath: systemNode,
-      stdio: ['ignore', 'pipe', 'pipe', 'ipc'],
-      env: {
-        ...process.env,
-        DATA_DIR: dataDir,
-      },
+    if (process.env.NODE_EXEC_PATH) {
+      spawnDev(process.env.NODE_EXEC_PATH)
+      return
+    }
+    execFile('node', ['-p', 'process.execPath'], { encoding: 'utf8' }, (err, out) => {
+      spawnDev(err ? 'node' : out.trim())
     })
-    backendProcess = child
-    child.stdout?.on('data', onData)
-    child.stderr?.on('data', onErrData)
-    child.on('error', onProcessorError)
-    child.on('exit', onExit)
-    child.on('disconnect', onDisconnect)
     return
   }
 
@@ -575,6 +622,7 @@ function compileBackendProcess() {
       ...process.env,
       DATA_DIR: dataDir,
       ELECTRON_RUN_AS_NODE: '1',
+      SECURE_MASTER: getMasterKey(),
     },
   })
 
@@ -582,6 +630,7 @@ function compileBackendProcess() {
   backendProcess.stderr?.on('data', onErrData)
   backendProcess.on('error', onProcessorError)
   backendProcess.on('exit', onExit)
+  backendProcess.on('exit', scheduleBackendRestart)
   backendProcess.on('disconnect', onDisconnect)
 }
 
@@ -599,19 +648,19 @@ function startBackend() {
   backendLog(`[main] 正在启动后端 (第 ${backendRestartCount + 1} 次)...\n`)
 
   compileBackendProcess()
+}
 
-  // 监听退出并自动重启（放弃内核权限控后台后）；
-  // 用一个短延迟把退出与重启解耦，避免同一个 exit 触发多次重启
-  const onExit = () => {
-    clearTimeout(backendRestartTimer)
-    backendRestartTimer = setTimeout(() => {
-      if (app.isQuitting) return
-      backendRestartCount += 1
-      backendProcess = null
-      startBackend()
-    }, 1500)
-  }
-  backendProcess.on('exit', onExit)
+// 后端子进程退出后自动重启：用一个短延迟把退出与重启解耦，避免同一个 exit 触发多次重启。
+// 绑定发生在「实际 fork 成立后」（见 compileBackendProcess 内两种 fork 分支），
+// 兼容开发模式下「异步探测 system node 后才 fork」的场景。
+function scheduleBackendRestart() {
+  clearTimeout(backendRestartTimer)
+  backendRestartTimer = setTimeout(() => {
+    if (app.isQuitting) return
+    backendRestartCount += 1
+    backendProcess = null
+    startBackend()
+  }, 1500)
 }
 
 // 打包模式静态资源 MIME 表
@@ -662,33 +711,59 @@ function setupAppProtocol() {
         })
       }
       const ct = MIME[path.extname(file).toLowerCase()] || 'application/octet-stream'
+      // hash 命名的编译产物（.js/.css/.wasm/图片等）可长缓存，让二次及以后启动直接命中磁盘缓存，
+      // 免去每次重新读盘与解析前端 bundle，显著加快启动；入口 html 则 no-cache，避免升级后拿到旧壳。
+      const headers = { 'content-type': ct }
+      headers['cache-control'] = /\.(js|css|wasm|png|jpe?g|gif|webp|svg|woff2?)(\?.*)?$/i.test(file)
+        ? 'public, max-age=31536000, immutable'
+        : 'no-cache'
       console.log(`[app://] 已提供: ${file} (${ct})`)
-      return new Response(Readable.toWeb(fs.createReadStream(file)), { headers: { 'content-type': ct } })
+      return new Response(Readable.toWeb(fs.createReadStream(file)), { headers })
     } catch (_) {
       return new Response('Not Found', { status: 404 })
     }
   })
 }
 
-// 在主窗口页面加载完成后错峰创建 widget 和桌面小组件，避免启动瞬间多个渲染进程并行抢占资源
-function createWidgetAfterMainLoad() {
-  mainWindow?.webContents.once('did-finish-load', () => {
-    // 浮窗小组件：短延迟后创建
-    setTimeout(() => {
-      if (!widgetWindow || widgetWindow.isDestroyed()) {
-        createWidgetWindow()
-        startupTimer.mark('widget 创建完成')
-      }
-    }, 300)
-    // 桌面小组件：比浮窗更晚错峰，让主窗口先完成首帧渲染再分流资源
-    setTimeout(() => {
-      if (!desktopWidgetWindow || desktopWidgetWindow.isDestroyed()) {
-        createDesktopWidgetWindow()
-        startupTimer.mark('桌面组件创建完成')
-      }
-    }, 900)
-  })
+// 「桌面小组件按需创建」：主窗口渲染层延迟到「首帧真正空闲」才回报，主进程据此错峰创建桌面小组件窗口，
+// 无固定延迟；未启用则不创建。
+let desktopEnabled = true
+
+function scheduleCreateDesktop() {
+  if (!desktopEnabled) return
+  if (!desktopWidgetWindow || desktopWidgetWindow.isDestroyed()) {
+    createDesktopWidgetWindow()
+    startupTimer.mark('桌面组件创建完成')
+  }
 }
+
+function setDesktopEnabled(enabled) {
+  desktopEnabled = !!enabled
+  if (desktopEnabled) {
+    scheduleCreateDesktop()
+  } else if (desktopWidgetWindow && !desktopWidgetWindow.isDestroyed()) {
+    // 关闭桌面小组件窗口（不影响主窗口与后端，不触发 window-all-closed 退出）
+    desktopWidgetWindow.close()
+  }
+}
+
+// 主窗口渲染层空闲回报：同时创建工具箱浮窗，并（按启用状态）创建/关闭桌面小组件窗口
+ipcMain.on('widgets-ready', (event, enabled) => {
+  if (!mainWindow || mainWindow.isDestroyed()) return
+  if (event.sender !== mainWindow.webContents) return
+  if (!widgetWindow || widgetWindow.isDestroyed()) {
+    createWidgetWindow()
+    startupTimer.mark('widget 创建完成')
+  }
+  setDesktopEnabled(!!enabled)
+})
+
+// 设置页切换「桌面小组件」开关时实时建/关窗口（不依赖空闲时机）
+ipcMain.on('desktop-widget-enabled', (event, enabled) => {
+  if (!mainWindow || mainWindow.isDestroyed()) return
+  if (event.sender !== mainWindow.webContents) return
+  setDesktopEnabled(enabled)
+})
 
 // 后端就绪检测：后端 app.listen 回调会打印「服务器已启动」，这里仅作日志提示，
 // 不再触发建窗（主窗口已提前创建）。stdout 可能被分片，做滚动缓冲 + 子串匹配。
@@ -714,18 +789,15 @@ app.whenReady().then(() => {
     setupAppProtocol()
     startupTimer.mark('协议注册完成')
 
-    // 主窗口立即创建：它加载的静态前端（app://local/index.html 或 dev 的 Vite）
-    // 不依赖后端，后端在后台并行启动。登录页/首页骨架无需后端即可渲染，
-    // 前端通过 axios 响应重试兜底「后端未就绪」的短暂窗口。
-    createMainWindow()
-    startupTimer.mark('createMainWindow 完成')
-    // 主窗口加载完成后错峰建 widget / 桌面小组件：启动瞬间仅保留主窗口一个渲染进程，
-    // 避免多个渲染进程并行抢占 CPU/GPU（桌面小组件同样依赖 axios 重试，晚建无碍）。
-    createWidgetAfterMainLoad()
-
-    // 后端后台启动（就绪信号不再决定主窗口创建）
+    // 先 fire 后端：fork 子进程立刻启动，与下方 createMainWindow 的同步初始化并行推进，
+    // 不再等主窗口创建完成后再启动后端（省去串行等待，后端更早就绪）。
     startBackend()
     startupTimer.mark('startBackend 完成')
+
+    // 主窗口立即创建：它加载的静态前端（app://local/index.html 或 dev 的 Vite）不依赖后端，
+    // 登录页/首页骨架无需后端即可渲染，前端通过 axios 响应重试兜底「后端未就绪」的短暂窗口。
+    createMainWindow()
+    startupTimer.mark('createMainWindow 完成')
 
     // 5s 后输出启动时间线并保存日志
     setTimeout(() => {
@@ -815,6 +887,22 @@ ipcMain.handle('open-external', (event, url) => {
 // 「选择软件文件+提取图标」和「点击启动」两项平台能力。
 // 每项：{ id, name, path, icon }（icon 为提取自 exe/.lnk 图标的 dataURL，可为空）。
 
+// 解析 .lnk 快捷方式的目标可执行程序路径（仅接受 .exe 目标，供取图标用）
+async function resolveLnkTarget(lnkPath) {
+  const { execFile } = require('child_process')
+  return new Promise((resolve) => {
+    const ps = [
+      '-NoProfile', '-NonInteractive', '-Command',
+      `$s=(New-Object -ComObject WScript.Shell).CreateShortcut('${lnkPath.replace(/'/g, "''")}'); if($s.TargetPath){$s.TargetPath}`,
+    ]
+    execFile('powershell.exe', ps, { timeout: 8000 }, (err, stdout) => {
+      if (err) return resolve('')
+      const target = (stdout || '').trim()
+      resolve(path.extname(target).toLowerCase() === '.exe' ? target : '')
+    })
+  })
+}
+
 // 打开"选择软件程序/快捷方式"对话框，并提取其图标为 dataURL 返回
 ipcMain.handle('apps-select-file', async () => {
   if (!mainWindow || mainWindow.isDestroyed()) return { canceled: true, error: '无主窗口' }
@@ -830,15 +918,17 @@ ipcMain.handle('apps-select-file', async () => {
   if (result.canceled || result.filePaths.length === 0) return { canceled: true }
   const filePath = result.filePaths[0]
   lastDialogDir = path.dirname(filePath)
-  let icon = ''
-  try {
-    const img = await app.getFileIcon(filePath, { size: 'large' })
-    icon = img.toDataURL()
-  } catch (_) { /* 图标提取失败则留空 */ }
   const ext = path.extname(filePath).toLowerCase()
   let name = path.basename(filePath, ext) || filePath
   // bat/cmd 显示名字会带扩展名，去掉小尾巴，更整洁
   if (['.bat', '.cmd'].includes(ext)) name = path.basename(filePath, ext)
+  let icon = ''
+  try {
+    // 快捷方式(.lnk)本身取不到目标程序图标，先解析出目标 exe 再取其图标
+    const iconTarget = ext === '.lnk' ? await resolveLnkTarget(filePath) : ''
+    const img = await app.getFileIcon(iconTarget || filePath, { size: 'large' })
+    icon = img.toDataURL()
+  } catch (_) { /* 图标提取失败则留空 */ }
   return { canceled: false, filePath, name, icon }
 })
 
@@ -1025,7 +1115,77 @@ ipcMain.handle('get-main-token', () => {
   return null
 })
 
+// 安全通道主密钥：提供给渲染进程（含工具箱/桌面组件）参与前后端 HKDF 派生态。
+ipcMain.handle('get-master-key', () => getMasterKey())
+
 // ============ 无边框自绘标题栏的窗口控制 ============
+// 关闭确认菜单：点主窗口右上角关闭时居中弹出，让用户选择关闭范围。
+// 菜单由**渲染层**用现有弹窗组件 + dialog-transition 动画弹出（触感一致）；
+// 仅当渲染层尚未就绪（如启动瞬间点系统 ✕）时，回退到主进程原生菜单。
+// 核心约束：只要还有任意窗口（含工具箱/桌面组件）存在，就由 window-all-closed 保证不关后端；
+// 当最后一个窗口（组件）被关闭后自动触发 window-all-closed，从而关闭后端并退出。
+
+// 渲染层是否已就绪可弹关闭菜单：由渲染层 ready 时经 shutdown-action 回报
+let mainRendererShutdownReady = false
+
+// 请求渲染层在窗口中央弹出关闭菜单；渲染层未就绪/发送失败返回 false
+function requestShutdownMenu(win) {
+  if (!mainRendererShutdownReady) return false
+  const ex = (w) => !!(w && !w.isDestroyed())
+  try {
+    win.webContents.send('from-main', {
+      type: 'shutdown-menu',
+      hasToolbox: ex(widgetWindow),
+      hasDesktop: ex(desktopWidgetWindow),
+    })
+    return true
+  } catch (_) {
+    return false
+  }
+}
+
+// 统一的「按所选范围关闭」逻辑：渲染层回传与原生菜单回退共用，避免重复
+function closeMainWith(action) {
+  shutdownMenuOpen = false
+  if (action === 'all') { app.quit(); return }
+  // 关闭组件（桌面组件窗口或工具箱窗口）后再关主窗口；组件未开启时无副作用
+  if (action === 'toolbox' && widgetWindow && !widgetWindow.isDestroyed()) widgetWindow.close()
+  if (action === 'desktop' && desktopWidgetWindow && !desktopWidgetWindow.isDestroyed()) desktopWidgetWindow.close()
+  allowMainClose = true
+  if (mainWindow && !mainWindow.isDestroyed()) mainWindow.close() // 主窗口关闭：组件保留时后端仍存活
+}
+
+// 渲染层回报：就绪标记 / 用户选择（action）/ 取消
+ipcMain.on('shutdown-action', (event, data) => {
+  if (!data) return
+  if (data === 'ready' || data?.type === 'ready') { mainRendererShutdownReady = true; return }
+  if (data === 'cancel' || data?.action === 'cancel') { shutdownMenuOpen = false; return }
+  const action = (typeof data === 'string' ? data : data?.action)
+  closeMainWith(action === 'desktop' || action === 'toolbox' || action === 'all' || action === 'main' ? action : 'main')
+})
+
+// 原生菜单回退：仅渲染层未就绪时使用
+function showShutdownMenu(win) {
+  shutdownMenuOpen = true
+  const ex = (w) => !!(w && !w.isDestroyed())
+  const bounds = win.getBounds()
+  // 组件不存在（未开启）时对应菜单项置灰，避免点了没反应造成困惑
+  const menu = Menu.buildFromTemplate([
+    { label: '关闭主窗口', click: () => closeMainWith('main') },
+    { label: '关闭主窗口和工具箱', enabled: ex(widgetWindow), click: () => closeMainWith('toolbox') },
+    { label: '关闭主窗口和桌面组件', enabled: ex(desktopWidgetWindow), click: () => closeMainWith('desktop') },
+    { type: 'separator' },
+    { label: '关闭所有窗口及其后端', click: () => closeMainWith('all') },
+  ])
+  // 菜单关闭（Esc / 点击空白）时复位，允许下次再弹
+  menu.popup({
+    window: win,
+    x: Math.round(bounds.x + bounds.width / 2),
+    y: Math.round(bounds.y + bounds.height / 2),
+    callback: () => { shutdownMenuOpen = false },
+  })
+}
+
 // 最小化
 ipcMain.on('win-minimize', (event) => {
   const win = BrowserWindow.fromWebContents(event.sender)

@@ -1,7 +1,7 @@
 <template>
   <div>
-    <div class="w-full bg-surface shadow-md rounded-xl mb-6 px-6 py-5 border border-border min-h-[4.5rem] flex items-center">
-      <h1 class="text-2xl font-bold text-text">🪑 座位管理</h1>
+    <div class="w-full bg-surface shadow-md rounded-xl mb-6 px-5 py-3 border border-border min-h-[4.5rem] flex items-center">
+      <h1 class="text-2xl font-bold text-text flex items-center gap-2"><IconGlyph name="seat" /> 座位管理</h1>
     </div>
 
     <Tabs :tabs="tabItems" v-model="activeTab">
@@ -10,14 +10,14 @@
           <section class="mb-4">
             <h2 class="text-xl font-semibold mb-4">🪑 当前座位</h2>
             <div class="mb-4 flex flex-wrap items-center gap-3">
-              <button @click="openSettings('active')" class="bg-primary text-text-inverse px-4 py-2 rounded">⚙️ 设置</button>
+              <button @click="openSettings('active')" class="bg-primary text-text-inverse px-4 py-2 rounded flex items-center gap-1.5"><IconGlyph name="settings" :size="14" tint="current" /> 设置</button>
               <button @click="smartArrangementVisible = true" class="bg-primary text-text-inverse px-4 py-2 rounded">🧠 智能排表</button>
-              <button @click="refreshActive" class="bg-text-muted text-text-inverse px-4 py-2 rounded">🔄 刷新</button>
-              <button @click="applyMasterToActive" class="bg-primary text-text-inverse px-4 py-2 rounded">📥 从模板导入</button>
-              <button @click="activeExportVisible = true" class="bg-warning text-text-inverse px-4 py-2 rounded">📥 导出 Excel</button>
+              <button @click="refreshActive" class="bg-text-muted text-text-inverse px-4 py-2 rounded flex items-center gap-1.5"><IconGlyph name="refresh" :size="14" tint="current" /> 刷新</button>
+              <button @click="applyMasterToActive" class="bg-primary text-text-inverse px-4 py-2 rounded flex items-center gap-1.5"><IconGlyph name="upload" :size="14" tint="current" /> 从模板导入</button>
+              <button @click="activeExportVisible = true" class="bg-warning text-text-inverse px-4 py-2 rounded flex items-center gap-1.5"><IconGlyph name="download" :size="14" tint="current" /> 导出 Excel</button>
             </div>
 
-            <div v-if="!activeLoaded" class="text-center py-10 text-text-muted">加载中...</div>
+            <div v-if="!activeLoaded" class="skeleton-block"></div>
             <GridView
               v-else
               ref="activeGridRef"
@@ -43,14 +43,14 @@
           <div class="mb-2"></div>
 
           <section>
-            <h2 class="text-xl font-semibold mb-4">📋 座位模板</h2>
+            <h2 class="text-xl font-semibold mb-4 flex items-center gap-2"><IconGlyph name="clipboard" :size="20" /> 座位模板</h2>
             <div class="mb-4 flex flex-wrap items-center gap-3">
-              <button @click="openSettings('master')" class="bg-primary text-text-inverse px-4 py-2 rounded">⚙️ 设置</button>
-              <button @click="refreshMaster" class="bg-text-muted text-text-inverse px-4 py-2 rounded">🔄 刷新</button>
-              <button @click="masterExportVisible = true" class="bg-warning text-text-inverse px-4 py-2 rounded">📥 导出 Excel</button>
+              <button @click="openSettings('master')" class="bg-primary text-text-inverse px-4 py-2 rounded flex items-center gap-1.5"><IconGlyph name="settings" :size="14" tint="current" /> 设置</button>
+              <button @click="refreshMaster" class="bg-text-muted text-text-inverse px-4 py-2 rounded flex items-center gap-1.5"><IconGlyph name="refresh" :size="14" tint="current" /> 刷新</button>
+              <button @click="masterExportVisible = true" class="bg-warning text-text-inverse px-4 py-2 rounded flex items-center gap-1.5"><IconGlyph name="download" :size="14" tint="current" /> 导出 Excel</button>
             </div>
 
-            <div v-if="!masterLoaded" class="text-center py-10 text-text-muted">加载中...</div>
+            <div v-if="!masterLoaded" class="skeleton-block"></div>
             <GridView
               v-else
               ref="masterGridRef"
@@ -74,7 +74,7 @@
         </div>
 
         <div v-else-if="activeTab === 'history'">
-          <div v-if="historyLoading" class="text-center py-10">加载中...</div>
+          <div v-if="historyLoading" class="skeleton-block"></div>
           <EmptySnapshot v-else-if="!historySnapshot" />
           <GridView v-else :colHeaders="historyColHeaders" :rows="historyDisplayRows" :hideMetaColumns="true" :showRowNumber="true" />
           <WeekSwitcher v-model:currentWeek="historyCurrentWeek" :weeks="historyWeeks" @update:currentWeek="loadHistorySnapshot" />
@@ -146,6 +146,7 @@ import WeekSwitcher from '../components/base/WeekSwitcher.vue'
 import { useSeatGrid } from '../composables/useSeatGrid.js'
 import { useUndoShortcut, recordGridSnapshotUndo } from '../composables/useUndo.js'
 import { useNotification } from '../composables/useNotification.js'
+import { syncStudentNamesFromRows } from '../composables/useSyncStudentNames.js'
 
 // 弹窗类组件懒加载：打开时才加载对应 chunk
 const ExportExcel = defineAsyncComponent(() => import('../components/import-export/ExportExcel.vue'))
@@ -281,11 +282,20 @@ function confirmShrink() {
 const saveActiveSettings = (s) => requestSaveSettings(activeGrid, s)
 
 const loadMaster = masterGrid.load
-const onMasterCellsUpdate = masterGrid.onCellsUpdate
+// 表格输入的人名同步到学生管理：包装 onCellsUpdate，先同步再转发给网格逻辑
+const wrapCellsSync = (fn) => (newRows) => {
+  syncStudentNamesFromRows(newRows, {
+    getKnown: () => allStudents.value,
+    refresh: fetchAllStudents,
+    notify: notifySuccess
+  })
+  return fn(newRows)
+}
+const onMasterCellsUpdate = wrapCellsSync(masterGrid.onCellsUpdate)
 const onMasterSwapRows = masterGrid.onSwapRows
 const onMasterSwapColumns = masterGrid.onSwapColumns
 const onMasterCellDblClick = masterGrid.onCellDblClick
-const onActiveCellsUpdate = activeGrid.onCellsUpdate
+const onActiveCellsUpdate = wrapCellsSync(activeGrid.onCellsUpdate)
 const onActiveSwapRows = activeGrid.onSwapRows
 const onActiveSwapColumns = activeGrid.onSwapColumns
 const onActiveCellDblClick = activeGrid.onCellDblClick

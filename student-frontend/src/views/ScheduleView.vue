@@ -1,8 +1,8 @@
 <template>
   <div>
     <!-- 顶部标题栏 -->
-    <div class="w-full bg-surface shadow-md rounded-xl mb-6 px-6 py-5 border border-border min-h-[4.5rem] flex items-center">
-      <h1 class="text-2xl font-bold text-text">📅 课程表</h1>
+    <div class="w-full bg-surface shadow-md rounded-xl mb-6 px-5 py-3 border border-border min-h-[4.5rem] flex items-center">
+      <h1 class="text-2xl font-bold text-text flex items-center gap-2"><IconGlyph name="schedule" /> 课程表</h1>
     </div>
 
     <!-- 标签切换 -->
@@ -14,9 +14,9 @@
           <section class="mb-10">
             <h2 class="text-xl font-semibold mb-4">📅 实行课表（临时）</h2>
             <div class="mb-4 flex items-center gap-3">
-              <button @click="activeSettingsVisible = true" class="bg-primary text-text-inverse px-4 py-2 rounded">⚙️ 设置</button>
-              <button @click="refreshActive" class="bg-text-muted text-text-inverse px-4 py-2 rounded">🔄 刷新</button>
-              <button @click="applyMasterToActive" class="bg-primary text-text-inverse px-4 py-2 rounded">📥 从模板导入</button>
+              <button @click="activeSettingsVisible = true" class="bg-primary text-text-inverse px-4 py-2 rounded flex items-center gap-1.5"><IconGlyph name="settings" :size="14" tint="current" /> 设置</button>
+              <button @click="refreshActive" class="bg-text-muted text-text-inverse px-4 py-2 rounded flex items-center gap-1.5"><IconGlyph name="refresh" :size="14" tint="current" /> 刷新</button>
+              <button @click="applyMasterToActive" class="bg-primary text-text-inverse px-4 py-2 rounded flex items-center gap-1.5"><IconGlyph name="upload" :size="14" tint="current" /> 从模板导入</button>
               <button @click="activeExportVisible = true" class="bg-warning text-text-inverse px-4 py-2 rounded">📥 导出 Excel</button>
             </div>
 
@@ -63,11 +63,11 @@
 
           <!-- 一般课表（模板） -->
           <section>
-            <h2 class="text-xl font-semibold mb-4">📋 一般课表（模板）</h2>
+            <h2 class="text-xl font-semibold mb-4 flex items-center gap-2"><IconGlyph name="clipboard" :size="20" /> 一般课表（模板）</h2>
             <div class="mb-4 flex items-center gap-3">
-              <button @click="masterSettingsVisible = true" class="bg-primary text-text-inverse px-4 py-2 rounded">⚙️ 设置</button>
-              <button @click="refreshMaster" class="bg-text-muted text-text-inverse px-4 py-2 rounded">🔄 刷新</button>
-              <button @click="masterExportVisible = true" class="bg-warning text-text-inverse px-4 py-2 rounded">📥 导出 Excel</button>
+              <button @click="masterSettingsVisible = true" class="bg-primary text-text-inverse px-4 py-2 rounded flex items-center gap-1.5"><IconGlyph name="settings" :size="14" tint="current" /> 设置</button>
+              <button @click="refreshMaster" class="bg-text-muted text-text-inverse px-4 py-2 rounded flex items-center gap-1.5"><IconGlyph name="refresh" :size="14" tint="current" /> 刷新</button>
+              <button @click="masterExportVisible = true" class="bg-warning text-text-inverse px-4 py-2 rounded flex items-center gap-1.5"><IconGlyph name="download" :size="14" tint="current" /> 导出 Excel</button>
             </div>
 
             <GridView
@@ -111,7 +111,7 @@
         <!-- ==================== 历史课程表记录标签页（占位） ==================== -->
         <div v-else-if="activeTab === 'history'">
           
-          <div v-if="historyLoading" class="text-center py-10">加载中...</div>
+          <div v-if="historyLoading" class="skeleton-block"></div>
           <EmptySnapshot v-else-if="!historySnapshot" />
           <GridView
             v-else

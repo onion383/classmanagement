@@ -200,13 +200,37 @@ export default {
     },
     filteredCandidates() {
       if (!this.enableCandidate || !this.editingCell) return [];
-      let list = this.allowDuplicate ? [...this.candidateItems] : this.candidateItems.filter(s => !this.candidateExcludeIds.includes(s.id));
+      const list = this.allowDuplicate ? [...this.candidateItems] : this.candidateItems.filter(s => !this.candidateExcludeIds.includes(s.id));
       const text = this.editingCellData.course?.trim() || '';
       if (text) {
         const kw = text.toLowerCase();
-        list = list.filter(s => String(this.getCandidateLabel(s)).toLowerCase().includes(kw));
+        // 用预缓存的标签小写，避免每次击键都对每个候选现场 String+toLowerCase 分配（同行为、更快）
+        const cache = this.candidateLabelCache;
+        return list.filter(s => cache.get(s).includes(kw));
       }
       return list;
+    },
+    // 候选标签小写缓存：仅当候选列表变更时重建一次，供过滤 O(1) 命中，避免击键时逐项构造字符串。
+    candidateLabelCache() {
+      const field = this.candidateLabelField;
+      const map = new Map();
+      for (const item of this.candidateItems) {
+        map.set(item, String(item[field] ?? item.姓名 ?? '').toLowerCase());
+      }
+      return map;
+    },
+    // 选中坐标缓存：框选/拖拽时 mouseenter/重渲染会高频触发，预构造成 Set 供 isCellSelected O(1) 判断，
+    // 避免每个单元格每次渲染都重建整个选区数组做线性查找（INP 优化）。
+    selectionCoords() {
+      const set = new Set();
+      if (!this.selectionStart || !this.selectionEnd || this.longPressActive) return set;
+      const minR = Math.min(this.selectionStart.row, this.selectionEnd.row), maxR = Math.max(this.selectionStart.row, this.selectionEnd.row);
+      const minC = Math.min(this.selectionStart.col, this.selectionEnd.col), maxC = Math.max(this.selectionStart.col, this.selectionEnd.col);
+      for (let r = minR; r <= maxR; r++) {
+        const row = this.rows[r]; if (!row || row._isSeparator || row._mergeCells || row._isPodium) continue;
+        for (let c = minC; c <= maxC; c++) set.add(r + ',' + c);
+      }
+      return set;
     },
   },
   methods: {
@@ -248,15 +272,7 @@ export default {
       document.addEventListener('mousemove', moveHandler); this._cellGhostMoveHandler = moveHandler;
     },
     removeCellGhost() { if (this._cellGhost) { document.body.removeChild(this._cellGhost); this._cellGhost = null; } if (this._cellGhostMoveHandler) { document.removeEventListener('mousemove', this._cellGhostMoveHandler); } },
-    getSelectedCoords() {
-      if (!this.selectionStart || !this.selectionEnd) return [];
-      const minR = Math.min(this.selectionStart.row, this.selectionEnd.row), maxR = Math.max(this.selectionStart.row, this.selectionEnd.row);
-      const minC = Math.min(this.selectionStart.col, this.selectionEnd.col), maxC = Math.max(this.selectionStart.col, this.selectionEnd.col);
-      const coords = [];
-      for (let r = minR; r <= maxR; r++) { if (this.rows[r]._isSeparator || this.rows[r]._mergeCells || this.rows[r]._isPodium) continue; for (let c = minC; c <= maxC; c++) coords.push({ row: r, col: c }); }
-      return coords;
-    },
-    isCellSelected(rowIdx, colIdx) { return this.longPressActive ? false : this.getSelectedCoords().some(c => c.row === rowIdx && c.col === colIdx); },
+    isCellSelected(rowIdx, colIdx) { return this.longPressActive ? false : this.selectionCoords.has(String(rowIdx) + ',' + String(colIdx)); },
     isDragTarget(rowIdx, colIdx) { return this.dragTarget && this.dragTarget.row === rowIdx && this.dragTarget.col === colIdx; },
     swapCells(r1, c1, r2, c2) {
       if (r1 === r2 && c1 === c2) return;

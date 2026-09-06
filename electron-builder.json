@@ -1,6 +1,6 @@
 {
   "appId": "com.example.campus-assistant",
-  "productName": "校园助手",
+  "productName": "班级管理系统",
   "directories": {
     "output": "release4",
     "buildResources": "build"
@@ -11,13 +11,16 @@
     "student-backend/**/*",
     "!student-backend/data/**",
     "!student-backend/uploads/**",
+    "resources/ffmpeg/**/*",
     "package.json"
   ],
   "asarUnpack": [
+    "resources/ffmpeg/**/*",
     "**/student-backend/**",
     "node_modules/**/*",
     "**/*.node"
   ],
+  "compression": "maximum",
   "npmRebuild": false,
   "win": {
     "target": "nsis"

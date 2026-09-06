@@ -6,6 +6,8 @@ const { execFile } = require('child_process');
 const { db, _current: currentDb } = require('../db');
 const dbManager = require('../dbManager');
 const { moveToTrash, deleteThumb } = require('../albumOps');
+// 懒加载：ffmpeg 只为视频封面抓帧时使用，且可能触发按需下载，故不随顶层 require 加载
+const { ensureFfmpeg } = require('../services/ffmpeg');
 
 // 服务端缩略图/视频封面生成
 // 注：sharp 与 ffmpeg-static 都是重的依赖，改为用到时（genThumb 生成缩略图）才 require，
@@ -76,7 +78,9 @@ async function genThumb(photoId, filePath, isVideo) {
   await acquireThumbSlot();
   try {
     if (isVideo) {
-      const ffmpegPath = (() => { try { return require('ffmpeg-static'); } catch (_) { return ''; } })();
+      // 用 LGPL 版 ffmpeg 抓帧（独立二进制命令行调用，不链接进主程序）。
+      // 见 services/ffmpeg.js：定位本机/缓存 ffmpeg，缺失时按需下载 LGPL 构建。
+      const ffmpegPath = await ensureFfmpeg();
       if (!ffmpegPath) { return ''; }
       await new Promise((resolve, reject) => {
         execFile(ffmpegPath, ['-y', '-ss', '0.1', '-i', filePath, '-frames:v', '1', '-vf', 'scale=320:-2', '-q:v', '5', tmp],
@@ -444,7 +448,8 @@ async function fullScan(albumId) {
 
   txn.flush();
   conn.prepare('UPDATE albums SET updated_at = ? WHERE id = ?').run(now(), albumId);
-  if (task.cancelled) return;
+  // 即使被取消也清理 map 引用，避免已终止的任务残留 scanTasks（防内存累积）。
+  // 仅当仍是当前任务时才删，防止误删后来新开始的扫描。
   const taskNow = scanTasks.get(albumId);
   if (taskNow === task) scanTasks.delete(albumId);
 }
@@ -539,7 +544,8 @@ async function incrementalScan(albumId) {
   txn.flush();
 
   conn.prepare('UPDATE albums SET updated_at = ? WHERE id = ?').run(now(), albumId);
-  if (task.cancelled) return;
+  // 即使被取消也清理 map 引用，避免已终止的任务残留 scanTasks（防内存累积）。
+  // 仅当仍是当前任务时才删，防止误删后来新开始的扫描。
   const taskNow = scanTasks.get(albumId);
   if (taskNow === task) scanTasks.delete(albumId);
 }

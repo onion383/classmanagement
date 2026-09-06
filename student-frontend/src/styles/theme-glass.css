@@ -61,9 +61,20 @@
   background-attachment: fixed;
   background-color: #f0f4f8;
 }
-/* main 区域半透明遮罩（透明度由 --bg-mask-opacity 控制） */
+/* 全局图片背景遮罩：设为固定在视口的独立层（body::before），而非 main 的背景。
+   橡皮筋滚动会对可滚动容器 main 做 translateY；若遮罩是 main 的背景就会跟随位移，
+   在顶部/底部露出一条背景图（“跑出遮罩”）。固定层始终覆盖整个视口，拉伸时也不会跑出。 */
+:root[data-theme="glass"].has-bg-image body::before {
+  content: '';
+  position: fixed;
+  inset: 0;
+  z-index: -1;
+  background-color: rgba(240, 244, 248, var(--bg-mask-opacity, 0.65));
+  pointer-events: none;
+}
+/* main 不再自带遮罩背景，透明以透出上方固定的背景遮罩 */
 :root[data-theme="glass"].has-bg-image main {
-  background: rgba(240, 244, 248, var(--bg-mask-opacity, 0.65)) !important;
+  background: transparent !important;
   position: relative;
 }
 

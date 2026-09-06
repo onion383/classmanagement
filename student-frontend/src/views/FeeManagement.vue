@@ -1,7 +1,7 @@
-<template>
+﻿<template>
   <div>
-    <div class="w-full bg-surface shadow-md rounded-xl mb-6 px-6 py-5 border border-border min-h-[4.5rem] flex items-center">
-      <h1 class="text-2xl font-bold text-text">💰 班费管理</h1>
+    <div class="w-full bg-surface shadow-md rounded-xl mb-6 px-5 py-3 border border-border min-h-[4.5rem] flex items-center">
+      <h1 class="text-2xl font-bold text-text flex items-center gap-2"><IconGlyph name="fee" /> 班费管理</h1>
     </div>
 
     <!-- 看板 -->
@@ -26,26 +26,26 @@
         ＋ 添加记录
       </button>
       <button @click="refreshRecords" class="bg-text-muted hover:bg-text-secondary text-text-inverse px-4 py-2 rounded flex items-center gap-1" title="刷新表格">
-        🔄 刷新
+        <IconGlyph name="refresh" :size="14" tint="current" /> 刷新
       </button>
       <button
         @click="onBatchDelete"
         :disabled="selectedCount === 0"
-        class="bg-danger hover:bg-danger-hover text-text-inverse px-4 py-2 rounded disabled:opacity-50 disabled:cursor-not-allowed"
+        class="bg-danger hover:bg-danger-hover text-text-inverse px-4 py-2 rounded disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-1.5"
       >
-        🗑️ 批量删除 ({{ selectedCount }})
+        <IconGlyph name="trash" :size="14" tint="current" /> 批量删除 ({{ selectedCount }})
       </button>
-      <button @click="importDialogVisible = true" class="bg-warning hover:bg-warning-hover text-text-inverse px-4 py-2 rounded">
-        📥 从 Excel 导入
+      <button @click="importDialogVisible = true" class="bg-warning hover:bg-warning-hover text-text-inverse px-4 py-2 rounded flex items-center gap-1.5">
+        <IconGlyph name="download" :size="14" tint="current" /> 从 Excel 导入
       </button>
       <button
         @click="exportDialogVisible = true"
-        class="bg-warning hover:bg-warning-hover text-text-inverse px-4 py-2 rounded"
+        class="bg-warning hover:bg-warning-hover text-text-inverse px-4 py-2 rounded flex items-center gap-1.5"
       >
-        📥 导出 Excel
+        <IconGlyph name="download" :size="14" tint="current" /> 导出 Excel
       </button>
-      <button @click="dedupeDialogVisible = true" class="bg-danger hover:bg-danger-hover text-text-inverse px-4 py-2 rounded">
-        🔍 去除重复数据
+      <button @click="dedupeDialogVisible = true" class="bg-danger hover:bg-danger-hover text-text-inverse px-4 py-2 rounded flex items-center gap-1.5">
+        <IconGlyph name="search" :size="14" tint="current" /> 去除重复数据
       </button>
     </div>
 

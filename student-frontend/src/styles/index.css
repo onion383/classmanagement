@@ -1,5 +1,23 @@
 /* ==================== 样式入口 ==================== */
 
+/* 去网页感：禁止文本被选中（划动不出蓝底白字拖影）。
+   注意：不能再加全局 `-webkit-user-drag:none` —— 它设在祖先上会整棵子树禁拖，
+   且后代 `auto` 无法覆盖，导致所有 draggable=true 的原生拖拽
+   （表格行列、智能排表条件、劳动项目排序等）一并失效。
+   文本蓝底拖影由 user-select:none 即可阻止，故保留 user-select、去掉 user-drag 全局限制。 */
+html, body {
+  user-select: none;
+  -webkit-user-select: none;
+}
+input,
+textarea,
+[contenteditable="true"],
+select {
+  user-select: auto;
+  -webkit-user-select: auto;
+  -webkit-user-drag: auto;
+}
+
 @import "tailwindcss";
 @import "./theme-base.css";
 @import "./theme-glass.css";

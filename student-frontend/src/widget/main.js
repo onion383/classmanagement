@@ -2,6 +2,7 @@ import { createApp } from 'vue'
 import WidgetApp from './WidgetApp.vue'
 import axios from 'axios'
 import '../styles/index.css'
+import { setupSecureAxios } from '../composables/secureAxios'
 
 // 配置 API 基础地址（生产模式下 widget 使用 file:// 协议，必须使用完整地址）
 axios.defaults.baseURL = 'http://localhost:3000'
@@ -31,5 +32,8 @@ axios.interceptors.response.use(
     return Promise.reject(error)
   }
 )
+
+// 安全通道：请求体加密 + 响应体解密（仅 JSON API；无开关时直通）
+setupSecureAxios(axios)
 
 createApp(WidgetApp).mount('#widget-app')

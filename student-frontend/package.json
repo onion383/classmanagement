@@ -9,12 +9,11 @@
     "preview": "vite preview"
   },
   "dependencies": {
+    "@lucide/vue": "^1.38.0",
     "axios": "^1.16.0",
-    "better-sqlite3": "^12.10.0",
     "dompurify": "^3.4.14",
     "exceljs": "^4.4.0",
     "html2canvas": "^1.4.1",
-    "jsonwebtoken": "^9.0.3",
     "jspdf": "^4.2.1",
     "jspdf-autotable": "^5.0.7",
     "marked": "^18.0.11",

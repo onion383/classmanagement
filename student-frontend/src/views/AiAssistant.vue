@@ -1,15 +1,15 @@
-<template>
+﻿<template>
   <div class="h-full flex flex-col" :class="floating ? 'rounded-xl overflow-hidden' : ''">
     <!-- 顶部（页面模式显示标题） -->
-    <div v-if="!floating" class="w-full bg-surface shadow-md rounded-xl mb-4 px-6 py-5 border border-border min-h-[4.5rem] flex items-center justify-between">
-      <h1 class="text-2xl font-bold text-text">🤖 AI 助手</h1>
+    <div v-if="!floating" class="w-full bg-surface shadow-md rounded-xl mb-4 px-5 py-3 border border-border min-h-[4.5rem] flex items-center justify-between">
+      <h1 class="text-2xl font-bold text-text flex items-center gap-2"><IconGlyph name="ai" /> AI 助手</h1>
       <div class="flex items-center gap-3">
         <span v-if="!enabled" class="text-xs text-text-muted">{{ enabled ? '' : '未启用' }}</span>
         <button
           @click="showSettings = true"
-          class="bg-surface-hover hover:bg-primary hover:text-text-inverse text-text px-4 py-2 rounded transition-theme"
+          class="bg-surface-hover hover:bg-primary hover:text-text-inverse text-text px-4 py-2 rounded transition-theme flex items-center gap-1.5"
           title="AI 助手设置"
-        >⚙️ 设置</button>
+        ><IconGlyph name="settings" :size="14" tint="current" /> 设置</button>
       </div>
     </div>
 
@@ -24,7 +24,7 @@
     <div v-else-if="!enabled" class="flex-1 flex items-center justify-center text-sm text-text-muted rounded-xl border border-border bg-white/55 backdrop-blur-md">
       <div class="text-center space-y-2">
         <div>AI 助手尚未启用</div>
-        <button @click="showSettings = true" class="text-info hover:underline inline-block cursor-pointer">点击【⚙️ 设置】填写 API Key 并启用</button>
+        <button @click="showSettings = true" class="text-info hover:underline inline-block cursor-pointer">点击【<IconGlyph name="settings" :size="13" tint="current" class="align-middle inline-block" /> 设置】填写 API Key 并启用</button>
       </div>
     </div>
 
@@ -131,7 +131,7 @@
                       class="bg-primary hover:bg-primary-hover text-text-inverse text-xs px-3 py-1.5 rounded transition-theme"
                     >确认执行</button>
                     <span v-if="m.proposal.executing" class="text-xs text-text-muted">执行中…</span>
-                    <span v-if="m.proposal.executed" class="text-xs text-success">✅ 已执行</span>
+                    <span v-if="m.proposal.executed" class="text-xs text-success inline-flex items-center gap-1"><IconGlyph name="check" :size="13" /> 已执行</span>
                   </div>
                 </div>
               </div>
@@ -174,9 +174,9 @@
             <button
               v-if="!busy"
               @click="triggerFileSelect"
-              class="border border-border bg-surface text-text px-2.5 py-2 rounded-lg hover:bg-surface-hover transition-theme flex-shrink-0"
+              class="border border-border bg-surface text-text px-2.5 py-2 rounded-lg hover:bg-surface-hover transition-theme flex-shrink-0 flex items-center justify-center"
               title="上传图片/PDF/Excel/Word/文本（支持粘贴图片）"
-            >📎</button>
+            ><IconGlyph name="paperclip" :size="16" tint="current" /></button>
             <textarea
               ref="textareaRef"
               v-model="input"
