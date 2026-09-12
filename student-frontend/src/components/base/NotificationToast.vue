@@ -14,15 +14,24 @@
 
           <!-- 消息内容 -->
           <div class="nt-body">
-            <span class="nt-title">{{ titles[item.type] }}</span>
+            <div class="nt-head">
+              <span class="nt-title">{{ titles[item.type] }}</span>
+              <span v-if="item.count > 1" class="nt-badge">×{{ item.count }}</span>
+            </div>
             <span class="nt-msg">{{ item.message }}</span>
           </div>
 
           <!-- 关闭按钮 -->
           <button class="nt-close" @click="remove(item.id)">&times;</button>
 
-          <!-- 进度条（从左往右消失） -->
-          <span v-if="item._originalDuration > 0" class="nt-bar" :class="{ 'nt-bar-paused': item._paused }" :style="{ animationDuration: item._originalDuration + 'ms' }" />
+          <!-- 进度条（从左往右消失）；合并后通过 _barKey 重播 -->
+          <span
+            v-if="item._originalDuration > 0"
+            :key="item._barKey"
+            class="nt-bar"
+            :class="{ 'nt-bar-paused': item._paused }"
+            :style="{ animationDuration: item._originalDuration + 'ms' }"
+          />
         </div>
       </TransitionGroup>
     </div>
@@ -126,12 +135,26 @@ function onLeave(item) {
   min-width: 0;
 }
 
-/* 标题 */
+/* 标题 + 计数徽标 */
+.nt-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
 .nt-title {
   font-size: 13px;
   font-weight: 600;
   line-height: 1.4;
   color: var(--color-text, #111827);
+}
+.nt-badge {
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 1;
+  padding: 2px 7px;
+  border-radius: 999px;
+  color: #fff;
+  background: var(--color-primary, #2563eb);
 }
 
 /* 消息内容 */

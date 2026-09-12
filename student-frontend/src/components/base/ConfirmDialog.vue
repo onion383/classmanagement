@@ -1,10 +1,11 @@
 <template>
+  <Teleport to="body">
   <Transition name="dialog">
   <div v-if="visible" class="fixed inset-0 bg-black/50 flex items-center justify-center z-[10006] pointer-events-auto" @click.self="handleOverlayClick">
-    <div class="bg-surface p-5 rounded-lg min-w-[300px] text-center shadow-card dialog-card">
-      <p v-if="message" class="mb-3">{{ message }}</p>
-
+    <div class="bg-surface p-5 rounded-lg min-w-[300px] max-w-[600px] text-center shadow-card dialog-card">
+      <h3 v-if="title" class="text-lg font-bold mb-3">{{ title }}</h3>
       <!-- 添加列：显示列名输入 + 类型选择 -->
+      <p v-if="message" class="mb-3 whitespace-pre-line break-words text-sm leading-relaxed" v-html="message"></p>
       <div v-if="type === 'columnAdd'" class="text-left">
         <label class="block mb-2">新列名：
           <input
@@ -37,12 +38,13 @@
       </div>
 
       <div class="mt-4">
-        <button @click="$emit('confirm')" class="bg-info text-text-inverse border-none px-4 py-1.5 rounded mr-2 cursor-pointer">确定</button>
-        <button v-if="showCancel" @click="$emit('cancel')" class="bg-surface-hover border-none px-4 py-1.5 rounded cursor-pointer">取消</button>
+        <button v-if="showCancel" @click="$emit('cancel')" class="bg-surface-hover border-none px-4 py-1.5 rounded mr-2 cursor-pointer">{{ cancelText }}</button>
+        <button @click="$emit('confirm')" class="bg-info text-text-inverse border-none px-4 py-1.5 rounded cursor-pointer">{{ confirmText }}</button>
       </div>
     </div>
   </div>
   </Transition>
+  </Teleport>
 </template>
 
 <script>
@@ -55,8 +57,11 @@ export default {
   props: {
     visible: Boolean,
     message: String,
+    title: String,
     type: String,
     showCancel: Boolean,
+    confirmText: { type: String, default: '确定' },
+    cancelText: { type: String, default: '取消' },
     columnName: String,
     columnType: String,
     errorMsg: String,

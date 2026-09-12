@@ -35,6 +35,7 @@
     </div>
 
     <!-- ============ 设置窗口（Windows 目录树管理职务） ============ -->
+    <Teleport to="body">
     <Transition name="dialog">
     <div v-if="settingsVisible" class="fixed inset-0 bg-black/50 flex items-center justify-center z-[10002]" @click.self="settingsVisible = false">
       <div class="bg-surface p-6 rounded-xl w-[28rem] shadow-card dialog-card border border-border flex flex-col max-h-[80vh]">
@@ -66,8 +67,10 @@
       </div>
     </div>
     </Transition>
+    </Teleport>
 
     <!-- ============ 新增/编辑职务弹窗 ============ -->
+    <Teleport to="body">
     <Transition name="dialog">
     <div v-if="nodeDialogVisible" class="fixed inset-0 bg-black/50 flex items-center justify-center z-[10003]" @click.self="nodeDialogVisible = false">
       <div class="bg-surface p-6 rounded-xl w-96 shadow-card dialog-card border border-border">
@@ -83,8 +86,10 @@
       </div>
     </div>
     </Transition>
+    </Teleport>
 
     <!-- ============ 添加担任学生弹窗 ============ -->
+    <Teleport to="body">
     <Transition name="dialog">
     <div v-if="memberDialogVisible" class="fixed inset-0 bg-black/50 flex items-center justify-center z-[10003]" @click.self="memberDialogVisible = false">
       <div class="bg-surface p-6 rounded-xl w-96 shadow-card dialog-card border border-border">
@@ -126,8 +131,10 @@
       </div>
     </div>
     </Transition>
+    </Teleport>
 
     <!-- ============ 二次确认弹窗 ============ -->
+    <Teleport to="body">
     <Transition name="dialog">
     <div v-if="confirmMsg" class="fixed inset-0 bg-black/50 flex items-center justify-center z-[10004]" @click.self="confirmMsg = null">
       <div class="bg-surface p-6 rounded-xl w-96 shadow-card dialog-card border border-border">
@@ -140,6 +147,7 @@
       </div>
     </div>
     </Transition>
+    </Teleport>
   </div>
 </template>
 

@@ -58,8 +58,8 @@
 }
 
 /* ========== 登录页：不叠加页面级磨砂遮罩，让桌面亚克力透出 ========== */
-:root[data-theme="win11"] .login-bg::before {
-  display: none !important;
+:root[data-theme="win11"] .login-bg {
+  background: transparent;
 }
 
 /* ========== 自绘标题栏：透明，仅靠亚克力透出，带细分隔线 ========== */

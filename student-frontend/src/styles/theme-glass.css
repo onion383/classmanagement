@@ -69,7 +69,7 @@
   position: fixed;
   inset: 0;
   z-index: -1;
-  background-color: rgba(240, 244, 248, var(--bg-mask-opacity, 0.65));
+  background-color: rgba(240, 244, 248, var(--bg-mask-opacity, 0.6));
   pointer-events: none;
 }
 /* main 不再自带遮罩背景，透明以透出上方固定的背景遮罩 */
@@ -321,25 +321,53 @@
   transform: none !important;
 }
 
-/* ========== 毛玻璃输入框 ========== */
+/* ========== 毛玻璃输入框（与登录页输入框统一样式：12px 圆角 + 半透明磨砂底 + 聚焦蓝边外发光） ========== */
+:root:is([data-theme="glass"], [data-theme="win11"]) input:not([type]),
 :root:is([data-theme="glass"], [data-theme="win11"]) input[type="text"],
 :root:is([data-theme="glass"], [data-theme="win11"]) input[type="number"],
 :root:is([data-theme="glass"], [data-theme="win11"]) input[type="password"],
+:root:is([data-theme="glass"], [data-theme="win11"]) input[type="search"],
+:root:is([data-theme="glass"], [data-theme="win11"]) input[type="tel"],
+:root:is([data-theme="glass"], [data-theme="win11"]) input[type="email"],
+:root:is([data-theme="glass"], [data-theme="win11"]) input[type="url"],
+:root:is([data-theme="glass"], [data-theme="win11"]) input[type="date"],
+:root:is([data-theme="glass"], [data-theme="win11"]) input[type="datetime-local"],
+:root:is([data-theme="glass"], [data-theme="win11"]) input[type="time"],
 :root:is([data-theme="glass"], [data-theme="win11"]) textarea,
 :root:is([data-theme="glass"], [data-theme="win11"]) select {
-  background-color: rgba(255, 255, 255, 0.88) !important;
-  border: 1px solid rgba(0, 0, 0, 0.08) !important;
+  background-color: rgba(255, 255, 255, var(--glass-opacity, 0.4)) !important;
+  border: 1px solid rgba(0, 0, 0, 0.12) !important;
   border-radius: 12px;
+  backdrop-filter: blur(10px) saturate(1.1);
+  -webkit-backdrop-filter: blur(10px) saturate(1.1);
   transition: border-color 0.2s, box-shadow 0.2s, background-color 0.2s;
 }
+/* 聚焦：蓝色边框 + 3px 蓝色外发光，内部转白高亮 */
+:root:is([data-theme="glass"], [data-theme="win11"]) input:not([type]):focus,
 :root:is([data-theme="glass"], [data-theme="win11"]) input[type="text"]:focus,
 :root:is([data-theme="glass"], [data-theme="win11"]) input[type="number"]:focus,
 :root:is([data-theme="glass"], [data-theme="win11"]) input[type="password"]:focus,
+:root:is([data-theme="glass"], [data-theme="win11"]) input[type="search"]:focus,
+:root:is([data-theme="glass"], [data-theme="win11"]) input[type="tel"]:focus,
+:root:is([data-theme="glass"], [data-theme="win11"]) input[type="email"]:focus,
+:root:is([data-theme="glass"], [data-theme="win11"]) input[type="url"]:focus,
+:root:is([data-theme="glass"], [data-theme="win11"]) input[type="date"]:focus,
+:root:is([data-theme="glass"], [data-theme="win11"]) input[type="datetime-local"]:focus,
+:root:is([data-theme="glass"], [data-theme="win11"]) input[type="time"]:focus,
 :root:is([data-theme="glass"], [data-theme="win11"]) textarea:focus,
 :root:is([data-theme="glass"], [data-theme="win11"]) select:focus {
-  border-color: rgba(59, 130, 246, 0.5) !important;
-  box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.1);
-  background-color: rgba(255, 255, 255, 0.98) !important;
+  border-color: #3b82f6 !important;
+  background-color: rgba(255, 255, 255, 0.85) !important;
+  box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.28);
+  outline: none;
+}
+/* 动态表格「上移/下移」箭头：毛玻璃下半透明填充，融入主题 */
+:root:is([data-theme="glass"], [data-theme="win11"]) .move-arrow-btn {
+  background-color: #D9E6FA;
+  border-color: rgba(59, 130, 246, 0.3);
+}
+:root:is([data-theme="glass"], [data-theme="win11"]) .move-arrow-btn:hover {
+  background-color: rgba(59, 130, 246, 0.3);
 }
 :root:is([data-theme="glass"], [data-theme="win11"]) input:disabled,
 :root:is([data-theme="glass"], [data-theme="win11"]) textarea:disabled {
@@ -358,31 +386,46 @@
 
 /* ========== 登录页账号/密码输入框：毛玻璃适配（半透明磨砂，与卡片一致） ========== */
 :root:is([data-theme="glass"], [data-theme="win11"]) .login-bg input {
-  background-color: rgba(255, 255, 255, var(--glass-opacity, 0.5)) !important;
+  background-color: rgba(255, 255, 255, var(--glass-opacity, 0.4)) !important;
+  border: 1px solid rgba(0, 0, 0, 0.12);
   backdrop-filter: blur(10px) saturate(1.1);
   -webkit-backdrop-filter: blur(10px) saturate(1.1);
 }
-/* 避免浏览器自动填充（autofill）覆盖账号框的半透明背景 */
-:root:is([data-theme="glass"], [data-theme="win11"]) .login-bg input:-webkit-autofill,
-:root:is([data-theme="glass"], [data-theme="win11"]) .login-bg input:-webkit-autofill:hover,
-:root:is([data-theme="glass"], [data-theme="win11"]) .login-bg input:-webkit-autofill:focus {
-  -webkit-text-fill-color: var(--color-text, #1e293b);
-  -webkit-box-shadow: 0 0 0 1000px rgba(255, 255, 255, 0.5) inset;
-  box-shadow: 0 0 0 1000px rgba(255, 255, 255, 0.5) inset;
+/* 聚焦：账号与密码统一 内部变白高亮 + 蓝色边框高亮 */
+:root:is([data-theme="glass"], [data-theme="win11"]) .login-bg input:focus {
+  border-color: #3b82f6 !important;
+  background-color: rgba(255, 255, 255, 0.85) !important;
+  box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.28);
+  outline: none;
+}
+/* 覆盖浏览器自动填充（autofill）：未聚焦时统一灰边半透明底，去掉浏览器默认的蓝/黄边框 */
+:root:is([data-theme="glass"], [data-theme="win11"]) .login-bg input:-webkit-autofill:not(:focus),
+:root:is([data-theme="glass"], [data-theme="win11"]) .login-bg input:-webkit-autofill:hover:not(:focus) {
+  -webkit-text-fill-color: #1e293b;
+  -webkit-box-shadow: 0 0 0 1000px rgba(255, 255, 255, 0.85) inset;
+  box-shadow: 0 0 0 1000px rgba(255, 255, 255, 0.85) inset;
+  border-color: rgba(0, 0, 0, 0.12) !important;
   backdrop-filter: blur(10px) saturate(1.1);
   -webkit-backdrop-filter: blur(10px) saturate(1.1);
   transition: background-color 9999s ease-out;
 }
+/* autofill 聚焦：统一为蓝色边框，保证账号/密码聚焦高亮一致 */
+:root:is([data-theme="glass"], [data-theme="win11"]) .login-bg input:-webkit-autofill:focus {
+  -webkit-text-fill-color: #1e293b;
+  -webkit-box-shadow: 0 0 0 1000px rgba(255, 255, 255, 0.9) inset;
+  box-shadow: 0 0 0 1000px rgba(255, 255, 255, 0.9) inset;
+  border-color: #3b82f6 !important;
+}
 
 /* ========== 登录界面毛玻璃窗 - 更白更透 ========== */
 :root:is([data-theme="glass"], [data-theme="win11"]) .login-bg .bg-surface {
-  background-color: rgba(255, 255, 255, var(--glass-opacity, 0.5)) !important;
+  background-color: rgba(255, 255, 255, var(--glass-opacity, 0.4)) !important;
   backdrop-filter: blur(24px) saturate(1.2);
   -webkit-backdrop-filter: blur(24px) saturate(1.2);
 }
 /* ========== 毛玻璃卡片 / 面板 - 荧光边框（基准透明度由 --glass-opacity 控制） ========== */
 :root:is([data-theme="glass"], [data-theme="win11"]) .bg-surface {
-  background-color: rgba(255, 255, 255, var(--glass-opacity, 0.5)) !important;
+  background-color: rgba(255, 255, 255, var(--glass-opacity, 0.4)) !important;
   backdrop-filter: blur(20px) saturate(1.1);
   -webkit-backdrop-filter: blur(20px) saturate(1.1);
   border: 1px solid rgba(255, 255, 255, 0.1);
@@ -419,13 +462,13 @@
   pointer-events: none;
 }
 :root:is([data-theme="glass"], [data-theme="win11"]) .bg-surface-hover {
-  background-color: rgba(255, 255, 255, calc(var(--glass-opacity, 0.5) + 0.1)) !important;
+  background-color: rgba(255, 255, 255, calc(var(--glass-opacity, 0.4) + 0.1)) !important;
 }
 
 /* ========== 毛玻璃表格 ========== */
 :root:is([data-theme="glass"], [data-theme="win11"]) .table-scroll-wrapper {
   border-radius: 16px;
-  background-color: rgba(255, 255, 255, calc(var(--glass-opacity, 0.5) - 0.05)) !important;
+  background-color: rgba(255, 255, 255, calc(var(--glass-opacity, 0.4) - 0.05)) !important;
   backdrop-filter: blur(16px);
   -webkit-backdrop-filter: blur(16px);
   contain: paint;
@@ -441,7 +484,7 @@
   overflow: hidden;
 }
 :root:is([data-theme="glass"], [data-theme="win11"]) table th {
-  background-color: rgba(255, 255, 255, calc(var(--glass-opacity, 0.5) - 0.05)) !important;
+  background-color: rgba(255, 255, 255, calc(var(--glass-opacity, 0.4) - 0.05)) !important;
   color: #1e293b !important;
   font-weight: 600;
   backdrop-filter: blur(10px);
@@ -452,7 +495,7 @@
   border-top: none !important;
 }
 :root:is([data-theme="glass"], [data-theme="win11"]) table td {
-  background-color: rgba(255, 255, 255, calc(var(--glass-opacity, 0.5) - 0.1)) !important;
+  background-color: rgba(255, 255, 255, calc(var(--glass-opacity, 0.4) - 0.1)) !important;
   color: #1e293b !important;
   border-right: 1px solid rgba(15, 23, 42, 0.22) !important;
   border-bottom: 1px solid rgba(15, 23, 42, 0.22) !important;
@@ -476,10 +519,10 @@
   border-color: transparent !important;
 }
 :root:is([data-theme="glass"], [data-theme="win11"]) table tbody tr:hover td {
-  background-color: rgba(255, 255, 255, calc(var(--glass-opacity, 0.5) + 0.05)) !important;
+  background-color: rgba(255, 255, 255, calc(var(--glass-opacity, 0.4) + 0.05)) !important;
 }
 :root:is([data-theme="glass"], [data-theme="win11"]) table tbody tr:nth-child(even) td {
-  background-color: rgba(255, 255, 255, calc(var(--glass-opacity, 0.5) - 0.08)) !important;
+  background-color: rgba(255, 255, 255, calc(var(--glass-opacity, 0.4) - 0.08)) !important;
 }
 :root:is([data-theme="glass"], [data-theme="win11"]) table .border:not(th):not(td),
 :root:is([data-theme="glass"], [data-theme="win11"]) table .border-border:not(th):not(td),
@@ -588,7 +631,7 @@
 
 /* ========== 毛玻璃通知弹窗 ========== */
 :root:is([data-theme="glass"], [data-theme="win11"]) .nt-toast {
-  background-color: rgba(255, 255, 255, calc(var(--glass-opacity, 0.5) - 0.15)) !important;
+  background-color: rgba(255, 255, 255, calc(var(--glass-opacity, 0.4) - 0.15)) !important;
   backdrop-filter: blur(20px) saturate(1.2);
   -webkit-backdrop-filter: blur(20px) saturate(1.2);
   border: 1px solid rgba(255, 255, 255, 0.2) !important;
@@ -783,16 +826,6 @@
     rgba(255, 255, 255, 0.15) 0%,
     transparent 50%
   );
-  pointer-events: none;
-}
-:root:is([data-theme="glass"], [data-theme="win11"]) .login-bg::before {
-  content: '';
-  position: fixed;
-  inset: 0;
-  z-index: 0;
-  background: rgba(240, 244, 248, 0.5);
-  backdrop-filter: blur(3px);
-  -webkit-backdrop-filter: blur(3px);
   pointer-events: none;
 }
 :root:is([data-theme="glass"], [data-theme="win11"]) .login-bg > * {

@@ -1,7 +1,9 @@
 import { ref, computed, watch, onMounted, onBeforeUnmount } from 'vue'
 import axios from 'axios'
+import { useNotification } from './useNotification'
 
 export function useTableCRUD(apiBase, defaultFields, options = {}) {
+  const { error: notifyError } = useNotification()
   const {
     requiredField = null,
     protectedColumns = [],
@@ -218,7 +220,7 @@ export function useTableCRUD(apiBase, defaultFields, options = {}) {
   async function saveNewRow() {
     if (!newRow.value) return
     if (requiredField && !newRow.value[requiredField]?.trim()) {
-      showAlert(`${requiredField}不能为空`)
+      notifyError(`${requiredField}不能为空`)
       return
     }
     const data = {}
@@ -241,7 +243,7 @@ export function useTableCRUD(apiBase, defaultFields, options = {}) {
       await axios.post(`${apiBase}/move-row`, { id: row.id, direction })
       await fetchRows()
     } catch (err) {
-      showAlert(err.response?.data?.error || '移动失败')
+      notifyError(err.response?.data?.error || '移动失败')
     }
   }
 
@@ -430,11 +432,25 @@ export function useTableCRUD(apiBase, defaultFields, options = {}) {
     const selectedIds = rows.value.filter(s => keys.includes(s.id)).map(s => s.id)
     showConfirm(`确定删除选中的 ${selectedIds.length} 条记录吗？`, async () => {
       try {
-        // 并行删除所有选中行，替代逐个串行
-        await Promise.all(selectedIds.map(id => axios.delete(`${apiBase}/${id}`).catch(() => {})))
+        // 并行删除所有选中行，逐个收集结果（不再静默吞错）
+        const results = await Promise.all(selectedIds.map(async id => {
+          try {
+            await axios.delete(`${apiBase}/${id}`)
+            return { ok: true }
+          } catch (err) {
+            return { ok: false, msg: err.response?.data?.error || '删除失败' }
+          }
+        }))
         await fetchRows()
         selectedCount.value = 0
         selectedRowKeys.value = []
+        // 有失败时区分原因：只要存在「至少保留一个学生」保护导致的失败，就优先给明确提示条
+        const fails = results.filter(r => !r.ok)
+        if (fails.some(f => /保留.{0,2}一个学生/.test(f.msg || ''))) {
+          notifyError('至少需要保留一个学生')
+        } else if (fails.length) {
+          notifyError('部分记录删除失败，请重试')
+        }
       } catch (err) {
         showAlert('删除失败')
       }
@@ -478,10 +494,10 @@ export function useTableCRUD(apiBase, defaultFields, options = {}) {
     importDialogVisible.value = false
     try {
       const res = await axios.post(`${apiBase}/import`, { fields, rows: importRows })
-      showAlert(res.data.message)
+      notifySuccess(res.data.message)
       await fetchRows()
     } catch (err) {
-      showAlert(err.response?.data?.error || '导入失败')
+      notifyError(err.response?.data?.error || '导入失败')
     }
   }
 
@@ -536,7 +552,7 @@ export function useTableCRUD(apiBase, defaultFields, options = {}) {
         targetColumnName: position === 'first' ? null : targetName,
         position
       })
-      await fetchRows()
+      // 移动列不改变行数据，不需要重新拉取，避免行的 FLIP 交换动画被误触发
     } catch (err) {
       fields.value = originalFields
       showAlert('列移动失败')

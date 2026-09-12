@@ -1,10 +1,23 @@
 const express = require('express');
 const router = express.Router();
+const crypto = require('crypto');
 const jwt = require('jsonwebtoken');
 const bcrypt = require('bcryptjs');
 const { SECRET, auth } = require('../middleware/auth');
 const { pickPhrase, deriveRestoreHash, normalizePhrase, formatPhrase, safeEqualHash } = require('../services/recoveryKey');
 const dbManager = require('../dbManager');
+
+// 待确认注册草稿：有密码账号先生成恢复密钥，用户「抄写前 3 词」通过后才真正建库。
+// 未确认的草稿不会占用账号，且在 TTL 后自动失效。
+const PENDING_TTL_MS = 30 * 60 * 1000; // 30 分钟
+const pendingRegs = new Map();
+function newDraftId() { return crypto.randomBytes(16).toString('hex'); }
+function putDraft(draft) {
+  const id = newDraftId();
+  pendingRegs.set(id, draft);
+  setTimeout(() => { if (pendingRegs.get(id) === draft) pendingRegs.delete(id); }, PENDING_TTL_MS);
+  return id;
+}
 
 // 账号列表：登录页「从数据库注册」加载已登记的班主任账号（无需登录）。
 // 仅返回数据库有效的账号——解不开/打不开/账号行缺失的无效库直接隐藏。
@@ -53,18 +66,18 @@ router.post('/login', (req, res) => {
   }
   if (!resolved) {
     console.warn('[login] 账号不在登记表:', username);
-    return res.status(401).json({ error: '账号不存在' });
+    return res.status(401).json({ error: '账号或密码错误' });
   }
 
   const user = resolved.conn.prepare('SELECT id, username, role, db_slug, password FROM users WHERE username = ?').get(username);
   if (!user) {
     console.warn('[login] 库内查无此账号:', username, 'slug:', resolved.slug);
-    return res.status(401).json({ error: '账号不存在' });
+    return res.status(401).json({ error: '账号或密码错误' });
   }
   // 无密码用户：直接放行；有密码用户：校验密码哈希
   if (user.password && !bcrypt.compareSync(password, user.password)) {
     console.warn('[login] 密码校验失败:', username);
-    return res.status(401).json({ error: '密码错误' });
+    return res.status(401).json({ error: '账号或密码错误' });
   }
 
   const token = jwt.sign(
@@ -122,28 +135,85 @@ router.post('/register', (req, res) => {
     return res.status(409).json({ error: '该账号已被注册' });
   }
 
-  try {
-    // 无密码注册无需恢复密钥（恢复密钥仅用于「忘记密码」重置，无密码不存在该场景）
-    const hasPassword = !!passwordHash;
-    const phrase = hasPassword ? pickPhrase() : null;
-    const restoreHash = hasPassword ? deriveRestoreHash(phrase) : null;
-
-    const { slug } = dbManager.createTeacher(uname, passwordHash, 'teacher');
-    // 有密码才把恢复密钥哈希写入新库的账号
-    const resolved = dbManager.resolveByUsername(uname);
-    if (resolved && restoreHash) {
-      resolved.conn.prepare('UPDATE users SET recovery_hash = ? WHERE username = ?').run(restoreHash, uname);
+  const hasPassword = !!passwordHash;
+  if (!hasPassword) {
+    // 无密码账号无恢复密钥可抄写，直接创建
+    try {
+      const { slug } = dbManager.createTeacher(uname, passwordHash, 'teacher');
+      console.log('[register] 无密码注册成功:', uname, 'slug:', slug);
+      return res.json({
+        message: '注册成功',
+        user: { username: uname, role: 'teacher', dbSlug: slug },
+      });
+    } catch (err) {
+      console.error('[register] 注册抛异常:', uname, err.stack || err.message);
+      if (!res.headersSent) return res.status(500).json({ error: '注册失败：' + (err.message || '未知错误') });
+      return;
     }
+  }
 
-    console.log('[register] 注册成功:', uname, 'slug:', slug, 'hasPassword:', hasPassword);
+  // 有密码账号：先生成恢复密钥，存草稿；抄写通过后由 /api/register/confirm 真正建库。
+  const phrase = pickPhrase();
+  const restoreHash = deriveRestoreHash(phrase);
+  const draftId = putDraft({ username: uname, passwordHash, role: 'teacher', restoreHash });
+  console.log('[register] 生成待确认草稿:', uname, 'draftId:', draftId);
+  res.json({
+    message: '注册进行中，请抄写前 3 个恢复词完成确认',
+    draftId,
+    recovery: { phrase: formatPhrase(phrase), hash: restoreHash },
+    user: { username: uname, role: 'teacher', dbSlug: null },
+  });
+});
+
+// ---------------------------------------------------------------------------
+// 完成确认注册：前端在「抄写前 3 词」校验通过后调用，此时才真正创建账号库。
+// ---------------------------------------------------------------------------
+router.post('/register/confirm', (req, res) => {
+  const { draftId } = req.body || {};
+  const draft = draftId && pendingRegs.get(draftId);
+  if (!draft) {
+    return res.status(400).json({ error: '确认已过期，请重新注册' });
+  }
+
+  // 确认前再次校验唯一（防止等待期间被他人注册占用）
+  if (dbManager.registryFindByUsername(draft.username)) {
+    pendingRegs.delete(draftId);
+    console.warn('[register/confirm] 确认时账号已被注册:', draft.username);
+    return res.status(409).json({ error: '该账号已被注册' });
+  }
+
+  try {
+    const { slug } = dbManager.createTeacher(draft.username, draft.passwordHash, draft.role);
+    const resolved = dbManager.resolveByUsername(draft.username);
+    if (resolved && draft.restoreHash) {
+      resolved.conn.prepare('UPDATE users SET recovery_hash = ? WHERE username = ?').run(draft.restoreHash, draft.username);
+    }
+    pendingRegs.delete(draftId);
+    console.log('[register/confirm] 确认注册成功:', draft.username, 'slug:', slug);
+    // 签发登录态，注册成功即自动进入系统，无需再回登录页手动登录
+    const userRow = resolved.conn.prepare('SELECT id, username, role FROM users WHERE username = ?').get(draft.username);
+    const token = jwt.sign(
+      { userId: userRow.id, username: userRow.username, role: userRow.role, dbSlug: slug },
+      SECRET,
+      { expiresIn: '7d' }
+    );
+    res.cookie('token', token, {
+      httpOnly: true,
+      sameSite: 'lax',
+      path: '/',
+      maxAge: 7 * 24 * 60 * 60 * 1000
+    });
     res.json({
       message: '注册成功',
-      recovery: hasPassword ? { phrase: formatPhrase(phrase), hash: restoreHash } : null,
-      user: { username: uname, role: 'teacher', dbSlug: slug },
+      token,
+      user: { id: userRow.id, username: draft.username, role: draft.role, dbSlug: slug, hasPassword: true },
     });
   } catch (err) {
-    console.error('[register] 注册抛异常:', uname, err.stack || err.message);
-    if (!res.headersSent) res.status(500).json({ error: '注册失败：' + (err.message || '未知错误') });
+    console.error('[register/confirm] 注册抛异常:', draft.username, err.stack || err.message);
+    if (!res.headersSent) {
+      pendingRegs.delete(draftId);
+      res.status(500).json({ error: '注册失败：' + (err.message || '未知错误') });
+    }
   }
 });
 

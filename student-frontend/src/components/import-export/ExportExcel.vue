@@ -1,5 +1,6 @@
 <template>
   <!-- 导出表格组件 -->
+  <Teleport to="body">
   <Transition name="dialog">
   <div v-if="effectiveVisible" class="fixed inset-0 bg-black/50 flex items-center justify-center z-[10001]">
     <div class="bg-surface p-5 rounded-lg min-w-[400px] max-w-xl shadow-card border border-border dialog-card">
@@ -42,16 +43,17 @@
 
       <div class="mb-4">
         <label class="font-semibold block mb-1">文件名</label>
-        <input v-model="filename" class="border p-2 w-full rounded" />
+        <input v-model="filename" class="filename-input border border-border bg-surface text-text p-2 w-full !rounded-[12px]" />
       </div>
 
       <div class="text-right">
-        <button @click="cancel" class="bg-surface-hover text-text border border-border px-4 py-1.5 rounded mr-2 cursor-pointer">取消</button>
-        <button @click="doExport" class="bg-info text-text-inverse border-none px-4 py-1.5 rounded cursor-pointer" :disabled="selectedColumns.length === 0">导出</button>
+        <button @click="cancel" class="bg-surface-hover text-text border border-border px-4 py-1.5 rounded-lg mr-2 cursor-pointer">取消</button>
+        <button @click="doExport" class="bg-info text-text-inverse border-none px-4 py-1.5 rounded-lg cursor-pointer" :disabled="selectedColumns.length === 0">导出</button>
       </div>
     </div>
   </div>
   </Transition>
+  </Teleport>
 </template>
 
 <script>
@@ -958,3 +960,16 @@ export default {
   }
 };
 </script>
+
+<style scoped>
+/* 文件名输入框：聚焦时显示与登录框一致的蓝色边缘，白色高亮带过渡 */
+.filename-input {
+  transition: background-color 0.2s ease, border-color 0.2s ease, box-shadow 0.2s ease;
+}
+.filename-input:focus {
+  border-color: #3b82f6 !important;
+  box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.28) !important;
+  outline: none;
+  background-color: rgba(255, 255, 255, 0.98) !important;
+}
+</style>

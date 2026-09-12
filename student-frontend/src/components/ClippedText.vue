@@ -10,6 +10,7 @@
   </span>
 
   <!-- 完整内容浮窗：复用项目统一弹窗范式 -->
+  <Teleport to="body">
   <Transition name="dialog">
     <div v-if="open" class="fixed inset-0 bg-black/50 flex items-center justify-center z-[10005] pointer-events-auto" @click.self="close">
       <div class="bg-surface p-5 rounded-xl w-[420px] max-w-full shadow-lg dialog-card">
@@ -21,6 +22,7 @@
       </div>
     </div>
   </Transition>
+  </Teleport>
 </template>
 
 <script setup>

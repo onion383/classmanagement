@@ -1,9 +1,10 @@
 const express = require('express');
 const router = express.Router();
+const jwt = require('jsonwebtoken');
 const { db } = require('../db');
 const dbManager = require('../dbManager');
 const bcrypt = require('bcryptjs');
-const { auth } = require('../middleware/auth');
+const { SECRET, auth } = require('../middleware/auth');
 const { pickPhrase, deriveRestoreHash, formatPhrase } = require('../services/recoveryKey');
 
 // 重置恢复密钥：为当前登录账号生成一组新的 12 词恢复密钥并保存哈希。
@@ -115,7 +116,25 @@ router.post('/restore-offline', (req, res) => {
     }
 
     const result = dbManager.restoreBundle({ slug, username, data, dbKey });
-    res.json({ message: '恢复成功', slug: result.slug, username: result.username || username });
+    // 恢复成功后直接签发登录态，前端据此跳转首页，无需再次手动登录
+    const token = jwt.sign(
+      { userId: 1, username, role: 'teacher', dbSlug: result.slug || slug },
+      SECRET,
+      { expiresIn: '7d' }
+    );
+    res.cookie('token', token, {
+      httpOnly: true,
+      sameSite: 'lax',
+      path: '/',
+      maxAge: 7 * 24 * 60 * 60 * 1000
+    });
+    res.json({
+      message: '恢复成功',
+      slug: result.slug,
+      username: result.username || username,
+      token,
+      user: { id: 1, username, role: 'teacher', dbSlug: result.slug || slug },
+    });
   } catch (err) {
     res.status(400).json({ error: err.message });
   }

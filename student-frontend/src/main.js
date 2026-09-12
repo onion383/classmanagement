@@ -83,8 +83,8 @@ try {
   })
 } catch (_) {}
 // 应用透明度
-const glassOpacity = parseFloat(localStorage.getItem(GLASS_KEY)) || 0.5
-const bgMaskOpacity = parseFloat(localStorage.getItem(BG_MASK_KEY)) || 0.65
+const glassOpacity = parseFloat(localStorage.getItem(GLASS_KEY)) || 0.4
+const bgMaskOpacity = parseFloat(localStorage.getItem(BG_MASK_KEY)) || 0.6
 document.documentElement.style.setProperty('--glass-opacity', glassOpacity)
 document.documentElement.style.setProperty('--bg-mask-opacity', bgMaskOpacity)
 // 应用背景图（毛玻璃主题默认使用内置背景）

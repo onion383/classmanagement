@@ -14,20 +14,14 @@
             <th
               v-for="(col, colIdx) in colHeaders"
               :key="colIdx"
-              :draggable="col !== '走廊'"
-              @dragstart="col !== '走廊' && onColDragStart($event, colIdx)"
-              @dragover.prevent="onColDragOver($event, colIdx)"
-              @dragleave="onColDragLeave($event, colIdx)"
-              @drop="onColDrop($event, colIdx)"
-              @dragend="onColDragEnd"
               :class="['bg-primary text-text-inverse border border-border px-2 py-1 text-center', col !== '走廊' ? 'cursor-pointer' : 'cursor-default bg-text-muted', { 'opacity-30': colDragIdx === colIdx }]"
               :style="col === '走廊' ? 'width: 60px;' : ''"
             >
               <div v-if="col !== '走廊'" class="flex items-center justify-center gap-1">
-                <span class="drag-handle cursor-grab text-text-inverse/70 hover:text-text-inverse">⠿</span>
+                <span class="drag-handle cursor-grab text-text-inverse/70 hover:text-text-inverse" title="按住拖动列" @mousedown.prevent.stop="onColHandleDown($event, colIdx)" @contextmenu.stop.prevent>⠿</span>
                 <span>{{ col }}</span>
               </div>
-              <span v-else class="text-base text-text-inverse/80">走廊</span>
+              <span v-else class="text-base text-text">走廊</span>
             </th>
           </tr>
         </thead>
@@ -35,11 +29,7 @@
             <tr
               v-for="(row, rowIdx) in rows"
               :key="row._rowKey || rowIdx"
-              :class="[{ 'opacity-30': rowDragIdx === rowIdx, 'content-visibility-auto': true }, rowDropIndicatorClass(rowIdx), row._isSeparator ? 'bg-border h-8' : '', row._isPodium ? 'bg-warning/20 h-10' : '']"
-              @dragover.prevent="onRowDragOver($event, rowIdx, row)"
-              @dragleave="onRowDragLeave($event, rowIdx)"
-              @drop="onRowDrop($event, rowIdx, row)"
-              @dragend="onRowDragEnd"
+              :class="[{ 'opacity-30': rowDragIdx === rowIdx, 'content-visibility-auto': true }, row._isSeparator ? 'bg-border h-8' : '', row._isPodium ? 'bg-warning/20 h-10' : '']"
             >
               <!-- 讲台行 -->
               <template v-if="row._isPodium">
@@ -57,7 +47,7 @@
 
                 <td v-if="!hideMetaColumns" class="bg-primary text-text-inverse border border-border px-2 py-1 text-center font-bold" style="width: 100px;">
                   <div class="flex items-center justify-center gap-1">
-                    <span v-if="canDragRow(row)" class="drag-handle cursor-grab select-none text-text-inverse/70 hover:text-text-inverse" draggable="true" @dragstart.stop="onRowDragStart($event, rowIdx)" @dragend.stop="onRowDragEnd">⠿</span>
+                    <span v-if="canDragRow(row)" class="drag-handle cursor-grab select-none text-text-inverse/70 hover:text-text-inverse" title="按住拖动行" @mousedown.prevent.stop="onRowHandleDown($event, rowIdx)" @contextmenu.stop.prevent>⠿</span>
                     <span @dblclick.stop="startEditMeta(rowIdx, 'label')">
                       <input v-if="editingMeta && editingMeta.row === rowIdx && editingMeta.field === 'label'" v-model="editingMetaValue" class="w-20 border border-border p-0 text-sm text-text" @keyup.enter="saveEditMeta(rowIdx)" @blur="saveEditMeta(rowIdx)" @mousedown.stop />
                       <span v-else>{{ row.label }}</span>
@@ -72,7 +62,7 @@
                 <!-- 行号列（绿色背景；首子行跨行合并居中显示分组名，可拖拽排序） -->
                 <td v-if="hideMetaColumns && showRowNumber && row._rowHeaderRowSpan !== 0" class="bg-primary text-text-inverse border border-border text-center text-sm font-bold align-middle" style="width: 110px; vertical-align: middle;" :rowspan="row._rowHeaderRowSpan > 0 ? row._rowHeaderRowSpan : undefined">
                   <div class="flex items-center justify-center gap-1">
-                    <span v-if="!disableRowDrag && row._rowHeaderRowSpan !== 0 && canDragRow(row)" class="drag-handle cursor-grab select-none text-text-inverse/70 hover:text-text-inverse" draggable="true" @dragstart.stop="onRowDragStart($event, rowIdx)" @dragend.stop="onRowDragEnd">⠿</span>
+                    <span v-if="!disableRowDrag && row._rowHeaderRowSpan !== 0 && canDragRow(row)" class="drag-handle cursor-grab select-none text-text-inverse/70 hover:text-text-inverse" title="按住拖动行" @mousedown.prevent.stop="onRowHandleDown($event, rowIdx)" @contextmenu.stop.prevent>⠿</span>
                     <span>{{ row.label }}</span>
                   </div>
                 </td>
@@ -80,8 +70,8 @@
 
                 <!-- 数据单元格 -->
                 <template v-for="(cell, colIdx) in row.cells" :key="colIdx">
-                  <td v-if="cell._isAisle && cell._aisleRowSpan" :rowspan="cell._aisleRowSpan" class="border border-border bg-text-muted text-center align-middle" style="width: 60px; vertical-align: middle; font-size: 0.875rem; line-height: 1.2;">
-                     <div style="writing-mode: vertical-lr; text-orientation: upright; display: flex; align-items: center; justify-content: center;">走廊</div></td>
+                  <td v-if="cell._isAisle && cell._aisleRowSpan" :rowspan="cell._aisleRowSpan" class="border border-border bg-text-muted text-center align-middle" style="width: 60px; vertical-align: middle; font-size: 1.125rem; line-height: 1.2;">
+                     <div style="writing-mode: vertical-lr; text-orientation: upright; display: inline-block;">走廊</div></td>
                   <td v-else-if="cell._isAisleHidden" style="display: none;"></td>
                   <td
                     v-else
@@ -183,8 +173,9 @@ export default {
     return {
       selecting: false, selectionStart: null, selectionEnd: null, longPressTimer: null, longPressActive: false,
       dragSource: null, dragTarget: null, _cellGhost: null,
-      rowDragIdx: null, rowDragOverIdx: null, _rowGhost: null,
-      colDragIdx: null, colDragOverIdx: null,
+      rowDragIdx: null, rowDragOverIdx: null, _rowGhost: null, _rowGrab: null, _rowMove: null, _rowUp: null, _rowDropBox: null,
+      colDragIdx: null, colDragOverIdx: null, _colGhost: null, _colGrab: null, _colMove: null, _colUp: null, _colDropBox: null,
+      firstActivate: true, _tableEnterCleanup: null,
       editingCell: null, editingCellData: { course: '' }, editingMeta: null, editingMetaValue: '',
       candidateHighlightIndex: 0, showCandidatePopup: false, candidatePopupX: 0, candidatePopupY: 0,
       cellRefs: {},
@@ -374,49 +365,329 @@ export default {
     isEditing(rowIdx, colIdx) { return this.editingCell?.row === rowIdx && this.editingCell?.col === colIdx; },
     startEditMeta(rowIdx, field) { /* 省略，保留原逻辑 */ },
     saveEditMeta(rowIdx) { /* 省略，保留原逻辑 */ },
-    rowDropIndicatorClass(rowIdx) {
-      if (this.rowDragIdx === null || this.rowDragOverIdx === null) return '';
-      if (rowIdx !== this.rowDragOverIdx) return '';
-      return this.rowDragOverIdx > this.rowDragIdx ? 'border-b-2 border-info' : 'border-t-2 border-info';
+    // ==================== 拖拽落点高亮框 ====================
+    // 整层包住目标行/列的蓝色边框（不用 border 直接改单元格，避免撑动列宽/行高）
+    createDropBox() {
+      const box = document.createElement('div');
+      box.style.cssText = 'position:fixed;left:0;top:0;z-index:99999;pointer-events:none;display:none;box-sizing:border-box;will-change:transform;border:2px solid var(--color-info, #2563eb);border-radius:4px;';
+      document.body.appendChild(box);
+      return box;
     },
-    onRowDragStart(event, rowIdx) {
-      if (this.disableRowDrag) { event.preventDefault(); return; }
-      if (this.rows[rowIdx]._isSeparator || this.rows[rowIdx]._isPodium) return;
-      this.rowDragIdx = rowIdx;
-      event.dataTransfer.effectAllowed = 'move';
+    // rect: {left, top, right, bottom}（视口坐标）；container 内裁剪，避免滚动时溢出表格范围
+    updateDropBox(box, rect, container) {
+      if (!box) return;
+      if (!rect) { box.style.display = 'none'; return; }
+      let { left, top, right, bottom } = rect;
+      if (container) {
+        const c = container.getBoundingClientRect();
+        left = Math.max(left, c.left);
+        top = Math.max(top, c.top);
+        right = Math.min(right, c.right);
+        bottom = Math.min(bottom, c.bottom);
+      }
+      const w = right - left, h = bottom - top;
+      if (w <= 0 || h <= 0) { box.style.display = 'none'; return; }
+      box.style.display = 'block';
+      box.style.transform = `translate(${left}px, ${top}px)`;
+      box.style.width = w + 'px';
+      box.style.height = h + 'px';
+    },
+    updateRowDropBox() {
+      const box = this._rowDropBox;
+      if (!box) return;
+      const trs = this.$el ? this.$el.querySelectorAll('tbody tr') : [];
+      const tr = this.rowDragOverIdx === null ? null : trs[this.rowDragOverIdx];
+      if (!tr) { box.style.display = 'none'; return; }
+      const r = tr.getBoundingClientRect();
+      this.updateDropBox(box, { left: r.left, top: r.top, right: r.right, bottom: r.bottom }, this.$refs.gridTable);
+    },
+    updateColDropBox() {
+      const box = this._colDropBox;
+      if (!box) return;
+      const tbl = this.$el ? this.$el.querySelector('table') : null;
+      const ths = this.colHeaderEls();
+      const th = this.colDragOverIdx === null ? null : ths[this.colThOffset() + this.colDragOverIdx];
+      if (!tbl || !th) { box.style.display = 'none'; return; }
+      const r = th.getBoundingClientRect();
+      const headerRow = th.parentElement.getBoundingClientRect();
+      const tblRect = tbl.getBoundingClientRect();
+      this.updateDropBox(box, { left: r.left, top: headerRow.top, right: r.right, bottom: tblRect.bottom }, this.$refs.gridTable);
+    },
+    // ==================== 交换动画（内容互换型 FLIP） ====================
+    // 网格表格的交换是「同一批 DOM 节点换内容」，不是节点重排，TransitionGroup 的 move 不会触发，
+    // 所以按交换前后的位置差给元素加一次性过渡，让内容看起来从原位滑到新位。
+    playSwapFlip(items) {
+      const list = (items || []).filter(it => it.el && it.el.isConnected);
+      if (!list.length) return;
+      list.forEach(({ el, dx = 0, dy = 0 }) => {
+        el.style.transition = 'none';
+        el.style.transform = `translate(${dx}px, ${dy}px)`;
+      });
+      void this.$el.offsetWidth; // 强制重排，让起始位移先生效
+      list.forEach(({ el }) => {
+        el.classList.add('swap-flip');
+        el.style.transition = '';
+        el.style.transform = '';
+        const done = (e) => {
+          if (e && e.propertyName !== 'transform') return;
+          el.classList.remove('swap-flip');
+          el.removeEventListener('transitionend', done);
+        };
+        el.addEventListener('transitionend', done);
+      });
+    },
+    rowSig(idx) {
+      const r = this.rows[idx];
+      if (!r) return '';
+      return (r.label || '') + '#' + (r.cells || []).map(c => c.course || '').join(',');
+    },
+    colSig(idx) {
+      return (this.rows || []).map(r => (r.cells && r.cells[idx] ? r.cells[idx].course || '' : '')).join(',');
+    },
+    animateRowSwap(fromIdx, toIdx) {
+      const trs = this.$el ? this.$el.querySelectorAll('tbody tr') : [];
+      const a = trs[fromIdx], b = trs[toIdx];
+      if (!a || !b) return;
+      const dy = b.getBoundingClientRect().top - a.getBoundingClientRect().top;
+      if (!dy) return;
+      this.playSwapFlip([{ el: a, dy }, { el: b, dy: -dy }]);
+    },
+    animateColSwap(fromIdx, toIdx) {
+      const ths = this.colHeaderEls();
+      const off = this.colThOffset();
+      const thFrom = ths[off + fromIdx], thTo = ths[off + toIdx];
+      if (!thFrom || !thTo) return;
+      const dx = thTo.getBoundingClientRect().left - thFrom.getBoundingClientRect().left;
+      if (!dx) return;
+      const items = [];
+      const trs = this.$el ? this.$el.querySelectorAll('tbody tr') : [];
+      trs.forEach((tr, rowIdx) => {
+        const refs = this.cellRefs[rowIdx];
+        if (!refs) return;
+        const a = refs[fromIdx], b = refs[toIdx];
+        if (a && a.isConnected) items.push({ el: a, dx });
+        if (b && b.isConnected) items.push({ el: b, dx: -dx });
+      });
+      this.playSwapFlip(items);
+    },
+
+    // ==================== 数据区(tbody)整体从左往右弹入（不含表头） ====================
+    playTableEnter() {
+      const tbody = this.$el ? this.$el.querySelector('tbody') : null;
+      if (!tbody) return;
+      if (this._tableEnterCleanup) this._tableEnterCleanup();
+      const onEnd = (e) => { if (e && e.target !== tbody) return; this._tableEnterCleanup(); };
+      this._tableEnterCleanup = () => {
+        tbody.classList.remove('table-enter');
+        tbody.removeEventListener('animationend', onEnd);
+        this._tableEnterCleanup = null;
+      };
+      tbody.addEventListener('animationend', onEnd);
+      void tbody.offsetWidth; // 强制重排，保证重复导航时动画能重播
+      tbody.classList.add('table-enter');
+    },
+
+    // ==================== 手动拖拽：半透明整行/整列克隆虚影 ====================
+    isRowDropTarget(row) {
+      return !!row && !row._isSeparator && !row._mergeCells && !row._isPodium;
+    },
+    // 表头行里数据列之前的固定列数量（时段/节次/时间/行号）
+    colThOffset() {
+      if (!this.hideMetaColumns) return 2 + (this.showPeriodColumn ? 1 : 0);
+      return this.showRowNumber ? 1 : 0;
+    },
+    colHeaderEls() { return this.$el ? this.$el.querySelectorAll('thead tr:last-child th') : []; },
+    // 克隆整张表格后按矩形切片，得到与原件像素一致的半透明虚影（保留行高/边框/字体/走廊跨行）
+    createSliceGhost(region, opacity, radius) {
+      const table = this.$el ? this.$el.querySelector('table') : null;
+      if (!table || !region.width || !region.height) return null;
+      const tblRect = table.getBoundingClientRect();
+      const clone = table.cloneNode(true);
+      // 保留 content-visibility:auto 会让屏外行按内在尺寸折叠，导致切片错位
+      clone.querySelectorAll('.content-visibility-auto').forEach(el => el.classList.remove('content-visibility-auto'));
+      clone.style.width = tblRect.width + 'px';
+      clone.style.position = 'absolute';
+      clone.style.left = (-(region.left - tblRect.left)) + 'px';
+      clone.style.top = (-(region.top - tblRect.top)) + 'px';
+      const wrapper = document.createElement('div');
+      wrapper.style.cssText = 'position:fixed;left:0;top:0;z-index:100000;pointer-events:none;overflow:hidden;will-change:transform;box-shadow:0 6px 18px rgba(0,0,0,0.18);';
+      wrapper.style.opacity = opacity;
+      if (radius) wrapper.style.borderRadius = radius;
+      wrapper.style.width = region.width + 'px';
+      wrapper.style.height = region.height + 'px';
+      wrapper.appendChild(clone);
+      document.body.appendChild(wrapper);
+      return wrapper;
+    },
+    placeGhost(ghost, grab, clientX, clientY) {
+      if (!ghost || !grab) return;
+      ghost.style.transform = `translate(${clientX - grab.grabX}px, ${clientY - grab.grabY}px)`;
+    },
+
+    // ---------- 行拖拽 ----------
+    onRowHandleDown(event, rowIdx) {
+      if (this.disableRowDrag || this.editingCell) return;
       const row = this.rows[rowIdx];
-      const ghost = document.createElement('div');
-      ghost.style.cssText = 'position:fixed;top:-9999px;left:-9999px;pointer-events:none;z-index:10000;padding:6px 14px;background:white;border:1px solid #9ca3af;border-radius:4px;color:#1f2937;font-size:14px;';
-      const names = (row.cells || []).slice(0, 3).map(c => c.course || '空').join('、');
-      ghost.textContent = `${row.label} (${row.time}) ${names}`;
-      document.body.appendChild(ghost); event.dataTransfer.setDragImage(ghost, 0, 0); this._rowGhost = ghost;
-    },
-    onRowDragOver(event, rowIdx, row) {
-      if (row._isSeparator || row._mergeCells || row._isPodium) { this.rowDragOverIdx = null; return; }
+      if (!row || !this.canDragRow(row)) return;
+      const table = this.$el.querySelector('table');
+      const tr = event.currentTarget.closest('tr');
+      if (!table || !tr) return;
+      event.preventDefault();
+      const trRect = tr.getBoundingClientRect();
+      const tblRect = table.getBoundingClientRect();
+      const ghost = this.createSliceGhost(
+        { left: tblRect.left, top: trRect.top, width: tblRect.width, height: trRect.height }, 0.85, '4px'
+      );
+      if (!ghost) return;
+      this.rowDragIdx = rowIdx;
       this.rowDragOverIdx = rowIdx;
+      this._rowGhost = ghost;
+      this._rowGrab = { grabX: event.clientX - tblRect.left, grabY: event.clientY - trRect.top };
+      this.placeGhost(ghost, this._rowGrab, event.clientX, event.clientY);
+      // 落点高亮框：包住即将落位的那一行
+      this._rowDropBox = this.createDropBox();
+      this.updateRowDropBox();
+
+      const move = (e) => {
+        if (!this._rowGhost) return;
+        this.placeGhost(this._rowGhost, this._rowGrab, e.clientX, e.clientY);
+        this.rowDragOverIdx = this.resolveRowIndexAt(e.clientY);
+        this.updateRowDropBox();
+      };
+      const up = () => this.finishRowDrag();
+      this._rowMove = move;
+      this._rowUp = up;
+      window.addEventListener('mousemove', move);
+      window.addEventListener('mouseup', up);
     },
-    onRowDragLeave(event, rowIdx) { if (this.rowDragOverIdx === rowIdx) this.rowDragOverIdx = null; },
-    onRowDrop(event, targetIdx, row) {
-      if (this.disableRowDrag) { this.rowDragIdx = null; this.rowDragOverIdx = null; return; }
-      if (this.rowDragIdx === null || this.rowDragIdx === targetIdx) { this.rowDragIdx = null; this.rowDragOverIdx = null; return; }
-      if (row._isSeparator || row._mergeCells || row._isPodium) { this.rowDragIdx = null; this.rowDragOverIdx = null; return; }
-      this.$emit('swapRows', this.rowDragIdx, targetIdx);
-      this.rowDragIdx = null; this.rowDragOverIdx = null;
+    resolveRowIndexAt(clientY) {
+      const trs = this.$el ? this.$el.querySelectorAll('tbody tr') : [];
+      let best = null, min = Infinity;
+      for (let i = 0; i < trs.length; i++) {
+        if (!this.isRowDropTarget(this.rows[i])) continue;
+        const r = trs[i].getBoundingClientRect();
+        if (clientY >= r.top && clientY <= r.bottom) return i; // 命中直接返回，避免被相邻行覆盖
+        const d = Math.min(Math.abs(clientY - r.top), Math.abs(clientY - r.bottom));
+        if (d < min) { min = d; best = i; }
+      }
+      return best;
     },
-    onRowDragEnd() { this.rowDragIdx = null; this.rowDragOverIdx = null; if (this._rowGhost) { document.body.removeChild(this._rowGhost); this._rowGhost = null; } },
-    onColDragStart(event, colIdx) { this.colDragIdx = colIdx; event.dataTransfer.effectAllowed = 'move'; event.dataTransfer.setDragImage(event.target, 0, 0); },
-    onColDragOver(event, colIdx) { this.colDragOverIdx = colIdx; },
-    onColDragLeave(event, colIdx) { if (this.colDragOverIdx === colIdx) this.colDragOverIdx = null; },
-    onColDrop(event, targetIdx) { if (this.colDragIdx === null || this.colDragIdx === targetIdx) { this.colDragIdx = null; this.colDragOverIdx = null; return; } this.$emit('swapColumns', this.colDragIdx, targetIdx); this.colDragIdx = null; this.colDragOverIdx = null; },
-    onColDragEnd() { this.colDragIdx = null; this.colDragOverIdx = null; },
+    finishRowDrag() {
+      if (this._rowMove) window.removeEventListener('mousemove', this._rowMove);
+      if (this._rowUp) window.removeEventListener('mouseup', this._rowUp);
+      this._rowMove = null;
+      this._rowUp = null;
+      if (this._rowGhost) { this._rowGhost.remove(); this._rowGhost = null; }
+      if (this._rowDropBox) { this._rowDropBox.remove(); this._rowDropBox = null; }
+      const from = this.rowDragIdx, to = this.rowDragOverIdx;
+      this.rowDragIdx = null;
+      this.rowDragOverIdx = null;
+      if (from === null || to === null || from === to) return;
+      if (!this.isRowDropTarget(this.rows[to])) return;
+      const sigBefore = this.rowSig(from) + '|' + this.rowSig(to);
+      this.$emit('swapRows', from, to);
+      this.$nextTick(() => {
+        // 数据真的换了才播动画（无监听方时数据不变，避免空放动画）
+        if (this.rowSig(from) + '|' + this.rowSig(to) === sigBefore) return;
+        this.animateRowSwap(from, to);
+      });
+    },
+
+    // ---------- 列拖拽 ----------
+    onColHandleDown(event, colIndex) {
+      if (this.editingCell || this.editingMeta) return;
+      if (this.colHeaders[colIndex] === '走廊') return;
+      const table = this.$el.querySelector('table');
+      const ths = this.colHeaderEls();
+      const th = ths[this.colThOffset() + colIndex];
+      if (!table || !th) return;
+      event.preventDefault();
+      const thRect = th.getBoundingClientRect();
+      const rowRect = th.parentElement.getBoundingClientRect();
+      const tblRect = table.getBoundingClientRect();
+      const ghost = this.createSliceGhost(
+        { left: thRect.left, top: rowRect.top, width: thRect.width, height: tblRect.bottom - rowRect.top }, 0.7
+      );
+      if (!ghost) return;
+      this.colDragIdx = colIndex;
+      this.colDragOverIdx = colIndex;
+      this._colGhost = ghost;
+      this._colGrab = { grabX: event.clientX - thRect.left, grabY: event.clientY - rowRect.top };
+      this.placeGhost(ghost, this._colGrab, event.clientX, event.clientY);
+      // 落点高亮框：包住即将落位的那一列
+      this._colDropBox = this.createDropBox();
+      this.updateColDropBox();
+
+      const move = (e) => {
+        if (!this._colGhost) return;
+        this.placeGhost(this._colGhost, this._colGrab, e.clientX, e.clientY);
+        this.colDragOverIdx = this.resolveColIndexAt(e.clientX);
+        this.updateColDropBox();
+      };
+      const up = () => this.finishColDrag();
+      this._colMove = move;
+      this._colUp = up;
+      window.addEventListener('mousemove', move);
+      window.addEventListener('mouseup', up);
+    },
+    resolveColIndexAt(clientX) {
+      const ths = this.colHeaderEls();
+      const off = this.colThOffset();
+      let best = null, min = Infinity;
+      for (let i = 0; i < ths.length; i++) {
+        const colIdx = i - off;
+        const col = this.colHeaders[colIdx];
+        if (colIdx < 0 || col === undefined || col === '走廊') continue;
+        const r = ths[i].getBoundingClientRect();
+        if (clientX >= r.left && clientX <= r.right) return colIdx; // 命中直接返回，避免被相邻列覆盖
+        const d = Math.abs(clientX - (r.left + r.right) / 2);
+        if (d < min) { min = d; best = colIdx; }
+      }
+      return best;
+    },
+    finishColDrag() {
+      if (this._colMove) window.removeEventListener('mousemove', this._colMove);
+      if (this._colUp) window.removeEventListener('mouseup', this._colUp);
+      this._colMove = null;
+      this._colUp = null;
+      if (this._colGhost) { this._colGhost.remove(); this._colGhost = null; }
+      if (this._colDropBox) { this._colDropBox.remove(); this._colDropBox = null; }
+      const from = this.colDragIdx, to = this.colDragOverIdx;
+      this.colDragIdx = null;
+      this.colDragOverIdx = null;
+      if (from === null || to === null || from === to) return;
+      const sigBefore = this.colSig(from) + '|' + this.colSig(to);
+      this.$emit('swapColumns', from, to);
+      this.$nextTick(() => {
+        if (this.colSig(from) + '|' + this.colSig(to) === sigBefore) return;
+        this.animateColSwap(from, to);
+      });
+    },
     getCellColor(cell) { if (cell._isAisle) return '#d1d5db'; return COURSE_COLORS[cell.course] || '#FFFFFF'; },
   },
-  mounted() { document.addEventListener('mouseup', this.handleGlobalMouseUp); },
+  mounted() {
+    document.addEventListener('mouseup', this.handleGlobalMouseUp);
+    // 首屏：数据区整体从左往右弹入
+    this.playTableEnter();
+  },
+  // KeepAlive：从其它状态栏/页签切回来时重播数据区弹入动效
+  activated() {
+    if (this.firstActivate) { this.firstActivate = false; return; }
+    this.playTableEnter();
+  },
   beforeUnmount() {
     document.removeEventListener('mouseup', this.handleGlobalMouseUp);
     this.clearLongPress();
     this.removeCellGhost();
-    if (this._rowGhost) document.body.removeChild(this._rowGhost);
+    if (this._rowGhost) this._rowGhost.remove();
+    if (this._rowMove) window.removeEventListener('mousemove', this._rowMove);
+    if (this._rowUp) window.removeEventListener('mouseup', this._rowUp);
+    if (this._colGhost) this._colGhost.remove();
+    if (this._colMove) window.removeEventListener('mousemove', this._colMove);
+    if (this._colUp) window.removeEventListener('mouseup', this._colUp);
+    if (this._rowDropBox) this._rowDropBox.remove();
+    if (this._colDropBox) this._colDropBox.remove();
+    if (this._tableEnterCleanup) this._tableEnterCleanup();
     this.cellRefs = {}; // 清除 DOM 引用，避免内存泄漏
   },
 };
@@ -427,7 +698,17 @@ export default {
 .drag-handle:hover { opacity: 1; }
 th .drag-handle { color: color-mix(in srgb, var(--color-text-inverse, #ffffff) 70%, transparent); }
 th:hover .drag-handle { color: var(--color-text-inverse, #ffffff); }
-.row-flip-move { transition: transform 0.25s ease; }
-.row-flip-enter-active, .row-flip-leave-active { transition: all 0.25s ease; }
+/* 行交换(FLIP)：松手后其它行平滑让位滑开，与动态表格保持一致 */
+.row-flip-move { transition: transform 0.32s cubic-bezier(0.34, 1.08, 0.64, 1) !important; }
+/* 内容互换型交换（网格表格的实际交换方式）的一次性过渡曲线 */
+.swap-flip { transition: transform 0.32s cubic-bezier(0.34, 1.08, 0.64, 1) !important; }
+.row-flip-enter-active { transition: opacity 0.3s cubic-bezier(0.22, 1, 0.36, 1), transform 0.3s cubic-bezier(0.34, 1.56, 0.64, 1); }
+.row-flip-leave-active { position: absolute; width: 100%; transition: opacity 0.25s cubic-bezier(0.22, 1, 0.36, 1), transform 0.25s cubic-bezier(0.22, 1, 0.36, 1); }
 .row-flip-enter-from, .row-flip-leave-to { opacity: 0; transform: translateX(-20px); }
+/* 整表数据区(tbody)进入：从左往右弹入，不含表头 */
+.table-enter { animation: table-slide-in 0.35s cubic-bezier(0.34, 1.56, 0.64, 1); }
+@keyframes table-slide-in {
+  from { opacity: 0; transform: translateX(-20px); }
+  to { opacity: 1; transform: translateX(0); }
+}
 </style>

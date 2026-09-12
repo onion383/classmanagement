@@ -1,5 +1,6 @@
 <template>
   <!-- 重复筛选组件 -->
+  <Teleport to="body">
   <Transition name="dialog">
   <div
     v-if="visible"
@@ -65,7 +66,7 @@
       </template>
 
       <template v-else>
-        <div class="text-center py-8 text-text-muted">
+        <div class="text-center py-8 text-text-muted font-semibold">
           ✅ 没有发现重复数据。
         </div>
         <div class="flex justify-center mt-4">
@@ -75,6 +76,7 @@
     </div>
   </div>
   </Transition>
+  </Teleport>
 </template>
 
 <script>

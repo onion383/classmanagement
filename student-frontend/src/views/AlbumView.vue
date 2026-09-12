@@ -71,6 +71,7 @@
     </div>
 
     <!-- 添加相册弹窗 -->
+    <Teleport to="body">
     <Transition name="dialog">
     <div v-if="showAdd" class="fixed inset-0 bg-black/50 flex items-center justify-center z-[10003]" @click.self="showAdd = false">
       <div class="bg-surface p-6 rounded-xl w-96 shadow-card dialog-card">
@@ -92,8 +93,10 @@
       </div>
     </div>
     </Transition>
+    </Teleport>
 
     <!-- 管理弹窗（相册管理 + 任务管理） -->
+    <Teleport to="body">
     <Transition name="dialog">
     <div v-if="showManage" class="fixed inset-0 bg-black/50 flex items-center justify-center z-[10003]" @click.self="showManage = false">
       <div class="bg-surface rounded-xl p-6 w-[820px] max-w-[94vw] flex flex-col border border-border shadow-card dialog-card">
@@ -165,8 +168,10 @@
       </div>
     </div>
     </Transition>
+    </Teleport>
 
     <!-- 删除确认弹窗 -->
+    <Teleport to="body">
     <Transition name="dialog">
     <div v-if="confirmDelete" class="fixed inset-0 bg-black/50 flex items-center justify-center z-[10004]" @click.self="confirmDelete = null">
       <div class="bg-surface p-5 rounded-lg min-w-[300px] text-center shadow-card dialog-card">
@@ -178,8 +183,10 @@
       </div>
     </div>
     </Transition>
+    </Teleport>
 
     <!-- 媒体查看器（图片 / 视频） -->
+    <Teleport to="body">
     <Transition name="preview">
     <div v-if="viewer" class="fixed inset-0 bg-black/90 z-[10004] flex flex-col" @click.self="closeViewer">
       <!-- 关闭按钮（右上角） -->
@@ -252,6 +259,7 @@
       </div>
     </div>
     </Transition>
+    </Teleport>
   </div>
 </template>
 

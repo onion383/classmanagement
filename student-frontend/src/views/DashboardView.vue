@@ -5,11 +5,13 @@
       <div class="flex items-center justify-between gap-6">
         <div class="flex items-center gap-3 min-w-0">
           <IconGlyph name="home" :size="30" />
-          <h1 class="text-2xl font-bold text-text truncate">
-            <ClippedText :text="classInfo.name" :max="18" title="班级名称" />
+          <h1 class="flex-1 min-w-0 text-2xl font-bold text-text truncate">
+            <ClippedText v-if="classInfo.name" :text="classInfo.name" :max="18" title="班级名称" />
+            <span v-else class="text-text-muted font-normal">请设置班级名称</span>
           </h1>
           <button class="class-gear" title="设置班名/口号/班风/学风" @click="openClassModal">
-            <IconGlyph name="settings" :size="20" tint="current" />
+            <IconGlyph name="settings" :size="18" tint="current" />
+            <span class="gear-text">设置</span>
           </button>
         </div>
         <div class="flex items-center gap-4 shrink-0">
@@ -46,9 +48,9 @@
       <div class="info-part class-part">
         <div class="class-name"><ClippedText :text="classInfo.name" :max="12" title="班级名称" /></div>
         <div class="class-lines">
-          <div class="class-line"><span class="line-label">班级口号：</span><ClippedText :text="classInfo.motto" title="班级口号" /></div>
-          <div class="class-line"><span class="line-label">班风：</span><ClippedText :text="classInfo.mottoStyle" title="班风" /></div>
-          <div class="class-line"><span class="line-label">学风：</span><ClippedText :text="classInfo.xuefeng" title="学风" /></div>
+          <div class="class-line"><span class="line-label">班级口号：</span><ClippedText v-if="classInfo.motto" :text="classInfo.motto" title="班级口号" /><span v-else class="class-placeholder">请设置班级口号</span></div>
+          <div class="class-line"><span class="line-label">班风：</span><ClippedText v-if="classInfo.mottoStyle" :text="classInfo.mottoStyle" title="班风" /><span v-else class="class-placeholder">请设置班风</span></div>
+          <div class="class-line"><span class="line-label">学风：</span><ClippedText v-if="classInfo.xuefeng" :text="classInfo.xuefeng" title="学风" /><span v-else class="class-placeholder">请设置学风</span></div>
         </div>
       </div>
       <div class="info-divider"></div>
@@ -89,10 +91,13 @@
               {{ showFee ? '🙈' : '👁️' }}
             </button>
           </h2>
-          <div class="text-3xl font-bold text-text tabular-nums">{{ showFee ? formatMoney(feeBalance) : '••••' }} 元</div>
+          <div class="text-3xl font-bold text-text tabular-nums flex items-baseline">
+            <span :key="'fee-bal-' + showFee" class="fee-blur-in fee-amount">{{ showFee ? formatMoney(feeBalance) : '••••' }}</span>
+            <span class="fee-unit">元</span>
+          </div>
           <div class="flex gap-5 mt-3 text-sm">
-            <span class="text-text-muted">本月收入 <b class="text-success">{{ showFee ? formatMoney(monthIncome) : '••' }}</b></span>
-            <span class="text-text-muted">本月支出 <b class="text-warning">{{ showFee ? formatMoney(monthExpense) : '••' }}</b></span>
+            <span class="text-text-muted">本月收入 <b :key="'fee-in-' + showFee" class="text-success fee-blur-in fee-amount-sm">{{ showFee ? formatMoney(monthIncome) : '••' }}</b></span>
+            <span class="text-text-muted">本月支出 <b :key="'fee-out-' + showFee" class="text-warning fee-blur-in fee-amount-sm">{{ showFee ? formatMoney(monthExpense) : '••' }}</b></span>
           </div>
         </div>
 
@@ -185,8 +190,10 @@ import IconGlyph from '../components/base/IconGlyph.vue'
 import AnimatedClock from '../components/AnimatedClock.vue'
 import ClippedText from '../components/ClippedText.vue'
 import ClassInfoDialog from '../components/dialogs/ClassInfoDialog.vue'
+import { useNotification } from '../composables/useNotification.js'
 
 const router = useRouter()
+const { success: notifySuccess, error: notifyError } = useNotification()
 
 // 返回当天的课表列索引（周一=0…周五=4），周末返回 -1；兼容传入 Date 或星期数字(0-6，周日=0)
 function getWeekDayIndex(d) {
@@ -236,10 +243,8 @@ async function loadClassInfo() {
     const res = await axios.get('/api/widget-settings/class-info')
     const d = res.data?.data
     if (d) {
-      classInfo.value.name = d.name || classInfo.value.name
-      classInfo.value.motto = d.motto || classInfo.value.motto
-      classInfo.value.mottoStyle = d.mottoStyle || classInfo.value.mottoStyle
-      classInfo.value.xuefeng = d.xuefeng || classInfo.value.xuefeng
+      // 直接赋值，不再用 `|| 默认值` 回退：删除后的空值应保留为空，配合占位提示展示
+      classInfo.value = { name: d.name ?? '', motto: d.motto ?? '', mottoStyle: d.mottoStyle ?? '', xuefeng: d.xuefeng ?? '' }
     }
   } catch (_) {}
 }
@@ -249,7 +254,10 @@ async function saveClassInfo(data) {
     const d = res.data?.data
     if (d) classInfo.value = { ...d }
     showClassModal.value = false
-  } catch (_) {}
+    notifySuccess('班级信息保存成功')
+  } catch (e) {
+    notifyError('班级信息保存失败，请重试')
+  }
 }
 
 // 出勤统计
@@ -521,6 +529,10 @@ onBeforeUnmount(() => {
 .line-label {
   color: #6b7280;
 }
+.class-placeholder {
+  color: #9ca3af;
+  font-style: italic;
+}
 /* 第三部分：倒计时（大字排版） */
 .countdown-part {
   gap: 4px;
@@ -551,6 +563,30 @@ onBeforeUnmount(() => {
 .countdown-empty {
   font-size: 14px;
   color: #9ca3af;
+}
+
+/* 班费金额查看/隐藏切换：模糊渐入（与 AnimatedClock 时钟 charFlipIn 同款效果） */
+.fee-blur-in {
+  animation: feeBlurIn 0.35s cubic-bezier(0.4, 0, 0.2, 1);
+}
+@keyframes feeBlurIn {
+  0% { filter: blur(4px); transform: translateY(10px); opacity: 0.2; }
+  100% { filter: blur(0px); transform: translateY(0); opacity: 1; }
+}
+/* 金额数字区预留固定最小宽度，数字在区内居中：切换时宽度不变，「元」位置不移动 */
+.fee-amount {
+  display: inline-block;
+  min-width: 5.5em;
+  text-align: center;
+}
+.fee-amount-sm {
+  display: inline-block;
+  min-width: 4em;
+  text-align: right;
+}
+.fee-unit {
+  flex: none;
+  margin-left: 0.15em;
 }
 
 /* 看板卡片瀑布流排列：用 CSS 多列实现"砌墙"效果——
@@ -586,14 +622,22 @@ onBeforeUnmount(() => {
 .class-gear {
   display: inline-flex;
   align-items: center;
+  gap: 3px;
   justify-content: center;
-  padding: 5px;
+  margin-right: 2px;
+  padding: 4px 9px 4px 7px;
   border: none;
   border-radius: 8px;
   background: transparent;
   color: #94a3b8;
   cursor: pointer;
   transition: background-color 0.15s ease, color 0.15s ease;
+  white-space: nowrap;
+}
+.gear-text {
+  font-size: 13px;
+  line-height: 1;
+  padding-top: 1px;
 }
 .class-gear:hover {
   background: rgba(59, 130, 246, 0.1);

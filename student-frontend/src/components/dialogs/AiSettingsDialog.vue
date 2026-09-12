@@ -1,4 +1,5 @@
 <template>
+  <Teleport to="body">
   <Transition name="dialog">
     <div v-if="show" class="fixed inset-0 bg-black/50 flex items-center justify-center z-[10005]" @click.self="close">
       <div class="dialog-card bg-surface rounded-lg p-6 min-w-[32rem] w-auto min-h-[32rem] max-w-[calc(100vw-2rem)] border border-border shadow-lg flex flex-col" style="max-height: 90vh; overflow: visible;">
@@ -67,6 +68,7 @@
       </div>
     </div>
   </Transition>
+  </Teleport>
 
   <!-- 添加模型二次弹窗 -->
   <AddModelDialog :show="modelDialog" @close="modelDialog = false" @saved="onModelSaved" />
