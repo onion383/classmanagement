@@ -6,6 +6,7 @@ import axios from 'axios'   // 必须导入
 import './styles/index.css'
 import { useThemeStore } from './stores/theme'
 import { setupSecureAxios } from './composables/secureAxios'
+import { useNotification } from './composables/useNotification'
 
 // 生产模式（file:// 协议）下无 Vite 代理，需指定完整后端地址
 if (import.meta.env.PROD) {
@@ -21,6 +22,9 @@ axios.interceptors.request.use(config => {
   return config
 })
 
+// 401 提示条去重：记录最近一次已处理的 401 时间，避免同一瞬间并发 401 重复弹提示
+let lastAuthPrompt = 0
+
 // 响应拦截器：主窗口先于后端启动时，首屏请求可能遇到「连接被拒」等网络错误
 // （此时 error.response 为 undefined）。自动退避重试，等后端就绪，避免白屏/报错。
 // 有 HTTP 响应（4xx/5xx）的错误不重试，避免重复提交等副作用。
@@ -28,6 +32,24 @@ axios.interceptors.response.use(
   res => res,
   async (error) => {
     const config = error.config
+
+    // token 失效（401，且非登录/注册/恢复等自身接口）：清除过期 token、
+    // 弹出提示条并回到登录页。用时间戳锁去重：同一瞬间多个并发 401 只处理一次，
+    // 但几秒后的再次过期仍能重新触发。
+    if (error.response && error.response.status === 401) {
+      const url = (config?.url || '')
+      const isAuthReq = /(login|register|restore|recover)/i.test(url)
+      // 登录态预校验（/api/me）的 401 交由路由守卫统一处理跳转，避免这里再弹一次提示/二次跳转
+      if (!config?.__skipAuth && !isAuthReq && Date.now() - lastAuthPrompt > 2000) {
+        lastAuthPrompt = Date.now()
+        localStorage.removeItem('token')
+        useNotification().error('登录已过期，请重新登录', 5000)
+        if (router.currentRoute.value.path !== '/login') {
+          router.push('/login')
+        }
+      }
+    }
+
     if (!error.response && config) {
       const retryCount = config.__retryCount || 0
       if (retryCount < 6) {

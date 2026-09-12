@@ -12,7 +12,6 @@
 // 密钥约定：
 //   - 主密钥 DB_MASTER_KEY：环境变量或 student-backend/.env，用于解密 index.db 与包裹库密钥。禁止硬编码。
 //   - 库密钥：每个班主任库独立生成的随机密钥（32 字节 hex），用主密钥 AES-256-GCM 包裹后存入 index.db。
-//   - 旧单库：保留为默认库 slug = 'default'，其库密钥即原 DB_KEY，首次启动时自动登记进 index.db。
 // =========================================================================
 
 const crypto = require('crypto');
@@ -57,12 +56,16 @@ const dataDir = process.env.DATA_DIR
   : path.join(__dirname, 'data');
 if (!fs.existsSync(dataDir)) fs.mkdirSync(dataDir, { recursive: true });
 
-// 可写资源目录：上传文件（收据/背景图）、相册缩略图等统一放 dataDir 下，
-// 避免打包后 __dirname 位于只读的 asar 归档内导致写入失败（ENOTDIR/无权限）。
+// 可写资源目录：上传文件（收据/背景图）统一放 dataDir 下，避免打包后 __dirname 位于只读
+// asar 归档内导致写入失败（ENOTDIR/无权限）。
 function ensureDir(p) { fs.mkdirSync(p, { recursive: true }); return p; }
 const uploadsDir = ensureDir(path.join(dataDir, 'uploads'));
 const backgroundDir = ensureDir(path.join(uploadsDir, 'background'));
-const thumbsDir = ensureDir(path.join(dataDir, 'album-thumbs'));
+// 相册缩略图缓存目录：可再生的缓存，默认可随数据目录走；被用户单独配置为独立缓存目录时
+// 读 ALBUM_THUMBS_DIR（由 Electron 主进程按 app-config 注入），相册缩略图移到该位置。
+const thumbsDir = ensureDir(
+  process.env.ALBUM_THUMBS_DIR ? path.resolve(process.env.ALBUM_THUMBS_DIR) : path.join(dataDir, 'album-thumbs')
+);
 // 相册应用内回收站目录：删除照片时的文件先移到这里（可编程撤销还原），替代系统回收站。
 const trashDir = ensureDir(path.join(dataDir, 'album-trash'));
 
@@ -131,8 +134,6 @@ const als = new AsyncLocalStorage();
 const connCache = new Map();
 // 缓存连接数量上限（LRU 驱逐策略：超过上限时关闭并移出最久未使用的连接）
 const CONN_CACHE_MAX = 10;
-// 缓存「default」的库连接
-let defaultConn = null;
 
 // 记录对某连接的访问（命中时刷新 LRU 顺序）
 function touchConn(slug) {
@@ -148,8 +149,7 @@ function setCachedConn(slug, conn) {
   connCache.set(slug, conn);
   while (connCache.size > CONN_CACHE_MAX) {
     const oldestKey = connCache.keys().next().value;
-    // 始终保留 default 连接，避免关闭当前会话所用库
-    if (oldestKey === DEFAULT_SLUG || oldestKey == null) break;
+    if (oldestKey == null) break;
     const evicted = connCache.get(oldestKey);
     connCache.delete(oldestKey);
     try { evicted.close(); } catch (_) { /* 关闭失败可忽略 */ }
@@ -234,6 +234,27 @@ function registryList() {
   return indexDb.prepare('SELECT slug, username FROM registry ORDER BY created_at').all();
 }
 
+// 类似 registryList，但只返回「数据库有效」的账号：需满足
+//   1) 库钥匙能用当前主密钥解包（unwrapKey 不抛错）
+//   2) 对应库文件能正常打开
+//   3) 库内 users 表确实存在该账号行
+// 任一不满足（如主密钥变更后旧库打不开、登记残留的幽灵账号）即视为无效，从登录列表隐藏。
+function registryListValid() {
+  const valid = [];
+  for (const rec of registryList()) {
+    try {
+      const resolved = resolveByUsername(rec.username);
+      if (!resolved) continue; // 登记表有账号但缺 slug 映射
+      const row = resolved.conn.prepare('SELECT 1 FROM users WHERE username = ?').get(rec.username);
+      if (row) valid.push({ slug: rec.slug, username: rec.username });
+    } catch (err) {
+      // 主密钥不匹配 / 库文件损坏 / 打开失败 → 该数据库无效，跳过
+      console.warn('[registry] 账号无效，已过滤:', rec.username, '-', err.message);
+    }
+  }
+  return valid;
+}
+
 // 新建一个班主任库：生成 slug + 随机库密钥 + 建库 + 建账号 + 登记 index。
 // 返回 { slug }
 function createTeacher(username, passwordHash, role) {
@@ -258,11 +279,27 @@ function resolveByUsername(username) {
   return { slug: rec.slug, conn: getConn(rec.slug, passphrase) };
 }
 
+// 「从数据库文件登录」：根据用户选中的库文件名（@xxxx.db）定位本机
+// 已登记库，解包钥匙并打开，返回该库内的账号。外来/无登记或本地解不开的库会抛错（
+// 此时引导用户走备份恢复导入 .json 包）。仅传文件名作定位，不读取文件内容。
+function resolveByDbFile(filename) {
+  // 仅文件名作定位：班主任库名为 @xxxx（十二位十六进制）；去掉 .db 后缀即 slug。
+  let slug = filename.endsWith('.db') ? filename.slice(0, -3) : filename;
+  const rec = registryFindBySlug(slug);
+  if (!rec) throw new Error('本机未找到该数据库登记，若为换机/外来库请使用“从备份恢复”导入');
+  const passphrase = unwrapKey(rec.wrapped_key);
+  const conn = getConn(slug, passphrase); // 打开失败(钥匙不匹配)会在此抛错
+  const row = conn.prepare('SELECT username FROM users ORDER BY id LIMIT 1').get();
+  if (!row) throw new Error('该数据库内没有可用账号');
+  return { slug, username: row.username };
+}
+
 // ---------- 请求内取当前库 ----------
 function current() {
   const ctx = als.getStore();
   if (ctx && ctx.slug && connCache.has(ctx.slug)) return connCache.get(ctx.slug);
-  return getDefault();
+  // 未通过 auth 中间件绑定库（如未登录直接访问业务接口）即拒绝访问
+  throw new Error('未绑定数据库连接');
 }
 
 // 绑定：在请求上下文内设置当前班主任库 slug，并解析出连接放入上下文缓存
@@ -274,44 +311,9 @@ function withDb(slug, fn) {
   return als.run({ slug, conn }, () => fn({ slug, conn }));
 }
 
-// ---------- 默认库（旧单库 -> default） ----------
-let DEFAULT_SLUG = 'default';
-let DB_KEY = process.env.DB_KEY || '';
-
-// 初始化默认库：用 DB_KEY 打开旧 database.db，并确保其在 index.db 中登记为 default。
-function initDefault() {
-  const dbPath = path.join(dataDir, 'database.db');
-  // 若从未登记 default，则把旧库密钥登记进 index，保证登录定位可用
-  if (!DB_KEY) {
-    throw new Error('未配置默认库密钥 DB_KEY（请设置环境变量或 student-backend/.env）');
-  }
-  const conn = openFile(dbPath, DB_KEY);
-  initSchema(conn);
-  // 旧库 users 表迁移：补充 db_slug / recovery_hash 列
-  {
-    const cols = conn.prepare('PRAGMA table_info(users)').all().map(c => c.name);
-    if (!cols.includes('db_slug')) conn.exec(`ALTER TABLE users ADD COLUMN db_slug TEXT DEFAULT ''`);
-    if (!cols.includes('recovery_hash')) conn.exec(`ALTER TABLE users ADD COLUMN recovery_hash TEXT DEFAULT ''`);
-  }
-  // 旧库账号迁移：把 admin 的 db_slug 指向 default
-  conn.prepare('UPDATE users SET db_slug = ? WHERE db_slug IS NULL OR db_slug = \'\'').run(DEFAULT_SLUG);
-  connCache.set(DEFAULT_SLUG, conn);
-  defaultConn = conn;
-
-  registryUpsert(DEFAULT_SLUG, 'admin', wrapKey(DB_KEY));
-  // 兼容旧库中已有的 admin（若 db_slug 已被更新为 default，则无需再次登记账号）；
-  // 若旧库存在 admin 但 index 中 default 已登记，保持一致性。
-  return conn;
-}
-
-function getDefault() {
-  if (!defaultConn) initDefault();
-  return defaultConn;
-}
-
-// 库文件路径：默认库 default 落盘为 database.db（旧单库），其余 slug 为 ${slug}.db
+// 库文件路径：每个班主任库独立落盘为 ${slug}.db（slug 形如 @xxxxxxxxxxxx）
 function dbFilePath(slug) {
-  return path.join(dataDir, slug === DEFAULT_SLUG ? 'database.db' : `${slug}.db`);
+  return path.join(dataDir, `${slug}.db`);
 }
 
 // 供备份/导出：返回当前 slug 对应库文件路径与密钥
@@ -334,7 +336,7 @@ function restoreBundle({ slug, username, data, dbKey }) {
     throw new Error('备份数据不完整');
   }
   // 强约束 slug：仅允许 @ 开头 + 十六进制的内部格式，防止路径穿越/覆盖其它库
-  if (!/^@[0-9a-f]{12}$/.test(slug) && slug !== DEFAULT_SLUG) {
+  if (!/^@[0-9a-f]{12}$/.test(slug)) {
     throw new Error('非法的库标识');
   }
   const filePath = dbFilePath(slug);
@@ -346,19 +348,16 @@ function restoreBundle({ slug, username, data, dbKey }) {
     const conn = connCache.get(slug);
     try { conn.close(); } catch (_) { /* 关闭失败可忽略 */ }
     connCache.delete(slug);
-    if (slug === DEFAULT_SLUG) defaultConn = null;
   }
   return { slug };
 }
 
-// 后端就绪后的后台暖机：把一次性冷启动成本（require 原生 sqlite 模块、打开 index.db、
-// 若存在 default 库则打开并 initSchema）放到 listen 就绪信号之后、用户首个请求到达之前悄悄完成，
-// 让首个请求落在已缓存连接的库上，消除登录/首屏出现的「转圈」等待。
+// 后端就绪后的后台暖机：把一次性冷启动成本（require 原生 sqlite 模块、打开 index.db）
+// 放到 listen 就绪信号之后、用户首个请求到达之前悄悄完成，消除登录/首屏的等待。
 // 暖机失败不抛出，正常走懒加载兜底（与原先行为一致）。
 function warmup() {
   try {
     ensureIndex();
-    if (!defaultConn && DB_KEY) initDefault();
   } catch (_) { /* 暖机失败不影响正常懒加载路径 */ }
 }
 
@@ -366,19 +365,19 @@ module.exports = {
   ensureIndex,
   createTeacher,
   resolveByUsername,
+  resolveByDbFile,
   registryFindByUsername,
   registryFindBySlug,
   wrapKey,
   unwrapKey,
   wrapKeyBySecret,
   decryptBundleKey,
-  initDefault,
-  getDefault,
   current,
   withDb,
   exportBundle,
   restoreBundle,
   registryList,
+  registryListValid,
   warmup,
   // 可写资源目录（与数据库同层，随 userData 持久化）
   dataDir,

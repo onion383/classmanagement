@@ -2,7 +2,7 @@
   <div class="desktop-widget">
     <!-- 时钟区域（拖动手柄） -->
     <div class="clock-area glass-panel drag-handle">
-      <AnimatedClock date-format="{Y}-{M}-{D} 星期{W}" />
+      <AnimatedClock date-format="{Y}-{M}-{D}  星期{W}" />
     </div>
 
     <!-- 倒计时区域 -->

@@ -515,27 +515,6 @@ router.post('/conversations/:id/messages', (req, res) => {
   }
 });
 
-// 手动触发建表（新库自动建；老库打开时 schema 也会补齐）
-function ensureAiTable() {
-  db.exec(`
-    CREATE TABLE IF NOT EXISTS ai_conversations (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      title TEXT DEFAULT '新对话',
-      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-      updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
-    );
-    CREATE TABLE IF NOT EXISTS ai_messages (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      conversation_id INTEGER NOT NULL,
-      role TEXT NOT NULL,
-      content TEXT DEFAULT '',
-      created_at DATETIME DEFAULT CURRENT_TIMESTAMP
-    );
-    CREATE INDEX IF NOT EXISTS idx_ai_messages_conv ON ai_messages (conversation_id, id);
-  `);
-}
-ensureAiTable();
-
 // ---------------------------------------------------------------------------
 // 流式对话（SSE）：逐字输出 + 工具调用 + 提案
 // ---------------------------------------------------------------------------

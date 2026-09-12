@@ -1,4 +1,4 @@
-﻿<template>
+<template>
   <div>
     <div class="w-full bg-surface shadow-md rounded-xl mb-6 px-5 py-3 border border-border min-h-[4.5rem] flex items-center justify-between">
       <h1 class="text-2xl font-bold text-text flex items-center gap-2">
@@ -12,10 +12,10 @@
         <div v-if="activeTab === 'manage'">
           <section class="mb-8">
             <h2 class="text-xl font-semibold mb-4 flex items-center gap-2"><IconGlyph name="clipboard" :size="20" /> 当前值日表</h2>
-            <div class="mb-4 flex flex-wrap items-center gap-3">
+            <div class="mb-4 flex flex-wrap items-center gap-3 opbar">
               <button @click="settingsVisible = true" class="bg-primary text-text-inverse px-4 py-2 rounded flex items-center gap-1.5"><IconGlyph name="settings" :size="14" tint="current" /> 设置</button>
               <button @click="arrangeVisible = true" class="bg-primary text-text-inverse px-4 py-2 rounded flex items-center gap-1.5"><IconGlyph name="zap" :size="14" tint="current" /> 智能排表</button>
-              <button @click="refreshActive" class="bg-text-muted text-text-inverse px-4 py-2 rounded flex items-center gap-1.5"><IconGlyph name="refresh" :size="14" tint="current" /> 刷新</button>
+              <button @click="refreshActive" class="bg-text-muted text-text-inverse px-4 py-2 rounded flex items-center gap-1.5 btn-refresh"><IconGlyph name="refresh" :size="14" tint="current" /> 刷新</button>
               <button @click="applyMasterToActive" class="bg-primary text-text-inverse px-4 py-2 rounded flex items-center gap-1.5"><IconGlyph name="download" :size="14" tint="current" /> 从模板导入</button>
               <button @click="activeExportVisible = true" class="bg-warning text-text-inverse px-4 py-2 rounded flex items-center gap-1.5"><IconGlyph name="download" :size="14" tint="current" /> 导出值日表</button>
             </div>
@@ -44,8 +44,8 @@
 
           <section>
             <h2 class="text-xl font-semibold mb-4 flex items-center gap-2"><IconGlyph name="box" :size="20" /> 值日模板</h2>
-            <div class="mb-4 flex flex-wrap items-center gap-3">
-              <button @click="refreshMaster" class="bg-text-muted text-text-inverse px-4 py-2 rounded flex items-center gap-1.5"><IconGlyph name="refresh" :size="14" tint="current" /> 刷新</button>
+            <div class="mb-4 flex flex-wrap items-center gap-3 opbar">
+              <button @click="refreshMaster" class="bg-text-muted text-text-inverse px-4 py-2 rounded flex items-center gap-1.5 btn-refresh"><IconGlyph name="refresh" :size="14" tint="current" /> 刷新</button>
               <button @click="masterExportVisible = true" class="bg-warning text-text-inverse px-4 py-2 rounded flex items-center gap-1.5"><IconGlyph name="download" :size="14" tint="current" /> 导出值日表</button>
             </div>
 

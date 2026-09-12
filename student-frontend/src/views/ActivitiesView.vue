@@ -11,9 +11,9 @@
     <!-- ==================== 日常活动 ==================== -->
     <div v-if="activeTab === 'daily'">
       <!-- 工具栏 -->
-      <div class="mb-4 flex items-center gap-3">
+      <div class="mb-4 flex items-center gap-3 opbar">
         <button @click="openAddActivity" class="bg-primary hover:bg-primary-hover text-text-inverse px-5 py-2 rounded">＋ 新增活动</button>
-        <button @click="refreshActivities" class="bg-text-muted hover:bg-text-secondary text-text-inverse px-4 py-2 rounded flex items-center gap-1"><IconGlyph name="refresh" :size="14" tint="current" /> 刷新</button>
+        <button @click="refreshActivities" class="bg-text-muted hover:bg-text-secondary text-text-inverse px-4 py-2 rounded flex items-center gap-1 btn-refresh"><IconGlyph name="refresh" :size="14" tint="current" /> 刷新</button>
         <button @click="openActivityExport" class="bg-warning hover:bg-warning-hover text-text-inverse px-4 py-2 rounded flex items-center gap-1">📥 导出活动</button>
       </div>
 
@@ -45,9 +45,9 @@
     <!-- ==================== 倒计时 ==================== -->
     <div v-if="activeTab === 'countdown'">
       <!-- 工具栏 -->
-      <div class="mb-4 flex items-center gap-3">
+      <div class="mb-4 flex items-center gap-3 opbar">
         <button @click="openAddCountdown" class="bg-primary hover:bg-primary-hover text-text-inverse px-5 py-2 rounded">＋ 添加倒计时</button>
-        <button @click="refreshCountdowns" class="bg-text-muted hover:bg-text-secondary text-text-inverse px-4 py-2 rounded flex items-center gap-1">🔄 刷新</button>
+        <button @click="refreshCountdowns" class="bg-text-muted hover:bg-text-secondary text-text-inverse px-4 py-2 rounded flex items-center gap-1 btn-refresh">🔄 刷新</button>
         <button @click="openCountdownExport" class="bg-warning hover:bg-warning-hover text-text-inverse px-4 py-2 rounded flex items-center gap-1"><IconGlyph name="download" :size="14" tint="current" /> 导出 EXCEL 表格</button>
       </div>
 
