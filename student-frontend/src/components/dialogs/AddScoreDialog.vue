@@ -1,4 +1,5 @@
 <template>
+  <Teleport to="body">
   <Transition name="dialog">
   <div v-if="visible" class="fixed inset-0 bg-black/50 flex items-center justify-center z-[10001] pointer-events-auto" @click.self="$emit('cancel')">
     <div class="bg-surface p-5 rounded-xl w-[520px] max-w-full shadow-lg dialog-card">
@@ -141,6 +142,7 @@
     </div>
   </div>
   </Transition>
+  </Teleport>
 </template>
 
 <script>

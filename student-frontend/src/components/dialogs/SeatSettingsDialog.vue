@@ -1,4 +1,5 @@
 <template>
+  <Teleport to="body">
   <Transition name="dialog">
   <div v-if="visible" class="fixed inset-0 bg-black/30 z-50 flex items-center justify-center">
     <div class="bg-surface rounded-lg p-6 w-80 shadow-card dialog-card">
@@ -37,6 +38,7 @@
     </div>
   </div>
   </Transition>
+  </Teleport>
 </template>
 
 <script>

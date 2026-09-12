@@ -108,6 +108,16 @@
             <span class="text-xs text-text-muted">影响侧边栏导航图标显示风格</span>
           </div>
 
+          <!-- 提示合并 -->
+          <div class="flex items-center gap-4 mb-6">
+            <label class="text-sm font-medium text-text w-16 flex-shrink-0">提示合并</label>
+            <label class="inline-flex items-center cursor-pointer">
+              <input type="checkbox" :checked="mergeNotifications" @change="onMergeNotificationsChange" class="w-4 h-4 rounded border-border text-primary focus:ring-primary cursor-pointer" />
+              <span class="ml-2 text-sm text-text-secondary">{{ mergeNotifications ? '合并相同内容的提示' : '相同内容每次单独展示' }}</span>
+            </label>
+            <span class="text-xs text-text-muted">相同类型的重复提示合并为一条并计数，避免遮挡页面</span>
+          </div>
+
           <!-- 背景图片（仅毛玻璃主题） -->
           <div v-if="currentTheme === 'glass'" class="border-t border-border pt-6 mt-6">
             <h3 class="text-lg font-semibold text-text mb-4 flex items-center gap-2"><IconGlyph name="image" :size="18" /> 背景图片</h3>
@@ -270,6 +280,7 @@
     </div>
 
     <!-- 内嵌弹窗：修改用户名 -->
+    <Teleport to="body">
     <Transition name="dialog" v-if="modalType === 'username'">
       <div class="fixed inset-0 bg-black/50 flex items-center justify-center z-[10001]" @click.self="closeModal">
         <div class="dialog-card bg-surface rounded-lg p-6 w-96 border border-border shadow-lg">
@@ -283,8 +294,10 @@
         </div>
       </div>
     </Transition>
+    </Teleport>
 
     <!-- 内嵌弹窗：修改密码 -->
+    <Teleport to="body">
     <Transition name="dialog" v-if="modalType === 'password'">
       <div class="fixed inset-0 bg-black/50 flex items-center justify-center z-[10001]" @click.self="closeModal">
         <div class="dialog-card bg-surface rounded-lg p-6 w-96 border border-border shadow-lg">
@@ -298,8 +311,10 @@
         </div>
       </div>
     </Transition>
+    </Teleport>
 
     <!-- 内嵌弹窗：导出数据库 -->
+    <Teleport to="body">
     <Transition name="dialog" v-if="modalType === 'export'">
       <div class="fixed inset-0 bg-black/50 flex items-center justify-center z-[10001]" @click.self="closeModal">
         <div class="dialog-card bg-surface rounded-lg p-6 w-96 border border-border shadow-lg">
@@ -320,6 +335,7 @@
         </div>
       </div>
     </Transition>
+    </Teleport>
 
     <ConfirmDialog
       v-if="dialogMounted"
@@ -406,6 +422,8 @@ export default {
       busyUndo: false,
       // Theme
       selectedThemeId: '',
+      // 是否合并相同内容的重复提示
+      mergeNotifications: true,
       // Background image
       bgImageUrl: '',
       bgImageFileName: '',
@@ -438,6 +456,7 @@ export default {
   mounted() {
     this.selectedThemeId = this.currentTheme
     this.bgImageUrl = this.themeStore.backgroundImage
+    this.mergeNotifications = (localStorage.getItem('mergeNotifications') ?? '1') === '1'
     this.loadUndo()
     this.loadWidgetSettings()
     this.loadSession()
@@ -609,6 +628,11 @@ export default {
     // Theme
     onThemeSelect() {
       this.themeStore.setTheme(this.selectedThemeId)
+    },
+    // 提示合并（立即生效，无需保存）
+    onMergeNotificationsChange(e) {
+      this.mergeNotifications = e.target.checked
+      localStorage.setItem('mergeNotifications', this.mergeNotifications ? '1' : '0')
     },
     // 图标样式：线性图标 / Emoji
     onIconStyleChange() {

@@ -83,9 +83,6 @@ router.put('/:id', (req, res) => {
 router.delete('/:id', (req, res) => {
   try {
     const { id } = req.params;
-    const count = db.prepare('SELECT COUNT(*) AS count FROM students').get().count;
-    if (count <= 1) return res.status(400).json({ error: '至少需要保留一个学生' });
-
     const row = db.prepare('SELECT position FROM students WHERE id = ?').get(id);
     if (!row) return res.status(404).json({ error: '学生不存在' });
 

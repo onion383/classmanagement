@@ -1,9 +1,8 @@
 <template>
-  <div class="snapshot-empty">
-    <div class="snapshot-empty-card">
-      <span class="snapshot-empty-icon">🗓</span>
-      <span class="snapshot-empty-text">暂未有历史快照</span>
-    </div>
+  <!-- 空态占位：整行铺满（与表格/骨架屏同宽同高），底色走主题 surface（毛玻璃主题下即白色磨砂玻璃） -->
+  <div class="snapshot-empty bg-surface">
+    <span class="snapshot-empty-icon">🗓</span>
+    <span class="snapshot-empty-text">暂未有历史快照</span>
   </div>
 </template>
 
@@ -15,23 +14,17 @@ export default {
 
 <style scoped>
 .snapshot-empty {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  min-height: 240px;
-}
-.snapshot-empty-card {
+  box-sizing: border-box;
+  width: 100%;
+  min-height: 320px;
   display: flex;
   flex-direction: column;
   align-items: center;
   justify-content: center;
   gap: 12px;
-  padding: 48px 64px;
+  /* 与同位置的表格容器保持同样的圆角与描边，避免切换时视觉跳变 */
   border-radius: 16px;
-  background: rgba(148, 163, 184, 0.12);
-  border: 1px solid rgba(148, 163, 184, 0.28);
-  backdrop-filter: blur(14px);
-  -webkit-backdrop-filter: blur(14px);
+  border: 1px solid var(--color-border, #e5e7eb);
 }
 .snapshot-empty-icon {
   font-size: 44px;
@@ -40,7 +33,7 @@ export default {
 }
 .snapshot-empty-text {
   font-size: 18px;
-  color: var(--text-muted, #94a3b8);
+  color: var(--color-text-muted, #94a3b8);
   letter-spacing: 1px;
 }
 </style>

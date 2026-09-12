@@ -1,4 +1,5 @@
 <template>
+  <Teleport to="body">
   <Transition name="dialog">
     <div v-if="visible" class="fixed inset-0 bg-black/50 flex items-center justify-center z-[10006] pointer-events-auto" @click.self="cancel">
       <div class="shutdown-card dialog-card">
@@ -71,6 +72,7 @@
       </div>
     </div>
   </Transition>
+  </Teleport>
 </template>
 
 <script>

@@ -13,14 +13,45 @@ export function useNotification() {
    * @param {string} options.message - 消息内容
    * @param {number} [options.duration] - 自动关闭时间（毫秒），默认 success/info 3000ms，warning/error 5000ms
    */
-  function show({ type = 'info', message, duration } = {}) {
-    const id = ++uid
+  // 是否合并相同内容的重复提示（默认合并），可被设置项「提示合并」切换
+function isMergeEnabled() {
+  try {
+    return localStorage.getItem('mergeNotifications') !== '0'
+  } catch (_) {
+    return true
+  }
+}
+
+function show({ type = 'info', message, duration } = {}) {
     const defaultDuration = type === 'error' || type === 'warning' ? 5000 : 3000
     const dur = duration ?? defaultDuration
+
+    // 合并相同内容：相同类型+消息且尚未离开的通知复用同一条，计数 +1 并重置自动关闭时间
+    if (isMergeEnabled()) {
+      const existing = notifications.find(n => !n.leaving && n.type === type && n.message === message)
+      if (existing) {
+        existing.count++
+        existing._barKey = (existing._barKey || 1) + 1 // 让进度条重播
+        if (existing._paused) {
+          existing._remaining = dur
+          existing._startTime = Date.now()
+        } else {
+          clearTimeout(existing.timer)
+          existing._startTime = Date.now()
+          existing._remaining = null
+          existing.timer = setTimeout(() => remove(existing.id), dur)
+        }
+        return existing.id
+      }
+    }
+
+    const id = ++uid
     const item = reactive({
       id,
       type,
       message,
+      count: 1,
+      _barKey: 1,
       duration: dur,
       _originalDuration: dur,
       _startTime: Date.now(),

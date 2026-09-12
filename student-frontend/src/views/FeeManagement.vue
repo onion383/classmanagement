@@ -78,6 +78,7 @@
     />
 
     <!-- 收据管理弹窗 -->
+    <Teleport to="body">
     <div v-if="receiptDialog.visible" class="fixed inset-0 bg-black/50 flex items-center justify-center z-[10001] pointer-events-auto" @click.self="closeReceiptDialog">
       <div class="bg-surface p-5 rounded-lg min-w-[400px] max-w-xl">
         <h3 class="text-lg font-bold mb-3">管理收据</h3>
@@ -116,8 +117,10 @@
         </div>
       </div>
     </div>
+    </Teleport>
 
     <!-- 全屏图片预览 -->
+    <Teleport to="body">
     <div
       v-if="previewImageUrl"
       class="fixed inset-0 bg-black/80 z-[10002] flex items-center justify-center cursor-pointer"
@@ -125,6 +128,7 @@
     >
       <img :src="getFullUrl(previewImageUrl)" class="max-w-[90vw] max-h-[90vh] object-contain" />
     </div>
+    </Teleport>
 
     <DynamicTable
       ref="dynamicTable"
@@ -134,6 +138,7 @@
       :sortField="sortField"
       :sortOrder="sortOrder"
       :editingCell="editingCell"
+      :protectedColumns="['收据']"
       @contextmenu="openContextMenu"
       @search="openSearch"
       @toggleSort="toggleSort"
@@ -234,7 +239,8 @@ function customValidate(val, field) {
 const table = useTableCRUD(`${API_BASE}/fee-records`, DEFAULT_FIELDS, {
   requiredField: '收支编码',
   customValidate,
-  undoTableKey: 'fee_records'
+  undoTableKey: 'fee_records',
+  protectedColumns: ['收据']
 })
 
 const feeRecords = table.rows

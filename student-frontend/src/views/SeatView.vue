@@ -77,10 +77,24 @@
           <div v-if="historyLoading" class="skeleton-block"></div>
           <EmptySnapshot v-else-if="!historySnapshot" />
           <GridView v-else :colHeaders="historyColHeaders" :rows="historyDisplayRows" :hideMetaColumns="true" :showRowNumber="true" />
-          <WeekSwitcher v-model:currentWeek="historyCurrentWeek" :weeks="historyWeeks" @update:currentWeek="loadHistorySnapshot" />
-          <div class="text-center mt-4">
-            <button @click="captureHistorySnapshot" class="bg-primary text-text-inverse px-4 py-2 rounded">📸 保存本周快照</button>
-          </div>
+          <!-- 快照菜单栏：周切换 + 下拉框 + 保存/删除按钮，同处一条毛玻璃栏 -->
+          <WeekSwitcher
+            v-model:currentWeek="historyCurrentWeek"
+            :weeks="historyWeeks"
+            @update:currentWeek="loadHistorySnapshot"
+          >
+            <template #actions>
+              <button
+                @click="captureHistorySnapshot"
+                class="bg-primary text-text-inverse px-3 py-1.5 rounded whitespace-nowrap cursor-pointer"
+              >📸 保存快照</button>
+              <button
+                @click="requestDeleteHistorySnapshot"
+                :disabled="!canDeleteHistorySnapshot"
+                class="bg-danger text-text-inverse px-3 py-1.5 rounded whitespace-nowrap cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"
+              >🗑 删除本周快照</button>
+            </template>
+          </WeekSwitcher>
         </div>
       </template>
     </Tabs>
@@ -118,6 +132,19 @@
       :showCancel="true"
       @confirm="confirmShrink"
       @cancel="shrinkConfirmVisible = false"
+    />
+
+    <!-- 删除历史快照确认弹窗 -->
+    <ConfirmDialog
+      v-if="deleteSnapshotMounted"
+      :visible="deleteSnapshotVisible"
+      title="删除历史快照"
+      :message="deleteSnapshotMessage"
+      type="confirm"
+      :showCancel="true"
+      confirmText="删除"
+      @confirm="confirmDeleteHistorySnapshot"
+      @cancel="deleteSnapshotVisible = false"
     />
 
     <!-- 智能排表弹窗 -->
@@ -228,7 +255,7 @@ const masterExportRows = masterGrid.exportRows
 
 // ==================== 方法别名 ====================
 const loadActive = activeGrid.load
-const { success: notifySuccess } = useNotification()
+const { success: notifySuccess, error: notifyError } = useNotification()
 
 async function refreshActive() {
   try {
@@ -453,6 +480,41 @@ async function captureHistorySnapshot() {
     alert('本周快照已保存')
     await fetchHistoryWeeks()
   } catch (e) { alert('保存失败') }
+}
+
+// ==================== 删除历史快照 ====================
+// 删除的是当前下拉框选中的那一周（也就是正在看的那份快照）
+const deleteSnapshotVisible = ref(false)
+const deleteSnapshotMounted = ref(false)
+// 首次打开才挂载弹窗（保持与其它懒加载弹窗一致的保活方式）
+watch(() => deleteSnapshotVisible.value, v => { if (v) deleteSnapshotMounted.value = true })
+const canDeleteHistorySnapshot = computed(() =>
+  !!historyCurrentWeek.value && historyWeeks.value.some(w => w.week_start === historyCurrentWeek.value)
+)
+const deleteSnapshotMessage = computed(() => {
+  const w = historyCurrentWeek.value
+  if (!w) return ''
+  const start = new Date(w)
+  const end = new Date(start)
+  end.setDate(end.getDate() + 6)
+  return `确定删除 ${start.toISOString().slice(0, 10)} ~ ${end.toISOString().slice(0, 10)} 的历史快照吗？删除后不可恢复。`
+})
+function requestDeleteHistorySnapshot() {
+  if (!canDeleteHistorySnapshot.value) return
+  deleteSnapshotVisible.value = true
+}
+async function confirmDeleteHistorySnapshot() {
+  deleteSnapshotVisible.value = false
+  const week = historyCurrentWeek.value
+  if (!week) return
+  try {
+    await axios.delete(`${API_BASE}/seats/history/${week}`)
+    notifySuccess('该周快照已删除')
+    if (historyCurrentWeek.value === week) historySnapshot.value = null
+    await fetchHistoryWeeks()
+  } catch (e) {
+    notifyError('删除快照失败，请重试')
+  }
 }
 
 watch(activeTab, (newTab) => { if (newTab === 'history') fetchHistoryWeeks() })

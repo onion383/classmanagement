@@ -74,6 +74,7 @@
       :fields="visibleFields"
       :rows="displayRows"
       :newRow="newRow"
+      :protectedColumns="['学号', '姓名']"
       :sortField="sortField"
       :sortOrder="sortOrder"
       :editingCell="editingCell"

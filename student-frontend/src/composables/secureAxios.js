@@ -47,5 +47,18 @@ export function setupSecureAxios(axios) {
       }
     }
     return res
-  }, err => Promise.reject(err))
+  }, async err => {
+    // 错误响应（4xx/5xx）在加密会话下同样被后端包成 { d: 'iv.tag.ct' }，
+    // 这里也尝试解密，否则调用方拿到的 err.response.data 是密文，
+    // 诸如后端返回的 needConfirm / error 等真实字段将无法读取。
+    const d = err.response?.data
+    if (d && typeof d === 'object' && typeof d.d === 'string') {
+      try {
+        err.response.data = await decryptBody(d.d)
+      } catch (_) {
+        // 非法/过期密文（如 { d:'session-expired' }）保持原样，由调用方兜底
+      }
+    }
+    return Promise.reject(err)
+  })
 }

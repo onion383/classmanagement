@@ -30,9 +30,9 @@ export const useThemeStore = defineStore('theme', () => {
   const customThemes = ref(JSON.parse(localStorage.getItem(CUSTOM_THEMES_KEY) || '[]'))
   const backgroundImage = ref(localStorage.getItem(BG_IMAGE_KEY) || '')
   // 背景遮罩层不透明度（0~1，有自定义背景图时生效）
-  const bgMaskOpacity = ref(parseFloat(localStorage.getItem(BG_MASK_KEY)) || 0.65)
+  const bgMaskOpacity = ref(parseFloat(localStorage.getItem(BG_MASK_KEY)) || 0.6)
   // 组件透明玻璃层不透明度（0~1，卡片基准值）
-  const glassOpacity = ref(parseFloat(localStorage.getItem(GLASS_KEY)) || 0.5)
+  const glassOpacity = ref(parseFloat(localStorage.getItem(GLASS_KEY)) || 0.4)
   // 图标样式：'color'（彩色图标）| 'emoji'（Emoji）
   const iconStyle = ref(localStorage.getItem(ICON_STYLE_KEY) || 'color')
 

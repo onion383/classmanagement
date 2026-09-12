@@ -1,4 +1,5 @@
 <template>
+  <Teleport to="body">
   <Transition name="dialog">
     <div v-if="show" class="fixed inset-0 bg-black/50 flex items-center justify-center z-[10070]" @click.self="close">
       <div class="dialog-card bg-surface rounded-lg p-6 w-[28rem] max-w-[calc(100vw-2rem)] border border-border shadow-lg">
@@ -66,6 +67,7 @@
       </div>
     </div>
   </Transition>
+  </Teleport>
 </template>
 
 <script>

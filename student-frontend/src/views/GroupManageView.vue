@@ -165,6 +165,7 @@
     </div><!-- 玻璃面板结束 -->
 
     <!-- ============ 添加组（新增分组）弹窗 ============ -->
+    <Teleport to="body">
     <Transition name="dialog">
     <div v-if="showAddDim" class="fixed inset-0 bg-black/50 flex items-center justify-center z-[10003]" @click.self="showAddDim = false">
       <div class="bg-surface p-6 rounded-xl w-[26rem] shadow-card dialog-card border border-border">
@@ -195,8 +196,10 @@
       </div>
     </div>
     </Transition>
+    </Teleport>
 
     <!-- ============ 分组设置弹窗（只对当前分组维度生效） ============ -->
+    <Teleport to="body">
     <Transition name="dialog">
     <div v-if="showSettings && activeDim" class="fixed inset-0 bg-black/50 flex items-center justify-center z-[10003]" @click.self="showSettings = false">
       <div class="bg-surface p-6 rounded-xl w-[26rem] shadow-card dialog-card border border-border">
@@ -265,8 +268,10 @@
       </div>
     </div>
     </Transition>
+    </Teleport>
 
     <!-- ============ 添加小组弹窗 ============ -->
+    <Teleport to="body">
     <Transition name="dialog">
     <div v-if="showAddGroup" class="fixed inset-0 bg-black/50 flex items-center justify-center z-[10003]" @click.self="showAddGroup = false">
       <div class="bg-surface p-6 rounded-xl w-96 shadow-card dialog-card border border-border">
@@ -281,8 +286,10 @@
       </div>
     </div>
     </Transition>
+    </Teleport>
 
     <!-- ============ 二次确认弹窗 ============ -->
+    <Teleport to="body">
     <Transition name="dialog">
     <div v-if="confirmMsg" class="fixed inset-0 bg-black/50 flex items-center justify-center z-[10004]" @click.self="confirmMsg = null">
       <div class="bg-surface p-6 rounded-xl w-96 shadow-card dialog-card border border-border">
@@ -295,6 +302,7 @@
       </div>
     </div>
     </Transition>
+    </Teleport>
 
     <!-- ============ 组名覆盖确认（复用组件 + 统一动画） ============ -->
     <ConfirmDialog

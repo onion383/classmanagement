@@ -27,8 +27,11 @@
   transition: border-color 0.2s, box-shadow 0.2s, background-color 0.2s, transform 0.12s ease;
   font: inherit;
 }
-/* 紧凑模式：用于页面标题条等高度受限场景，避免把标题条撑大 */
-.av-select--compact .av-select__trigger { padding: 4px 9px; font-size: 13px; }
+/* 紧凑模式：用于空间受限场景（如工具条），缩小字号与内边距。
+   注意：菜单是 Teleport 到 body 的，组件会主动读取根元素字号同步给菜单，
+   所以这里改根元素字号即可同时生效于 trigger 与下拉菜单。 */
+.av-select--compact { font-size: 12px; }
+.av-select--compact .av-select__trigger { padding: 6px 10px; }
 .av-select__trigger:hover { background-color: var(--color-surface, #ffffff); }
 .av-select__trigger:active { transform: scale(0.975); }
 .av-select--open .av-select__trigger,
