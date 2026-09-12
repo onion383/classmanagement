@@ -9,7 +9,7 @@
         class="w-full mb-2"
         :options="roleOptions"
       />
-      <input v-model="username" placeholder="账号" class="border p-2 w-full mb-2 rounded-xl" autocomplete="username" />
+      <input v-model="username" placeholder="账号" class="border border-border p-2 w-full mb-2 rounded-xl" autocomplete="username" />
       <input v-model="password" type="password" placeholder="密码（留空则无密码登录）" autocomplete="current-password" class="border p-2 w-full mb-4 rounded-xl" />
       <div class="flex gap-2">
         <button type="submit" :disabled="busy" class="bg-info text-text-inverse px-4 py-2 flex-1 disabled:opacity-50">
@@ -19,21 +19,10 @@
           注册
         </button>
       </div>
-      <button type="button" :disabled="busy" class="mt-2 bg-surface-hover px-4 py-2 rounded-xl w-full disabled:opacity-50" @click="loadAccounts">
-        从数据库注册
+      <button type="button" :disabled="busy" class="mt-2 bg-surface-hover px-4 py-2 rounded-xl w-full disabled:opacity-50" @click="openDbPicker">
+        从数据库登录
       </button>
-      <div v-if="showAccounts" class="mt-2 border rounded-lg max-h-44 overflow-auto bg-surface">
-        <button
-          v-for="acc in accounts" :key="acc.slug"
-          type="button"
-          class="block w-full text-left px-3 py-2 text-sm hover:bg-surface-hover disabled:opacity-50"
-          :disabled="busy"
-          @click="pickAccount(acc)"
-        >
-          {{ acc.username }}
-        </button>
-        <p v-if="accounts.length === 0" class="px-3 py-2 text-xs text-text-muted">暂无可用账号</p>
-      </div>
+      <input ref="dbFileInput" type="file" accept=".db" class="hidden" @change="onPickDbFile" />
       <p class="text-center mt-3 flex gap-3 justify-center">
         <a class="cursor-pointer underline text-xs text-text-muted" @click="switchMode('recover')">忘记密码？</a>
         <a class="cursor-pointer underline text-xs text-text-muted" @click="switchMode('restore')">从备份恢复</a>
@@ -67,7 +56,7 @@
         class="w-full mb-2"
         :options="roleOptions"
       />
-      <input v-model="username" placeholder="账号" class="border p-2 w-full mb-2 rounded-xl" autocomplete="username" />
+      <input v-model="username" placeholder="账号" class="border border-border p-2 w-full mb-2 rounded-xl" autocomplete="username" />
       <input v-model="password" type="password" placeholder="密码（留空则无密码登录）" autocomplete="new-password" class="border p-2 w-full mb-2 rounded-xl" />
       <input v-model="confirm" type="password" placeholder="确认密码" autocomplete="new-password" class="border p-2 w-full mb-4 rounded-xl" />
       <button type="submit" :disabled="busy" class="bg-info text-text-inverse px-4 py-2 rounded w-full disabled:opacity-50">
@@ -119,6 +108,7 @@ import axios from 'axios';
 import { defineAsyncComponent } from 'vue';
 import { useNotification } from '../composables/useNotification.js';
 import AppSelect from '../components/base/AppSelect.vue';
+import '../styles/dialog-transition.css';
 
 // 弹窗类组件懒加载：打开时才加载对应 chunk
 const ConfirmDialog = defineAsyncComponent(() => import('../components/base/ConfirmDialog.vue'));
@@ -149,8 +139,6 @@ export default {
       copyWords: '',
       copyError: '',
       busy: false,
-      accounts: [],
-      showAccounts: false,
       restoreBundle: null,
       restoreFile: '',
       confirmVisible: false,
@@ -161,25 +149,25 @@ export default {
   },
   methods: {
     switchMode(m) {
-      this.mode = m; this.copyError = ''; this.busy = false; this.showAccounts = false;
+      this.mode = m; this.copyError = ''; this.busy = false;
       if (m === 'login') this.role = '';
       if (m === 'restore') { this.password = ''; this.recoverPhrase = ''; this.restoreBundle = null; this.restoreFile = ''; }
     },
-    loadAccounts() {
-      if (this.showAccounts) { this.showAccounts = false; return; }
-      axios.get('/api/accounts').then(res => {
-        this.accounts = res.data.accounts || [];
-        this.showAccounts = true;
-        if (this.accounts.length === 0) useNotification().info('暂无可加载的账号');
-      }).catch(err => {
-        useNotification().error(err.response?.data?.error || '加载账号失败');
-      });
+    openDbPicker() {
+      this.$refs.dbFileInput && this.$refs.dbFileInput.click();
     },
-    pickAccount(acc) {
-      if (this.accounts.length > 1) useNotification().info('已加载账号，请输入密码登录');
-      this.username = acc.username;
-      this.role = 'teacher';
-      this.showAccounts = false;
+    onPickDbFile(e) {
+      const file = e.target.files && e.target.files[0];
+      e.target.value = ''; // 清空以允许再次选择同一文件
+      if (!file) return;
+      this.busy = true;
+      axios.post('/api/db-login', { file: file.name }).then(res => {
+        this.username = res.data.username;
+        this.role = 'teacher';
+        useNotification().success('已选择数据库，账号 ' + res.data.username + '，请输入密码登录');
+      }).catch(err => {
+        useNotification().error(err.response?.data?.error || '无法打开该数据库');
+      }).finally(() => { this.busy = false; });
     },
     login() {
       if (!this.role) return useNotification().warning('请选择角色');

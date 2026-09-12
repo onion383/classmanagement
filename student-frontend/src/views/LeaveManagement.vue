@@ -1,4 +1,4 @@
-﻿<template>
+<template>
   <div>
     <!-- 页面标题 -->
     <div class="w-full bg-surface shadow-md rounded-xl mb-6 px-5 py-3 border border-border min-h-[4.5rem] flex items-center">
@@ -30,11 +30,11 @@
       </div>
 
       <!-- 工具栏 -->
-      <div class="mb-4 flex items-center gap-3">
+      <div class="mb-4 flex items-center gap-3 opbar">
         <button @click="openAddLeave" class="bg-primary hover:bg-primary-hover text-text-inverse px-5 py-2 rounded">
           ＋ 添加请假
         </button>
-        <button @click="refresh" class="bg-text-muted hover:bg-text-secondary text-text-inverse px-4 py-2 rounded flex items-center gap-1.5">
+        <button @click="refresh" class="bg-text-muted hover:bg-text-secondary text-text-inverse px-4 py-2 rounded flex items-center gap-1.5 btn-refresh">
           <IconGlyph name="refresh" :size="14" tint="current" /> 刷新
         </button>
         <button @click="openExportToday" class="bg-warning hover:bg-warning-hover text-text-inverse px-4 py-2 rounded flex items-center gap-1.5">
@@ -131,11 +131,11 @@
 
     <!-- 请假记录 -->
     <div v-if="activeTab === 'records'">
-      <div class="mb-4 flex items-center gap-3">
+      <div class="mb-4 flex items-center gap-3 opbar">
         <button @click="openAddLeave" class="bg-primary hover:bg-primary-hover text-text-inverse px-5 py-2 rounded">
           ＋ 添加请假
         </button>
-        <button @click="refresh" class="bg-text-muted hover:bg-text-secondary text-text-inverse px-4 py-2 rounded flex items-center gap-1.5">
+        <button @click="refresh" class="bg-text-muted hover:bg-text-secondary text-text-inverse px-4 py-2 rounded flex items-center gap-1.5 btn-refresh">
           <IconGlyph name="refresh" :size="14" tint="current" /> 刷新
         </button>
       </div>

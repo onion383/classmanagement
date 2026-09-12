@@ -50,6 +50,10 @@ const validInvokeChannels = [
   // 桌面小组件·常用软件（选文件/启动；列表读写已改走后端数据库）
   'apps-select-file',
   'apps-launch',
+  // 数据目录/缓存目录：读取与搬迁
+  'get-data-directories',
+  'set-data-dir',
+  'set-thumbs-dir',
 ]
 
 // 白名单：仅允许以下主进程 -> 渲染进程推送通道

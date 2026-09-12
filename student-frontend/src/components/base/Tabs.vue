@@ -12,7 +12,7 @@
           'px-5 py-2.5 rounded-xl font-medium text-sm transition-all duration-300 ease-in-out',
           'hover:shadow-md hover:scale-105',
           modelValue === tab.value
-            ? 'bg-info text-text-inverse shadow-lg shadow-info/30'
+            ? 'bg-info text-text-inverse shadow-lg shadow-info/30 tab-active'
             : 'bg-surface-hover text-text-secondary hover:bg-border hover:text-text'
         ]"
       >

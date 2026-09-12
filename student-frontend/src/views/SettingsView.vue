@@ -208,71 +208,118 @@
         <div>
           <div class="flex items-center gap-4 mb-2">
             <label class="text-sm font-medium text-text w-40 flex-shrink-0">注释截屏保存位置</label>
-            <div class="flex-1 flex gap-2">
-              <input :value="noteSavePath" @input="onNotePathInput" placeholder="默认为图片/screenshots/" class="flex-1 border border-border bg-surface text-text px-3 py-2 rounded" />
-              <button @click="selectFolder('note')" class="bg-surface-hover text-text px-4 py-2 rounded border border-border transition-theme hover:bg-bg whitespace-nowrap">浏览...</button>
+            <div class="flex-1 min-w-0">
+              <div class="truncate text-sm text-text-secondary border border-border bg-bg px-3 py-2 rounded-lg" :title="noteSavePath || screenshotDir">{{ noteSavePath || screenshotDir }}</div>
             </div>
+            <button @click="selectFolder('note')" class="bg-info hover:bg-info-hover text-text-inverse px-4 py-2 rounded transition-theme whitespace-nowrap">修改</button>
+            <button @click="openDir(noteSavePath || screenshotDir)" class="bg-success hover:bg-success-hover text-text-inverse px-4 py-2 rounded transition-theme whitespace-nowrap">打开文件夹</button>
           </div>
           <p class="text-xs text-text-muted ml-40">注释工具保存截图的目录，留空则使用默认位置</p>
         </div>
         <div>
           <div class="flex items-center gap-4 mb-2">
             <label class="text-sm font-medium text-text w-40 flex-shrink-0">一键截屏保存位置</label>
-            <div class="flex-1 flex gap-2">
-              <input :value="screenshotSavePath" @input="onScreenshotPathInput" placeholder="默认为图片/screenshots/" class="flex-1 border border-border bg-surface text-text px-3 py-2 rounded" />
-              <button @click="selectFolder('screenshot')" class="bg-surface-hover text-text px-4 py-2 rounded border border-border transition-theme hover:bg-bg whitespace-nowrap">浏览...</button>
+            <div class="flex-1 min-w-0">
+              <div class="truncate text-sm text-text-secondary border border-border bg-bg px-3 py-2 rounded-lg" :title="screenshotSavePath || screenshotDir">
+                {{ screenshotSavePath || screenshotDir }}
+              </div>
             </div>
+            <button @click="selectFolder('screenshot')" class="bg-info hover:bg-info-hover text-text-inverse px-4 py-2 rounded transition-theme whitespace-nowrap">修改</button>
+            <button @click="openDir(screenshotSavePath || screenshotDir)" class="bg-success hover:bg-success-hover text-text-inverse px-4 py-2 rounded transition-theme whitespace-nowrap">打开文件夹</button>
           </div>
           <p class="text-xs text-text-muted ml-40">一键截屏工具保存截图的目录，留空则使用默认位置</p>
         </div>
       </div>
     </div>
 
-    <!-- 内嵌弹窗：修改用户名 -->
-    <div v-if="modalType === 'username'" class="fixed inset-0 bg-black/50 flex items-center justify-center z-[10001]" @click.self="closeModal">
-      <div class="bg-surface rounded-lg p-6 w-96 border border-border shadow-lg">
-        <h3 class="text-lg font-bold text-text mb-4">修改用户名</h3>
-        <input v-model="newUsername" placeholder="新用户名" class="border border-border bg-surface text-text p-2 w-full mb-3 rounded" />
-        <input v-model="usernamePassword" type="password" placeholder="当前密码" autocomplete="current-password" class="border border-border bg-surface text-text p-2 w-full mb-4 rounded" />
-        <div class="flex justify-end gap-2">
-          <button @click="closeModal" class="bg-surface-hover text-text px-4 py-2 rounded border border-border transition-theme">取消</button>
-          <button @click="changeUsername" class="bg-primary hover:bg-primary-hover text-text-inverse px-4 py-2 rounded transition-theme">确认修改</button>
+    <!-- ========== 数据目录设置 ========== -->
+    <div class="mb-6">
+      <h2 class="text-xl font-semibold text-text mb-4 flex items-center gap-2"><IconGlyph name="box" :size="20" /> 数据目录设置</h2>
+      <div class="bg-surface rounded-lg border border-border p-6 space-y-6">
+        <div>
+          <div class="flex items-center gap-4 mb-2">
+            <label class="text-sm font-medium text-text w-40 flex-shrink-0">数据库目录</label>
+            <div class="flex-1 min-w-0">
+              <div class="truncate text-sm text-text-secondary border border-border bg-bg px-3 py-2 rounded-lg" :title="dataDir">
+                {{ dataDir || '加载中…' }}
+              </div>
+            </div>
+            <button @click="changeDataDir" :disabled="busyDataDir" class="bg-info hover:bg-info-hover text-text-inverse px-4 py-2 rounded transition-theme disabled:opacity-50 whitespace-nowrap">
+              {{ busyDataDir ? '搬迁中…' : '修改' }}
+            </button>
+            <button @click="openDir(dataDir)" :disabled="busyDataDir" class="bg-success hover:bg-success-hover text-text-inverse px-4 py-2 rounded transition-theme disabled:opacity-50 whitespace-nowrap">打开文件夹</button>
+          </div>
+          <p class="text-xs text-text-muted ml-40">存放数据库（index.db、各老师库）与上传图片等用户数据的目录。修改会整体搬迁现有数据并重启应用服务。</p>
+        </div>
+        <div>
+          <div class="flex items-center gap-4 mb-2">
+            <label class="text-sm font-medium text-text w-40 flex-shrink-0">相册缩略图缓存</label>
+            <div class="flex-1 min-w-0">
+              <div class="truncate text-sm text-text-secondary border border-border bg-bg px-3 py-2 rounded-lg" :title="thumbsDir">
+                {{ thumbsDir || '加载中…' }}
+              </div>
+            </div>
+            <button @click="changeThumbsDir" :disabled="busyThumbsDir" class="bg-info hover:bg-info-hover text-text-inverse px-4 py-2 rounded transition-theme disabled:opacity-50 whitespace-nowrap">
+              {{ busyThumbsDir ? '切换中…' : '修改' }}
+            </button>
+            <button @click="openDir(thumbsDir)" :disabled="busyThumbsDir" class="bg-success hover:bg-success-hover text-text-inverse px-4 py-2 rounded transition-theme disabled:opacity-50 whitespace-nowrap">打开文件夹</button>
+          </div>
+          <p class="text-xs text-text-muted ml-40">相册缩略图是可再生的缓存，可放到独立目录（如临时盘/SSD）；切换后已有缩略图会自动重建。</p>
         </div>
       </div>
     </div>
+
+    <!-- 内嵌弹窗：修改用户名 -->
+    <Transition name="dialog" v-if="modalType === 'username'">
+      <div class="fixed inset-0 bg-black/50 flex items-center justify-center z-[10001]" @click.self="closeModal">
+        <div class="dialog-card bg-surface rounded-lg p-6 w-96 border border-border shadow-lg">
+          <h3 class="text-lg font-bold text-text mb-4">修改用户名</h3>
+          <input v-model="newUsername" placeholder="新用户名" class="border border-border bg-surface text-text p-2 w-full mb-3 rounded" />
+          <input v-model="usernamePassword" type="password" placeholder="当前密码" autocomplete="current-password" class="border border-border bg-surface text-text p-2 w-full mb-4 rounded" />
+          <div class="flex justify-end gap-2">
+            <button @click="closeModal" class="bg-surface-hover text-text px-4 py-2 rounded border border-border transition-theme">取消</button>
+            <button @click="changeUsername" class="bg-primary hover:bg-primary-hover text-text-inverse px-4 py-2 rounded transition-theme">确认修改</button>
+          </div>
+        </div>
+      </div>
+    </Transition>
 
     <!-- 内嵌弹窗：修改密码 -->
-    <div v-if="modalType === 'password'" class="fixed inset-0 bg-black/50 flex items-center justify-center z-[10001]" @click.self="closeModal">
-      <div class="bg-surface rounded-lg p-6 w-96 border border-border shadow-lg">
-        <h3 class="text-lg font-bold text-text mb-4">修改密码</h3>
-        <input v-model="oldPassword" type="password" placeholder="原密码" autocomplete="current-password" class="border border-border bg-surface text-text p-2 w-full mb-3 rounded" />
-        <input v-model="newPassword" type="password" placeholder="新密码" autocomplete="new-password" class="border border-border bg-surface text-text p-2 w-full mb-4 rounded" />
-        <div class="flex justify-end gap-2">
-          <button @click="closeModal" class="bg-surface-hover text-text px-4 py-2 rounded border border-border transition-theme">取消</button>
-          <button @click="changePassword" class="bg-info hover:bg-info-hover text-text-inverse px-4 py-2 rounded transition-theme">确认修改</button>
+    <Transition name="dialog" v-if="modalType === 'password'">
+      <div class="fixed inset-0 bg-black/50 flex items-center justify-center z-[10001]" @click.self="closeModal">
+        <div class="dialog-card bg-surface rounded-lg p-6 w-96 border border-border shadow-lg">
+          <h3 class="text-lg font-bold text-text mb-4">修改密码</h3>
+          <input v-model="oldPassword" type="password" placeholder="原密码" autocomplete="current-password" class="border border-border bg-surface text-text p-2 w-full mb-3 rounded" />
+          <input v-model="newPassword" type="password" placeholder="新密码" autocomplete="new-password" class="border border-border bg-surface text-text p-2 w-full mb-4 rounded" />
+          <div class="flex justify-end gap-2">
+            <button @click="closeModal" class="bg-surface-hover text-text px-4 py-2 rounded border border-border transition-theme">取消</button>
+            <button @click="changePassword" class="bg-info hover:bg-info-hover text-text-inverse px-4 py-2 rounded transition-theme">确认修改</button>
+          </div>
         </div>
       </div>
-    </div>
+    </Transition>
 
     <!-- 内嵌弹窗：导出数据库 -->
-    <div v-if="modalType === 'export'" class="fixed inset-0 bg-black/50 flex items-center justify-center z-[10001]" @click.self="closeModal">
-      <div class="bg-surface rounded-lg p-6 w-96 border border-border shadow-lg">
-        <h3 class="text-lg font-bold text-text mb-4">导出数据库</h3>
-        <p class="text-xs text-text-muted mb-3">导出当前库（业务数据 + 应用设置 + 账号），换机后用对应的密码恢复。</p>
-        <input v-model="exportPassword" type="password" placeholder="登录密码（未设密码可留空）" autocomplete="current-password" class="border border-border bg-surface text-text p-2 w-full mb-3 rounded" />
-        <label class="flex items-center gap-2 text-sm text-text mb-2 cursor-pointer select-none">
-          <input type="checkbox" v-model="exportEncrypt" class="w-4 h-4 accent-warning" />
-          数据库密码加密导出
-        </label>
-        <input v-model="exportDbPwd" type="password" :disabled="!exportEncrypt" placeholder="数据库密码（有密码账号留空则默认用账号密码）" autocomplete="new-password" class="border border-border bg-surface text-text p-2 w-full mb-4 rounded disabled:opacity-50" />
-        <div class="flex justify-end gap-2">
-          <button @click="closeModal" class="bg-surface-hover text-text px-4 py-2 rounded border border-border transition-theme">取消</button>
-          <button @click="exportDb" :disabled="busyExport" class="bg-warning hover:bg-warning-hover text-text-inverse px-4 py-2 rounded transition-theme disabled:opacity-50">
-            {{ busyExport ? '导出中…' : '导出备份' }}
-          </button>
+    <Transition name="dialog" v-if="modalType === 'export'">
+      <div class="fixed inset-0 bg-black/50 flex items-center justify-center z-[10001]" @click.self="closeModal">
+        <div class="dialog-card bg-surface rounded-lg p-6 w-96 border border-border shadow-lg">
+          <h3 class="text-lg font-bold text-text mb-4">导出数据库</h3>
+          <p class="text-xs text-text-muted mb-3">导出当前库（业务数据 + 应用设置 + 账号），换机后用对应的密码恢复。</p>
+          <input v-model="exportPassword" type="password" placeholder="登录密码（未设密码可留空）" autocomplete="current-password" class="border border-border bg-surface text-text p-2 w-full mb-3 rounded" />
+          <label class="flex items-center gap-2 text-sm text-text mb-2 cursor-pointer select-none">
+            <input type="checkbox" v-model="exportEncrypt" class="w-4 h-4 accent-warning" />
+            数据库密码加密导出
+          </label>
+          <input v-model="exportDbPwd" type="password" :disabled="!exportEncrypt" placeholder="数据库密码（有密码账号留空则默认用账号密码）" autocomplete="new-password" class="border border-border bg-surface text-text p-2 w-full mb-4 rounded disabled:opacity-50" />
+          <div class="flex justify-end gap-2">
+            <button @click="closeModal" class="bg-surface-hover text-text px-4 py-2 rounded border border-border transition-theme">取消</button>
+            <button @click="exportDb" :disabled="busyExport" class="bg-warning hover:bg-warning-hover text-text-inverse px-4 py-2 rounded transition-theme disabled:opacity-50">
+              {{ busyExport ? '导出中…' : '导出备份' }}
+            </button>
+          </div>
         </div>
       </div>
-    </div>
+    </Transition>
 
     <ConfirmDialog
       v-if="dialogMounted"
@@ -293,7 +340,7 @@ import AppSelect from '../components/base/AppSelect.vue'
 import { useThemeStore } from '../stores/theme'
 import { storeToRefs } from 'pinia'
 import { resourceUrl } from '../utils/apiUrl'
-import { createDebouncedSave } from '../composables/useDebouncedSave'
+import '../styles/dialog-transition.css'
 
 // 弹窗类组件懒加载：打开时才加载对应 chunk
 const ConfirmDialog = defineAsyncComponent(() => import('../components/base/ConfirmDialog.vue'))
@@ -345,9 +392,15 @@ export default {
       sessionLoaded: false,
       noteSavePath: '',
       screenshotSavePath: '',
+      screenshotDir: '',
       usbAutoOpen: false,
       loaded: false,
       _fromMainHandler: null,
+      // 数据目录 / 缓存目录
+      dataDir: '',
+      thumbsDir: '',
+      busyDataDir: false,
+      busyThumbsDir: false,
       // 撤销记录
       undoGroups: [],
       busyUndo: false,
@@ -383,22 +436,18 @@ export default {
     },
   },
   mounted() {
-    // 路径输入的防抖保存调度器
-    this._noteSaver = createDebouncedSave(() => this.saveWidgetSettings())
-    this._screenshotSaver = createDebouncedSave(() => this.saveWidgetSettings())
     this.selectedThemeId = this.currentTheme
     this.bgImageUrl = this.themeStore.backgroundImage
     this.loadUndo()
     this.loadWidgetSettings()
     this.loadSession()
     this.loadUsbAutoOpen()
+    this.loadDataDirs()
     this._fromMainHandler = window.electron?.on('from-main', (data) => {
       if (data && data.type === 'session-widget-changed') this.loadSession()
     })
   },
   beforeUnmount() {
-    this._noteSaver?.teardown()
-    this._screenshotSaver?.teardown()
     if (this._fromMainHandler) {
       window.electron?.off('from-main', this._fromMainHandler)
     }
@@ -667,16 +716,6 @@ export default {
       if (!this.sessionLoaded) return
       window.electron?.send('widget-set-session-visible', this.sessionEnabled)
     },
-    onNotePathInput(e) {
-      this.noteSavePath = e.target.value
-      if (!this.loaded) return
-      this._noteSaver.schedule()
-    },
-    onScreenshotPathInput(e) {
-      this.screenshotSavePath = e.target.value
-      if (!this.loaded) return
-      this._screenshotSaver.schedule()
-    },
     async loadUsbAutoOpen() {
       try {
         const res = await window.electron?.invoke('get-usb-auto-open')
@@ -689,6 +728,69 @@ export default {
         await window.electron?.invoke('set-usb-auto-open', this.usbAutoOpen)
       } catch (_) {
         console.error('保存U盘自动打开设置失败')
+      }
+    },
+    async loadDataDirs() {
+      try {
+        const res = await window.electron?.invoke('get-data-directories')
+        if (res) {
+          this.dataDir = res.dataDir
+          this.thumbsDir = res.thumbsDir
+          this.screenshotDir = res.screenshotDir || ''
+        }
+      } catch (_) {}
+    },
+    async changeDataDir() {
+      const picked = await this.pickDir()
+      if (!picked) return
+      this.showConfirm(`确定把数据库目录搬迁到「${picked}」吗？现有数据将整体迁移，随后会自动重启应用服务。`, async () => {
+        this.busyDataDir = true
+        try {
+          const res = await window.electron.invoke('set-data-dir', picked)
+          if (res?.ok) {
+            this.dataDir = res.dataDir
+            this.showAlert(res.changed ? '数据库目录搬迁成功，应用服务已重启。' : '目录未变化。')
+          }
+        } catch (err) {
+          this.showAlert(err?.message || '数据库目录搬迁失败')
+        } finally {
+          this.busyDataDir = false
+        }
+      })
+    },
+    async changeThumbsDir() {
+      const picked = await this.pickDir()
+      if (!picked) return
+      this.showConfirm(`确定把相册缩略图缓存目录改为「${picked}」吗？将自动重启应用服务，缩略图会按需重建。`, async () => {
+        this.busyThumbsDir = true
+        try {
+          const res = await window.electron.invoke('set-thumbs-dir', picked)
+          if (res?.ok) {
+            this.thumbsDir = res.thumbsDir
+            this.showAlert(res.changed ? '缓存目录已切换，应用服务已重启。' : '目录未变化。')
+          }
+        } catch (err) {
+          this.showAlert(err?.message || '缓存目录切换失败')
+        } finally {
+          this.busyThumbsDir = false
+        }
+      })
+    },
+    async pickDir() {
+      try {
+        const result = await window.electron?.invoke('select-folder')
+        if (result && result.filePaths && result.filePaths.length > 0) {
+          return result.filePaths[0]
+        }
+      } catch (_) {}
+      return ''
+    },
+    async openDir(path) {
+      if (!path) return
+      try {
+        await window.electron?.invoke('open-folder', path)
+      } catch (err) {
+        console.error('打开文件夹失败:', err)
       }
     },
     async selectFolder(type) {

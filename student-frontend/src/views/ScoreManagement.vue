@@ -1,4 +1,4 @@
-﻿<template>
+<template>
   <div>
     <!-- 页面标题 + 加分对象下拉 -->
     <div class="w-full bg-surface shadow-md rounded-xl mb-6 px-5 py-3 border border-border min-h-[4.5rem] flex flex-wrap items-center justify-between gap-3">
@@ -43,9 +43,9 @@
       </div>
 
       <!-- 工具栏 -->
-      <div class="mb-4 flex items-center gap-3">
+      <div class="mb-4 flex items-center gap-3 opbar">
         <button @click="openAdd" class="bg-primary hover:bg-primary-hover text-text-inverse px-5 py-2 rounded">＋ 添加{{ isGroup ? '小组' : '个人' }}加分</button>
-        <button @click="refresh" class="bg-text-muted hover:bg-text-secondary text-text-inverse px-4 py-2 rounded flex items-center gap-1"><IconGlyph name="refresh" :size="14" tint="current" /> 刷新</button>
+        <button @click="refresh" class="bg-text-muted hover:bg-text-secondary text-text-inverse px-4 py-2 rounded flex items-center gap-1 btn-refresh"><IconGlyph name="refresh" :size="14" tint="current" /> 刷新</button>
         <button @click="exportVisible = true" class="bg-warning hover:bg-warning-hover text-text-inverse px-4 py-2 rounded flex items-center gap-1">📥 导出{{ isGroup ? '小组' : '个人' }}加分</button>
       </div>
 

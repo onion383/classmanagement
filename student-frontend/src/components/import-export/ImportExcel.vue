@@ -1,6 +1,7 @@
 <template>
-  <div v-if="visible" class="fixed inset-0 bg-black/50 flex items-center justify-center z-[10001]">
-    <div class="bg-surface p-5 rounded-lg w-[900px] max-h-[85vh] flex flex-col shadow-card">
+  <Transition name="dialog">
+    <div v-if="visible" class="fixed inset-0 bg-black/50 flex items-center justify-center z-[10001]">
+      <div class="bg-surface p-5 rounded-lg w-[900px] max-h-[85vh] flex flex-col shadow-card dialog-card">
       <h3 class="text-lg font-bold mb-3">从文件导入数据</h3>
       <!-- 文件选择 -->
       <div class="mb-4 flex items-center gap-3">
@@ -34,11 +35,13 @@
         </div>
       </div>
     </div>
-  </div>
+    </div>
+  </Transition>
 </template>
 
 <script>
 import DynamicTable from '../tables/DynamicTable.vue';
+import '../../styles/dialog-transition.css';
 
 export default {
   name: 'ImportExcel',

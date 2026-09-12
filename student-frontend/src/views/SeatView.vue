@@ -9,10 +9,10 @@
         <div v-if="activeTab === 'seat'">
           <section class="mb-4">
             <h2 class="text-xl font-semibold mb-4">🪑 当前座位</h2>
-            <div class="mb-4 flex flex-wrap items-center gap-3">
+            <div class="mb-4 flex flex-wrap items-center gap-3 opbar">
               <button @click="openSettings('active')" class="bg-primary text-text-inverse px-4 py-2 rounded flex items-center gap-1.5"><IconGlyph name="settings" :size="14" tint="current" /> 设置</button>
               <button @click="smartArrangementVisible = true" class="bg-primary text-text-inverse px-4 py-2 rounded">🧠 智能排表</button>
-              <button @click="refreshActive" class="bg-text-muted text-text-inverse px-4 py-2 rounded flex items-center gap-1.5"><IconGlyph name="refresh" :size="14" tint="current" /> 刷新</button>
+              <button @click="refreshActive" class="bg-text-muted text-text-inverse px-4 py-2 rounded flex items-center gap-1.5 btn-refresh"><IconGlyph name="refresh" :size="14" tint="current" /> 刷新</button>
               <button @click="applyMasterToActive" class="bg-primary text-text-inverse px-4 py-2 rounded flex items-center gap-1.5"><IconGlyph name="upload" :size="14" tint="current" /> 从模板导入</button>
               <button @click="activeExportVisible = true" class="bg-warning text-text-inverse px-4 py-2 rounded flex items-center gap-1.5"><IconGlyph name="download" :size="14" tint="current" /> 导出 Excel</button>
             </div>
@@ -44,9 +44,9 @@
 
           <section>
             <h2 class="text-xl font-semibold mb-4 flex items-center gap-2"><IconGlyph name="clipboard" :size="20" /> 座位模板</h2>
-            <div class="mb-4 flex flex-wrap items-center gap-3">
+            <div class="mb-4 flex flex-wrap items-center gap-3 opbar">
               <button @click="openSettings('master')" class="bg-primary text-text-inverse px-4 py-2 rounded flex items-center gap-1.5"><IconGlyph name="settings" :size="14" tint="current" /> 设置</button>
-              <button @click="refreshMaster" class="bg-text-muted text-text-inverse px-4 py-2 rounded flex items-center gap-1.5"><IconGlyph name="refresh" :size="14" tint="current" /> 刷新</button>
+              <button @click="refreshMaster" class="bg-text-muted text-text-inverse px-4 py-2 rounded flex items-center gap-1.5 btn-refresh"><IconGlyph name="refresh" :size="14" tint="current" /> 刷新</button>
               <button @click="masterExportVisible = true" class="bg-warning text-text-inverse px-4 py-2 rounded flex items-center gap-1.5"><IconGlyph name="download" :size="14" tint="current" /> 导出 Excel</button>
             </div>
 

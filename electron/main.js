@@ -1,4 +1,4 @@
-const { app, BrowserWindow, ipcMain, desktopCapturer, screen, dialog, shell, protocol, Menu, globalShortcut, Notification } = require('electron')
+const { app, BrowserWindow, ipcMain, desktopCapturer, screen, dialog, shell, protocol, Menu, globalShortcut, Notification, safeStorage } = require('electron')
 const path = require('path')
 const fs = require('fs')
 const crypto = require('crypto')
@@ -13,6 +13,70 @@ let channelMasterKey = null
 function getMasterKey() {
   if (!channelMasterKey) channelMasterKey = crypto.randomBytes(32).toString('hex')
   return channelMasterKey
+}
+
+// DB 静态加密主密钥（方案 A：首启现场随机生成 + safeStorage/DPAPI 持久化）：
+// 取代原先明文写在 student-backend/.env、随安装包分发的 DB_MASTER_KEY。
+// - Windows 上 safeStorage 底层走 DPAPI，密文绑定当前系统用户，解开安装包拿不到明文。
+// - 首启：文件不存在 → 生成随机 32 字节 → 加密写 userData/data/db-master.key。
+// - 之后：解密文件复用同一把钥匙，保证持久库可连续打开。
+// - 兜底：safeStorage 不可用（非 Windows 等）时仅返回运行期随机值，不落明文文件。
+// 数据目录/缓存目录解析（app-config.json，存于 userData，独立于业务数据目录以便启动即读）
+function getAppConfigPath() {
+  return path.join(app.getPath('userData'), 'app-config.json')
+}
+function resolveAppConfig() {
+  try { return JSON.parse(fs.readFileSync(getAppConfigPath(), 'utf8')) || {} } catch (_) { return {} }
+}
+function saveAppConfig(patch) {
+  const next = { ...resolveAppConfig(), ...patch }
+  if (!next.dataDir) delete next.dataDir
+  if (!next.thumbsDir) delete next.thumbsDir
+  try { fs.writeFileSync(getAppConfigPath(), JSON.stringify(next, null, 2)) } catch (err) {
+    console.error('[main] 写入 app-config 失败:', err?.message || err)
+  }
+  return next
+}
+// 数据库主目录：默认 userData/data，可被用户配置覆盖
+function resolveDataDir() {
+  const cfg = resolveAppConfig()
+  return cfg.dataDir ? path.resolve(cfg.dataDir) : path.join(app.getPath('userData'), 'data')
+}
+// 相册缩略图缓存目录：默认位于数据目录下 album-thumbs，可单独配置为独立缓存位置
+function resolveThumbsDir() {
+  const cfg = resolveAppConfig()
+  if (cfg.thumbsDir) return path.resolve(cfg.thumbsDir)
+  return path.join(resolveDataDir(), 'album-thumbs')
+}
+
+let dbMasterKey = null
+function getDbMasterKey() {
+  if (dbMasterKey) return dbMasterKey
+  // 主密钥文件与数据库同目录存放，随数据目录一起迁移；解析用配置后的 dataDir，保证两者一致
+  const keyFile = path.join(resolveDataDir(), 'db-master.key')
+  try {
+    if (fs.existsSync(keyFile) && safeStorage.isEncryptionAvailable()) {
+      const blob = fs.readFileSync(keyFile)
+      try {
+        dbMasterKey = safeStorage.decryptString(blob)
+        return dbMasterKey
+      } catch { /* 密文损坏/密钥变更，退回重新生成 */ }
+    }
+    dbMasterKey = crypto.randomBytes(32).toString('hex')
+    if (safeStorage.isEncryptionAvailable()) {
+      try {
+        fs.mkdirSync(path.dirname(keyFile), { recursive: true })
+        fs.writeFileSync(keyFile, safeStorage.encryptString(dbMasterKey))
+      } catch (err) {
+        console.error('[main] DB 主密钥持久化失败，将仅本次运行有效:', err?.message || err)
+      }
+    }
+    return dbMasterKey
+  } catch (err) {
+    console.error('[main] DB 主密钥初始化失败，使用运行期随机值:', err?.message || err)
+    dbMasterKey = crypto.randomBytes(32).toString('hex')
+    return dbMasterKey
+  }
 }
 
 // electron-acrylic-window：原生模块，走 Win32 SetWindowCompositionAttribute 启用真·亚克力毛玻璃，
@@ -540,8 +604,10 @@ function getBackendPaths() {
 // 实现免依赖分发（原生模块已通过 @electron/rebuild 针对 Electron ABI 重编译）。
 function compileBackendProcess() {
   const { backendDir, backendPath } = getBackendPaths()
-  const dataDir = path.join(app.getPath('userData'), 'data')
+  const dataDir = resolveDataDir()
+  const thumbsDir = resolveThumbsDir()
   fs.mkdirSync(dataDir, { recursive: true })
+  fs.mkdirSync(thumbsDir, { recursive: true })
 
   // 统一的输出/退出处理
   const onData = (chunk) => {
@@ -587,7 +653,9 @@ function compileBackendProcess() {
         env: {
           ...process.env,
           DATA_DIR: dataDir,
+          ALBUM_THUMBS_DIR: thumbsDir,
           SECURE_MASTER: getMasterKey(),
+          DB_MASTER_KEY: getDbMasterKey(),
         },
       })
       backendProcess = child
@@ -621,8 +689,10 @@ function compileBackendProcess() {
     env: {
       ...process.env,
       DATA_DIR: dataDir,
+      ALBUM_THUMBS_DIR: thumbsDir,
       ELECTRON_RUN_AS_NODE: '1',
       SECURE_MASTER: getMasterKey(),
+      DB_MASTER_KEY: getDbMasterKey(),
     },
   })
 
@@ -1295,6 +1365,91 @@ ipcMain.handle('open-folder', async (event, folderPath) => {
   if (!folderPath) return { error: '路径为空' }
   shell.openPath(folderPath)
   return {}
+})
+
+// ========== 数据目录 / 缓存目录（可自定义，含整体搬迁） ==========
+// 当前数据目录与缓存目录信息（供设置页展示）
+ipcMain.handle('get-data-directories', () => {
+  return {
+    dataDir: resolveDataDir(),
+    thumbsDir: resolveThumbsDir(),
+    defaultDataDir: path.join(app.getPath('userData'), 'data'),
+    screenshotDir: path.join(app.getPath('pictures'), 'screenshots'),
+  }
+})
+
+// 递归拷贝一个目录的内容（含子目录），用于数据目录整体搬迁
+function copyRecursive(src, dest) {
+  const entries = fs.readdirSync(src, { withFileTypes: true })
+  for (const ent of entries) {
+    const s = path.join(src, ent.name)
+    const d = path.join(dest, ent.name)
+    if (ent.isDirectory()) {
+      copyRecursive(s, d)
+    } else {
+      fs.mkdirSync(path.dirname(d), { recursive: true })
+      fs.copyFileSync(s, d)
+    }
+  }
+}
+
+// 停止后端子进程（不清 isQuitting 标志，便于随后重启）
+function stopBackendProcess() {
+  clearTimeout(backendRestartTimer)
+  if (backendProcess) {
+    try { backendProcess.kill() } catch (_) {}
+    backendProcess = null
+  }
+}
+
+// 变更「数据库目录」：先停后端释放文件锁 → 把旧目录整体拷贝到新目录 → 更新配置 → 重启后端。
+// 采用「拷贝成功后再删旧目录」而非直接 move，避免中途失败时旧数据被破坏。
+ipcMain.handle('set-data-dir', async (event, dir) => {
+  const target = path.resolve(String(dir || ''))
+  const oldDir = resolveDataDir()
+  if (!target || target.toLowerCase() === oldDir.toLowerCase()) {
+    return { ok: true, dataDir: oldDir, changed: false }
+  }
+  // 防循环：不允许把数据目录迁到它自身内部
+  const rel = path.relative(oldDir, target)
+  if (rel && !rel.startsWith('..') && !path.isAbsolute(rel)) {
+    throw new Error('新目录不能位于当前数据目录内部')
+  }
+  if (target === oldDir) return { ok: true, dataDir: oldDir, changed: false }
+  if (!fs.existsSync(target)) fs.mkdirSync(target, { recursive: true })
+  // 目标目录须为空（或不存在），避免与已有文件/旧数据混淆
+  if (fs.readdirSync(target).length > 0 && fs.readdirSync(oldDir).length > 0) {
+    throw new Error('目标目录非空，请选择空目录')
+  }
+  stopBackendProcess()
+  try {
+    copyRecursive(oldDir, target)
+    saveAppConfig({ dataDir: target })
+    fs.rmSync(oldDir, { recursive: true, force: true })
+  } catch (err) {
+    // 搬迁失败：删除可能已拷贝的部分，保留旧目录与人可读错误
+    try { fs.rmSync(target, { recursive: true, force: true }) } catch (_) {}
+    console.error('[main] 数据目录搬迁失败:', err?.message || err)
+    throw new Error('数据搬迁失败：' + (err?.message || err))
+  } finally {
+    startBackend()
+  }
+  return { ok: true, dataDir: target, changed: true }
+})
+
+// 变更「相册缩略图缓存目录」：缩略图是可再生的缓存，无需搬迁文件，
+// 直接更新配置并重启后端，让后端使用新缓存目录，已有小图按需重建。
+ipcMain.handle('set-thumbs-dir', async (event, dir) => {
+  const target = path.resolve(String(dir || ''))
+  const oldDir = resolveThumbsDir()
+  if (!target || target.toLowerCase() === oldDir.toLowerCase()) {
+    return { ok: true, thumbsDir: oldDir, changed: false }
+  }
+  fs.mkdirSync(target, { recursive: true })
+  saveAppConfig({ thumbsDir: target })
+  stopBackendProcess()
+  try { startBackend() } catch (_) {}
+  return { ok: true, thumbsDir: target, changed: true, oldThumbsDir: oldDir }
 })
 
 // 选择图片文件对话框（用于背景图片）

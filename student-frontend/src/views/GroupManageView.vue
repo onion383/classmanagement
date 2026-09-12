@@ -17,7 +17,7 @@
     <div class="flex flex-nowrap items-center gap-3 mb-4 overflow-x-auto">
       <button v-if="activeDim" @click="openSettings" class="bg-primary hover:bg-primary-hover text-text-inverse px-4 py-2 rounded transition-theme flex items-center gap-1.5" title="当前维度设置"><IconGlyph name="settings" :size="14" tint="current" /> 设置</button>
       <button @click="onSmartGroup" class="bg-primary hover:bg-primary-hover text-text-inverse px-4 py-2 rounded transition-theme">🧠 智能分组</button>
-      <button @click="loadAll" :disabled="loading" class="bg-text-muted hover:bg-text-secondary text-text-inverse px-4 py-2 rounded transition-theme disabled:opacity-50 flex items-center gap-1.5">
+      <button @click="loadAll" :disabled="loading" class="bg-text-muted hover:bg-text-secondary text-text-inverse px-4 py-2 rounded transition-theme disabled:opacity-50 flex items-center gap-1.5 btn-refresh">
         <IconGlyph name="refresh" :size="14" tint="current" /> 刷新
       </button>
       <button @click="openExport" :disabled="loading || !active?.groups?.length" class="bg-warning hover:bg-warning-hover text-text-inverse px-4 py-2 rounded transition-theme disabled:opacity-50 flex items-center gap-1.5">

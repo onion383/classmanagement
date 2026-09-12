@@ -1,4 +1,4 @@
-﻿<template>
+<template>
   <div>
     <div class="w-full bg-surface shadow-md rounded-xl mb-6 px-5 py-3 border border-border min-h-[4.5rem] flex items-center">
       <h1 class="text-2xl font-bold text-text flex items-center gap-2"><IconGlyph name="students" /> 学生管理</h1>
@@ -13,11 +13,11 @@
     <!-- 学生信息 -->
     <template v-else>
     <!-- 工具栏按钮 -->
-    <div class="mb-4 flex items-center gap-3">
+    <div class="mb-4 flex items-center gap-3 opbar">
       <button @click="addNewRowAtBottom" class="bg-primary hover:bg-primary-hover text-text-inverse px-5 py-2 rounded">
         ＋ 添加学生
       </button>
-      <button @click="refreshStudents" class="bg-text-muted hover:bg-text-secondary text-text-inverse px-4 py-2 rounded flex items-center gap-1" title="刷新表格">
+      <button @click="refreshStudents" class="bg-text-muted hover:bg-text-secondary text-text-inverse px-4 py-2 rounded flex items-center gap-1 btn-refresh" title="刷新表格">
         <IconGlyph name="refresh" :size="14" tint="current" /> 刷新
       </button>
       <button

@@ -37,7 +37,7 @@
       <div class="info-part clock-part">
         <AnimatedClock
           style="--ac-time-size:40px; --ac-date-size:14px; --ac-time-color:#111827;"
-          date-format="星期{W} {Y}-{M}-{D}"
+          date-format="星期{W}  {Y}-{M}-{D}"
         />
       </div>
       <div class="info-divider"></div>

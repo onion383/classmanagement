@@ -1,0 +1,94 @@
+/* ============================================================
+   旧版彩色玻璃按钮样式备份
+   说明：这是「彩色玻璃按钮统一新风格」改动之前的样式快照。
+   当前版本已改为：去边框 + blur 模糊 + 50% 白色遮罩 + 填充加深。
+   如需改回旧效果，把下列规则重新加回 theme-glass.css，
+   并删除/停用新风格的相关规则即可。
+
+   文件默认不启用（未在 main.js 引入）。
+   ============================================================ */
+
+/* ========== 彩色玻璃按钮（旧版） ========== */
+:root:is([data-theme="glass"], [data-theme="win11"]) button.bg-primary.text-text-inverse,
+:root:is([data-theme="glass"], [data-theme="win11"]) button.bg-success.text-text-inverse {
+  background: rgba(34, 197, 94, 0.2) !important;
+  color: #166534 !important;
+  border-color: rgba(34, 197, 94, 0.4);
+  box-shadow:
+    0 0 0 1px rgba(255, 255, 255, 0.15),
+    0 0 12px rgba(34, 197, 94, 0.15),
+    inset 0 1px 0 rgba(255, 255, 255, 0.2);
+}
+:root:is([data-theme="glass"], [data-theme="win11"]) button.bg-primary.text-text-inverse:hover,
+:root:is([data-theme="glass"], [data-theme="win11"]) button.bg-success.text-text-inverse:hover {
+  background: rgba(34, 197, 94, 0.3) !important;
+  box-shadow:
+    0 0 0 1px rgba(255, 255, 255, 0.25),
+    0 0 20px rgba(34, 197, 94, 0.25),
+    inset 0 1px 0 rgba(255, 255, 255, 0.3);
+}
+
+:root:is([data-theme="glass"], [data-theme="win11"]) button.bg-warning.text-text-inverse {
+  background: rgba(245, 158, 11, 0.2) !important;
+  color: #92400e !important;
+  border-color: rgba(245, 158, 11, 0.4);
+  box-shadow:
+    0 0 0 1px rgba(255, 255, 255, 0.15),
+    0 0 12px rgba(245, 158, 11, 0.15),
+    inset 0 1px 0 rgba(255, 255, 255, 0.2);
+}
+:root:is([data-theme="glass"], [data-theme="win11"]) button.bg-warning.text-text-inverse:hover {
+  background: rgba(245, 158, 11, 0.3) !important;
+  box-shadow:
+    0 0 0 1px rgba(255, 255, 255, 0.25),
+    0 0 20px rgba(245, 158, 11, 0.25),
+    inset 0 1px 0 rgba(255, 255, 255, 0.3);
+}
+
+:root:is([data-theme="glass"], [data-theme="win11"]) button.bg-danger.text-text-inverse {
+  background: rgba(239, 68, 68, 0.2) !important;
+  color: #991b1b !important;
+  border-color: rgba(239, 68, 68, 0.4);
+  box-shadow:
+    0 0 0 1px rgba(255, 255, 255, 0.15),
+    0 0 12px rgba(239, 68, 68, 0.15),
+    inset 0 1px 0 rgba(255, 255, 255, 0.2);
+}
+:root:is([data-theme="glass"], [data-theme="win11"]) button.bg-danger.text-text-inverse:hover {
+  background: rgba(239, 68, 68, 0.3) !important;
+  box-shadow:
+    0 0 0 1px rgba(255, 255, 255, 0.25),
+    0 0 20px rgba(239, 68, 68, 0.25),
+    inset 0 1px 0 rgba(255, 255, 255, 0.3);
+}
+
+:root:is([data-theme="glass"], [data-theme="win11"]) button.bg-info.text-text-inverse {
+  background: rgba(59, 130, 246, 0.2) !important;
+  color: #1e40af !important;
+  border-color: rgba(59, 130, 246, 0.4);
+  box-shadow:
+    0 0 0 1px rgba(255, 255, 255, 0.15),
+    0 0 12px rgba(59, 130, 246, 0.15),
+    inset 0 1px 0 rgba(255, 255, 255, 0.2);
+}
+:root:is([data-theme="glass"], [data-theme="win11"]) button.bg-info.text-text-inverse:hover {
+  background: rgba(59, 130, 246, 0.3) !important;
+  box-shadow:
+    0 0 0 1px rgba(255, 255, 255, 0.25),
+    0 0 20px rgba(59, 130, 246, 0.25),
+    inset 0 1px 0 rgba(255, 255, 255, 0.3);
+}
+
+/* ========== 刷新按钮（旧版浅色玻璃） ========== */
+:root:is([data-theme="glass"], [data-theme="win11"]) button.btn-refresh {
+  background-color: rgba(255, 255, 255, 0.75) !important;
+  border-color: rgba(0, 0, 0, 0.08);
+  color: var(--color-text) !important;
+  box-shadow:
+    0 0 0 1px rgba(255, 255, 255, 0.15),
+    inset 0 1px 0 rgba(255, 255, 255, 0.2);
+}
+:root:is([data-theme="glass"], [data-theme="win11"]) button.btn-refresh:hover {
+  background-color: rgba(255, 255, 255, 0.95) !important;
+  color: var(--color-text) !important;
+}

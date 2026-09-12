@@ -1,11 +1,11 @@
 <template>
   <div class="h-full flex flex-col">
     <!-- 工具栏按钮（与其他页面一致，无独立标题框） -->
-    <div class="mb-4 flex items-center gap-3">
+    <div class="mb-4 flex items-center gap-3 opbar">
       <button @click="settingsVisible = true" class="bg-primary hover:bg-primary-hover text-text-inverse px-4 py-2 rounded transition-theme flex items-center gap-1.5">
         <IconGlyph name="settings" :size="14" tint="current" /> 设置
       </button>
-      <button @click="loadTree" :disabled="loading" class="bg-text-muted hover:bg-text-secondary text-text-inverse px-4 py-2 rounded transition-theme disabled:opacity-50 flex items-center gap-1.5">
+      <button @click="loadTree" :disabled="loading" class="bg-text-muted hover:bg-text-secondary text-text-inverse px-4 py-2 rounded transition-theme disabled:opacity-50 flex items-center gap-1.5 btn-refresh">
         {{ loading ? '刷新中…' : '' }}<IconGlyph v-if="!loading" name="refresh" :size="14" tint="current" /> 刷新
       </button>
     </div>
