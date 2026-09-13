@@ -88,7 +88,6 @@ export default {
   box-shadow: none !important;
   background-color: rgba(255, 255, 255, 0.5);
   backdrop-filter: blur(12px) saturate(1.3);
-  -webkit-backdrop-filter: blur(12px) saturate(1.3);
   color: var(--color-text);
   transition: background-color 0.15s ease;
 }

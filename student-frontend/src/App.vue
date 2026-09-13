@@ -68,7 +68,7 @@
       <div
         ref="assistantPanel"
         class="fixed z-[20001] border border-border rounded-xl shadow-2xl flex flex-col overflow-hidden"
-        style="background-color: rgba(255,255,255,0.72); backdrop-filter: blur(28px) saturate(1.5); -webkit-backdrop-filter: blur(28px) saturate(1.5);"
+        style="background-color: rgba(255,255,255,0.72); backdrop-filter: blur(28px) saturate(1.5);"
         :style="{
           width: '24rem',
           maxWidth: 'calc(100vw - 2rem)',
