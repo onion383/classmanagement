@@ -468,7 +468,6 @@ onUnmounted(() => {
   position: relative;
   background: rgba(255, 255, 255, 0.42);
   backdrop-filter: blur(20px) saturate(1.3);
-  -webkit-backdrop-filter: blur(20px) saturate(1.3);
   border: 1px solid rgba(255, 255, 255, 0.55);
   border-radius: 12px;
   box-shadow:

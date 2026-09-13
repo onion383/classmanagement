@@ -16,9 +16,17 @@ export default defineConfig({
         './src/App.vue',
         './src/router/index.js',
         './src/stores/theme.js',
+        './src/composables/secureAxios.js',
+        './src/composables/useNotification.js',
         './src/components/layout/Sidebar.vue',
         './src/components/base/NotificationToast.vue',
+        './src/components/base/AppSelect.vue',
+        './src/components/base/IconGlyph.vue',
         './src/styles/index.css',
+        // 首屏落地页（未登录→Login，已登录→Dashboard）：提前编译，避免跳转后才逐模块编译
+        './src/views/Login.vue',
+        './src/views/DashboardView.vue',
+        './src/composables/useDashboardData.js',
         './src/desktop-widget/main.js',
         './src/desktop-widget/DesktopWidget.vue',
       ],
@@ -42,29 +50,14 @@ export default defineConfig({
   },
   base: './',
   build: {
+    // 显式清空输出目录，避免旧 hash 文件残留被打进安装包
+    emptyOutDir: true,
     rollupOptions: {
       input: {
         main: path.resolve(__dirname, 'index.html'),
         widget: path.resolve(__dirname, 'widget.html'),
         'desktop-widget': path.resolve(__dirname, 'desktop-widget.html'),
       },
-      output: {
-        // 大依赖单独拆包，延迟到使用时才被加载
-        manualChunks(id) {
-          if (id.includes('node_modules/exceljs')) {
-            return 'exceljs';
-          }
-          if (id.includes('node_modules/html2canvas')) {
-            return 'html2canvas';
-          }
-          if (id.includes('node_modules/jspdf')) {
-            return 'jspdf';
-          }
-          if (id.includes('node_modules/sortablejs')) {
-            return 'sortablejs';
-          }
-        }
-      }
     }
   }
 })

@@ -247,7 +247,8 @@ body{background:linear-gradient(160deg,#eef2ff 0%,#e2e8ff 100%)}
 
 // 轮询 Vite 开发服务器：用 https.get 轻量探测，不阻塞渲染进程。
 // Vite 就绪后导航到其 URL，并打开 DevTools。
-function pollViteAndNavigate(win, retries = 30) {
+// 重试上限留足 ~4s 预算（现在轮询在创建窗口后立刻开始，比之前提前约 0.5s）。
+function pollViteAndNavigate(win, retries = 40) {
   const https = require('https')
   const req = https.get('https://127.0.0.1:5173/', { rejectUnauthorized: false }, (res) => {
     res.resume() // 消耗响应体，避免内存泄漏
@@ -349,11 +350,13 @@ function createMainWindow(mode = 'native') {
     // 第一步：加载本地 inline 页面，窗口立即显示（< 1s）
     win.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(DEV_LOADING_HTML)}`)
     startupTimer.mark('开始加载 loading 页面')
-    // 第二步：后台轮询 Vite，就绪后自动跳转（不阻塞窗口显示）
+    // loading 页首帧只作计时标记，不阻塞下面的 Vite 轮询
     win.webContents.once('did-finish-load', () => {
-      startupTimer.mark('loading 页面加载完成')
-      pollViteAndNavigate(win)
+      if (win.webContents.getURL().startsWith('data:')) startupTimer.mark('loading 页面加载完成')
     })
+    // 第二步：立即开始后台轮询 Vite（不再等 loading 页 did-finish-load 才发起），
+    // 就绪后自动跳转。Vite 已在运行时可直接跳转，省下等 loading 页加载的数百毫秒。
+    pollViteAndNavigate(win)
   } else {
     win.loadURL('app://local/index.html')
     // 生产模式：监听渲染进程的 [startup] 日志，记录 Vue 挂载时间

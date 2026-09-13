@@ -74,7 +74,7 @@
         <a class="cursor-pointer underline" @click="switchMode('register')">返回</a>
       </p>
       <p class="text-xs text-text-muted mb-2">请点击「下载文本」，将恢复密钥保存到安全的地方，然后抄写前 3 个词完成注册。</p>
-      <div v-if="recoveryPhrase" class="p-3 rounded-xl mb-3 font-mono text-sm leading-6" style="background: rgba(255,255,255,var(--glass-opacity,0.4)); backdrop-filter: blur(10px) saturate(1.1); -webkit-backdrop-filter: blur(10px) saturate(1.1);">{{ recoveryPhrase }}</div>
+      <div v-if="recoveryPhrase" class="p-3 rounded-xl mb-3 font-mono text-sm leading-6" style="background: rgba(255,255,255,var(--glass-opacity,0.4)); backdrop-filter: blur(10px) saturate(1.1);">{{ recoveryPhrase }}</div>
       <div class="flex gap-2 mb-3">
         <button type="button" @click="downloadTxt" class="bg-info text-text-inverse px-3 py-2 rounded-xl text-sm flex-1">下载文本</button>
         <button type="button" @click="copyRecovery" class="bg-info text-text-inverse px-3 py-2 rounded-xl text-sm flex-1">复制</button>

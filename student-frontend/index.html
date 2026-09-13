@@ -5,9 +5,10 @@
     <link rel="icon" type="image/svg+xml" href="/vite.svg">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <link rel="preconnect" href="http://localhost:3000">
-    <!-- modulepreload：在 HTML 解析阶段就预下载 main.js 及其静态依赖图（Vue/Pinia/Router 等），
-         避免等到 <script> 执行时才串行加载，与 CSS/图片下载并行进行 -->
-    <link rel="modulepreload" href="/src/main.js">
+    <!-- 注意：这里不要手写 <link rel="modulepreload" href="/src/main.js">。
+         构建时它会被解析成一个独立 chunk（与真正入口 chunk 不同名），
+         导致启动多下载一个无人使用的小 chunk；入口及其静态依赖的 modulepreload
+         由 Vite 构建时自动注入（见构建产物的 index.html），无需手写。 -->
     
     <title>班级管理系统</title>
     <style>

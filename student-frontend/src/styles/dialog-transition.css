@@ -41,7 +41,6 @@
     opacity: 0;
     transform: scale(0.95);
     backdrop-filter: blur(0px) saturate(1);
-    -webkit-backdrop-filter: blur(0px) saturate(1);
   }
   70% {
     opacity: 1;
@@ -51,7 +50,6 @@
     opacity: 1;
     transform: scale(1);
     backdrop-filter: blur(var(--glass-blur, 20px)) saturate(1.1);
-    -webkit-backdrop-filter: blur(var(--glass-blur, 20px)) saturate(1.1);
   }
 }
 
@@ -64,12 +62,10 @@
     opacity: 1;
     transform: scale(1);
     backdrop-filter: blur(var(--glass-blur, 20px)) saturate(1.1);
-    -webkit-backdrop-filter: blur(var(--glass-blur, 20px)) saturate(1.1);
   }
   to {
     opacity: 0;
     transform: scale(0.95);
     backdrop-filter: blur(0px) saturate(1);
-    -webkit-backdrop-filter: blur(0px) saturate(1);
   }
 }
