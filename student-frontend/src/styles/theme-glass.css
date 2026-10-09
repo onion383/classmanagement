@@ -38,7 +38,7 @@
   --radius-card: 12px;
 }
 
-/* ========== 全局背景（仅毛玻璃：win11 为透明背景，见 theme-win11.css） ========== */
+/* 全局背景（仅毛玻璃：win11 为透明背景，见 theme-win11.css） */
 :root[data-theme="glass"] body {
   background-color: #f0f4f8;
 }
@@ -51,6 +51,62 @@
     radial-gradient(ellipse 40% 30% at 90% 10%, rgba(139, 92, 246, 0.06) 0%, transparent 60%),
     radial-gradient(ellipse 45% 35% at 50% 95%, rgba(34, 197, 94, 0.05) 0%, transparent 60%);
   background-attachment: fixed;
+}
+
+/* ========== 无边框自绘标题栏：毛玻璃（直角整条） ==========
+   与侧边栏 .bg-sidebar 共用同一套玻璃配方（背景色/blur/顶部受光渐变/内高光）。
+   顶栏配色由根元素 data-topbar-color 决定（blue=旧深蓝 / light=白色调，设置页可切换）。
+   light 主题下，标题栏底色用淡蓝 rgba(219,234,254,.55)；blue 用深蓝 rgba(30,64,175,.55)。 */
+:root:is([data-theme="glass"], [data-theme="win11"]) .window-title-bar {
+  position: relative;
+  backdrop-filter: blur(24px) saturate(1.4);
+  border-bottom: 1px solid rgba(15, 23, 42, 0.08);
+  contain: paint;
+  overflow: hidden;
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.35),
+    0 4px 32px rgba(15, 23, 42, 0.12),
+    inset 0 -1px 0 rgba(255, 255, 255, 0.4);
+  z-index: 1;
+}
+/* 白色调（默认） */
+:root[data-topbar-color="light"]:is([data-theme="glass"], [data-theme="win11"]) .window-title-bar {
+  background-color: rgba(219, 234, 254, 0.55) !important;
+  color: #1e293b !important;
+}
+/* 深蓝（旧款） */
+:root[data-topbar-color="blue"]:is([data-theme="glass"], [data-theme="win11"]) .window-title-bar {
+  background-color: rgba(30, 64, 175, 0.55) !important;
+  color: #f1f5f9 !important;
+}
+/* 顶部受光渐变高光（与侧边栏一致，淡色 0.22→0.06→0） */
+:root:is([data-theme="glass"], [data-theme="win11"]) .window-title-bar::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 40%;
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.22) 0%, rgba(255, 255, 255, 0.06) 55%, rgba(255, 255, 255, 0) 100%);
+  pointer-events: none;
+  z-index: -1;
+}
+/* 标题栏内容/按钮浮动到高光之上 */
+:root:is([data-theme="glass"], [data-theme="win11"]) .window-title-bar > * {
+  position: relative;
+  z-index: 1;
+}
+/* 白色调：控制按钮 hover 用深色遮罩 */
+:root[data-topbar-color="light"]:is([data-theme="glass"], [data-theme="win11"]) .window-controls .win-btn:hover {
+  background: rgba(15, 23, 42, 0.08);
+}
+/* 深蓝：控制按钮 hover 用浅色遮罩 */
+:root[data-topbar-color="blue"]:is([data-theme="glass"], [data-theme="win11"]) .window-controls .win-btn:hover {
+  background: rgba(255, 255, 255, 0.15);
+}
+:root:is([data-theme="glass"], [data-theme="win11"]) .window-controls .win-btn-close:hover {
+  background: #e81123;
+  color: #fff;
 }
 
 /* ========== 自定义背景图 ========== */
@@ -78,23 +134,37 @@
   position: relative;
 }
 
-/* ========== 侧边栏：深蓝毛玻璃 ========== */
+/* ========== 侧边栏：毛玻璃（配色随 data-topbar-color） ========== */
 :root:is([data-theme="glass"], [data-theme="win11"]) .bg-sidebar {
-  background-color: rgba(30, 64, 175, 0.55) !important;
   backdrop-filter: blur(24px) saturate(1.4);
-  border-right: 1px solid rgba(255, 255, 255, 0.15);
-  border-radius: 0 18px 18px 0;
+  border-right: 1px solid rgba(15, 23, 42, 0.08);
+  border-radius: 0 18px 18px 0; /* 旧版右侧圆角 */
   contain: paint;
-  box-shadow:
-    inset 0 1px 0 rgba(255, 255, 255, 0.12),
-    4px 0 32px rgba(15, 23, 42, 0.18),
-    inset -1px 0 0 rgba(255, 255, 255, 0.06);
-  color: #f1f5f9 !important;
   position: relative;
   z-index: 1;
   overflow: hidden;
 }
-/* 顶部玻璃受光渐变高光（增强） */
+/* 白色调（默认） */
+:root[data-topbar-color="light"]:is([data-theme="glass"], [data-theme="win11"]) .bg-sidebar {
+  background-color: rgba(255, 255, 255, 0.35) !important;
+  color: #1e293b !important;
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.35),
+    4px 0 32px rgba(15, 23, 42, 0.12),
+    inset -1px 0 0 rgba(255, 255, 255, 0.4);
+}
+/* 深蓝（旧款，还原最后一次提交前的原版配方：右侧圆角 + 浅色边框 + 原投影） */
+:root[data-topbar-color="blue"]:is([data-theme="glass"], [data-theme="win11"]) .bg-sidebar {
+  background-color: rgba(30, 64, 175, 0.55) !important;
+  color: #f1f5f9 !important;
+  /* 右侧 1px 浅色 border 与 box-shadow 内侧 -1px 白线会在深蓝半透明底上透出浅蓝细线，统一改透明（勿误删） */
+  border-right-color: transparent !important;
+  border-radius: 0 18px 18px 0;
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.12),
+    4px 0 32px rgba(15, 23, 42, 0.18);
+}
+/* 顶部玻璃受光渐变高光（与原版完全一致：淡 0.22→0.06→0） */
 :root:is([data-theme="glass"], [data-theme="win11"]) .bg-sidebar::before {
   content: '';
   position: absolute;
@@ -112,31 +182,84 @@
 :root:is([data-theme="glass"], [data-theme="win11"]) .bg-sidebar .rounded {
   border-radius: 14px !important;
 }
-:root:is([data-theme="glass"], [data-theme="win11"]) .bg-sidebar-hover {
+/* 白色调：未选中项默认深灰文字，hover 加一层深色玻璃悬浮；active 用蓝色系 */
+:root[data-topbar-color="light"]:is([data-theme="glass"], [data-theme="win11"]) .bg-sidebar a,
+:root[data-topbar-color="light"]:is([data-theme="glass"], [data-theme="win11"]) .bg-sidebar nav a {
+  color: #334155 !important;
+}
+:root[data-topbar-color="light"]:is([data-theme="glass"], [data-theme="win11"]) .bg-sidebar-hover,
+:root[data-topbar-color="light"]:is([data-theme="glass"], [data-theme="win11"]) .bg-sidebar a:hover:not(.bg-sidebar-active) {
+  background-color: rgba(15, 23, 42, 0.05) !important;
+  color: #0f172a !important;
+  text-shadow: none;
+}
+:root[data-topbar-color="light"]:is([data-theme="glass"], [data-theme="win11"]) .bg-sidebar-active,
+:root[data-topbar-color="light"]:is([data-theme="glass"], [data-theme="win11"]) .bg-sidebar-active.rounded {
+  background-color: rgba(59, 130, 246, 0.18) !important;
+  color: #1d4ed8 !important;
+  font-weight: 600;
+  box-shadow:
+    inset 0 0 0 1px rgba(59, 130, 246, 0.3),
+    inset 0 1px 0 rgba(255, 255, 255, 0.4),
+    0 0 16px rgba(59, 130, 246, 0.25),
+    0 2px 8px rgba(15, 23, 42, 0.06);
+}
+/* 白底侧边栏分组标题：深灰；深蓝底侧边栏分组标题：浅色 */
+:root[data-topbar-color="light"]:is([data-theme="glass"], [data-theme="win11"]) .sidebar-group-title {
+  color: #64748b !important;
+}
+:root[data-topbar-color="blue"]:is([data-theme="glass"], [data-theme="win11"]) .sidebar-group-title {
+  color: rgba(224, 231, 255, 0.6) !important;
+}
+/* 侧边栏顶部应用名：深蓝底用浅色(旧版 #f1f5f9)，白底用深色，保证可读 */
+:root[data-topbar-color="blue"]:is([data-theme="glass"], [data-theme="win11"]) .bg-sidebar .app-name {
+  color: #f1f5f9 !important;
+}
+:root[data-topbar-color="light"]:is([data-theme="glass"], [data-theme="win11"]) .bg-sidebar .app-name {
+  color: #1e293b !important;
+}
+/* 标题栏应用名：白底深灰 / 深蓝底浅色 */
+:root[data-topbar-color="light"]:is([data-theme="glass"], [data-theme="win11"]) .win-app-title {
+  color: rgba(0, 0, 0, 0.62) !important;
+}
+:root[data-topbar-color="blue"]:is([data-theme="glass"], [data-theme="win11"]) .win-app-title {
+  color: rgba(241, 245, 249, 0.85) !important;
+}
+:root[data-topbar-color="blue"]:is([data-theme="glass"], [data-theme="win11"]) .bg-sidebar a,
+:root[data-topbar-color="blue"]:is([data-theme="glass"], [data-theme="win11"]) .bg-sidebar nav a {
+  color: #f1f5f9 !important;
+}
+:root[data-topbar-color="blue"]:is([data-theme="glass"], [data-theme="win11"]) .bg-sidebar-hover {
+  /* 旧版 hover 背景：8% 透明白 + blur + 阴影（Tailwind hover:bg-sidebar-hover 触发）。
+     描边用 box-shadow inset 模拟，不用真 border，避免 hover 时产生 1px 布局位移（顿挫） */
   background-color: rgba(255, 255, 255, 0.08) !important;
   backdrop-filter: blur(8px) saturate(1.1);
   box-shadow:
+    inset 0 0 0 1px rgba(255, 255, 255, 0.12),
     inset 0 1px 0 rgba(255, 255, 255, 0.12),
     0 0 8px rgba(59, 130, 246, 0.06),
     0 1px 3px rgba(15, 23, 42, 0.05);
-  border: 1px solid rgba(255, 255, 255, 0.12);
 }
-/* 悬浮在未选中的侧边栏项上时，文字变黑，保证在浅色悬浮背景上清晰可见 */
-:root:is([data-theme="glass"], [data-theme="win11"]) .bg-sidebar a:hover:not(.bg-sidebar-active),
-:root:is([data-theme="glass"], [data-theme="win11"]) .bg-sidebar nav a:hover:not(.bg-sidebar-active) {
+/* 悬浮在未选中的侧边栏项上时，文字变黑 */
+:root[data-topbar-color="blue"]:is([data-theme="glass"], [data-theme="win11"]) .bg-sidebar a:hover:not(.bg-sidebar-active),
+:root[data-topbar-color="blue"]:is([data-theme="glass"], [data-theme="win11"]) .bg-sidebar nav a:hover:not(.bg-sidebar-active) {
   color: #0f172a !important;
 }
-:root:is([data-theme="glass"], [data-theme="win11"]) .bg-sidebar-active,
-:root:is([data-theme="glass"], [data-theme="win11"]) .bg-sidebar-active.rounded {
+:root[data-topbar-color="blue"]:is([data-theme="glass"], [data-theme="win11"]) .bg-sidebar-active,
+:root[data-topbar-color="blue"]:is([data-theme="glass"], [data-theme="win11"]) .bg-sidebar-active.rounded {
   background-color: rgba(255, 255, 255, 0.16) !important;
   color: #bfdbfe !important;
   font-weight: 600;
   box-shadow:
+    inset 0 0 0 1px rgba(255, 255, 255, 0.18),
     inset 0 1px 0 rgba(255, 255, 255, 0.18),
     0 0 16px rgba(59, 130, 246, 0.2),
     0 2px 8px rgba(15, 23, 42, 0.1);
-  border: 1px solid rgba(255, 255, 255, 0.18);
 }
+
+/* 深蓝侧边栏原有的一组「深色滚动条」::-webkit-scrollbar-thumb 皮肤已删除：
+   本主题在 :root 上把 scrollbar-color 设为非 auto，Chromium 会忽略 -webkit 伪元素皮肤，
+   这套规则从未生效（滚动条颜色实际由下方的 scrollbar-color 决定）。 */
 
 /* ========== 毛玻璃按钮 - 荧光边框 ========== */
 :root:is([data-theme="glass"], [data-theme="win11"]) button {
@@ -254,35 +377,33 @@
 :root:is([data-theme="glass"], [data-theme="win11"]) button.bg-surface-hover:hover {
   background-color: rgba(255, 255, 255, 0.95) !important;
 }
-/* ========== 刷新按钮：半透明色块玻璃，暖橙色区别于旁边绿(primary)/金(warning) ========== */
+/* ========== 刷新按钮：与其它彩色玻璃按钮同款质感（白遮罩 + blur，透出暖橙底色） ========== */
 :root:is([data-theme="glass"], [data-theme="win11"]) button.btn-refresh {
-  background: rgba(251, 146, 60, 0.2) !important;
-  backdrop-filter: none;
-  color: #c2410c !important;
-  border-color: rgba(251, 146, 60, 0.4) !important;
+  background: rgba(251, 146, 60, 0.5) !important;
+  backdrop-filter: blur(12px) saturate(1.3);
+  color: #9a3412 !important;
+  border: none;
   box-shadow:
-    0 0 0 1px rgba(255, 255, 255, 0.15),
-    0 0 12px rgba(251, 146, 60, 0.15),
-    inset 0 1px 0 rgba(255, 255, 255, 0.2);
+    inset 0 0 0 40px rgba(255, 255, 255, 0.50),
+    0 0 14px rgba(251, 146, 60, 0.18) !important;
 }
 :root:is([data-theme="glass"], [data-theme="win11"]) button.btn-refresh:hover {
-  background: rgba(251, 146, 60, 0.3) !important;
-  color: #c2410c !important;
+  color: #7c2d12 !important;
   box-shadow:
-    0 0 0 1px rgba(255, 255, 255, 0.25),
-    0 0 20px rgba(251, 146, 60, 0.25),
-    inset 0 1px 0 rgba(255, 255, 255, 0.3);
+    inset 0 0 0 40px rgba(255, 255, 255, 0.56),
+    0 0 20px rgba(251, 146, 60, 0.3) !important;
 }
 
-/* ========== 操作栏按钮：叠加微弱白色遮罩提升可读性（仅操作栏，不作用到弹窗等其它按钮） ========== */
-:root:is([data-theme="glass"], [data-theme="win11"]) .opbar button {
+/* ========== 操作栏按钮：叠加微弱白色遮罩提升可读性（仅操作栏，不作用到弹窗等其它按钮）
+   排除 .view-switch-btn：视图切换的两个标签需要直接透出切换组件自身的标题栏同款毛玻璃底面 ========== */
+:root:is([data-theme="glass"], [data-theme="win11"]) .opbar button:not(.view-switch-btn) {
   border: none;
   backdrop-filter: blur(12px) saturate(1.3);
   box-shadow:
     inset 0 0 0 40px rgba(255, 255, 255, 0.50),
     0 0 14px rgba(255, 255, 255, 0.12) !important;
 }
-:root:is([data-theme="glass"], [data-theme="win11"]) .opbar button:hover {
+:root:is([data-theme="glass"], [data-theme="win11"]) .opbar button:hover:not(.view-switch-btn) {
   box-shadow:
     inset 0 0 0 40px rgba(255, 255, 255, 0.56),
     0 0 18px rgba(255, 255, 255, 0.18) !important;
@@ -309,11 +430,31 @@
     0 0 18px rgba(255, 255, 255, 0.18) !important;
 }
 
+/* ========== 视图切换（分段控件）：滑块与两个标签不套用上面的「荧光边框」按钮皮肤 ==========
+   上面的全局 button 规则会给每个按钮加 1px 边框 + 12px 圆角 + 荧光描边（::before）。
+   滑块和两个标签各自成框后，会挤成「两个自带边框的小方块」贴在一起，
+   整条轨道看起来又宽又挤。这里统一去边框/去圆角/去描边，
+   圆角完全交给外层 .view-switch 的 overflow:hidden 裁切，恢复分段控件的整体感。 */
+:root:is([data-theme="glass"], [data-theme="win11"]) .view-switch button {
+  border: none;
+  border-radius: 0;
+  box-shadow: none;
+}
+:root:is([data-theme="glass"], [data-theme="win11"]) .view-switch button::before {
+  display: none;
+}
+/* 轨道圆角与同排「添加职务」等按钮一致（glass 按钮皮肤为 12px） */
+:root:is([data-theme="glass"], [data-theme="win11"]) .view-switch {
+  border-radius: 12px;
+}
+
 :root:is([data-theme="glass"], [data-theme="win11"]) button:disabled {
   opacity: 0.35;
   cursor: not-allowed;
   box-shadow: none !important;
   transform: none !important;
+  /* 去掉 transition-theme 的 opacity 过渡，避免点击进入禁用态时淡入闪烁 */
+  transition: none !important;
 }
 
 /* ========== 毛玻璃输入框（与登录页输入框统一样式：12px 圆角 + 半透明磨砂底 + 聚焦蓝边外发光） ========== */
@@ -414,42 +555,34 @@
   background-color: rgba(255, 255, 255, var(--glass-opacity, 0.4)) !important;
   backdrop-filter: blur(24px) saturate(1.2);
 }
-/* ========== 毛玻璃卡片 / 面板 - 荧光边框（基准透明度由 --glass-opacity 控制） ========== */
+/* ========== 毛玻璃卡片 / 面板（基准透明度由 --glass-opacity 控制） ========== */
 :root:is([data-theme="glass"], [data-theme="win11"]) .bg-surface {
   background-color: rgba(255, 255, 255, var(--glass-opacity, 0.4)) !important;
   backdrop-filter: blur(20px) saturate(1.1);
-  border: 1px solid rgba(255, 255, 255, 0.1);
+  /* 四周 1px 发光白边：与侧边栏的白线同强度（0.35），去掉原来叠加的外圈 0 0 0 1px 阴影，避免出现双重边 */
+  border: 1px solid rgba(255, 255, 255, 0.35);
   border-radius: 20px;
   position: relative;
   /* contain: paint 限制绘制边界，告诉浏览器子元素不超出父容器绘制，
      减少 backdrop-filter 无效区域的 GPU 合成计算，且不影响外观 */
   contain: paint;
   box-shadow:
-    0 0 0 1px rgba(255, 255, 255, 0.1),
     0 0 20px rgba(255, 255, 255, 0.03),
     inset 0 1px 0 rgba(255, 255, 255, 0.15);
 }
+/* 顶部玻璃受光渐变高光：与侧边栏 / 标题栏统一（自上而下 0.22→0.06→0，占高度 40%），
+   取代原来的「四周 1px 渐变荧光描边」；底边与四周的 1px 亮边仍由 border + box-shadow 提供 */
 :root:is([data-theme="glass"], [data-theme="win11"]) .bg-surface::before {
   content: '';
   position: absolute;
-  inset: -1px;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 40%;
   border-radius: inherit;
-  padding: 1px;
-  background: linear-gradient(
-    180deg,
-    rgba(255, 255, 255, 0.2) 0%,
-    rgba(255, 255, 255, 0.05) 50%,
-    rgba(255, 255, 255, 0.08) 100%
-  );
-  -webkit-mask:
-    linear-gradient(#fff 0 0) content-box,
-    linear-gradient(#fff 0 0);
-  mask:
-    linear-gradient(#fff 0 0) content-box,
-    linear-gradient(#fff 0 0);
-  -webkit-mask-composite: xor;
-  mask-composite: exclude;
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.22) 0%, rgba(255, 255, 255, 0.06) 55%, rgba(255, 255, 255, 0) 100%);
   pointer-events: none;
+  z-index: -1;
 }
 :root:is([data-theme="glass"], [data-theme="win11"]) .bg-surface-hover {
   background-color: rgba(255, 255, 255, calc(var(--glass-opacity, 0.4) + 0.1)) !important;
@@ -458,12 +591,37 @@
 /* ========== 毛玻璃表格 ========== */
 :root:is([data-theme="glass"], [data-theme="win11"]) .table-scroll-wrapper {
   border-radius: 16px;
-  background-color: rgba(255, 255, 255, calc(var(--glass-opacity, 0.4) - 0.05)) !important;
+  background-color: rgba(255, 255, 255, calc(var(--glass-opacity, 0.4) + 0.02)) !important;
   backdrop-filter: blur(16px);
   contain: paint;
   box-shadow:
     0 0 0 1px rgba(255, 255, 255, 0.12),
     0 0 16px rgba(255, 255, 255, 0.04),
+    inset 0 1px 0 rgba(255, 255, 255, 0.15);
+}
+
+/* 底角边框补绘：容器 contain:paint 会把子元素裁切到 16px 圆角，导致最后一行单元格的
+   border-bottom 在左下/右下圆角处被切掉。用与外框同圆角的 1px 描边环补回四周边线，
+   使最后一行底边线在圆角处连续不缺失（边线比容器圆角小 1px，避免被同半径裁切）。 */
+:root:is([data-theme="glass"], [data-theme="win11"]) .table-scroll-wrapper::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: 15px;
+  border: 1px solid rgba(15, 23, 42, 0.18);
+  pointer-events: none;
+  z-index: 7;
+}
+
+/* 底部「＋ 点击添加一行」毛玻璃：与表格容器同一套玻璃配方，视觉上融合不显割裂 */
+:root:is([data-theme="glass"], [data-theme="win11"]) .add-row-bar {
+  background-color: rgba(255, 255, 255, calc(var(--glass-opacity, 0.4) + 0.06)) !important;
+  backdrop-filter: blur(16px);
+  /* 限制绘制边界，减少 backdrop-filter 无效区域的 GPU 合成（外观不变，与 .bg-surface 同法） */
+  contain: paint;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  box-shadow:
+    0 1px 6px rgba(15, 23, 42, 0.05),
     inset 0 1px 0 rgba(255, 255, 255, 0.15);
 }
 :root:is([data-theme="glass"], [data-theme="win11"]) table {
@@ -473,7 +631,9 @@
   overflow: hidden;
 }
 :root:is([data-theme="glass"], [data-theme="win11"]) table th {
-  background-color: rgba(255, 255, 255, calc(var(--glass-opacity, 0.4) - 0.05)) !important;
+  /* 单元格自身不再叠加半透明遮罩：让表层唯一遮罩由 .table-scroll-wrapper 统一承担，
+     保证「有数据」与「空数据区」遮罩程度一致（表头蓝色调由下方 .bg-primary 规则提供） */
+  background-color: transparent !important;
   color: #1e293b !important;
   font-weight: 600;
   backdrop-filter: blur(10px);
@@ -484,12 +644,21 @@
   border-top: none !important;
 }
 :root:is([data-theme="glass"], [data-theme="win11"]) table td {
-  background-color: rgba(255, 255, 255, calc(var(--glass-opacity, 0.4) - 0.1)) !important;
+  background-color: transparent !important;
   color: #1e293b !important;
   border-right: 1px solid rgba(15, 23, 42, 0.22) !important;
   border-bottom: 1px solid rgba(15, 23, 42, 0.22) !important;
   border-left: none !important;
   border-top: none !important;
+}
+/* 数据区与空数据区的轻微层次：数据行加一档更亮的白色玻璃，让空数据区保持偏暗，
+   形成一点点可辨识的深浅区分（数据行亮、空区暗）。 */
+:root:is([data-theme="glass"], [data-theme="win11"]) table tbody tr td {
+  background-color: rgba(255, 255, 255, calc(var(--glass-opacity, 0.4) + 0.12)) !important;
+}
+/* 选中行比普通数据行更亮（覆盖数据行更白的底色，保证选中态有增亮反馈） */
+:root:is([data-theme="glass"], [data-theme="win11"]) table tbody tr.bg-surface-hover td {
+  background-color: rgba(255, 255, 255, calc(var(--glass-opacity, 0.4) + 0.24)) !important;
 }
 /* 编辑时输入框透明，只保留单元格本身的单层透明度 */
 :root:is([data-theme="glass"], [data-theme="win11"]) table input[type="text"],
@@ -508,10 +677,7 @@
   border-color: transparent !important;
 }
 :root:is([data-theme="glass"], [data-theme="win11"]) table tbody tr:hover td {
-  background-color: rgba(255, 255, 255, calc(var(--glass-opacity, 0.4) + 0.05)) !important;
-}
-:root:is([data-theme="glass"], [data-theme="win11"]) table tbody tr:nth-child(even) td {
-  background-color: rgba(255, 255, 255, calc(var(--glass-opacity, 0.4) - 0.08)) !important;
+  background-color: rgba(255, 255, 255, calc(var(--glass-opacity, 0.4) + 0.22)) !important;
 }
 :root:is([data-theme="glass"], [data-theme="win11"]) table .border:not(th):not(td),
 :root:is([data-theme="glass"], [data-theme="win11"]) table .border-border:not(th):not(td),
@@ -815,9 +981,12 @@
 }
 /* 覆盖弹窗遮罩：.login-bg > * 的 position: relative 会覆盖 ConfirmDialog 遮罩的 .fixed，
   使其退化为普通 flex 子项、与登录表单并排。此规则强制遮罩保持 fixed 全屏盖住。 */
-:root:is([data-theme="glass"], [data-theme="win11"]) .bg-black\/50 {
+:root:is([data-theme="glass"], [data-theme="win11"]) [class*="inset-0"][class*="bg-black/"]:not([class*="bg-black/9"]) {
   position: fixed;
   inset: 0;
+  /* 弹窗遮罩：透明底（不加纯色压暗）+ 背景模糊，磨砂虚化下层页面 */
+  background-color: rgba(0, 0, 0, 0);
+  backdrop-filter: blur(18px) saturate(1.1);
 }
 
 /* ========== 表格候选列表（Teleport 到 body，需更实更清晰的毛玻璃） ========== */
@@ -875,34 +1044,53 @@
 }
 
 /* ========== 毛玻璃滚动条 ========== */
+/* scrollbar-width / scrollbar-color 都是可继承属性，设在 :root 上即可覆盖全站，
+   无需再用 `:root *` 逐元素下发（原来的通用选择器写法结果等价，纯属多余匹配开销）。 */
 :root:is([data-theme="glass"], [data-theme="win11"]) {
   scrollbar-width: thin;
   scrollbar-color: rgba(255, 255, 255, 0.55) rgba(255, 255, 255, 0.08);
 }
-:root:is([data-theme="glass"], [data-theme="win11"]) * {
-  scrollbar-width: thin;
-  scrollbar-color: rgba(255, 255, 255, 0.55) rgba(255, 255, 255, 0.08);
-}
-:root:is([data-theme="glass"], [data-theme="win11"]) ::-webkit-scrollbar {
-  width: 10px;
-  height: 10px;
-}
-:root:is([data-theme="glass"], [data-theme="win11"]) ::-webkit-scrollbar-track {
-  background: rgba(255, 255, 255, 0.08);
+/* 说明：原先这里还有整套 ::-webkit-scrollbar / -track / -thumb / -corner 皮肤（10px 宽、
+   白色渐变 thumb、透明 corner），已删除。Chromium 的规则是「只要元素的 scrollbar-width 或
+   scrollbar-color 为非常规值(auto)，就忽略 -webkit 伪元素皮肤」；上面既是全局非 auto，
+   这套皮肤就从未参与渲染，留着只会误导。需要恢复时按上述描述补回即可。 */
+
+/* ========== 搜索面板 + 工具栏搜索按钮（毛玻璃 / 暖色） ========== */
+/* 搜索面板：与表格/卡片同一套玻璃配方，淡入下滑过渡见 SearchBar.vue */
+:root:is([data-theme="glass"], [data-theme="win11"]) .search-panel {
+  background-color: rgba(255, 255, 255, calc(var(--glass-opacity, 0.4) - 0.02)) !important;
+  backdrop-filter: blur(16px) saturate(1.1);
+  border: 1px solid rgba(15, 23, 42, 0.08);
   border-radius: 10px;
-  border: 1px solid rgba(255, 255, 255, 0.1);
-}
-:root:is([data-theme="glass"], [data-theme="win11"]) ::-webkit-scrollbar-thumb {
-  background: linear-gradient(180deg, rgba(255, 255, 255, 0.7), rgba(255, 255, 255, 0.45));
-  border-radius: 10px;
-  border: 2px solid rgba(255, 255, 255, 0.2);
   box-shadow:
-    inset 0 1px 0 rgba(255, 255, 255, 0.6),
-    0 1px 3px rgba(15, 23, 42, 0.12);
+    0 1px 6px rgba(15, 23, 42, 0.05),
+    inset 0 1px 0 rgba(255, 255, 255, 0.35);
 }
-:root:is([data-theme="glass"], [data-theme="win11"]) ::-webkit-scrollbar-thumb:hover {
-  background: linear-gradient(180deg, rgba(255, 255, 255, 0.85), rgba(255, 255, 255, 0.6));
+:root:is([data-theme="glass"], [data-theme="win11"]) .search-panel .bg-surface-hover {
+  background-color: rgba(255, 255, 255, 0.5) !important;
 }
-:root:is([data-theme="glass"], [data-theme="win11"]) ::-webkit-scrollbar-corner {
-  background: transparent;
+/* 工具栏「搜索」按钮：白色毛玻璃带上暖暖橙调，浓度对齐同排实色按钮（参照标题栏玻璃配方） */
+:root:is([data-theme="glass"], [data-theme="win11"]) .btn-search {
+  position: relative;
+  background-color: rgba(255, 205, 148, 0.92) !important;
+  color: #7a3d08 !important;
+  backdrop-filter: blur(16px) saturate(1.2);
+  border: 1px solid rgba(255, 255, 255, 0.35);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.22),
+    0 1px 4px rgba(154, 52, 18, 0.08);
+}
+:root:is([data-theme="glass"], [data-theme="win11"]) .btn-search:hover {
+  background-color: rgba(255, 196, 132, 0.95) !important;
+}
+:root:is([data-theme="glass"], [data-theme="win11"]) .btn-search:active {
+  background-color: rgba(255, 185, 118, 0.95) !important;
+}
+/* 非毛玻璃主题下搜索按钮的中性回退（浅沙色，仍带一点暖调，浓度对齐同排版式） */
+:root:not(:is([data-theme="glass"], [data-theme="win11"])) .btn-search {
+  background-color: #fcd9a8;
+  color: #8a4a0b;
+}
+:root:not(:is([data-theme="glass"], [data-theme="win11"])) .btn-search:hover {
+  background-color: #fbce8e;
 }

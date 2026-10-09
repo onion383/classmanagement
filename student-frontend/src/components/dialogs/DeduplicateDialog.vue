@@ -12,13 +12,13 @@
 
       <template v-if="flatRows.length > 0">
         <div class="flex items-center justify-between mb-2">
-          <p class="text-sm text-text-secondary">
+          <p class="text-sm text-text">
             共发现 {{ totalDuplicateRows }} 行重复数据（涉及 {{ groupedRows.length }} 组），
             每组将自动保留至少一行。
           </p>
           <button
             @click="toggleAllSelect"
-            class="text-sm text-info hover:underline"
+            class="dup-link-btn"
           >
             {{ isAllSelected ? '取消全选' : '全选可删除行' }}
           </button>
@@ -51,7 +51,7 @@
           />
         </div>
         <div class="flex justify-between items-center mt-4">
-          <span class="text-sm text-text-secondary">已选择 {{ selectedCount }} 行</span>
+          <span class="text-sm text-text">已选择 {{ selectedCount }} 行</span>
           <div class="flex gap-2">
             <button @click="cancel" class="bg-surface-hover px-4 py-1.5 rounded text-text">取消</button>
             <button
@@ -243,3 +243,25 @@ export default {
   }
 };
 </script>
+
+<style scoped>
+/* 「全选可删除行」链接按钮：带毛玻璃边框的轻按钮，统一各主题观感 */
+.dup-link-btn {
+  font-size: 14px;
+  color: var(--color-info, #2563eb);
+  padding: 5px 12px;
+  border: 1px solid var(--color-info, #2563eb);
+  border-radius: 10px;
+  background: transparent;
+  cursor: pointer;
+  transition: background-color 0.2s, color 0.2s, box-shadow 0.2s;
+}
+.dup-link-btn:hover {
+  color: var(--color-info, #2563eb);
+  background: color-mix(in srgb, var(--color-info, #2563eb) 12%, transparent);
+  box-shadow: 0 0 12px color-mix(in srgb, var(--color-info, #2563eb) 20%, transparent);
+}
+.dup-link-btn:active {
+  transform: translateY(1px);
+}
+</style>

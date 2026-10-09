@@ -73,4 +73,30 @@ router.beforeEach(async (to, from) => {
   return to.path === '/login' ? '/' : true
 })
 
+// 空闲预热所有懒加载路由 chunk：登录后主窗口空闲时后台按「逐条 + 让出空闲」的方式
+// 拉取各页面模块，让点击侧边栏跳转时不再等 chunk 下载/解析/V8 编译。
+// 逐条而非并发，是为了避免同一时刻下载并解析大量 chunk 抢占主线程造成卡顿。
+export function prefetchRoutes() {
+  const loaders = []
+  const seen = new Set()
+  for (const record of router.getRoutes()) {
+    const comp = record.components && record.components.default
+    if (typeof comp === 'function' && !seen.has(comp)) { seen.add(comp); loaders.push(comp) }
+  }
+  let i = 0
+  const idle = (fn) => {
+    if (typeof window.requestIdleCallback === 'function') window.requestIdleCallback(fn, { timeout: 2000 })
+    else setTimeout(fn, 80)
+  }
+  const next = () => {
+    if (i >= loaders.length) return
+    const loader = loaders[i++]
+    Promise.resolve()
+      .then(() => loader())
+      .catch(() => {})
+      .then(() => idle(next)) // 每条加载完都让出一次空闲，避免连续解析阻塞交互
+  }
+  idle(next)
+}
+
 export default router

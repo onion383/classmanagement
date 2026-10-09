@@ -31,13 +31,13 @@
 
       <!-- 工具栏 -->
       <div class="mb-4 flex items-center gap-3 opbar">
-        <button @click="openAddLeave" class="bg-primary hover:bg-primary-hover text-text-inverse px-5 py-2 rounded">
+        <button v-preload="loadAddLeaveDialog" @click="openAddLeave" class="bg-primary hover:bg-primary-hover text-text-inverse px-5 py-2 rounded">
           ＋ 添加请假
         </button>
         <button @click="refresh" class="bg-text-muted hover:bg-text-secondary text-text-inverse px-4 py-2 rounded flex items-center gap-1.5 btn-refresh">
           <IconGlyph name="refresh" :size="14" tint="current" /> 刷新
         </button>
-        <button @click="openExportToday" class="bg-warning hover:bg-warning-hover text-text-inverse px-4 py-2 rounded flex items-center gap-1.5">
+        <button v-preload="loadExportExcel" @click="openExportToday" class="bg-warning hover:bg-warning-hover text-text-inverse px-4 py-2 rounded flex items-center gap-1.5">
           <IconGlyph name="download" :size="14" tint="current" /> 导出今日表
         </button>
       </div>
@@ -132,7 +132,7 @@
     <!-- 请假记录 -->
     <div v-if="activeTab === 'records'">
       <div class="mb-4 flex items-center gap-3 opbar">
-        <button @click="openAddLeave" class="bg-primary hover:bg-primary-hover text-text-inverse px-5 py-2 rounded">
+        <button v-preload="loadAddLeaveDialog" @click="openAddLeave" class="bg-primary hover:bg-primary-hover text-text-inverse px-5 py-2 rounded">
           ＋ 添加请假
         </button>
         <button @click="refresh" class="bg-text-muted hover:bg-text-secondary text-text-inverse px-4 py-2 rounded flex items-center gap-1.5 btn-refresh">
@@ -220,8 +220,10 @@ import { useNotification } from '../composables/useNotification.js'
 import { recordCellUndo, useUndoShortcut } from '../composables/useUndo.js'
 
 // 弹窗类组件懒加载：打开时才加载对应 chunk
-const AddLeaveDialog = defineAsyncComponent(() => import('../components/dialogs/AddLeaveDialog.vue'))
-const ExportExcel = defineAsyncComponent(() => import('../components/import-export/ExportExcel.vue'))
+const loadAddLeaveDialog = () => import('../components/dialogs/AddLeaveDialog.vue')
+const AddLeaveDialog = defineAsyncComponent(loadAddLeaveDialog)
+const loadExportExcel = () => import('../components/import-export/ExportExcel.vue')
+const ExportExcel = defineAsyncComponent(loadExportExcel)
 const ConfirmDialog = defineAsyncComponent(() => import('../components/base/ConfirmDialog.vue'))
 const OverdueLeaveDialog = defineAsyncComponent(() => import('../components/dialogs/OverdueLeaveDialog.vue'))
 
@@ -240,6 +242,8 @@ export default {
       onAfterUndo: (label) => { inst.proxy.loadAll(); n(label ? `已撤销：${label}` : '已撤销') },
       onAfterRedo: (label) => { inst.proxy.loadAll(); n(label ? `已重做：${label}` : '已重做') }
     })
+    // 暴露给模板：v-preload 的绑值在渲染函数里求值，模块作用域的加载器不挂实例会告警
+    return { loadAddLeaveDialog, loadExportExcel }
   },
   // 懒加载弹窗保活：首次打开后保持挂载，关闭只降 visible，保留退出动画
   watch: {

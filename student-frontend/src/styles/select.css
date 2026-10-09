@@ -111,6 +111,14 @@
 :root:is([data-theme="glass"], [data-theme="win11"]) .av-select--open .av-select__trigger {
   background-color: rgba(255, 255, 255, 0.95) !important;
 }
+/* 展开下拉 / 键盘聚焦时：与输入框聚焦完全一致的蓝色边框 + 3px 蓝色外发光。
+   注：上面的玻璃覆盖把常态 border-color 写成了 !important（会盖掉基类的蓝色描边），
+   且 .opbar 内的按钮会被强制去边框，所以此处连边框与阴影一起强制，保证任意位置都生效 */
+:root:is([data-theme="glass"], [data-theme="win11"]) .av-select--open .av-select__trigger,
+:root:is([data-theme="glass"], [data-theme="win11"]) .av-select__trigger:focus-visible {
+  border: 1px solid #3b82f6 !important;
+  box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.28) !important;
+}
 :root:is([data-theme="glass"], [data-theme="win11"]) .av-select__menu {
   background-color: rgba(255, 255, 255, 0.88) !important;
   border-color: rgba(0, 0, 0, 0.08) !important;

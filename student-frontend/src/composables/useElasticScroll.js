@@ -5,6 +5,11 @@
 //   - 正常滚动（未到边界）：原生即时滚动，松手后按最近滚动速度做惯性滑行、逐渐减速停下。
 //   - 滚到顶/底后继续滚：触发橡皮筋，内容被拉开，松手后经 CSS 过渡回弹。
 //   - 惯性滑行途中撞到顶/底：直接停下，不触发橡皮筋（橡皮筋只由真实滚轮越界触发）。
+//
+// 现状（临时）：整个模块停用——main.js 里的 startElasticScroll() 已注释，
+// 橡皮筋与惯性滑行都不生效，滚动全部交回原生。
+// 恢复顺序：先取消 main.js 的调用；若只要惯性，保持下面「橡皮筋：暂时注释」的三处注释即可
+// （release() 函数、handleWheel 里的 pull 分支、定时器里的越界分流）。
 
 const MAX_PULL = 20    // 橡皮筋最大超出像素
 const DAMP = 0.38      // 橡皮筋超出阻尼（让拉出速度慢于滚轮）
@@ -32,6 +37,10 @@ function metaOf(el) {
 
 function isScrollable(el) {
   if (!el || !el.isConnected || el.getAttribute('data-elastic') === 'off') return false
+  // 快速路径：先检查 inline style，避免不必要的 getComputedStyle（强制重排）
+  const is = el.style
+  if (is.overflowY === 'auto' || is.overflowY === 'scroll' || is.overflow === 'auto' || is.overflow === 'scroll') return true
+  if (is.overflowY === 'hidden' || is.overflowY === 'visible' || is.overflow === 'hidden' || is.overflow === 'visible') return false
   const st = getComputedStyle(el)
   return st.overflowY === 'auto' || st.overflowY === 'scroll'
     || st.overflow === 'auto' || st.overflow === 'scroll'
@@ -70,6 +79,7 @@ function startInertia(el) {
   m.inertiaId = requestAnimationFrame(step)
 }
 
+/* 橡皮筋：暂时注释（回弹动画的执行者，停用后不会写入任何 transform）
 function release(el) {
   const m = metaOf(el)
   clearTimeout(m.settleTimer)
@@ -80,6 +90,7 @@ function release(el) {
   el.style.transition = `transform ${SETTLE_MS}ms cubic-bezier(0.25, 1, 0.3, 1)`
   el.style.transform = 'translateY(0)'
 }
+橡皮筋：暂时注释结束 */
 
 function handleWheel(e) {
   const el = e.currentTarget
@@ -100,6 +111,7 @@ function handleWheel(e) {
   const maxScrollTop = el.scrollHeight - el.clientHeight
   const over = (el.scrollTop <= 0 && dy > 0) || (el.scrollTop >= maxScrollTop - 0.5 && dy < 0)
 
+  /* 橡皮筋：暂时注释（越界拉开 + 跟随位移）
   if (over) {
     // 橡皮筋：叠加跟随滚动方向的弹性偏移。
     // pull 已到上限/下限时 next===pull，跳过重复写 style，避免相同赋值仍触发样式重算（INP 优化）。
@@ -115,11 +127,12 @@ function handleWheel(e) {
     el.style.transition = TRANS_SETTLE
     el.style.transform = 'translateY(0)'
   }
+  橡皮筋：暂时注释结束 */
 
-  // 松手（超过 IDLE_MS 无滚动事件）后分流：越界 → 回弹；否则 → 惯性滑行
+  // 松手（超过 IDLE_MS 无滚动事件）后：惯性滑行
+  // （橡皮筋已停用，越界时不再回弹；惯性滑行撞到顶/底会自行停下，行为与原生一致）
   m.settleTimer = setTimeout(() => {
-    if (over) release(el)
-    else startInertia(el)
+    startInertia(el)
   }, IDLE_MS)
 }
 
@@ -137,31 +150,35 @@ export function startElasticScroll() {
 
   const scanAll = () => {
     document.querySelectorAll('*').forEach(el => {
-      if (el.scrollHeight > el.clientHeight + 1 && isScrollable(el)) bindElastic(el)
+      if (!boundSet.has(el) && el.scrollHeight > el.clientHeight + 1 && isScrollable(el)) bindElastic(el)
     })
   }
   const scanRoot = (root) => {
     if (!root) return
     if (root.nodeType === 1) {
-      if (root.scrollHeight > root.clientHeight + 1 && isScrollable(root)) bindElastic(root)
+      if (!boundSet.has(root) && root.scrollHeight > root.clientHeight + 1 && isScrollable(root)) bindElastic(root)
       root.querySelectorAll('*').forEach(el => {
-        if (el.scrollHeight > el.clientHeight + 1 && isScrollable(el)) bindElastic(el)
+        if (!boundSet.has(el) && el.scrollHeight > el.clientHeight + 1 && isScrollable(el)) bindElastic(el)
       })
     }
   }
 
   let pending = []
   let ticking = false
+  const MAX_NODES_PER_FRAME = 16
   const flush = () => {
     ticking = false
     if (!pending.length) return
-    const batch = pending
-    pending = []
+    const batch = pending.splice(0, MAX_NODES_PER_FRAME)
     batch.forEach(scanRoot)
+    if (pending.length) {
+      ticking = true
+      requestAnimationFrame(flush)
+    }
   }
   const scheduleNodes = (nodes) => {
-    nodes.forEach(n => { if (n.nodeType === 1) pending.push(n) })
-    if (ticking) return
+    for (const n of nodes) { if (n.nodeType === 1) pending.push(n) }
+    if (ticking || !pending.length) return
     ticking = true
     requestAnimationFrame(flush)
   }

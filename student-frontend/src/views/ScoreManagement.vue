@@ -44,9 +44,9 @@
 
       <!-- 工具栏 -->
       <div class="mb-4 flex items-center gap-3 opbar">
-        <button @click="openAdd" class="bg-primary hover:bg-primary-hover text-text-inverse px-5 py-2 rounded">＋ 添加{{ isGroup ? '小组' : '个人' }}加分</button>
+        <button v-preload="loadAddScoreDialog" @click="openAdd" class="bg-primary hover:bg-primary-hover text-text-inverse px-5 py-2 rounded">＋ 添加{{ isGroup ? '小组' : '个人' }}加分</button>
         <button @click="refresh" class="bg-text-muted hover:bg-text-secondary text-text-inverse px-4 py-2 rounded flex items-center gap-1 btn-refresh"><IconGlyph name="refresh" :size="14" tint="current" /> 刷新</button>
-        <button @click="exportVisible = true" class="bg-warning hover:bg-warning-hover text-text-inverse px-4 py-2 rounded flex items-center gap-1">📥 导出{{ isGroup ? '小组' : '个人' }}加分</button>
+        <button v-preload="loadExportExcel" @click="exportVisible = true" class="bg-warning hover:bg-warning-hover text-text-inverse px-4 py-2 rounded flex items-center gap-1">📥 导出{{ isGroup ? '小组' : '个人' }}加分</button>
       </div>
 
       <!-- 今日时间轴 -->
@@ -168,9 +168,11 @@ import { useNotification } from '../composables/useNotification.js'
 import { recordCellUndo, recordRowInsert, recordRowDelete, recordRowUpdate, useUndoShortcut } from '../composables/useUndo.js'
 
 // 弹窗类组件懒加载：打开时才加载对应 chunk
-const AddScoreDialog = defineAsyncComponent(() => import('../components/dialogs/AddScoreDialog.vue'))
+const loadAddScoreDialog = () => import('../components/dialogs/AddScoreDialog.vue')
+const AddScoreDialog = defineAsyncComponent(loadAddScoreDialog)
 const ConfirmDialog = defineAsyncComponent(() => import('../components/base/ConfirmDialog.vue'))
-const ExportExcel = defineAsyncComponent(() => import('../components/import-export/ExportExcel.vue'))
+const loadExportExcel = () => import('../components/import-export/ExportExcel.vue')
+const ExportExcel = defineAsyncComponent(loadExportExcel)
 
 const API = '/api'
 
@@ -185,6 +187,8 @@ export default {
       onAfterUndo: (label) => { inst.proxy.loadAll(); n(label ? `已撤销：${label}` : '已撤销') },
       onAfterRedo: (label) => { inst.proxy.loadAll(); n(label ? `已重做：${label}` : '已重做') }
     })
+    // 暴露给模板：v-preload 的绑值在渲染函数里求值，模块作用域的加载器不挂实例会告警
+    return { loadAddScoreDialog, loadExportExcel }
   },
   // 懒加载弹窗保活：首次打开后保持挂载，关闭只降 visible，保留退出动画
   watch: {

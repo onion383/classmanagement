@@ -44,7 +44,7 @@
           :sortOrder="sortOrder"
         />
       </div>
-      <div v-else class="text-center py-6 text-text-muted">请选择一个文件进行解析</div>
+      <div v-else class="text-center py-6 text-text-secondary">请选择一个文件进行解析</div>
       <!-- 底部按钮 -->
       <div class="flex justify-between items-center mt-4">
         <span class="text-sm text-text-secondary">共 {{ previewRows.length }} 行</span>

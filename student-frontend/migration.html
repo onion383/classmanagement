@@ -1,0 +1,21 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>迁移数据库</title>
+  <style>
+    * { user-select: none; -webkit-user-select: none; }
+    /* 与主窗口同构：不强制屏蔽主题背景图，让毛玻璃主题的全局背景（--bg-image + 遮罩）正常绘制，
+       卡片以半透明毛玻璃浮在其上。此处仅设透明兜底，优先级低于主题规则，不会覆盖背景图。 */
+    html, body { margin: 0; padding: 0; overflow: hidden; width: 100%; height: 100%; background: transparent; }
+    /* 挂载根节点必须撑满：否则 .mig-wrap/.mig-card 的 height:100% 失去参照退化为内容高度，
+       卡片下方会露出窗口背景。这里定死满高，卡片随之铺满整窗，多余空间由内容区吸收。 */
+    #migration-app { width: 100%; height: 100%; }
+  </style>
+</head>
+<body>
+  <div id="migration-app"></div>
+  <script type="module" src="/src/migration/main.js"></script>
+</body>
+</html>

@@ -29,6 +29,9 @@ export default defineConfig({
         './src/composables/useDashboardData.js',
         './src/desktop-widget/main.js',
         './src/desktop-widget/DesktopWidget.vue',
+        // 首次安装引导窗口：全新安装首屏，提前编译避免引导页白屏
+        './src/setup/main.js',
+        './src/setup/Setup.vue',
       ],
     },
     https: {
@@ -57,6 +60,8 @@ export default defineConfig({
         main: path.resolve(__dirname, 'index.html'),
         widget: path.resolve(__dirname, 'widget.html'),
         'desktop-widget': path.resolve(__dirname, 'desktop-widget.html'),
+        migration: path.resolve(__dirname, 'migration.html'),
+        setup: path.resolve(__dirname, 'setup.html'),
       },
     }
   }

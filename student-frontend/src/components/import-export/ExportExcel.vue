@@ -107,13 +107,18 @@ export default {
     effectiveVisible() { return this.isControlled ? this.isVisible : this.visible; }
   },
   watch: {
-    effectiveVisible(val) {
-      if (val) {
-        this.selectedColumns = this.fields.map(f => f.name);
-        this.selectedGroups = this.groupSource ? this.groupSource.groups.map((_, i) => i) : [];
-        this.rowMode = 'all';
-        this.exportFormat = 'html';
-        this.filename = this.defaultFilename;
+    // immediate：挂载时（含 v-if 懒加载后首次可见）即初始化默认全选，
+    // 否则首次打开弹窗时 selectedColumns 为空，需开关一次才补全
+    effectiveVisible: {
+      immediate: true,
+      handler(val) {
+        if (val) {
+          this.selectedColumns = this.fields.map(f => f.name);
+          this.selectedGroups = this.groupSource ? this.groupSource.groups.map((_, i) => i) : [];
+          this.rowMode = 'all';
+          this.exportFormat = 'html';
+          this.filename = this.defaultFilename;
+        }
       }
     }
   },
@@ -200,6 +205,10 @@ export default {
           defaultName,
           data: arrayBuffer
         })
+        if (result && !result.canceled && result.filePath) {
+          // 导出成功后用系统默认应用打开文件
+          window.electron.invoke('open-file', { filePath: result.filePath }).catch(() => {})
+        }
         return !!result && !result.canceled
       }
       // 浏览器环境：直接触发下载

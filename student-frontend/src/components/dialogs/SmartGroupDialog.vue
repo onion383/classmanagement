@@ -2,7 +2,7 @@
   <Teleport to="body">
   <Transition name="dialog">
   <div v-if="visible" class="fixed inset-0 bg-black/30 z-50 flex items-center justify-center">
-    <div class="bg-surface rounded-lg p-5 shadow-card dialog-card flex flex-col overflow-hidden" style="width: 860px; height: 620px; max-width: 90vw;">
+    <div class="bg-surface rounded-xl p-5 shadow-card dialog-card flex flex-col overflow-hidden" style="width: 860px; height: 620px; max-width: 90vw;">
       <h3 class="text-lg font-bold mb-4">🧠 智能分组</h3>
 
       <!-- 新同学确认：小组里有班级学生信息表不存在的名字时提示 -->
@@ -18,11 +18,11 @@
       <!-- 流水线条件（拖入下方选项添加，拖动手柄调整顺序） -->
       <div class="mb-3">
         <div class="flex items-center justify-between mb-2">
-          <label class="text-sm font-medium block">流水线条件</label>
+          <label class="text-sm font-medium block">排表条件</label>
           <button @click="startArrange" class="bg-primary text-text-inverse px-3 py-1.5 rounded border-none cursor-pointer text-sm">{{ arranged ? '🔀 换一换' : '▶ 开始排表' }}</button>
         </div>
         <div
-          class="border border-dashed border-border rounded p-2 bg-surface-hover min-h-[44px]"
+          class="border border-dashed border-border rounded-lg p-2 bg-surface-hover min-h-[44px]"
           @dragover.prevent
           @drop="boxDrop"
         >

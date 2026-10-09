@@ -33,7 +33,6 @@ router.post('/export', auth(), (req, res) => {
     if (!user) return res.status(401).json({ error: '账号不存在' });
 
     const hasPassword = !!user.password;
-    const wantEncrypt = encrypt === '1';
     // 有密码账号：必须提供并校验正确的登录密码
     if (hasPassword) {
       if (!password) return res.status(400).json({ error: '请输入登录密码以导出数据库' });
@@ -44,12 +43,15 @@ router.post('/export', auth(), (req, res) => {
     // 无密码账号：无需密码校验。
 
     // 解析用于包裹库钥匙的「导出密码」：
-    //   - 勾选加密：
+    //   - 勾选加密且源库本身是加密库：
     //       有密码账号：dbPassword 留空则默认用账号密码；填了则以输入框为准。
     //       无密码账号：必须提供 dbPassword（否则没有口令可供派生包裹钥匙）。
-    //   - 不勾选加密：库钥匙明文随包带回，换机免密恢复。
+    //   - 不勾选加密、或源库是明文库：库钥匙明文随包带回（明文库无钥匙，无需任何口令）。
+    const bundle = dbManager.exportBundle(slug);
+    const wantEncrypt = encrypt === '1';
+
     let wrapPwd = null;
-    if (wantEncrypt) {
+    if (bundle.encrypted && wantEncrypt) {
       if (hasPassword) {
         wrapPwd = dbPassword && dbPassword.length ? dbPassword : password;
       } else {
@@ -60,15 +62,19 @@ router.post('/export', auth(), (req, res) => {
       }
     }
 
-    const bundle = dbManager.exportBundle(slug);
     const data = require('fs').readFileSync(bundle.filePath).toString('base64');
     const out = {
       version: 2,
       slug: bundle.slug,
       username: bundle.username,
       data,
+      // 备份包是否来自加密库：明文库恢复时无需任何密钥
+      encrypted: bundle.encrypted,
     };
-    if (wantEncrypt) {
+    if (!bundle.encrypted) {
+      // 明文库数据本身不加密，「用导出密码加密」对该库无意义，包内不携带库钥匙
+      out.key = null;
+    } else if (wantEncrypt) {
       // 库钥匙用导出密码派生钥匙包裹，换机后可用该密码解包恢复
       out.wrappedByPassword = dbManager.wrapKeyBySecret(bundle.key, wrapPwd);
     } else {
@@ -85,13 +91,51 @@ router.post('/export', auth(), (req, res) => {
 // 校验库身份：仅允许与当前登录账号一致的备份包。
 router.post('/restore', auth(), (req, res) => {
   try {
-    const { data, wrappedByPassword, wrappedByMnemonic, password, mnemonic, key } = req.body || {};
+    const { data, wrappedByPassword, wrappedByMnemonic, password, mnemonic, key, encrypted } = req.body || {};
     const curSlug = req.user && req.user.dbSlug ? req.user.dbSlug : 'default';
-    const dbKey = dbManager.decryptBundleKey({ key, wrappedByPassword, wrappedByMnemonic, password, mnemonic });
-    const result = dbManager.restoreBundle({ slug: curSlug, username: req.user.username, data, dbKey });
+    // 备份包未标注 encrypted 时按旧格式（加密库）处理，保证兼容
+    const isEncrypted = !(encrypted === false || encrypted === 0 || encrypted === '0');
+    const dbKey = isEncrypted
+      ? dbManager.decryptBundleKey({ key, wrappedByPassword, wrappedByMnemonic, password, mnemonic })
+      : null;
+    const result = dbManager.restoreBundle({ slug: curSlug, username: req.user.username, data, dbKey, encrypted: isEncrypted });
     res.json({ message: '恢复成功', slug: result.slug });
   } catch (err) {
     res.status(500).json({ error: err.message });
+  }
+});
+
+// 当前登录账号数据库的落盘加密状态（供设置页展示）。
+router.get('/db-encryption', auth(), (req, res) => {
+  try {
+    const slug = req.user && req.user.dbSlug ? req.user.dbSlug : 'default';
+    const rec = dbManager.registryFindBySlug(slug);
+    res.json({ encrypted: !rec || rec.encrypted !== 0 });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// 就地切换当前登录账号数据库的加密方式（加密 <-> 明文）。
+// 安全约束：slug 只从 JWT 取，绝不接受客户端传入的 slug，保证只改本人库、绝不波及其它账号。
+// 以 NDJSON 流逐步上报进度（校验文件 / 转换数据库 / 校验文件），最后一行为最终结果。
+router.post('/db-encryption', auth(), async (req, res) => {
+  const slug = req.user && req.user.dbSlug ? req.user.dbSlug : 'default';
+  const e = (req.body || {}).encrypt;
+  const targetEncrypted = e === true || e === 1 || e === '1';
+  res.setHeader('Content-Type', 'application/x-ndjson; charset=utf-8');
+  res.setHeader('Cache-Control', 'no-cache, no-transform');
+  res.setHeader('X-Accel-Buffering', 'no');
+  const write = (obj) => { try { res.write(JSON.stringify(obj) + '\n'); } catch (_) { /* 连接已断，忽略 */ } };
+  try {
+    const result = await dbManager.convertDbEncryption(slug, targetEncrypted, (p) => {
+      write({ type: 'progress', phase: p.phase, detail: p.detail, percent: p.percent });
+    });
+    write({ type: 'done', ok: true, changed: result.changed, encrypted: result.encrypted });
+  } catch (err) {
+    write({ type: 'done', ok: false, message: err.message || String(err) });
+  } finally {
+    res.end();
   }
 });
 
@@ -101,8 +145,12 @@ router.post('/restore', auth(), (req, res) => {
 // 以免误恢复盖掉本机已有数据。前端确认后带 confirm:true 才会真正落盘。
 router.post('/restore-offline', (req, res) => {
   try {
-    const { data, slug, wrappedByPassword, wrappedByMnemonic, password, mnemonic, key } = req.body || {};
-    const dbKey = dbManager.decryptBundleKey({ key, wrappedByPassword, wrappedByMnemonic, password, mnemonic });
+    const { data, slug, wrappedByPassword, wrappedByMnemonic, password, mnemonic, key, encrypted } = req.body || {};
+    // 备份包未标注 encrypted 时按旧格式（加密库）处理，保证兼容
+    const isEncrypted = !(encrypted === false || encrypted === 0 || encrypted === '0');
+    const dbKey = isEncrypted
+      ? dbManager.decryptBundleKey({ key, wrappedByPassword, wrappedByMnemonic, password, mnemonic })
+      : null;
     // 用备份包自带的账号名登记（index 中该账号才可登录）
     const username = req.body && req.body.username;
 
@@ -115,7 +163,7 @@ router.post('/restore-offline', (req, res) => {
       });
     }
 
-    const result = dbManager.restoreBundle({ slug, username, data, dbKey });
+    const result = dbManager.restoreBundle({ slug, username, data, dbKey, encrypted: isEncrypted });
     // 恢复成功后直接签发登录态，前端据此跳转首页，无需再次手动登录
     const token = jwt.sign(
       { userId: 1, username, role: 'teacher', dbSlug: result.slug || slug },

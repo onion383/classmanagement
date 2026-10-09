@@ -35,3 +35,11 @@
   content-visibility: auto;
   contain-intrinsic-size: 1px 120px;
 }
+
+/* 弹窗遮罩：透明底（不加纯色压暗）+ 背景模糊（基础/极简主题），磨砂虚化下层页面；
+   与毛玻璃/Win11 的处理一致。
+   排除 bg-black/9(深色查看器遮罩，如相册全屏看图需保持深底)。 */
+:root:not([data-theme="glass"]):not([data-theme="win11"]) [class*="inset-0"][class*="bg-black/"]:not([class*="bg-black/9"]) {
+  background-color: rgba(0, 0, 0, 0) !important;
+  backdrop-filter: blur(18px) saturate(1.1);
+}

@@ -1,11 +1,8 @@
 <template>
-  <div class="flex flex-col h-screen overflow-hidden">
-    <!-- 无边框自绘标题栏：仅当「Win11 主题」（无边框透明窗口）时渲染，
-         其余主题为系统原生边框，自带标题栏/最小化/最大化/关闭。 -->
-    <div v-if="isWin11" class="window-title-bar flex-shrink-0 select-none" style="height:36px;">
-      <div class="flex items-center" style="height:100%;">
-        <span class="px-3 text-sm font-semibold truncate" style="line-height:36px;">班级管理系统</span>
-      </div>
+  <div class="app-root flex flex-col h-screen overflow-hidden">
+    <!-- 自绘标题栏（所有主题统一）：主窗口为无边框透明窗口，标题栏承载窗口控制，整条可拖动。
+     应用名已放在侧边栏顶部，标题栏本身不再显示文字。 -->
+    <div class="window-title-bar flex-shrink-0 select-none" style="height:44px;">
       <div class="window-controls flex items-center" style="height:100%;">
         <button class="win-btn" title="最小化" @click="winMinimize">
           <Minus :size="14" stroke-width="1.5" />
@@ -27,9 +24,9 @@
       </div>
 
       <!-- 其他页面：带侧边栏布局 -->
-      <div v-else class="flex w-full">
+      <div v-else class="flex w-full min-w-0">
         <Sidebar />
-        <main class="flex-1 p-6 bg-bg overflow-auto">
+        <main class="flex-1 min-w-0 p-6 bg-bg overflow-auto">
           <router-view v-slot="{ Component }">
             <KeepAlive :max="10">
               <component :is="Component" />
@@ -104,7 +101,9 @@ import Sidebar from './components/layout/Sidebar.vue'
 import NotificationToast from './components/base/NotificationToast.vue'
 import ShutdownMenuDialog from './components/base/ShutdownMenuDialog.vue'
 import { useThemeStore } from './stores/theme'
+import { useNotification } from './composables/useNotification'
 import { defineAsyncComponent, h } from 'vue'
+import { prefetchRoutes } from './router'
 import { Minus, Square, X } from '@lucide/vue'
 
 // 异步组件：加载中/失败展示占位文案，避免浮窗点开就消失却毫无反馈
@@ -130,7 +129,6 @@ export default {
       // 图标位置：用 CSS transform translate 做偏移，基准位置始终 right/bottom: 1.5rem
       iconTranslate: { x: 0, y: 0 },
       iconDrag: null,
-      iconMoved: false,
       // 关闭选择弹窗状态
       shutdownMenuVisible: false,
       shutdownHasToolbox: false,
@@ -140,10 +138,6 @@ export default {
     }
   },
   computed: {
-    // 仅「Win11 主题」使用无边框透明窗口，需要自绘标题栏；其余主题由系统原生边框接管
-    isWin11() {
-      return this.themeStore.currentTheme === 'win11'
-    },
     // 图标用 right/bottom 基准 + transform 偏移，拖动时只改 transform，不触发布局，也不回弹
     // 显式写 position: fixed，覆盖 theme-glass.css 中 button { position: relative }
     iconStyle() {
@@ -174,16 +168,26 @@ export default {
         if (window.electron?.send) window.electron.send('widgets-ready', enabled)
       } catch (_) {}
     }
+    // 空闲预热其余页面路由 chunk：让侧边栏跳转不再等 chunk 下载/解析。
+    // 未登录（登录页）时不预热业务页面，避免无谓的后台解析。
+    const startIdlePrefetch = () => {
+      if (this.$route.path === '/login') return
+      prefetchRoutes()
+    }
     if (typeof window.requestIdleCallback === 'function') {
       // 双重 idle：确保首帧渲染与首屏请求都让出一段空闲后才上报
       window.requestIdleCallback(() => window.requestIdleCallback(reportWidgetsReady))
+      // 再让出一轮空闲后预热路由 chunk，避免与首屏请求/组件创建抢资源
+      window.requestIdleCallback(() => window.requestIdleCallback(startIdlePrefetch), { timeout: 4000 })
     } else {
       reportWidgetsReady()
+      setTimeout(startIdlePrefetch, 1500)
     }
   },
   created() {
     this.themeStore = useThemeStore()
     this.setupShutdownIpc()
+    this.fetchPendingNotification()
   },
   beforeUnmount() {
     window.removeEventListener('resize', this.onWindowResize)
@@ -213,7 +217,7 @@ export default {
         startLeft: rect.left,
         startTop: rect.top,
       }
-      this.iconMoved = false
+      this._iconMoved = false
       document.addEventListener('mousemove', this.onDragIcon, { capture: true })
       document.addEventListener('mouseup', this.stopDragIcon, { capture: true })
       e.preventDefault()
@@ -221,32 +225,39 @@ export default {
     },
     onDragIcon(e) {
       if (!this.iconDrag) return
-      const { startX, startY, startLeft, startTop } = this.iconDrag
-      const dx = e.clientX - startX
-      const dy = e.clientY - startY
-      if (Math.abs(dx) > 2 || Math.abs(dy) > 2) this.iconMoved = true
+      const drag = this.iconDrag
+      const dx = e.clientX - drag.startX
+      const dy = e.clientY - drag.startY
+      if (Math.abs(dx) > 2 || Math.abs(dy) > 2) this._iconMoved = true
       // 计算新左上角位置并钳制在可视区内（留出 12px 边距）
       const size = 48
       const m = 12
       const vw = window.innerWidth
       const vh = window.innerHeight
-      let newLeft = startLeft + dx
-      let newTop = startTop + dy
+      let newLeft = drag.startLeft + dx
+      let newTop = drag.startTop + dy
       newLeft = Math.max(m, Math.min(newLeft, vw - size - m))
       newTop = Math.max(m, Math.min(newTop, vh - size - m))
       // translate = 新位置 - 基准位置（基准是 right=1.5rem/bottom=1.5rem 时的 left/top）
       const baseLeft = vw - size - 24
       const baseTop = vh - size - 24
-      this.iconTranslate = { x: newLeft - baseLeft, y: newTop - baseTop }
+      drag.x = newLeft - baseLeft
+      drag.y = newTop - baseTop
+      // 直接改 DOM transform，避免每帧写响应式导致根组件重渲染；松手时再同步回 iconTranslate
+      const el = this.$refs.aiIcon
+      if (el) el.style.transform = `translate(${drag.x}px, ${drag.y}px)`
     },
     stopDragIcon() {
       document.removeEventListener('mousemove', this.onDragIcon, { capture: true })
       document.removeEventListener('mouseup', this.stopDragIcon, { capture: true })
+      const drag = this.iconDrag
+      // 松手后把最终位移同步回响应式状态，保持后续窗口缩放等逻辑一致
+      if (drag && drag.x != null) this.iconTranslate = { x: drag.x, y: drag.y }
       this.iconDrag = null
     },
     // 图标点击：拖动超过阈值则不触发；否则切换浮窗打开/关闭
     onIconClick() {
-      if (this.iconMoved) { this.iconMoved = false; return }
+      if (this._iconMoved) { this._iconMoved = false; return }
       this.assistantOpen = !this.assistantOpen
     },
     clientW() { return document.documentElement.clientWidth || window.innerWidth || 800 },
@@ -292,6 +303,19 @@ export default {
     },
     winClose() {
       window.electron?.send('win-close')
+    },
+
+    // 取走主进程暂存的待展示提示（如数据库迁移完成）。迁移会重建主窗口，
+    // 提示无法在迁移时推送到尚未加载的渲染层，故由主窗口加载后主动取走再弹提示条。
+    async fetchPendingNotification() {
+      try {
+        const res = await window.electron?.invoke('get-pending-notification')
+        if (res && res.message) {
+          const notify = useNotification()
+          const fn = { success: notify.success, error: notify.error, warning: notify.warning, info: notify.info }[res.type] || notify.info
+          fn(res.message)
+        }
+      } catch (_) {}
     },
 
     // ---- 关闭选择弹窗（复用现有弹窗动画，替代主进程原生菜单） ----
@@ -353,7 +377,7 @@ export default {
   position: relative;
   display: flex;
   align-items: center;
-  justify-content: space-between;
+  justify-content: flex-end; /* 控制按钮靠右，左侧为可拖动空白区 */
   background: transparent;
   -webkit-app-region: drag; /* 整条可拖动窗口 */
   user-select: none;
@@ -368,8 +392,8 @@ export default {
   align-items: center;
   justify-content: center;
   width: 46px;
-  height: 34px;
-  border: none;
+  height: 100%; /* 满高，与加高后的标题栏对齐 */
+  border: none !important; /* 覆盖毛玻璃/Win11 主题全局 button 边框（theme-glass.css） */
   background: transparent;
   color: inherit;
   cursor: pointer;

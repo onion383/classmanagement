@@ -37,3 +37,17 @@
   --radius-lg: 0px;
   --radius-card: 0px;
 }
+
+/* ========== 无边框透明窗口（窗外亚克力）适配：极简主题 ==========
+   body 透明透出桌面亚克力；内容区 main 叠加半透明白磨砂淡色，保留极简的
+   白色清爽感与可读性，同时透出亚克力。 */
+:root[data-theme="minimal"] body {
+  background-color: transparent;
+}
+:root[data-theme="minimal"] main {
+  background-color: rgba(255, 255, 255, 0.6);
+}
+:root[data-theme="minimal"] .window-title-bar {
+  background: rgba(255, 255, 255, 0.85);
+  border-bottom: 1px solid #e5e7eb;
+}

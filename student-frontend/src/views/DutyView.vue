@@ -13,8 +13,8 @@
           <section class="mb-8">
             <h2 class="text-xl font-semibold mb-4 flex items-center gap-2"><IconGlyph name="clipboard" :size="20" /> 当前值日表</h2>
             <div class="mb-4 flex flex-wrap items-center gap-3 opbar">
-              <button @click="settingsVisible = true" class="bg-primary text-text-inverse px-4 py-2 rounded flex items-center gap-1.5"><IconGlyph name="settings" :size="14" tint="current" /> 设置</button>
-              <button @click="arrangeVisible = true" class="bg-primary text-text-inverse px-4 py-2 rounded flex items-center gap-1.5"><IconGlyph name="zap" :size="14" tint="current" /> 智能排表</button>
+              <button @click="settingsVisible = true" v-preload="loadSettingsDialog" class="bg-primary text-text-inverse px-4 py-2 rounded flex items-center gap-1.5"><IconGlyph name="settings" :size="14" tint="current" /> 设置</button>
+              <button @click="arrangeVisible = true" v-preload="loadArrangementDialog" class="bg-primary text-text-inverse px-4 py-2 rounded">🧠 智能排表</button>
               <button @click="refreshActive" class="bg-text-muted text-text-inverse px-4 py-2 rounded flex items-center gap-1.5 btn-refresh"><IconGlyph name="refresh" :size="14" tint="current" /> 刷新</button>
               <button @click="applyMasterToActive" class="bg-primary text-text-inverse px-4 py-2 rounded flex items-center gap-1.5"><IconGlyph name="download" :size="14" tint="current" /> 从模板导入</button>
               <button @click="activeExportVisible = true" class="bg-warning text-text-inverse px-4 py-2 rounded flex items-center gap-1.5"><IconGlyph name="download" :size="14" tint="current" /> 导出值日表</button>
@@ -72,17 +72,49 @@
           </section>
         </div>
 
-        <div v-else-if="activeTab === 'history'">
-          <div v-if="historyLoading" class="skeleton-block"></div>
-          <EmptySnapshot v-else-if="!historySnapshot" />
-          <GridView v-else :col-headers="historyDays" :rows="historyRows" :hide-meta-columns="true" :show-row-number="true" row-header-label="劳动项目" :min-table-height="200" />
-          <WeekSwitcher v-model:currentWeek="historyCurrentWeek" :weeks="historyWeeks" @update:currentWeek="loadHistorySnapshot" />
-          <div class="text-center mt-4">
-            <button @click="captureHistorySnapshot" class="bg-primary text-text-inverse px-4 py-2 rounded">📸 保存本周快照</button>
-          </div>
+        <div v-else-if="activeTab === 'history'" class="relative">
+          <Transition :name="slideDir">
+            <div :key="historyCurrentWeek" class="history-content">
+              <div v-if="historyLoading" class="skeleton-block"></div>
+              <EmptySnapshot v-else-if="!historySnapshot" />
+              <GridView v-else :col-headers="historyDays" :rows="historyRows" :hide-meta-columns="true" :show-row-number="true" row-header-label="劳动项目" :min-table-height="200" />
+            </div>
+          </Transition>
+          <!-- 快照菜单栏：周切换 + 下拉框 + 保存/删除按钮，同处一条毛玻璃栏 -->
+          <WeekSwitcher
+            v-model:currentWeek="historyCurrentWeek"
+            :weeks="historyWeeks"
+            @update:currentWeek="loadHistorySnapshot"
+            @direction="onSwitchWeek"
+          >
+            <template #actions>
+              <button
+                @click="captureHistorySnapshot"
+                class="bg-primary text-text-inverse px-3 py-1.5 rounded whitespace-nowrap cursor-pointer"
+              >📸 保存本周快照</button>
+              <button
+                @click="requestDeleteHistorySnapshot"
+                :disabled="!canDeleteHistorySnapshot"
+                class="bg-danger text-text-inverse px-3 py-1.5 rounded whitespace-nowrap cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"
+              >🗑 删除本周快照</button>
+            </template>
+          </WeekSwitcher>
         </div>
       </template>
     </Tabs>
+
+    <!-- 删除历史快照确认弹窗 -->
+    <ConfirmDialog
+      v-if="deleteSnapshotMounted"
+      :visible="deleteSnapshotVisible"
+      title="删除历史快照"
+      :message="deleteSnapshotMessage"
+      type="confirm"
+      :showCancel="true"
+      confirmText="删除"
+      @confirm="confirmDeleteHistorySnapshot"
+      @cancel="deleteSnapshotVisible = false"
+    />
 
     <!-- 值日设置弹窗 -->
     <DutySettingsDialog
@@ -119,10 +151,14 @@ import { useNotification } from '../composables/useNotification.js'
 import { useUndoShortcut, recordGridSnapshotUndo } from '../composables/useUndo.js'
 import { syncStudentNamesFromRows, syncStudentNames } from '../composables/useSyncStudentNames.js'
 
-// 弹窗类组件懒加载：打开时才加载对应 chunk
-const DutySettingsDialog = defineAsyncComponent(() => import('../components/dialogs/DutySettingsDialog.vue'))
-const DutyArrangementDialog = defineAsyncComponent(() => import('../components/dialogs/DutyArrangementDialog.vue'))
+// 弹窗类组件懒加载：打开时才加载对应 chunk。loader 抽出为命名函数，
+// 可用 v-preload="loadXxx" 在悬停按钮时预取，点击时即时弹出。
+const loadSettingsDialog = () => import('../components/dialogs/DutySettingsDialog.vue')
+const DutySettingsDialog = defineAsyncComponent(loadSettingsDialog)
+const loadArrangementDialog = () => import('../components/dialogs/DutyArrangementDialog.vue')
+const DutyArrangementDialog = defineAsyncComponent(loadArrangementDialog)
 const ExportExcel = defineAsyncComponent(() => import('../components/import-export/ExportExcel.vue'))
+const ConfirmDialog = defineAsyncComponent(() => import('../components/base/ConfirmDialog.vue'))
 
 const API_BASE = '/api'
 const { success: notifySuccess, error: notifyError } = useNotification()
@@ -144,6 +180,9 @@ watch(() => settingsVisible.value, v => { if (v) settingsMounted.value = true })
 watch(() => activeExportVisible.value, v => { if (v) activeExportMounted.value = true })
 watch(() => masterExportVisible.value, v => { if (v) masterExportMounted.value = true })
 watch(() => arrangeVisible.value, v => { if (v) arrangeMounted.value = true })
+const deleteSnapshotVisible = ref(false)
+const deleteSnapshotMounted = ref(false)
+watch(() => deleteSnapshotVisible.value, v => { if (v) deleteSnapshotMounted.value = true })
 const tabItems = [
   { label: '值日管理', value: 'manage' },
   { label: '历史记录', value: 'history' }
@@ -300,10 +339,12 @@ function syncNewNamesFromRows(newRows) {
 function makeCellsUpdate(cellsRef, persist, table) {
   return (newRows) => {
     syncNewNamesFromRows(newRows) // 输入的人名自动同步到学生管理
-    const prev = JSON.parse(JSON.stringify(cellsRef.value))
-    cellsRef.value = reconstructCells(newRows, settingsDays.value)
-    const label = diffCellsLabel(prev, cellsRef.value)
-    if (label) recordGridSnapshotUndo('值日表', table, prev, JSON.parse(JSON.stringify(cellsRef.value)), label)
+    // 旧值会被整体替换为新对象，无需深拷贝即可作为撤销快照（recordGridSnapshotUndo 同步序列化，不受后续就地修改影响）
+    const prev = cellsRef.value
+    const next = reconstructCells(newRows, settingsDays.value)
+    cellsRef.value = next
+    const label = diffCellsLabel(prev, next)
+    if (label) recordGridSnapshotUndo('值日表', table, prev, next, label)
     persist()
   }
 }
@@ -427,6 +468,9 @@ const historyWeeks = ref([])
 const historyCurrentWeek = ref('')
 const historySnapshot = ref(null)
 const historyLoading = ref(false)
+// 周切换滑动方向：上一周="prev" 从右滑入，下一周="next" 从左滑入（应用于历史表格）
+const slideDir = ref('next')
+function onSwitchWeek(dir) { slideDir.value = dir }
 const historyItems = ref([])
 const historyDays = ref([])
 const historyCells = ref({})
@@ -486,6 +530,36 @@ async function captureHistorySnapshot() {
   } catch (e) { notifyError('保存失败'); console.error(e) }
 }
 
+// 删除的是当前下拉框选中的那一周（也就是正在看的那份快照）
+const canDeleteHistorySnapshot = computed(() =>
+  !!historyCurrentWeek.value && historyWeeks.value.some(w => w.week_start === historyCurrentWeek.value)
+)
+const deleteSnapshotMessage = computed(() => {
+  const w = historyCurrentWeek.value
+  if (!w) return ''
+  const start = new Date(w)
+  const end = new Date(start)
+  end.setDate(end.getDate() + 6)
+  return `确定删除 ${start.toISOString().slice(0, 10)} ~ ${end.toISOString().slice(0, 10)} 的历史快照吗？删除后不可恢复。`
+})
+function requestDeleteHistorySnapshot() {
+  if (!canDeleteHistorySnapshot.value) return
+  deleteSnapshotVisible.value = true
+}
+async function confirmDeleteHistorySnapshot() {
+  deleteSnapshotVisible.value = false
+  const week = historyCurrentWeek.value
+  if (!week) return
+  try {
+    await axios.delete(`${API_BASE}/duty/history/${week}`)
+    notifySuccess('该周快照已删除')
+    if (historyCurrentWeek.value === week) historySnapshot.value = null
+    await fetchHistoryWeeks()
+  } catch (e) {
+    notifyError('删除快照失败，请重试'); console.error(e)
+  }
+}
+
 watch(activeTab, (newTab) => { if (newTab === 'history') fetchHistoryWeeks() })
 
 onMounted(async () => {
@@ -493,3 +567,25 @@ onMounted(async () => {
   await Promise.all([loadActive(), loadMaster(), fetchAllStudents()])
 })
 </script>
+
+<style scoped>
+/* 历史表格周切换滑动动画：新旧表同向并行滑动（推拉感），不影响 WeekSwitcher */
+.history-content { width: 100%; }
+.next-enter-active, .next-leave-active,
+.prev-enter-active, .prev-leave-active {
+  transition: transform 0.25s ease, opacity 0.25s ease;
+}
+/* 退场表绝对定位到容器顶部，与进场表重叠实现并行滑动 */
+.next-leave-active, .prev-leave-active {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+}
+/* 下一周：向右推进（新表从左侧跟进向右移动，旧表向右滑出，同方向） */
+.next-enter-from { transform: translateX(-60px); opacity: 0; }
+.next-leave-to   { transform: translateX(60px); opacity: 0; }
+/* 上一周：向左推进（新表从右侧跟进向左移动，旧表向左滑出，同方向） */
+.prev-enter-from { transform: translateX(60px); opacity: 0; }
+.prev-leave-to   { transform: translateX(-60px); opacity: 0; }
+</style>

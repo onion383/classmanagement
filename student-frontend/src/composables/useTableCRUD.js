@@ -43,7 +43,20 @@ export function useTableCRUD(apiBase, defaultFields, options = {}) {
   const dedupeDialogVisible = ref(false)
 
   // ==================== Computed ====================
+  // 性能探针：displayRows 的求值包含「过滤+排序+为每行新建对象」，是大表格筛选/排序的核心成本。
+  // 用 performance.mark/measure 记录，配合 perf/probe.js 按交互时间窗归因（原生 API，开销可忽略；
+  // 不支持时静默跳过，不影响功能）。
+  const perfMark = (name) => {
+    if (typeof performance === 'undefined' || !performance.mark) return
+    try { performance.mark(name) } catch (_) { /* 忽略 */ }
+  }
+  const perfMeasure = (name, startMark) => {
+    if (typeof performance === 'undefined' || !performance.measure) return
+    try { performance.measure(name, startMark) } catch (_) { /* 忽略 */ }
+  }
+
   const displayRows = computed(() => {
+    perfMark('perf:displayRows:start')
     let filtered = rows.value
     if (searchField.value && searchKeywordDebounced.value) {
       const kw = searchKeywordDebounced.value.toLowerCase()
@@ -70,7 +83,12 @@ export function useTableCRUD(apiBase, defaultFields, options = {}) {
       _rowKey: s.id,
       _displayIndex: idx + 1,
     }))
-    if (!newRow.value) return list
+    const finish = (result) => {
+      perfMark('perf:displayRows:end')
+      perfMeasure('displayRows', 'perf:displayRows:start', 'perf:displayRows:end')
+      return result
+    }
+    if (!newRow.value) return finish(list)
     const insertAt = newRow.value.atPosition
     let insertIdx
     if (insertAt === null || insertAt === undefined) {
@@ -80,7 +98,7 @@ export function useTableCRUD(apiBase, defaultFields, options = {}) {
       if (insertIdx === -1) insertIdx = list.length
     }
     list.splice(insertIdx, 0, newRow.value)
-    return list
+    return finish(list)
   })
 
   const visibleFields = computed(() => {
@@ -605,7 +623,7 @@ export function useTableCRUD(apiBase, defaultFields, options = {}) {
   return {
     rows, fields, newRow, editingCell,
     contextMenu, dialog, columnForm, renameOldName,
-    sortField, sortOrder, searchField, searchKeyword,
+    sortField, sortOrder, searchField, searchKeyword, searchKeywordDebounced,
     dialogCallback, selectedCount, clipboard, selectedRowKeys,
     importDialogVisible, dedupeDialogVisible,
     displayRows, visibleFields, allBusinessFields,

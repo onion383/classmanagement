@@ -29,6 +29,12 @@ const validSendChannels = [
   'desktop-widget-enabled',
   // 主窗口渲染层「首帧真正空闲」回报：主进程据此建工具箱浮窗与（如启用）桌面小组件
   'widgets-ready',
+  // 数据库迁移进度窗口：渲染层挂载完成回报 / 失败后点击「返回主界面」
+  'migration-ready',
+  'migration-dismiss',
+  // 首次安装引导向导：渲染层挂载完成回报 / 完成引导回报
+  'setup-ready',
+  'setup-complete',
 ]
 
 // 白名单：仅允许以下请求-响应式动请求通道（对应 ipcMain.handle）
@@ -39,6 +45,7 @@ const validInvokeChannels = [
   'save-file',
   'screenshot-capture',
   'note-save',
+  'open-file',
   'open-folder',
   'get-session-widget-visible',
   'get-usb-auto-open',
@@ -54,6 +61,14 @@ const validInvokeChannels = [
   'get-data-directories',
   'set-data-dir',
   'set-thumbs-dir',
+  // 数据库加密：切换当前账号库的落盘加密方式（复用迁移进度窗口流程）
+  'set-db-encryption',
+  // 首次安装引导向导：写入初始数据/缓存目录（不重开窗口，仅重启后端）
+  'set-initial-data-dir',
+  // 首次安装引导向导：读取当前预热进度/完成态（供晚挂载的渲染层补齐）
+  'get-setup-warmup',
+  // 主窗口加载后取走主进程暂存的待展示提示（如「数据库移动成功」）
+  'get-pending-notification',
 ]
 
 // 白名单：仅允许以下主进程 -> 渲染进程推送通道

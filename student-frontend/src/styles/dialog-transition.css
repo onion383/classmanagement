@@ -4,68 +4,68 @@
  *   2. 内部卡片元素加 class="dialog-card"
  *   3. 在组件里 import 本文件即可复用
  * 效果：
- *   打开：遮罩淡入 + 卡片淡入 + 模糊增强 + 95%→102%→100% 回弹缩放
- *   关闭：遮罩淡出 + 卡片淡出 + 模糊减弱 + 100%→95% 缩小
+ *   打开：遮罩淡入 + 卡片淡入 + 96%→101.5%→100% 回弹缩放
+ *   关闭：遮罩淡出 + 卡片淡出 + 100%→97% 缩小
  *
  * 说明：
- *   - 卡片在动画期间通过 will-change 提示 GPU 合成避免毛玻璃闪烁，动画结束后脱离图层保证文字清晰
- *   - 不使用 transform 或 will-change:transform，避免创建新的包含块导致内部 position:fixed 元素定位错乱
- *   - 毛玻璃卡片需自己带 backdrop-filter（这里用 CSS 变量 --glass-blur 控制强度）
+ *   - 不逐帧改 backdrop-filter（逐帧重算模糊极耗性能，会让弹窗打开发顿）
+ *   - 不使用 will-change:transform，避免创建新的包含块导致内部 position:fixed 元素定位错乱
+ *   - 毛玻璃卡片需自己带 backdrop-filter（静态，不参与动画）
  */
 
 /* ---------- 背景遮罩：淡入淡出（慢慢变暗） ---------- */
 .dialog-enter-active,
 .dialog-leave-active {
-  transition: opacity 0.28s ease;
+  transition: opacity 0.24s ease;
 }
 .dialog-enter-from,
 .dialog-leave-to {
   opacity: 0;
 }
 .dialog-leave-active {
-  transition: opacity 0.3s ease;
+  transition: opacity 0.25s ease;
 }
 
-/* ---------- 卡片：淡入 + 模糊增强 + 回弹缩放 ---------- */
+/* 遮罩使用 backdrop-filter 时，动画期间只提示 GPU 合成，动画结束即释放 */
+.dialog-enter-active,
+.dialog-leave-active {
+  will-change: opacity;
+}
+
+/* ---------- 卡片：淡入 + 回弹缩放 ----------
+ * 注意：这里刻意「不」过渡 backdrop-filter。
+ * 逐帧改变 blur 半径会让浏览器每帧重新模糊一次整块背景，在 Electron 下开销很大，
+ * 弹窗打开会明显发顿；卡片自身的毛玻璃静态保持不变，观感基本一致但快很多。 */
 .dialog-card {
-  animation: dialogCardIn 0.4s ease;
-  /* 始终提示 GPU 合成，避免动画期间频繁创建/销毁合成层。
-     will-change: opacity/backdrop-filter 不会创建新的包含块（与 transform 不同），
-     因此内部 position:fixed 元素定位不受影响。
-     毛玻璃文字清晰度不受 will-change 影响，动画前后保持一致。 */
-  will-change: opacity, backdrop-filter;
+  animation: dialogCardIn 0.34s ease;
   backface-visibility: hidden;
 }
 @keyframes dialogCardIn {
   0% {
     opacity: 0;
-    transform: scale(0.95);
-    backdrop-filter: blur(0px) saturate(1);
+    transform: scale(0.96);
   }
   70% {
     opacity: 1;
-    transform: scale(1.02);
+    transform: scale(1.015);
   }
   100% {
     opacity: 1;
     transform: scale(1);
-    backdrop-filter: blur(var(--glass-blur, 20px)) saturate(1.1);
   }
 }
 
-/* ---------- 关闭：卡片从 100% 缩到 95% 并淡出 ---------- */
+/* ---------- 关闭：卡片从 100% 缩到 97% 并淡出 ---------- */
 .dialog-leave-active .dialog-card {
-  animation: dialogCardOut 0.3s ease forwards;
+  animation: dialogCardOut 0.25s ease forwards;
 }
 @keyframes dialogCardOut {
   from {
     opacity: 1;
     transform: scale(1);
-    backdrop-filter: blur(var(--glass-blur, 20px)) saturate(1.1);
   }
   to {
     opacity: 0;
-    transform: scale(0.95);
-    backdrop-filter: blur(0px) saturate(1);
+    transform: scale(0.97);
   }
 }

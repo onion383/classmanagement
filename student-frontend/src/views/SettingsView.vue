@@ -108,6 +108,18 @@
             <span class="text-xs text-text-muted">影响侧边栏导航图标显示风格</span>
           </div>
 
+          <!-- 标题栏/侧边栏毛玻璃配色切换 -->
+          <div class="flex items-center gap-4 mb-6">
+            <label class="text-sm font-medium text-text w-16 flex-shrink-0">顶栏配色</label>
+            <AppSelect
+              v-model="topbarColor"
+              @change="onTopbarColorChange"
+              :options="topbarColorOptions"
+              class="w-56"
+            />
+            <span class="text-xs text-text-muted">标题栏与侧边栏的毛玻璃底色（深蓝 / 白色调）</span>
+          </div>
+
           <!-- 提示合并 -->
           <div class="flex items-center gap-4 mb-6">
             <label class="text-sm font-medium text-text w-16 flex-shrink-0">提示合并</label>
@@ -118,8 +130,8 @@
             <span class="text-xs text-text-muted">相同类型的重复提示合并为一条并计数，避免遮挡页面</span>
           </div>
 
-          <!-- 背景图片（仅毛玻璃主题） -->
-          <div v-if="currentTheme === 'glass'" class="border-t border-border pt-6 mt-6">
+          <!-- 背景图片（毛玻璃系主题：glass / glass2） -->
+          <div v-if="isGlassTheme" class="border-t border-border pt-6 mt-6">
             <h3 class="text-lg font-semibold text-text mb-4 flex items-center gap-2"><IconGlyph name="image" :size="18" /> 背景图片</h3>
             <div class="flex items-center gap-3 mb-2">
               <input
@@ -139,8 +151,8 @@
             </div>
           </div>
 
-          <!-- 透明度设置（仅毛玻璃主题） -->
-          <div v-if="currentTheme === 'glass'" class="border-t border-border pt-6 mt-6">
+          <!-- 透明度设置（毛玻璃系主题：glass / glass2） -->
+          <div v-if="isGlassTheme" class="border-t border-border pt-6 mt-6">
             <h3 class="text-lg font-semibold text-text mb-4 flex items-center gap-2"><IconGlyph name="sliders" :size="18" /> 透明度设置</h3>
             <div class="space-y-5">
               <div>
@@ -276,6 +288,20 @@
           </div>
           <p class="text-xs text-text-muted ml-40">相册缩略图是可再生的缓存，可放到独立目录（如临时盘/SSD）；切换后已有缩略图会自动重建。</p>
         </div>
+        <div>
+          <div class="flex items-center gap-4 mb-2">
+            <label class="text-sm font-medium text-text w-40 flex-shrink-0">数据库加密</label>
+            <div class="flex-1 min-w-0">
+              <div class="truncate text-sm text-text-secondary border border-border bg-bg px-3 py-2 rounded-lg" :title="dbEncrypted ? '已加密（推荐）' : '未加密（明文存储）'">
+                {{ dbEncryptionLoading ? '加载中…' : (dbEncrypted ? '已加密（推荐）' : '未加密（明文存储）') }}
+              </div>
+            </div>
+            <button @click="toggleDbEncryption" :disabled="busyDbEncryption || dbEncryptionLoading" class="bg-info hover:bg-info-hover text-text-inverse px-4 py-2 rounded transition-theme disabled:opacity-50 whitespace-nowrap">
+              {{ busyDbEncryption ? '转换中…' : (dbEncrypted ? '关闭加密' : '启用加密') }}
+            </button>
+          </div>
+          <p class="text-xs text-text-muted ml-40">控制本账号数据库文件的落盘加密。关闭后数据库以明文保存，任何能访问该文件的程序都可直接读取其中数据；仅影响本账号，不影响其它账号。</p>
+        </div>
       </div>
     </div>
 
@@ -321,11 +347,14 @@
           <h3 class="text-lg font-bold text-text mb-4">导出数据库</h3>
           <p class="text-xs text-text-muted mb-3">导出当前库（业务数据 + 应用设置 + 账号），换机后用对应的密码恢复。</p>
           <input v-model="exportPassword" type="password" placeholder="登录密码（未设密码可留空）" autocomplete="current-password" class="border border-border bg-surface text-text p-2 w-full mb-3 rounded" />
-          <label class="flex items-center gap-2 text-sm text-text mb-2 cursor-pointer select-none">
-            <input type="checkbox" v-model="exportEncrypt" class="w-4 h-4 accent-warning" />
-            数据库密码加密导出
-          </label>
-          <input v-model="exportDbPwd" type="password" :disabled="!exportEncrypt" placeholder="数据库密码（有密码账号留空则默认用账号密码）" autocomplete="new-password" class="border border-border bg-surface text-text p-2 w-full mb-4 rounded disabled:opacity-50" />
+          <template v-if="dbEncrypted">
+            <label class="flex items-center gap-2 text-sm text-text mb-2 cursor-pointer select-none">
+              <input type="checkbox" v-model="exportEncrypt" class="w-4 h-4 accent-warning" />
+              数据库密码加密导出
+            </label>
+            <input v-model="exportDbPwd" type="password" :disabled="!exportEncrypt" placeholder="数据库密码（有密码账号留空则默认用账号密码）" autocomplete="new-password" class="border border-border bg-surface text-text p-2 w-full mb-4 rounded disabled:opacity-50" />
+          </template>
+          <p v-else class="text-xs text-text-muted mb-4">当前数据库未加密，导出的备份包为明文，无需设置导出密码。</p>
           <div class="flex justify-end gap-2">
             <button @click="closeModal" class="bg-surface-hover text-text px-4 py-2 rounded border border-border transition-theme">取消</button>
             <button @click="exportDb" :disabled="busyExport" class="bg-warning hover:bg-warning-hover text-text-inverse px-4 py-2 rounded transition-theme disabled:opacity-50">
@@ -369,7 +398,7 @@ export default {
   },
   data() {
     const themeStore = useThemeStore()
-    const { currentTheme, bgMaskOpacity, glassOpacity, iconStyle } = storeToRefs(themeStore)
+    const { currentTheme, bgMaskOpacity, glassOpacity, iconStyle, topbarColor } = storeToRefs(themeStore)
 
     return {
       themeStore,
@@ -377,10 +406,16 @@ export default {
       bgMaskOpacity,
       glassOpacity,
       iconStyle,
+      topbarColor,
       // 图标样式选项：彩色图标 / Emoji
       iconStyleOptions: [
         { value: 'color', label: '彩色图标' },
         { value: 'emoji', label: 'Emoji' },
+      ],
+      // 标题栏/侧边栏毛玻璃配色：深蓝（旧款）/ 白色调
+      topbarColorOptions: [
+        { value: 'blue', label: '深蓝' },
+        { value: 'light', label: '白色调' },
       ],
       // Modal
       modalType: '',
@@ -417,6 +452,10 @@ export default {
       thumbsDir: '',
       busyDataDir: false,
       busyThumbsDir: false,
+      // 数据库加密（仅当前账号）
+      dbEncrypted: true,
+      dbEncryptionLoading: true,
+      busyDbEncryption: false,
       // 撤销记录
       undoGroups: [],
       busyUndo: false,
@@ -430,6 +469,7 @@ export default {
       presetThemes: [
         { id: 'base', name: '彩色色块主题' },
         { id: 'glass', name: '毛玻璃主题' },
+        { id: 'glass2', name: '新毛玻璃主题' },
         { id: 'win11', name: 'Win11 主题' },
         { id: 'minimal', name: '极简主题' },
       ],
@@ -441,6 +481,10 @@ export default {
     },
     themeOptions() {
       return this.presetThemes.map(t => ({ value: t.id, label: t.name }))
+    },
+    // 玻璃系主题（旧毛玻璃 / 新毛玻璃）共用「背景图片 + 透明度」两组设置
+    isGlassTheme() {
+      return this.currentTheme === 'glass' || this.currentTheme === 'glass2'
     },
     // 预览图走 resourceUrl：补完整后端地址并追加 ?token=，保证打包版 file:// 下能通过鉴权
     bgImagePreviewUrl() {
@@ -462,6 +506,7 @@ export default {
     this.loadSession()
     this.loadUsbAutoOpen()
     this.loadDataDirs()
+    this.loadDbEncryption()
     this._fromMainHandler = window.electron?.on('from-main', (data) => {
       if (data && data.type === 'session-widget-changed') this.loadSession()
     })
@@ -537,7 +582,7 @@ export default {
       this.oldPassword = ''
       this.newPassword = ''
       this.exportPassword = ''
-      this.exportEncrypt = true
+      this.exportEncrypt = this.dbEncrypted
       this.exportDbPwd = ''
     },
     closeModal() {
@@ -599,8 +644,8 @@ export default {
         this.showAlert('请输入登录密码以导出数据库')
         return
       }
-      // 勾选加密：无密码账号必须提供一个导出密码（否则没有口令可供包裹库钥匙）
-      if (this.exportEncrypt && !needsPassword && !this.exportDbPwd) {
+      // 勾选加密（仅加密库有意义）：无密码账号必须提供一个导出密码（否则没有口令可供包裹库钥匙）
+      if (this.dbEncrypted && this.exportEncrypt && !needsPassword && !this.exportDbPwd) {
         this.showAlert('该账号未设置密码，请设置一个导出密码以加密备份')
         return
       }
@@ -608,7 +653,7 @@ export default {
       try {
         const body = { encrypt: this.exportEncrypt ? '1' : '0' }
         if (needsPassword) body.password = loginPwd
-        if (this.exportEncrypt && this.exportDbPwd) body.dbPassword = this.exportDbPwd
+        if (this.dbEncrypted && this.exportEncrypt && this.exportDbPwd) body.dbPassword = this.exportDbPwd
         const res = await axios.post('/api/account/export', body)
         const blob = new Blob([JSON.stringify(res.data, null, 2)], { type: 'application/json' })
         const url = URL.createObjectURL(blob)
@@ -637,6 +682,10 @@ export default {
     // 图标样式：线性图标 / Emoji
     onIconStyleChange() {
       this.themeStore.setIconStyle(this.iconStyle)
+    },
+    // 顶栏/侧边栏毛玻璃配色：深蓝 / 白色调（立即生效）
+    onTopbarColorChange() {
+      this.themeStore.setTopbarColor(this.topbarColor)
     },
     // Background image
     async onBgImageFileChange(e) {
@@ -767,7 +816,7 @@ export default {
     async changeDataDir() {
       const picked = await this.pickDir()
       if (!picked) return
-      this.showConfirm(`确定把数据库目录搬迁到「${picked}」吗？现有数据将整体迁移，随后会自动重启应用服务。`, async () => {
+      this.showConfirm(`确定把数据库目录搬迁到「${picked}」吗？搬迁期间所有窗口会暂时关闭并显示迁移进度，请勿强行停止程序，完成后会自动重开主界面。`, async () => {
         this.busyDataDir = true
         try {
           const res = await window.electron.invoke('set-data-dir', picked)
@@ -797,6 +846,33 @@ export default {
           this.showAlert(err?.message || '缓存目录切换失败')
         } finally {
           this.busyThumbsDir = false
+        }
+      })
+    },
+    // 读取本账号数据库的加密状态
+    async loadDbEncryption() {
+      try {
+        const { data } = await axios.get('/api/account/db-encryption')
+        this.dbEncrypted = !!data.encrypted
+      } catch (_) { /* 读取失败保持默认（加密） */ } finally {
+        this.dbEncryptionLoading = false
+      }
+    },
+    // 切换本账号数据库加密方式：复用数据目录迁移那套流程（关闭其它窗口 → 独立进度窗口转换 → 重开主界面）
+    toggleDbEncryption() {
+      const turningOff = this.dbEncrypted
+      const msg = turningOff
+        ? '确定关闭数据库加密吗？关闭后本账号数据库将以明文保存，任何能访问该文件的程序都能直接读取其中数据（仅影响本账号，不影响其它账号）。转换期间所有窗口会暂时关闭并显示进度，请勿强行停止程序，完成后会自动重开主界面。'
+        : '确定启用数据库加密吗？启用后本账号数据库将以随机密钥加密保存。转换期间所有窗口会暂时关闭并显示进度，请勿强行停止程序，完成后会自动重开主界面。'
+      this.showConfirm(msg, async () => {
+        this.busyDbEncryption = true
+        try {
+          // 主窗口即将被关闭并重开，转换结果由主进程提示条反馈
+          await window.electron.invoke('set-db-encryption', { encrypt: !turningOff })
+        } catch (err) {
+          this.showAlert(err?.message || '操作失败')
+        } finally {
+          this.busyDbEncryption = false
         }
       })
     },

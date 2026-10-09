@@ -20,7 +20,7 @@ function ensureDefaultDim() {
       db.prepare('UPDATE group_dimensions SET is_default = 1, sort_order = 1 WHERE id = ?').run(existsByName.id);
     } else {
       db.prepare(
-        `INSERT INTO group_dimensions (name, leader_title, members_per_group, group_count, is_default, sort_order) VALUES (?, '宿舍长', 6, 0, 1, 1)`
+        `INSERT INTO group_dimensions (name, leader_title, members_per_group, group_count, is_default, sort_order, male_group_count, female_group_count) VALUES (?, '宿舍长', 6, 0, 1, 1, 3, 3)`
       ).run('宿舍组');
     }
   });

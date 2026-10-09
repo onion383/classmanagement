@@ -12,9 +12,9 @@
     <div v-if="activeTab === 'daily'">
       <!-- 工具栏 -->
       <div class="mb-4 flex items-center gap-3 opbar">
-        <button @click="openAddActivity" class="bg-primary hover:bg-primary-hover text-text-inverse px-5 py-2 rounded">＋ 新增活动</button>
+        <button v-preload="loadAddActivityDialog" @click="openAddActivity" class="bg-primary hover:bg-primary-hover text-text-inverse px-5 py-2 rounded">＋ 新增活动</button>
         <button @click="refreshActivities" class="bg-text-muted hover:bg-text-secondary text-text-inverse px-4 py-2 rounded flex items-center gap-1 btn-refresh"><IconGlyph name="refresh" :size="14" tint="current" /> 刷新</button>
-        <button @click="openActivityExport" class="bg-warning hover:bg-warning-hover text-text-inverse px-4 py-2 rounded flex items-center gap-1">📥 导出活动</button>
+        <button v-preload="loadExportExcel" @click="openActivityExport" class="bg-warning hover:bg-warning-hover text-text-inverse px-4 py-2 rounded flex items-center gap-1">📥 导出活动</button>
       </div>
 
       <!-- 活动时间轴（带状态标签） -->
@@ -46,9 +46,9 @@
     <div v-if="activeTab === 'countdown'">
       <!-- 工具栏 -->
       <div class="mb-4 flex items-center gap-3 opbar">
-        <button @click="openAddCountdown" class="bg-primary hover:bg-primary-hover text-text-inverse px-5 py-2 rounded">＋ 添加倒计时</button>
+        <button v-preload="loadAddCountdownDialog" @click="openAddCountdown" class="bg-primary hover:bg-primary-hover text-text-inverse px-5 py-2 rounded">＋ 添加倒计时</button>
         <button @click="refreshCountdowns" class="bg-text-muted hover:bg-text-secondary text-text-inverse px-4 py-2 rounded flex items-center gap-1 btn-refresh">🔄 刷新</button>
-        <button @click="openCountdownExport" class="bg-warning hover:bg-warning-hover text-text-inverse px-4 py-2 rounded flex items-center gap-1"><IconGlyph name="download" :size="14" tint="current" /> 导出 EXCEL 表格</button>
+        <button v-preload="loadExportExcel" @click="openCountdownExport" class="bg-warning hover:bg-warning-hover text-text-inverse px-4 py-2 rounded flex items-center gap-1"><IconGlyph name="download" :size="14" tint="current" /> 导出 EXCEL 表格</button>
       </div>
 
       <!-- 数据看板（最近 3 个） -->
@@ -155,10 +155,13 @@ import LeaveTimeline from '../components/base/LeaveTimeline.vue'
 import { useNotification } from '../composables/useNotification.js'
 import { recordRowInsert, recordRowUpdate, recordRowDelete, useUndoShortcut } from '../composables/useUndo.js'
 
-const AddActivityDialog = defineAsyncComponent(() => import('../components/dialogs/AddActivityDialog.vue'))
-const AddCountdownDialog = defineAsyncComponent(() => import('../components/dialogs/AddCountdownDialog.vue'))
+const loadAddActivityDialog = () => import('../components/dialogs/AddActivityDialog.vue')
+const AddActivityDialog = defineAsyncComponent(loadAddActivityDialog)
+const loadAddCountdownDialog = () => import('../components/dialogs/AddCountdownDialog.vue')
+const AddCountdownDialog = defineAsyncComponent(loadAddCountdownDialog)
 const ConfirmDialog = defineAsyncComponent(() => import('../components/base/ConfirmDialog.vue'))
-const ExportExcel = defineAsyncComponent(() => import('../components/import-export/ExportExcel.vue'))
+const loadExportExcel = () => import('../components/import-export/ExportExcel.vue')
+const ExportExcel = defineAsyncComponent(loadExportExcel)
 
 const API = '/api'
 
@@ -206,6 +209,8 @@ export default {
       onAfterUndo: (label) => { inst.proxy.loadAll(); success(label ? `已撤销：${label}` : '已撤销') },
       onAfterRedo: (label) => { inst.proxy.loadAll(); success(label ? `已重做：${label}` : '已重做') }
     })
+    // 暴露给模板：v-preload 的绑值在渲染函数里求值，模块作用域的加载器不挂实例会告警
+    return { loadAddActivityDialog, loadAddCountdownDialog, loadExportExcel }
   },
   data() {
     return {

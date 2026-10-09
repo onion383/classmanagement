@@ -149,4 +149,16 @@ router.post('/snapshot', (req, res) => {
   }
 });
 
+// 删除某一周的历史快照
+router.delete('/history/:weekStart', (req, res) => {
+  try {
+    const { weekStart } = req.params;
+    const info = db.prepare('DELETE FROM schedule_history WHERE week_start = ?').run(weekStart);
+    if (!info.changes) return res.status(404).json({ error: '该周快照不存在' });
+    res.json({ message: '快照已删除' });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 module.exports = router;

@@ -470,7 +470,7 @@ onMounted(() => {
   timer = setInterval(() => { now.value = new Date() }, 60000)
 })
 
-// 每次从其他页面切回首页时重新拉取，保证「修改过数据回来自动更新」
+// 每次从其他页面切回首页时强制重新拉取，保证「修改过数据回来自动更新」为最新
 onActivated(() => {
   if (firstActivate) { firstActivate = false; return }
   loadData(true)

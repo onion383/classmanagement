@@ -159,7 +159,7 @@
             </div>
             <div class="w-full h-2 bg-bg rounded-full overflow-hidden">
               <div
-                class="h-full bg-info rounded-full transition-all duration-300"
+                class="h-full bg-info rounded-full transition-[width] duration-300"
                 :style="{ width: scanProgress.total > 0 ? Math.min(100, scanProgress.scanned / scanProgress.total * 100) + '%' : '2%' }"
               ></div>
             </div>
