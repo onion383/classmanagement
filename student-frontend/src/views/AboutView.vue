@@ -21,7 +21,7 @@
 
         <div class="flex flex-wrap items-center gap-3 mt-4">
           <button @click="dialogProtocol = true" class="px-4 py-2 text-sm rounded-lg bg-primary/10 text-primary hover:bg-primary/20 transition-colors">
-            PolyForm Noncommercial 协议
+            非商用免费协议
           </button>
           <button @click="dialogVersion = true" class="px-4 py-2 text-sm rounded-lg bg-primary/10 text-primary hover:bg-primary/20 transition-colors">
             版本更新

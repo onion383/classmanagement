@@ -21,6 +21,7 @@ select {
 @import "tailwindcss";
 @import "./theme-base.css";
 @import "./theme-glass.css";
+@import "./theme-glass2.css";
 @import "./theme-minimal.css";
 @import "./theme-win11.css";
 @import "./utilities.css";
@@ -171,4 +172,29 @@ input[type="checkbox"]:disabled:checked::after {
   input[type="checkbox"]::after {
     transition: none;
   }
+}
+
+/* ==================== 班干部管理 · 树状视图滚动条 ====================
+   折叠/展开时内容高度剧变（展开还带轻微回弹超调），原生滚动条会随着
+   scrollHeight 反复跨越容器高度而来回闪现（抽搐）。这里做两件事：
+   1) 横向永不出现滚动条（行内已换行，不需要横向滚动）；
+   2) 折叠动画进行中，把竖向滚动条整体透明化，动画结束再恢复，
+      同时用 scrollbar-gutter: stable 一直预留槽位，因此不会有宽度跳动。
+   「动画进行中」由 CadreTreeList 的过渡钩子打上 .is-animating 类来标记
+   （不用 :has() 祖先选择器：它会让容器内任意类名变化都触发祖先样式失效重算，
+   数据多时会让「点击选中」等操作显得迟滞）。 */
+.tree-scroll {
+  scrollbar-gutter: stable;
+  /* 若浏览器支持对 scrollbar-color 做插值，滚动条会淡入淡出；不支持则瞬时显隐，同样不抽搐 */
+  transition: scrollbar-color 0.25s ease;
+}
+.tree-scroll.is-animating {
+  scrollbar-color: transparent transparent;
+}
+/* 毛玻璃/Win11 主题的滚动条走 ::-webkit-scrollbar 皮肤，这里同步透明化 */
+.tree-scroll.is-animating::-webkit-scrollbar-thumb,
+.tree-scroll.is-animating::-webkit-scrollbar-track {
+  background: transparent !important;
+  border-color: transparent !important;
+  box-shadow: none !important;
 }

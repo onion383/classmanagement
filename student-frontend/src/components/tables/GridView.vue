@@ -392,26 +392,83 @@ export default {
       box.style.width = w + 'px';
       box.style.height = h + 'px';
     },
+    // 拖拽开始时一次性缓存各行与容器的几何信息，拖动过程中纯计算，避免每帧 O(n) 布局读取
+    _cacheRowGeom() {
+      const trs = this.$el ? this.$el.querySelectorAll('tbody tr') : [];
+      const arr = [];
+      for (let i = 0; i < trs.length; i++) {
+        const r = trs[i].getBoundingClientRect();
+        arr.push({ left: r.left, top: r.top, right: r.right, bottom: r.bottom });
+      }
+      this._rowGeom = arr;
+      const c = this.$refs.gridTable;
+      this._rowGeomContainer = c ? c.getBoundingClientRect() : null;
+    },
+    // 列拖拽几何缓存：按下时一次性量出各数据列的左右边界、表头行 top、表底 bottom 与容器 rect，
+    // 拖动过程中纯数值比较，避免每帧 O(n) getBoundingClientRect 触发布局（INP 优化）
+    _cacheColGeom() {
+      const ths = this.colHeaderEls();
+      const off = this.colThOffset();
+      const arr = [];
+      for (let i = 0; i < ths.length; i++) {
+        const colIdx = i - off;
+        if (colIdx < 0) continue; // 元数据列（时段/节次/时间/行号）不参与落点
+        const col = this.colHeaders[colIdx];
+        if (col === undefined || col === '走廊') { arr[colIdx] = null; continue; }
+        const r = ths[i].getBoundingClientRect();
+        arr[colIdx] = { left: r.left, right: r.right };
+      }
+      this._colGeom = arr;
+      this._colGeomHeaderTop = ths.length ? ths[0].parentElement.getBoundingClientRect().top : null;
+      const tbl = this.$el ? this.$el.querySelector('table') : null;
+      this._colGeomTblBottom = tbl ? tbl.getBoundingClientRect().bottom : null;
+      const c = this.$refs.gridTable;
+      this._colGeomContainer = c ? c.getBoundingClientRect() : null;
+    },
     updateRowDropBox() {
       const box = this._rowDropBox;
       if (!box) return;
-      const trs = this.$el ? this.$el.querySelectorAll('tbody tr') : [];
-      const tr = this.rowDragOverIdx === null ? null : trs[this.rowDragOverIdx];
-      if (!tr) { box.style.display = 'none'; return; }
-      const r = tr.getBoundingClientRect();
-      this.updateDropBox(box, { left: r.left, top: r.top, right: r.right, bottom: r.bottom }, this.$refs.gridTable);
+      const geom = this._rowGeom;
+      const g = (geom && this.rowDragOverIdx !== null) ? geom[this.rowDragOverIdx] : null;
+      if (!g) { box.style.display = 'none'; return; }
+      let { left, top, right, bottom } = g;
+      const c = this._rowGeomContainer;
+      if (c) {
+        left = Math.max(left, c.left);
+        top = Math.max(top, c.top);
+        right = Math.min(right, c.right);
+        bottom = Math.min(bottom, c.bottom);
+      }
+      const w = right - left, h = bottom - top;
+      if (w <= 0 || h <= 0) { box.style.display = 'none'; return; }
+      box.style.display = 'block';
+      box.style.transform = `translate(${left}px, ${top}px)`;
+      box.style.width = w + 'px';
+      box.style.height = h + 'px';
     },
     updateColDropBox() {
       const box = this._colDropBox;
       if (!box) return;
-      const tbl = this.$el ? this.$el.querySelector('table') : null;
-      const ths = this.colHeaderEls();
-      const th = this.colDragOverIdx === null ? null : ths[this.colThOffset() + this.colDragOverIdx];
-      if (!tbl || !th) { box.style.display = 'none'; return; }
-      const r = th.getBoundingClientRect();
-      const headerRow = th.parentElement.getBoundingClientRect();
-      const tblRect = tbl.getBoundingClientRect();
-      this.updateDropBox(box, { left: r.left, top: headerRow.top, right: r.right, bottom: tblRect.bottom }, this.$refs.gridTable);
+      const geom = this._colGeom;
+      const g = (geom && this.colDragOverIdx !== null) ? geom[this.colDragOverIdx] : null;
+      if (!g || this._colGeomHeaderTop == null) { box.style.display = 'none'; return; }
+      // 用按下时缓存的几何，拖动过程中不再读取布局
+      let { left, right } = g;
+      let top = this._colGeomHeaderTop;
+      let bottom = this._colGeomTblBottom;
+      const c = this._colGeomContainer;
+      if (c) {
+        left = Math.max(left, c.left);
+        top = Math.max(top, c.top);
+        right = Math.min(right, c.right);
+        bottom = Math.min(bottom, c.bottom);
+      }
+      const w = right - left, h = bottom - top;
+      if (w <= 0 || h <= 0) { box.style.display = 'none'; return; }
+      box.style.display = 'block';
+      box.style.transform = `translate(${left}px, ${top}px)`;
+      box.style.width = w + 'px';
+      box.style.height = h + 'px';
     },
     // ==================== 交换动画（内容互换型 FLIP） ====================
     // 网格表格的交换是「同一批 DOM 节点换内容」，不是节点重排，TransitionGroup 的 move 不会触发，
@@ -544,15 +601,20 @@ export default {
       this._rowGhost = ghost;
       this._rowGrab = { grabX: event.clientX - tblRect.left, grabY: event.clientY - trRect.top };
       this.placeGhost(ghost, this._rowGrab, event.clientX, event.clientY);
-      // 落点高亮框：包住即将落位的那一行
+      // 落点高亮框：包住即将落位的那一行（几何信息在此一次性缓存）
+      this._cacheRowGeom();
       this._rowDropBox = this.createDropBox();
       this.updateRowDropBox();
 
       const move = (e) => {
         if (!this._rowGhost) return;
-        this.placeGhost(this._rowGhost, this._rowGrab, e.clientX, e.clientY);
-        this.rowDragOverIdx = this.resolveRowIndexAt(e.clientY);
-        this.updateRowDropBox();
+        // rAF 对齐到帧：同一帧内多次 mousemove 只处理最后一次
+        this._rowPending = e;
+        if (this._rowRaf) return;
+        this._rowRaf = requestAnimationFrame(() => {
+          this._rowRaf = null;
+          this._applyRowMove();
+        });
       };
       const up = () => this.finishRowDrag();
       this._rowMove = move;
@@ -561,6 +623,19 @@ export default {
       window.addEventListener('mouseup', up);
     },
     resolveRowIndexAt(clientY) {
+      // 优先用拖拽开始时缓存的几何信息（无布局读取）
+      const geom = this._rowGeom;
+      if (geom && geom.length) {
+        let best = null, min = Infinity;
+        for (let i = 0; i < geom.length; i++) {
+          if (!this.isRowDropTarget(this.rows[i])) continue;
+          const r = geom[i];
+          if (clientY >= r.top && clientY <= r.bottom) return i;
+          const d = Math.min(Math.abs(clientY - r.top), Math.abs(clientY - r.bottom));
+          if (d < min) { min = d; best = i; }
+        }
+        return best;
+      }
       const trs = this.$el ? this.$el.querySelectorAll('tbody tr') : [];
       let best = null, min = Infinity;
       for (let i = 0; i < trs.length; i++) {
@@ -572,11 +647,25 @@ export default {
       }
       return best;
     },
+    // 应用最近一次待处理的拖拽位置（rAF 帧内执行；松手前也会强制冲刷一次，避免丢最后一帧）
+    _applyRowMove() {
+      if (!this._rowGhost || !this._rowPending) return;
+      const ev = this._rowPending;
+      this.placeGhost(this._rowGhost, this._rowGrab, ev.clientX, ev.clientY);
+      const idx = this.resolveRowIndexAt(ev.clientY);
+      if (idx !== this.rowDragOverIdx) this.rowDragOverIdx = idx;
+      this.updateRowDropBox();
+    },
     finishRowDrag() {
       if (this._rowMove) window.removeEventListener('mousemove', this._rowMove);
       if (this._rowUp) window.removeEventListener('mouseup', this._rowUp);
       this._rowMove = null;
       this._rowUp = null;
+      if (this._rowRaf) { cancelAnimationFrame(this._rowRaf); this._rowRaf = null; }
+      this._applyRowMove(); // 冲刷最后一帧
+      this._rowPending = null;
+      this._rowGeom = null;
+      this._rowGeomContainer = null;
       if (this._rowGhost) { this._rowGhost.remove(); this._rowGhost = null; }
       if (this._rowDropBox) { this._rowDropBox.remove(); this._rowDropBox = null; }
       const from = this.rowDragIdx, to = this.rowDragOverIdx;
@@ -614,15 +703,20 @@ export default {
       this._colGhost = ghost;
       this._colGrab = { grabX: event.clientX - thRect.left, grabY: event.clientY - rowRect.top };
       this.placeGhost(ghost, this._colGrab, event.clientX, event.clientY);
-      // 落点高亮框：包住即将落位的那一列
+      // 落点高亮框：包住即将落位的那一列（几何信息在此一次性缓存）
+      this._cacheColGeom();
       this._colDropBox = this.createDropBox();
       this.updateColDropBox();
 
       const move = (e) => {
         if (!this._colGhost) return;
-        this.placeGhost(this._colGhost, this._colGrab, e.clientX, e.clientY);
-        this.colDragOverIdx = this.resolveColIndexAt(e.clientX);
-        this.updateColDropBox();
+        // rAF 对齐到帧：同一帧内多次 mousemove 只处理最后一次
+        this._colPending = e;
+        if (this._colRaf) return;
+        this._colRaf = requestAnimationFrame(() => {
+          this._colRaf = null;
+          this._applyColMove();
+        });
       };
       const up = () => this.finishColDrag();
       this._colMove = move;
@@ -630,7 +724,28 @@ export default {
       window.addEventListener('mousemove', move);
       window.addEventListener('mouseup', up);
     },
+    // 应用最近一次待处理的列拖拽位置（rAF 帧内执行；松手前也会强制冲刷一次）
+    _applyColMove() {
+      if (!this._colGhost || !this._colPending) return;
+      const ev = this._colPending;
+      this.placeGhost(this._colGhost, this._colGrab, ev.clientX, ev.clientY);
+      this.colDragOverIdx = this.resolveColIndexAt(ev.clientX);
+      this.updateColDropBox();
+    },
     resolveColIndexAt(clientX) {
+      // 优先用拖拽开始时缓存的几何信息（无布局读取）
+      const geom = this._colGeom;
+      if (geom && geom.length) {
+        let best = null, min = Infinity;
+        for (let k = 0; k < geom.length; k++) {
+          const r = geom[k];
+          if (!r) continue; // 走廊/空列不参与落点
+          if (clientX >= r.left && clientX <= r.right) return k; // 命中直接返回，避免被相邻列覆盖
+          const d = Math.abs(clientX - (r.left + r.right) / 2);
+          if (d < min) { min = d; best = k; }
+        }
+        return best;
+      }
       const ths = this.colHeaderEls();
       const off = this.colThOffset();
       let best = null, min = Infinity;
@@ -650,6 +765,12 @@ export default {
       if (this._colUp) window.removeEventListener('mouseup', this._colUp);
       this._colMove = null;
       this._colUp = null;
+      if (this._colRaf) { cancelAnimationFrame(this._colRaf); this._colRaf = null; }
+      this._applyColMove(); // 冲刷最后一帧
+      this._colPending = null;
+      this._colGeom = null;
+      this._colGeomContainer = null;
+      this._colGrab = null;
       if (this._colGhost) { this._colGhost.remove(); this._colGhost = null; }
       if (this._colDropBox) { this._colDropBox.remove(); this._colDropBox = null; }
       const from = this.colDragIdx, to = this.colDragOverIdx;
@@ -682,9 +803,11 @@ export default {
     if (this._rowGhost) this._rowGhost.remove();
     if (this._rowMove) window.removeEventListener('mousemove', this._rowMove);
     if (this._rowUp) window.removeEventListener('mouseup', this._rowUp);
+    if (this._rowRaf) cancelAnimationFrame(this._rowRaf);
     if (this._colGhost) this._colGhost.remove();
     if (this._colMove) window.removeEventListener('mousemove', this._colMove);
     if (this._colUp) window.removeEventListener('mouseup', this._colUp);
+    if (this._colRaf) cancelAnimationFrame(this._colRaf);
     if (this._rowDropBox) this._rowDropBox.remove();
     if (this._colDropBox) this._colDropBox.remove();
     if (this._tableEnterCleanup) this._tableEnterCleanup();

@@ -87,21 +87,24 @@ const glassOpacity = parseFloat(localStorage.getItem(GLASS_KEY)) || 0.4
 const bgMaskOpacity = parseFloat(localStorage.getItem(BG_MASK_KEY)) || 0.6
 document.documentElement.style.setProperty('--glass-opacity', glassOpacity)
 document.documentElement.style.setProperty('--bg-mask-opacity', bgMaskOpacity)
-// 应用背景图（毛玻璃主题默认使用内置背景）
-if (savedTheme === 'glass') {
-  const bg = localStorage.getItem(BG_IMAGE_KEY) || (import.meta.env.PROD ? window.location.origin + '/glass-bg-opt.jpg' : `${import.meta.env.BASE_URL}glass-bg-opt.jpg`)
-  console.log('[startup] 背景图 URL:', bg)
-  if (bg) {
-    document.documentElement.style.setProperty('--bg-image', `url('${bg.replace(/'/g, "\\'")}')`)
-    document.documentElement.classList.add('has-bg-image')
-  }
+// 应用背景图：glass 用「自选图 ?? 内置默认图」，glass2（新毛玻璃）只用自选图
+// —— 它自带的 CSS 光斑底已经提供了可模糊的内容，不需要再挂一张图片。
+const DEFAULT_GLASS_BG = import.meta.env.PROD
+  ? window.location.origin + '/glass-bg-opt.jpg'
+  : `${import.meta.env.BASE_URL}glass-bg-opt.jpg`
+const startupBgUrl = () => {
+  if (savedTheme !== 'glass' && savedTheme !== 'glass2') return ''
+  return localStorage.getItem(BG_IMAGE_KEY) || (savedTheme === 'glass' ? DEFAULT_GLASS_BG : '')
+}
+const startupBg = startupBgUrl()
+console.log('[startup] 背景图 URL:', startupBg)
+if (startupBg) {
+  document.documentElement.style.setProperty('--bg-image', `url('${startupBg.replace(/'/g, "\\'")}')`)
+  document.documentElement.classList.add('has-bg-image')
 }
 
 // 2. 预加载背景图到浏览器缓存（<link rel="preload"> 在 HTML 阶段已开始，此处再确保一次）
-if (savedTheme === 'glass') {
-  const bg = localStorage.getItem(BG_IMAGE_KEY) || (import.meta.env.PROD ? window.location.origin + '/glass-bg-opt.jpg' : `${import.meta.env.BASE_URL}glass-bg-opt.jpg`)
-  if (bg) { const img = new Image(); img.src = bg }
-}
+if (startupBg) { const img = new Image(); img.src = startupBg }
 
 // 3. 预加载默认落地页组件（已登录→业务首页 DashboardView；未登录→登录页 Login），
 //    与 Vue 初始化并行执行，命中路由实际首帧，避免首屏首帧多等一次 chunk 下载。
@@ -126,9 +129,18 @@ const themeStore = useThemeStore()
 themeStore.applyTheme()
 
 // 记录 Vue 挂载耗时（主进程通过 console-message 事件捕获 [startup] 前缀的日志）
-// 全局橡皮筋滚动（轻回弹）：正常滚动保持原生，仅滚到顶/底越界时才弹性回弹
-import { startElasticScroll } from './composables/useElasticScroll'
-startElasticScroll()
+// 全局橡皮筋滚动（轻回弹）+ 松手惯性滑行：暂时整体停用，全部恢复原生滚动。
+// 恢复时取消下面两行注释即可（橡皮筋本身还需按 useElasticScroll.js 里的标记一并取消注释）
+// import { startElasticScroll } from './composables/useElasticScroll'
+// startElasticScroll()
+
+// 弹窗遮罩点击脉冲（事件委托）：点遮罩本尊时卡片轻放大收回提示，点卡片内部不触发
+import { initDialogOverlayPulse } from './utils/dialogOverlayPulse'
+initDialogOverlayPulse()
+
+// 弹窗懒加载预取指令（v-preload）：悬停触发按钮时提前加载对应弹窗 chunk
+import { vPreload } from './utils/dialogPrefetch'
+app.directive('preload', vPreload)
 
 const mountStart = performance.now()
 app.mount('#app')

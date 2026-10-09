@@ -5,7 +5,7 @@
       <div class="cadre-card-head">
         <span class="cadre-name">{{ node.name }}</span>
         <span class="cadre-count">{{ node.members.length }}/{{ node.max_count }}</span>
-        <div class="cadre-actions">
+        <div class="cadre-actions" v-if="!readonly">
           <button class="act" title="添加成员" @click="$emit('add-member', node)">＋</button>
           <button class="act" v-if="!isRoot" title="添加下级" @click="$emit('add-child', node)">⬇</button>
           <button class="act" title="编辑职务" @click="$emit('edit', node)">✎</button>
@@ -16,7 +16,7 @@
       <div class="cadre-members" v-if="node.members && node.members.length">
         <span v-for="m in node.members" :key="m.id" class="member-chip">
           {{ m.student_name }}
-          <button class="chip-x" title="移除" @click="$emit('remove-member', node, m)">×</button>
+          <button v-if="!readonly" class="chip-x" title="移除" @click="$emit('remove-member', node, m)">×</button>
         </span>
       </div>
       <div v-else class="cadre-empty">暂无担任学生</div>
@@ -33,6 +33,7 @@
           <CadreTreeNode
             :node="child"
             :all-students="allStudents"
+            :readonly="readonly"
             @add-member="$emit('add-member', $event)"
             @add-child="$emit('add-child', $event)"
             @edit="$emit('edit', $event)"
@@ -50,7 +51,8 @@ export default {
   name: 'CadreTreeNode',
   props: {
     node: { type: Object, required: true },
-    allStudents: { type: Array, default: () => [] }
+    allStudents: { type: Array, default: () => [] },
+    readonly: { type: Boolean, default: false }
   },
   computed: {
     isRoot() {

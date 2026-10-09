@@ -1,0 +1,749 @@
+/* ==================== 新毛玻璃主题（glass2 · 薰衣草冷雾） ====================
+   定位：与旧「毛玻璃主题」(glass) 并存的第二套玻璃皮肤。
+   - glass  ：蓝灰底 + 薄白玻璃（rgba .4）+ 荧光描边按钮，偏"网页感"。
+   - glass2 ：薰衣草 / 长春花底色 + 柔光斑背景 + 更厚的高光玻璃，
+              设计语言取自 agent/wechat-rag-frontend 的 tokens.css / base.css。
+
+   两套皮肤的取舍（有意为之，不是漏写）：
+   1) glass 给几乎所有元素都挂 backdrop-filter（含按钮、输入框）。
+      glass2 只在「大面板」上做模糊：侧栏 / 顶栏 / 内容卡 / 表格容器 / 弹窗 / 吐司。
+      按钮、标签、输入框本来就躺在已经模糊过的面板里，再叠一层 backdrop-filter
+      是纯 GPU 浪费（这一点沿用了 agent 项目的注释结论）。
+   2) glass 用「荧光描边 + 半透明白遮罩」做按钮；glass2 用实色强调色 + 圆角 +
+      内高光，去掉描边环，视觉更干净。
+   3) 透明度由设置页的「组件透明玻璃层」滑块 --glass-opacity 统一驱动，
+      glass2 在其上偏移 +0.15（默认 0.4 → 0.55），对齐参考项目的 --glass-bg。
+   ============================================================ */
+
+/* ------------------------------------------------------------
+   1. 设计变量
+   ------------------------------------------------------------ */
+:root[data-theme="glass2"] {
+  /* ---- 玻璃配方 ----
+     --g2-a 是「用户滑块值」，后面的玻璃层次都由它推导，
+     所以设置页拉滑块时，卡片/表格/弹窗的浓度会一起变。 */
+  --g2-a: var(--glass-opacity, 0.4);
+  --g2-glass: rgba(255, 255, 255, calc(var(--g2-a) + 0.15)); /* 内容卡基准 0.55 */
+  --g2-glass-strong: rgba(255, 255, 255, calc(var(--g2-a) + 0.34)); /* 0.74 */
+  --g2-glass-soft: rgba(255, 255, 255, calc(var(--g2-a) - 0.1)); /* 0.30 */
+  --g2-line: rgba(255, 255, 255, 0.7); /* 玻璃外描边 */
+  --g2-line-soft: rgba(255, 255, 255, 0.45);
+  --g2-hair: rgba(84, 94, 120, 0.16); /* 表格网格 / 分隔细线 */
+  --g2-hair-strong: rgba(84, 94, 120, 0.3);
+  --g2-blur: 18px;
+  --g2-saturate: 175%;
+  --g2-hl: inset 0 1px 0 rgba(255, 255, 255, 0.85); /* 顶部内高光 */
+
+  /* ---- 阴影（分层柔和，色调偏冷） ---- */
+  --g2-shadow-1: 0 1px 2px rgba(23, 30, 54, 0.05), 0 2px 8px rgba(23, 30, 54, 0.05);
+  --g2-shadow-2: 0 4px 16px rgba(23, 30, 54, 0.08), 0 14px 36px rgba(23, 30, 54, 0.07);
+  --g2-shadow-3: 0 18px 60px rgba(23, 30, 54, 0.2);
+
+  /* ---- 强调色：长春花蓝（区别于旧 glass 的 #3b82f6 亮蓝） ---- */
+  --g2-accent: #5b7cfa;
+  --g2-accent-strong: #4560e0;
+  --g2-accent-ring: rgba(91, 124, 250, 0.34);
+  --g2-ease: cubic-bezier(0.22, 0.61, 0.36, 1);
+
+  /* ---- 映射到全站主题变量 ---- */
+  --color-primary: #5b7cfa;
+  --color-primary-hover: #4560e0;
+  --color-primary-active: #3a51c9;
+  --color-primary-light: rgba(91, 124, 250, 0.14);
+
+  --color-success: #14874a;
+  --color-success-hover: #0f6c3b;
+  --color-warning: #c2740a;
+  --color-warning-hover: #a1600a;
+  --color-warning-light: rgba(194, 116, 10, 0.13);
+  --color-danger: #d63a3a;
+  --color-danger-hover: #b92f2f;
+  --color-info: #5b7cfa;
+  --color-info-hover: #4560e0;
+
+  --color-bg: #eef1f8;
+  --color-surface: var(--g2-glass);
+  --color-surface-hover: var(--g2-glass-strong);
+  --color-sidebar: rgba(255, 255, 255, 0.58);
+  --color-sidebar-hover: rgba(255, 255, 255, 0.78);
+  --color-sidebar-active: rgba(255, 255, 255, 0.92);
+
+  --color-text: #191f2e;
+  --color-text-secondary: #545e78;
+  --color-text-muted: #8a93a8;
+  --color-text-inverse: #ffffff;
+
+  --color-border: var(--g2-hair);
+  --color-border-strong: rgba(84, 94, 120, 0.26);
+
+  --shadow-sm: var(--g2-shadow-1);
+  --shadow-md: var(--g2-shadow-1);
+  --shadow-lg: var(--g2-shadow-2);
+  --shadow-card: var(--g2-shadow-2);
+
+  --radius-sm: 12px;
+  --radius-md: 16px;
+  --radius-lg: 22px;
+  --radius-card: 22px;
+  --radius-full: 999px;
+}
+
+/* ------------------------------------------------------------
+   2. 背景：冷雾渐变 + 柔光斑
+   毛玻璃必须有东西可模糊——纯色底上完全看不出玻璃感。
+   这里用两团柔光斑（蓝 / 紫）做底，面板压上去才有色彩层次；
+   第三团（青）是静态的，直接烘进 body 的渐变里。
+   【性能】光斑一旦动起来，上方所有 backdrop-filter 面板（侧边栏/卡片/表格）
+   每帧都要重算模糊，滚动会掉帧；故这里保持静态：
+   原 34s/41s 漂移动画与 will-change 已注释，恢复时见下方「暂时注释」标记。
+   ------------------------------------------------------------ */
+:root[data-theme="glass2"] body {
+  background-color: #e9edf8;
+  background-image:
+    radial-gradient(circle at 30% 108%, rgba(143, 217, 232, 0.62) 0%, rgba(143, 217, 232, 0) 44%),
+    linear-gradient(160deg, #e8edfb 0%, #f2ebfa 45%, #e6f2fa 100%);
+  background-attachment: fixed;
+}
+:root[data-theme="glass2"] body::before,
+:root[data-theme="glass2"] body::after {
+  content: '';
+  position: fixed;
+  border-radius: 50%;
+  filter: blur(60px);
+  opacity: 0.62;
+  pointer-events: none;
+  z-index: -2; /* 内容之下、body 背景之上 */
+  /* 暂时注释：光斑已改静态，不再需要常驻合成层
+  will-change: transform;
+  暂时注释结束 */
+}
+:root[data-theme="glass2"] body::before {
+  width: 48vw;
+  height: 48vw;
+  top: -16vw;
+  left: -10vw;
+  background: radial-gradient(circle at 35% 35%, #9fb8ff 0%, rgba(159, 184, 255, 0) 70%);
+  /* 暂时注释：漂移动画会带动全页玻璃逐帧重算模糊，滚动掉帧
+  animation: g2-drift-a 34s var(--g2-ease) infinite alternate;
+  暂时注释结束 */
+}
+:root[data-theme="glass2"] body::after {
+  width: 42vw;
+  height: 42vw;
+  top: 10vh;
+  right: -12vw;
+  background: radial-gradient(circle at 60% 40%, #c7a8f5 0%, rgba(199, 168, 245, 0) 70%);
+  /* 暂时注释：同 ::before
+  animation: g2-drift-b 41s var(--g2-ease) infinite alternate;
+  暂时注释结束 */
+}
+/* 暂时注释：漂移关键帧（配合上面两条 animation 一起恢复）
+@keyframes g2-drift-a {
+  to { transform: translate3d(6vw, 5vh, 0) scale(1.12); }
+}
+@keyframes g2-drift-b {
+  to { transform: translate3d(-7vw, 8vh, 0) scale(1.08); }
+}
+暂时注释结束 */
+/* 内容区必须是透明的，否则 body 上的渐变与光斑全被盖住。
+   main 带 Tailwind 的 bg-bg，而 --color-bg 是给其它零散元素兜底的实色。 */
+:root[data-theme="glass2"] main {
+  background-color: transparent !important;
+}
+
+/* ---- 自定义背景图（设置页可选，复用毛玻璃主题的同一套设置） ----
+   遮罩直接作为 body 背景的最上层，而不是 main 的背景：
+   橡皮筋滚动只对 main 做 translateY，遮罩挂在 body（background-attachment: fixed）
+   才不会跟着位移、在顶部/底部露出一条没盖住的背景图。 */
+:root[data-theme="glass2"].has-bg-image body {
+  background-color: #eef1f8;
+  background-image:
+    linear-gradient(
+      rgba(238, 241, 248, var(--bg-mask-opacity, 0.6)),
+      rgba(238, 241, 248, var(--bg-mask-opacity, 0.6))
+    ),
+    var(--bg-image);
+  background-size: cover, cover;
+  background-position: center, center;
+  background-repeat: no-repeat, no-repeat;
+  background-attachment: fixed, fixed;
+}
+/* 用户自带图片时，光斑让位（否则叠在照片上显脏） */
+:root[data-theme="glass2"].has-bg-image body::before,
+:root[data-theme="glass2"].has-bg-image body::after {
+  display: none;
+}
+
+/* ------------------------------------------------------------
+   3. 自绘标题栏
+   配色跟随设置页「顶栏配色」：light=白色调（默认）/ blue=深靛蓝。
+   ------------------------------------------------------------ */
+:root[data-theme="glass2"] .window-title-bar {
+  position: relative;
+  backdrop-filter: blur(var(--g2-blur)) saturate(var(--g2-saturate));
+  border-bottom: 1px solid var(--g2-hair);
+  box-shadow: var(--g2-shadow-1);
+  contain: paint;
+  overflow: hidden;
+}
+:root[data-topbar-color="light"][data-theme="glass2"] .window-title-bar {
+  background-color: rgba(255, 255, 255, 0.62) !important;
+  color: #191f2e !important;
+}
+:root[data-topbar-color="blue"][data-theme="glass2"] .window-title-bar {
+  background-color: rgba(74, 88, 179, 0.58) !important;
+  color: #eef1fb !important;
+}
+/* 顶部受光高光，与侧栏/卡片同一套配方 */
+:root[data-theme="glass2"] .window-title-bar::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 40%;
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.28) 0%, rgba(255, 255, 255, 0.06) 55%, rgba(255, 255, 255, 0) 100%);
+  pointer-events: none;
+  z-index: -1;
+}
+:root[data-theme="glass2"] .window-title-bar > * {
+  position: relative;
+  z-index: 1;
+}
+/* 窗口控制按钮：hover 用低对比遮罩；win-btn 不参与下面的全局按钮圆角 */
+:root[data-topbar-color="light"][data-theme="glass2"] .window-controls .win-btn:hover {
+  background: rgba(84, 94, 120, 0.12);
+}
+:root[data-topbar-color="blue"][data-theme="glass2"] .window-controls .win-btn:hover {
+  background: rgba(255, 255, 255, 0.16);
+}
+:root[data-theme="glass2"] .window-controls .win-btn-close:hover {
+  background: #e81123;
+  color: #fff;
+}
+
+/* ------------------------------------------------------------
+   4. 侧边栏
+   ------------------------------------------------------------ */
+:root[data-theme="glass2"] .bg-sidebar {
+  backdrop-filter: blur(var(--g2-blur)) saturate(var(--g2-saturate));
+  border-right: 1px solid var(--g2-line-soft);
+  border-radius: 0 22px 22px 0;
+  contain: paint;
+  position: relative;
+  z-index: 1;
+  overflow: hidden;
+}
+:root[data-topbar-color="light"][data-theme="glass2"] .bg-sidebar {
+  background-color: rgba(255, 255, 255, 0.58) !important;
+  /* 侧栏本体挂着 text-text-inverse（白字），浅玻璃底上必须改成深字 */
+  color: #191f2e !important;
+  border-right-color: var(--g2-line-soft) !important;
+  box-shadow: var(--g2-shadow-1), var(--g2-hl);
+}
+:root[data-topbar-color="blue"][data-theme="glass2"] .bg-sidebar {
+  background-color: rgba(74, 88, 179, 0.55) !important;
+  color: #eef1fb !important;
+  border-right-color: transparent !important;
+  box-shadow: 0 4px 24px rgba(23, 30, 54, 0.18), inset 0 1px 0 rgba(255, 255, 255, 0.16);
+}
+:root[data-theme="glass2"] .bg-sidebar::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 40%;
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.28) 0%, rgba(255, 255, 255, 0.06) 55%, rgba(255, 255, 255, 0) 100%);
+  pointer-events: none;
+  z-index: -1;
+}
+/* 导航项：更大的圆角，贴合玻璃面板的 16px 体系 */
+:root[data-theme="glass2"] .nav-item {
+  border-radius: 14px;
+}
+:root[data-topbar-color="light"][data-theme="glass2"] .bg-sidebar a,
+:root[data-topbar-color="light"][data-theme="glass2"] .bg-sidebar nav a {
+  color: #3d4661 !important;
+}
+:root[data-topbar-color="light"][data-theme="glass2"] .bg-sidebar .app-name {
+  color: #191f2e !important;
+}
+:root[data-topbar-color="light"][data-theme="glass2"] .sidebar-group-title {
+  color: #8a93a8 !important;
+}
+/* hover：浅色底压一层更亮的玻璃 */
+:root[data-topbar-color="light"][data-theme="glass2"] .bg-sidebar-hover,
+:root[data-topbar-color="light"][data-theme="glass2"] .bg-sidebar a:hover:not(.bg-sidebar-active) {
+  background-color: rgba(255, 255, 255, 0.78) !important;
+  color: #191f2e !important;
+}
+/* 选中：强调色淡底 + 内描边 + 柔光，不用荧光描边 */
+:root[data-topbar-color="light"][data-theme="glass2"] .bg-sidebar-active,
+:root[data-topbar-color="light"][data-theme="glass2"] .bg-sidebar-active.rounded {
+  background-color: var(--color-primary-light) !important;
+  color: var(--g2-accent-strong) !important;
+  font-weight: 600;
+  box-shadow:
+    inset 0 0 0 1px rgba(91, 124, 250, 0.28),
+    inset 0 1px 0 rgba(255, 255, 255, 0.6),
+    0 2px 10px rgba(91, 124, 250, 0.18);
+}
+:root[data-topbar-color="blue"][data-theme="glass2"] .bg-sidebar a,
+:root[data-topbar-color="blue"][data-theme="glass2"] .bg-sidebar nav a {
+  color: #e6eafb !important;
+}
+:root[data-topbar-color="blue"][data-theme="glass2"] .bg-sidebar .app-name {
+  color: #ffffff !important;
+}
+:root[data-topbar-color="blue"][data-theme="glass2"] .sidebar-group-title {
+  color: rgba(230, 234, 251, 0.62) !important;
+}
+:root[data-topbar-color="blue"][data-theme="glass2"] .bg-sidebar-hover,
+:root[data-topbar-color="blue"][data-theme="glass2"] .bg-sidebar a:hover:not(.bg-sidebar-active) {
+  background-color: rgba(255, 255, 255, 0.14) !important;
+  color: #ffffff !important;
+}
+:root[data-topbar-color="blue"][data-theme="glass2"] .bg-sidebar-active,
+:root[data-topbar-color="blue"][data-theme="glass2"] .bg-sidebar-active.rounded {
+  background-color: rgba(255, 255, 255, 0.2) !important;
+  color: #ffffff !important;
+  font-weight: 600;
+  box-shadow:
+    inset 0 0 0 1px rgba(255, 255, 255, 0.22),
+    inset 0 1px 0 rgba(255, 255, 255, 0.2),
+    0 2px 10px rgba(23, 30, 54, 0.16);
+}
+:root[data-topbar-color="blue"][data-theme="glass2"] .sidebar-scroll::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.34);
+}
+:root[data-topbar-color="blue"][data-theme="glass2"] .sidebar-scroll::-webkit-scrollbar-thumb:hover {
+  background: rgba(255, 255, 255, 0.5);
+}
+
+/* ------------------------------------------------------------
+   5. 按钮
+   圆角只提升「模板上挂 .rounded、原本是 4px 直角」的操作栏按钮。
+   rounded-lg / rounded-xl / rounded-full 都是有意的形状（弹窗按钮、登录按钮、
+   相册看图的圆形播放/缩放控件），一律不碰——旧 glass 主题给所有 button 统一写
+   12px，会把相册的圆形控件压成圆角方块，这里不重蹈覆辙。
+   颜色全部由 --color-* 变量提供，实色按钮比旧主题的"白遮罩"读起来干净。
+   ------------------------------------------------------------ */
+:root[data-theme="glass2"] button.rounded {
+  border-radius: 12px;
+}
+:root[data-theme="glass2"] button.rounded:not(:disabled) {
+  transition:
+    background-color 0.18s var(--g2-ease),
+    color 0.18s var(--g2-ease),
+    box-shadow 0.18s var(--g2-ease),
+    transform 0.12s var(--g2-ease);
+}
+/* 实色强调按钮：加一层顶部内高光，玻璃面板上更有"厚度" */
+:root[data-theme="glass2"] button.bg-primary.text-text-inverse,
+:root[data-theme="glass2"] button.bg-info.text-text-inverse,
+:root[data-theme="glass2"] button.bg-success.text-text-inverse,
+:root[data-theme="glass2"] button.bg-warning.text-text-inverse,
+:root[data-theme="glass2"] button.bg-danger.text-text-inverse {
+  box-shadow: var(--g2-hl), 0 2px 8px rgba(23, 30, 54, 0.12);
+}
+:root[data-theme="glass2"] button.bg-primary.text-text-inverse:hover,
+:root[data-theme="glass2"] button.bg-info.text-text-inverse:hover,
+:root[data-theme="glass2"] button.bg-success.text-text-inverse:hover,
+:root[data-theme="glass2"] button.bg-warning.text-text-inverse:hover,
+:root[data-theme="glass2"] button.bg-danger.text-text-inverse:hover {
+  box-shadow: var(--g2-hl), 0 4px 16px rgba(23, 30, 54, 0.18);
+}
+/* 切换栏选中态：保留它自己的彩色外发光（Tabs.vue 的 shadow-info/30），
+   只把光晕换成新强调色，别被上面的中性投影盖掉。 */
+:root[data-theme="glass2"] button.tab-active.bg-info.text-text-inverse,
+:root[data-theme="glass2"] button.tab-active.bg-info.text-text-inverse:hover {
+  box-shadow: var(--g2-hl), 0 6px 18px rgba(91, 124, 250, 0.32);
+}
+:root[data-theme="glass2"] button:not(.win-btn):not(:disabled):active {
+  transform: translateY(1px);
+}
+:root[data-theme="glass2"] button:focus-visible {
+  outline: 2px solid var(--g2-accent);
+  outline-offset: 2px;
+}
+:root[data-theme="glass2"] button:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+  box-shadow: none !important;
+  transform: none !important;
+}
+/* 中性按钮（bg-surface-hover / 浅玻璃底）：压在半透明面板上要够实才读得清 */
+:root[data-theme="glass2"] button.bg-surface-hover {
+  background-color: var(--g2-glass-strong) !important;
+  color: var(--color-text) !important;
+  border-color: var(--g2-line-soft);
+}
+:root[data-theme="glass2"] button.bg-surface-hover:hover {
+  background-color: rgba(255, 255, 255, 0.9) !important;
+}
+/* 搜索按钮：沿用暖橙点缀（与搜索面板同排按钮区分） */
+:root[data-theme="glass2"] .btn-search {
+  background-color: #f6c98a !important;
+  color: #6d3a06 !important;
+  border-color: #eebd77 !important;
+  box-shadow: var(--g2-hl);
+}
+:root[data-theme="glass2"] .btn-search:hover {
+  background-color: #f2bd76 !important;
+}
+:root[data-theme="glass2"] .btn-search:active {
+  background-color: #eeb168 !important;
+}
+
+/* ------------------------------------------------------------
+   6. 表单控件（刻意不加 backdrop-filter：面板已经模糊过，再叠是纯浪费）
+   ------------------------------------------------------------ */
+:root[data-theme="glass2"] input:not([type]),
+:root[data-theme="glass2"] input[type="text"],
+:root[data-theme="glass2"] input[type="number"],
+:root[data-theme="glass2"] input[type="password"],
+:root[data-theme="glass2"] input[type="search"],
+:root[data-theme="glass2"] input[type="tel"],
+:root[data-theme="glass2"] input[type="email"],
+:root[data-theme="glass2"] input[type="url"],
+:root[data-theme="glass2"] input[type="date"],
+:root[data-theme="glass2"] input[type="datetime-local"],
+:root[data-theme="glass2"] input[type="time"],
+:root[data-theme="glass2"] textarea,
+:root[data-theme="glass2"] select {
+  background-color: var(--g2-glass-soft) !important;
+  border: 1px solid var(--g2-hair-strong) !important;
+  border-radius: var(--radius-sm);
+  color: var(--color-text);
+  transition:
+    border-color 0.18s var(--g2-ease),
+    box-shadow 0.18s var(--g2-ease),
+    background-color 0.18s var(--g2-ease);
+}
+:root[data-theme="glass2"] input:not([type]):focus,
+:root[data-theme="glass2"] input[type="text"]:focus,
+:root[data-theme="glass2"] input[type="number"]:focus,
+:root[data-theme="glass2"] input[type="password"]:focus,
+:root[data-theme="glass2"] input[type="search"]:focus,
+:root[data-theme="glass2"] input[type="tel"]:focus,
+:root[data-theme="glass2"] input[type="email"]:focus,
+:root[data-theme="glass2"] input[type="url"]:focus,
+:root[data-theme="glass2"] input[type="date"]:focus,
+:root[data-theme="glass2"] input[type="datetime-local"]:focus,
+:root[data-theme="glass2"] input[type="time"]:focus,
+:root[data-theme="glass2"] textarea:focus,
+:root[data-theme="glass2"] select:focus {
+  border-color: var(--g2-accent) !important;
+  background-color: rgba(255, 255, 255, 0.88) !important;
+  box-shadow: 0 0 0 3px var(--g2-accent-ring);
+  outline: none;
+}
+:root[data-theme="glass2"] input:disabled,
+:root[data-theme="glass2"] textarea:disabled {
+  background-color: rgba(84, 94, 120, 0.06) !important;
+  opacity: 0.65;
+}
+:root[data-theme="glass2"] select option {
+  background-color: #ffffff;
+  color: var(--color-text);
+}
+:root[data-theme="glass2"] .move-arrow-btn {
+  background-color: var(--g2-glass-strong);
+  border-color: var(--g2-hair-strong);
+}
+:root[data-theme="glass2"] .move-arrow-btn:hover {
+  background-color: var(--color-primary-light);
+}
+
+/* ------------------------------------------------------------
+   7. 卡片 / 面板
+   注意：刻意「不」给 .bg-surface 设 position——候选弹窗/右键菜单同时挂着
+   .bg-surface 与 .fixed，一旦这里写了 position: relative 就会把它们顶到页面末端。
+   ------------------------------------------------------------ */
+:root[data-theme="glass2"] .bg-surface {
+  background-color: var(--g2-glass) !important;
+  backdrop-filter: blur(var(--g2-blur)) saturate(var(--g2-saturate));
+  border: 1px solid var(--g2-line) !important;
+  border-radius: var(--radius-lg);
+  box-shadow: var(--g2-shadow-2), var(--g2-hl);
+}
+:root[data-theme="glass2"] .bg-surface-hover {
+  background-color: var(--g2-glass-strong) !important;
+}
+/* 座位管理等卡片：只留玻璃 + 轻投影 */
+:root[data-theme="glass2"] .bg-surface.shadow-md {
+  border: 1px solid var(--g2-line) !important;
+  box-shadow: var(--g2-shadow-1), var(--g2-hl);
+}
+/* 班费统计卡片 */
+:root[data-theme="glass2"] .grid.grid-cols-3 > div {
+  background-color: var(--g2-glass) !important;
+  backdrop-filter: blur(var(--g2-blur)) saturate(var(--g2-saturate));
+  border: 1px solid var(--g2-line) !important;
+  border-radius: var(--radius-lg) !important;
+  box-shadow: var(--g2-shadow-1), var(--g2-hl);
+}
+
+/* ------------------------------------------------------------
+   8. 表格
+   ------------------------------------------------------------ */
+:root[data-theme="glass2"] .table-scroll-wrapper {
+  background-color: var(--g2-glass) !important;
+  backdrop-filter: blur(var(--g2-blur)) saturate(var(--g2-saturate));
+  border-radius: var(--radius-lg);
+  contain: paint;
+  box-shadow: var(--g2-shadow-1), var(--g2-hl);
+}
+:root[data-theme="glass2"] table {
+  border-collapse: separate;
+  border-spacing: 0;
+  border-radius: var(--radius-lg);
+  overflow: hidden;
+}
+/* 单元格带 border border-border（四边都有）→ 相邻格会双线。
+   统一只画右/下，网格线为单线且颜色统一。 */
+:root[data-theme="glass2"] table th,
+:root[data-theme="glass2"] table td {
+  background-color: transparent !important;
+  color: var(--color-text) !important;
+  border: none !important;
+  border-right: 1px solid var(--g2-hair) !important;
+  border-bottom: 1px solid var(--g2-hair) !important;
+}
+:root[data-theme="glass2"] table th {
+  color: #3d4661 !important;
+  font-weight: 600;
+}
+/* 表头用强调色淡底，与选中行区分开 */
+:root[data-theme="glass2"] .table-scroll-wrapper th.bg-primary,
+:root[data-theme="glass2"] .grid-view-container th.bg-primary {
+  background-color: rgba(91, 124, 250, 0.16) !important;
+}
+:root[data-theme="glass2"] table .text-text-inverse,
+:root[data-theme="glass2"] table .text-text-inverse\/70 {
+  color: #3d4661 !important;
+}
+/* 数据行：比空数据区亮一档，形成可辨识的层次 */
+:root[data-theme="glass2"] table tbody tr td {
+  background-color: rgba(255, 255, 255, calc(var(--g2-a) + 0.2)) !important;
+}
+:root[data-theme="glass2"] table tbody tr:hover td {
+  background-color: rgba(255, 255, 255, calc(var(--g2-a) + 0.34)) !important;
+}
+/* 选中行再亮一档，保证选中反馈可见 */
+:root[data-theme="glass2"] table tbody tr.bg-surface-hover td {
+  background-color: rgba(255, 255, 255, calc(var(--g2-a) + 0.42)) !important;
+}
+/* 格内编辑：输入框透明，只留单元格自身的单层玻璃 */
+:root[data-theme="glass2"] table input[type="text"],
+:root[data-theme="glass2"] table input[type="number"],
+:root[data-theme="glass2"] table input[type="date"],
+:root[data-theme="glass2"] table select {
+  background-color: transparent !important;
+  border-color: transparent !important;
+  box-shadow: none !important;
+}
+:root[data-theme="glass2"] table input:focus,
+:root[data-theme="glass2"] table select:focus {
+  background-color: rgba(255, 255, 255, 0.6) !important;
+  border-color: var(--g2-accent) !important;
+}
+/* 表格内的辅助元素（拖拽把手、操作列容器等）不要带边框/投影 */
+:root[data-theme="glass2"] table [class*="border"]:not(th):not(td) {
+  border: none !important;
+  border-width: 0 !important;
+  box-shadow: none !important;
+}
+/* 底部「＋ 点击添加一行」 */
+:root[data-theme="glass2"] .add-row-bar {
+  background-color: var(--g2-glass-strong) !important;
+  border: 1px solid var(--g2-line) !important;
+  border-radius: var(--radius-sm) !important;
+  box-shadow: var(--g2-shadow-1);
+}
+
+/* ------------------------------------------------------------
+   9. 网状表格（GridView）
+   ------------------------------------------------------------ */
+:root[data-theme="glass2"] .grid-view-container {
+  position: relative;
+  background-color: var(--g2-glass) !important;
+  backdrop-filter: blur(var(--g2-blur)) saturate(var(--g2-saturate));
+  border-radius: var(--radius-lg);
+  contain: paint;
+  box-shadow: var(--g2-shadow-1), var(--g2-hl);
+}
+:root[data-theme="glass2"] .grid-view-container table th {
+  background-color: rgba(91, 124, 250, 0.16) !important;
+}
+:root[data-theme="glass2"] .grid-view-container table td {
+  background-color: rgba(255, 255, 255, calc(var(--g2-a) + 0.2)) !important;
+}
+/* GridView 里用 bg-warning/30、bg-info/10 标记"讲台/分隔行"，
+   在玻璃底上直接透出原色会发花，统一压成中性玻璃 */
+:root[data-theme="glass2"] .grid-view-container table .bg-warning\/30,
+:root[data-theme="glass2"] .grid-view-container table .bg-warning\/20,
+:root[data-theme="glass2"] .grid-view-container table .bg-info\/10 {
+  background-color: rgba(255, 255, 255, 0.5) !important;
+}
+:root[data-theme="glass2"] .grid-view-container [class*="border"]:not(th):not(td) {
+  border: none !important;
+  border-width: 0 !important;
+  box-shadow: none !important;
+}
+
+/* ------------------------------------------------------------
+   10. 通知吐司
+   ------------------------------------------------------------ */
+:root[data-theme="glass2"] .nt-toast {
+  background-color: var(--g2-glass-strong) !important;
+  backdrop-filter: blur(var(--g2-blur)) saturate(var(--g2-saturate));
+  border: 1px solid var(--g2-line) !important;
+  border-radius: var(--radius-md);
+  contain: paint;
+  box-shadow: var(--g2-shadow-2), var(--g2-hl);
+}
+:root[data-theme="glass2"] .nt-title { color: #191f2e !important; }
+:root[data-theme="glass2"] .nt-msg { color: #545e78 !important; }
+:root[data-theme="glass2"] .nt-close { color: #8a93a8 !important; }
+:root[data-theme="glass2"] .nt-close:hover { background-color: rgba(84, 94, 120, 0.1) !important; color: #191f2e !important; }
+:root[data-theme="glass2"] .nt-success .nt-bar { background: rgba(20, 135, 74, 0.85) !important; }
+:root[data-theme="glass2"] .nt-error   .nt-bar { background: rgba(214, 58, 58, 0.85) !important; }
+:root[data-theme="glass2"] .nt-warning .nt-bar { background: rgba(194, 116, 10, 0.85) !important; }
+:root[data-theme="glass2"] .nt-info    .nt-bar { background: rgba(91, 124, 250, 0.85) !important; }
+
+/* ------------------------------------------------------------
+   11. 浮层：候选列表 / 右键菜单 / 搜索面板 / 分段控件
+   浮层要"更实"——它们悬浮在内容之上，透太多会读不清。
+   ------------------------------------------------------------ */
+:root[data-theme="glass2"] .candidate-popup,
+:root[data-theme="glass2"] .context-menu-popup {
+  background-color: rgba(255, 255, 255, 0.92) !important;
+  backdrop-filter: blur(14px) saturate(1.2);
+  border: 1px solid var(--g2-line) !important;
+  border-radius: var(--radius-sm) !important;
+  box-shadow: var(--g2-shadow-2);
+  overflow: hidden;
+}
+:root[data-theme="glass2"] .candidate-popup .bg-info\/20 {
+  background-color: var(--color-primary-light) !important;
+}
+:root[data-theme="glass2"] .candidate-popup .hover\:bg-info\/10:hover,
+:root[data-theme="glass2"] .context-menu-popup .hover\:bg-surface-hover:hover {
+  background-color: var(--color-primary-light) !important;
+}
+:root[data-theme="glass2"] .search-panel {
+  background-color: var(--g2-glass) !important;
+  backdrop-filter: blur(var(--g2-blur)) saturate(var(--g2-saturate));
+  border: 1px solid var(--g2-line);
+  border-radius: var(--radius-md);
+  box-shadow: var(--g2-shadow-2), var(--g2-hl);
+}
+:root[data-theme="glass2"] .search-panel .bg-surface-hover {
+  background-color: var(--g2-glass-strong) !important;
+}
+/* 视图切换分段控件：底面与顶栏同一材质，圆角与隔壁按钮一致（12px） */
+:root[data-theme="glass2"] .view-switch {
+  backdrop-filter: blur(var(--g2-blur)) saturate(var(--g2-saturate));
+  border-radius: 12px;
+  box-shadow: var(--g2-hl);
+}
+:root[data-topbar-color="light"][data-theme="glass2"] .view-switch {
+  background-color: rgba(255, 255, 255, 0.62) !important;
+}
+:root[data-topbar-color="blue"][data-theme="glass2"] .view-switch {
+  background-color: rgba(74, 88, 179, 0.58) !important;
+}
+:root[data-theme="glass2"] .view-switch-btn.on {
+  color: var(--color-text-inverse, #ffffff);
+}
+/* 深靛蓝配色下分段控件的轨道是深色底，而未选中标签的默认色是
+   --color-text-secondary（深灰蓝），压上去基本读不出来 —— 这里改成浅色。
+   （旧 glass 主题同样存在这个对比度问题，新主题顺手修掉。） */
+:root[data-topbar-color="blue"][data-theme="glass2"] .view-switch-btn {
+  color: rgba(238, 241, 251, 0.75);
+}
+:root[data-topbar-color="blue"][data-theme="glass2"] .view-switch-btn.on {
+  color: #ffffff;
+}
+
+/* 弹窗遮罩的透明底 + 背景模糊由 utilities.css 的非 glass/win11 规则统一提供，
+   这里不再重复声明。 */
+
+/* ------------------------------------------------------------
+   12. 登录页
+   ------------------------------------------------------------ */
+:root[data-theme="glass2"] .login-bg {
+  background: transparent;
+}
+:root[data-theme="glass2"] .login-bg .bg-surface {
+  background-color: var(--g2-glass) !important;
+  backdrop-filter: blur(28px) saturate(var(--g2-saturate));
+}
+:root[data-theme="glass2"] .login-bg input {
+  background-color: var(--g2-glass-soft) !important;
+}
+:root[data-theme="glass2"] .login-bg input:focus {
+  border-color: var(--g2-accent) !important;
+  background-color: rgba(255, 255, 255, 0.88) !important;
+  box-shadow: 0 0 0 3px var(--g2-accent-ring);
+  outline: none;
+}
+/* 覆盖浏览器自动填充：未聚焦时统一灰边半透明底 */
+:root[data-theme="glass2"] .login-bg input:-webkit-autofill:not(:focus),
+:root[data-theme="glass2"] .login-bg input:-webkit-autofill:hover:not(:focus) {
+  -webkit-text-fill-color: #191f2e;
+  -webkit-box-shadow: 0 0 0 1000px rgba(255, 255, 255, 0.85) inset;
+  box-shadow: 0 0 0 1000px rgba(255, 255, 255, 0.85) inset;
+  border-color: var(--g2-hair-strong) !important;
+  transition: background-color 9999s ease-out;
+}
+:root[data-theme="glass2"] .login-bg input:-webkit-autofill:focus {
+  -webkit-text-fill-color: #191f2e;
+  -webkit-box-shadow: 0 0 0 1000px rgba(255, 255, 255, 0.9) inset;
+  box-shadow: 0 0 0 1000px rgba(255, 255, 255, 0.9) inset;
+  border-color: var(--g2-accent) !important;
+}
+:root[data-theme="glass2"] .login-glow {
+  box-shadow: var(--g2-shadow-3), var(--g2-hl);
+}
+
+/* ------------------------------------------------------------
+   13. 滚动条
+   ------------------------------------------------------------ */
+:root[data-theme="glass2"],
+:root[data-theme="glass2"] * {
+  scrollbar-width: thin;
+  scrollbar-color: rgba(84, 94, 120, 0.24) transparent;
+}
+:root[data-theme="glass2"] ::-webkit-scrollbar {
+  width: 9px;
+  height: 9px;
+}
+:root[data-theme="glass2"] ::-webkit-scrollbar-track {
+  background: transparent;
+}
+:root[data-theme="glass2"] ::-webkit-scrollbar-thumb {
+  background: rgba(84, 94, 120, 0.24);
+  border: 2px solid transparent;
+  border-radius: 999px;
+  background-clip: content-box;
+}
+:root[data-theme="glass2"] ::-webkit-scrollbar-thumb:hover {
+  background: rgba(84, 94, 120, 0.4);
+  background-clip: content-box;
+}
+:root[data-theme="glass2"] ::-webkit-scrollbar-corner {
+  background: transparent;
+}
+
+/* ------------------------------------------------------------
+   14. 减少动效偏好
+   ------------------------------------------------------------ */
+@media (prefers-reduced-motion: reduce) {
+  :root[data-theme="glass2"] body::before,
+  :root[data-theme="glass2"] body::after {
+    animation: none;
+  }
+}

@@ -171,9 +171,15 @@ function ensureIndex() {
       slug TEXT PRIMARY KEY,
       username TEXT NOT NULL,
       wrapped_key TEXT NOT NULL,
+      encrypted INTEGER NOT NULL DEFAULT 1,
       created_at TEXT DEFAULT CURRENT_TIMESTAMP
     );
   `);
+  // 兼容存量 index.db：老库没有 encrypted 列，补上并默认 1（加密），保证既有库行为不变
+  const cols = indexDb.prepare('PRAGMA table_info(registry)').all();
+  if (!cols.some((c) => c.name === 'encrypted')) {
+    indexDb.exec('ALTER TABLE registry ADD COLUMN encrypted INTEGER NOT NULL DEFAULT 1');
+  }
   return indexDb;
 }
 
@@ -189,30 +195,40 @@ function applyPerfPragmas(conn) {
   conn.pragma('temp_store = MEMORY');
 }
 
-function openFile(dbPath, passphrase) {
+function openFile(dbPath, passphrase, encrypted = true) {
   const Database = getDatabase();
   const conn = new Database(dbPath);
-  conn.pragma(`key = '${sqlKey(passphrase)}'`);
+  // 明文库（宽松模式）没有库钥匙，不能下发 pragma key，否则会被当作加密库而打不开
+  if (encrypted) conn.pragma(`key = '${sqlKey(passphrase)}'`);
   applyPerfPragmas(conn);
   return conn;
 }
 
 // 打开（或打开后初始化）某个 slug 对应的库并缓存
-function getConn(slug, passphrase) {
+function getConn(slug, passphrase, encrypted = true) {
   if (connCache.has(slug)) {
     touchConn(slug);
     return connCache.get(slug);
   }
-  const conn = openFile(path.join(dataDir, `${slug}.db`), passphrase);
+  const conn = openFile(path.join(dataDir, `${slug}.db`), passphrase, encrypted);
   initSchema(conn);
   setCachedConn(slug, conn);
   return conn;
 }
 
+// 关闭并移出某库的缓存连接（加密转换等需要独占文件句柄的场景使用）
+function evictConn(slug) {
+  if (connCache.has(slug)) {
+    const conn = connCache.get(slug);
+    try { conn.close(); } catch (_) { /* 关闭失败可忽略 */ }
+    connCache.delete(slug);
+  }
+}
+
 // ---------- index.db 操作 ----------
 function registryFindByUsername(username) {
   ensureIndex();
-  return indexDb.prepare('SELECT slug, wrapped_key FROM registry WHERE username = ?').get(username);
+  return indexDb.prepare('SELECT slug, wrapped_key, encrypted FROM registry WHERE username = ?').get(username);
 }
 
 function registryFindBySlug(slug) {
@@ -220,12 +236,18 @@ function registryFindBySlug(slug) {
   return indexDb.prepare('SELECT * FROM registry WHERE slug = ?').get(slug);
 }
 
-function registryUpsert(slug, username, wrappedKey) {
+function registryUpsert(slug, username, wrappedKey, encrypted = 1) {
   ensureIndex();
   indexDb.prepare(`
-    INSERT INTO registry(slug, username, wrapped_key) VALUES (?, ?, ?)
-    ON CONFLICT(slug) DO UPDATE SET username = excluded.username, wrapped_key = excluded.wrapped_key
-  `).run(slug, username, wrappedKey);
+    INSERT INTO registry(slug, username, wrapped_key, encrypted) VALUES (?, ?, ?, ?)
+    ON CONFLICT(slug) DO UPDATE SET username = excluded.username, wrapped_key = excluded.wrapped_key, encrypted = excluded.encrypted
+  `).run(slug, username, wrappedKey, encrypted ? 1 : 0);
+}
+
+// 仅切换某库的加密标记（明文化时保留原 wrapped_key 作占位，NOT NULL 约束不允许置空）
+function registrySetEncrypted(slug, encrypted) {
+  ensureIndex();
+  indexDb.prepare('UPDATE registry SET encrypted = ? WHERE slug = ?').run(encrypted ? 1 : 0, slug);
 }
 
 // 列出所有已登记的班主任账号（供登录页「从数据库注册」加载账号）
@@ -255,18 +277,20 @@ function registryListValid() {
   return valid;
 }
 
-// 新建一个班主任库：生成 slug + 随机库密钥 + 建库 + 建账号 + 登记 index。
+// 新建一个班主任库：生成 slug + 建库 + 建账号 + 登记 index。
+// encrypted=true（默认）：生成随机库密钥并以主密钥包裹登记；encrypted=false 为宽松明文库，
+// 不下发 PRAGMA key，登记 wrapped_key 占位为空串且 encrypted=0（明文库不允许密码）。
 // 返回 { slug }
-function createTeacher(username, passwordHash, role) {
+function createTeacher(username, passwordHash, role, encrypted = true) {
   const slug = '@' + crypto.randomBytes(6).toString('hex');
-  const passphrase = crypto.randomBytes(32).toString('hex');
-  const db = openFile(path.join(dataDir, `${slug}.db`), passphrase);
+  const passphrase = encrypted ? crypto.randomBytes(32).toString('hex') : null;
+  const db = openFile(path.join(dataDir, `${slug}.db`), passphrase, encrypted);
   initSchema(db);
   db.prepare('INSERT INTO users (id, username, password, role, db_slug) VALUES (1, ?, ?, ?, ?)')
     .run(username, passwordHash, role, slug);
   db.close();
 
-  registryUpsert(slug, username, wrapKey(passphrase));
+  registryUpsert(slug, username, encrypted ? wrapKey(passphrase) : '', encrypted ? 1 : 0);
   return { slug };
 }
 
@@ -275,8 +299,9 @@ function createTeacher(username, passwordHash, role) {
 function resolveByUsername(username) {
   const rec = registryFindByUsername(username);
   if (!rec) return null;
-  const passphrase = unwrapKey(rec.wrapped_key);
-  return { slug: rec.slug, conn: getConn(rec.slug, passphrase) };
+  const encrypted = rec.encrypted !== 0;
+  const passphrase = encrypted ? unwrapKey(rec.wrapped_key) : null;
+  return { slug: rec.slug, conn: getConn(rec.slug, passphrase, encrypted) };
 }
 
 // 「从数据库文件登录」：根据用户选中的库文件名（@xxxx.db）定位本机
@@ -287,8 +312,9 @@ function resolveByDbFile(filename) {
   let slug = filename.endsWith('.db') ? filename.slice(0, -3) : filename;
   const rec = registryFindBySlug(slug);
   if (!rec) throw new Error('本机未找到该数据库登记，若为换机/外来库请使用“从备份恢复”导入');
-  const passphrase = unwrapKey(rec.wrapped_key);
-  const conn = getConn(slug, passphrase); // 打开失败(钥匙不匹配)会在此抛错
+  const encrypted = rec.encrypted !== 0;
+  const passphrase = encrypted ? unwrapKey(rec.wrapped_key) : null;
+  const conn = getConn(slug, passphrase, encrypted); // 打开失败(钥匙不匹配)会在此抛错
   const row = conn.prepare('SELECT username FROM users ORDER BY id LIMIT 1').get();
   if (!row) throw new Error('该数据库内没有可用账号');
   return { slug, username: row.username };
@@ -306,8 +332,9 @@ function current() {
 function withDb(slug, fn) {
   const rec = registryFindBySlug(slug);
   if (!rec) throw new Error('库不存在');
-  const passphrase = unwrapKey(rec.wrapped_key);
-  const conn = getConn(slug, passphrase);
+  const encrypted = rec.encrypted !== 0;
+  const passphrase = encrypted ? unwrapKey(rec.wrapped_key) : null;
+  const conn = getConn(slug, passphrase, encrypted);
   return als.run({ slug, conn }, () => fn({ slug, conn }));
 }
 
@@ -320,19 +347,26 @@ function dbFilePath(slug) {
 function exportBundle(slug) {
   const rec = registryFindBySlug(slug);
   if (!rec) throw new Error('库不存在');
+  const encrypted = rec.encrypted !== 0;
   return {
     slug,
     username: rec.username,
     wrappedKey: rec.wrapped_key,
     filePath: dbFilePath(slug),
-    key: unwrapKey(rec.wrapped_key),
+    encrypted,
+    // 明文库没有库钥匙（数据本身不加密），key 为 null
+    key: encrypted ? unwrapKey(rec.wrapped_key) : null,
   };
 }
 
 // 供备份/恢复：写入教师库文件并在 index 登记（幂等）。
-// 参数 dbKey 为「已解出的库钥匙」（明文）——由调用方用密码/助记词解出的，本处只负责落盘与登记。
-function restoreBundle({ slug, username, data, dbKey }) {
-  if (!slug || !username || !dbKey || typeof data !== 'string') {
+// 参数 dbKey 为「已解出的库钥匙」（明文，仅加密库需要）——由调用方用密码/助记词解出的，本处只负责落盘与登记。
+// encrypted=false 表示恢复的是一个明文库，不包裹库钥匙、登记为明文。
+function restoreBundle({ slug, username, data, dbKey, encrypted = true }) {
+  if (!slug || !username || typeof data !== 'string') {
+    throw new Error('备份数据不完整');
+  }
+  if (encrypted && !dbKey) {
     throw new Error('备份数据不完整');
   }
   // 强约束 slug：仅允许 @ 开头 + 十六进制的内部格式，防止路径穿越/覆盖其它库
@@ -341,15 +375,118 @@ function restoreBundle({ slug, username, data, dbKey }) {
   }
   const filePath = dbFilePath(slug);
   fs.writeFileSync(filePath, Buffer.from(data, 'base64'));
-  // 用本机主密钥重新包裹库钥匙后登记，后续登录走常规主密钥路径即可打开
-  registryUpsert(slug, username, wrapKey(dbKey));
-  // 若该库已缓存连接，使其失效并可按新文件重建
-  if (connCache.has(slug)) {
-    const conn = connCache.get(slug);
-    try { conn.close(); } catch (_) { /* 关闭失败可忽略 */ }
-    connCache.delete(slug);
+  // 覆盖 .db 后必须清掉同名的 -wal/-shm 残留，否则旧库的日志会被 New 库重放导致损坏
+  for (const suffix of ['-wal', '-shm']) {
+    try { fs.rmSync(filePath + suffix, { force: true }); } catch (_) { /* 忽略 */ }
   }
+  // 用本机主密钥重新包裹库钥匙后登记，后续登录走常规主密钥路径即可打开；
+  // 明文库无需钥匙，wrapped_key 留空占位（NOT NULL 约束）
+  registryUpsert(slug, username, encrypted ? wrapKey(dbKey) : '', encrypted ? 1 : 0);
+  evictConn(slug);
   return { slug };
+}
+
+// ---------- 就地切换单个库的落盘加密方式（加密 <-> 明文） ----------
+// 只作用于传入 slug 对应的那一个库，绝不触碰其它账号。
+// 严格顺序：关闭连接 → 退出 WAL → 预检完整性 → 备份 → rekey → 转换后校验 → 回写登记 → 删备份；
+// 任一步失败即从备份还原原库文件并保持原登记状态，绝不留下半加密/半明文的中间态。
+// rekey 是 SQLCipher 的同步阻塞操作，因此本函数由后端执行；进度只到步骤级（无字节级回报）。
+// 函数为 async：每上报一步就让出事件循环一次（tick），否则后续同步的 rekey 会把已写入的
+// 进度一并阻塞到结束时才送达，进度窗口将看不到中间步骤。
+async function convertDbEncryption(slug, encrypt, onProgress) {
+  const rec = registryFindBySlug(slug);
+  if (!rec) throw new Error('库不存在');
+  const dbPath = dbFilePath(slug);
+  if (!fs.existsSync(dbPath)) throw new Error('数据库文件不存在');
+
+  const wasEncrypted = rec.encrypted !== 0;
+  const targetEncrypted = !!encrypt;
+  if (wasEncrypted === targetEncrypted) return { changed: false, encrypted: targetEncrypted };
+
+  const report = (phase, detail, percent) => { if (onProgress) onProgress({ phase, detail, percent }); };
+  const tick = () => new Promise((r) => setImmediate(r));
+  const Database = getDatabase();
+  const oldKey = wasEncrypted ? unwrapKey(rec.wrapped_key) : null;
+  const newKey = targetEncrypted ? crypto.randomBytes(32).toString('hex') : null;
+  const backupPath = `${dbPath}.rekey-backup`;
+
+  const cleanSidecars = () => {
+    for (const suffix of ['-wal', '-shm']) {
+      try { fs.rmSync(dbPath + suffix, { force: true }); } catch (_) { /* 忽略 */ }
+    }
+  };
+  const integrityOk = (conn) => {
+    const r = conn.pragma('integrity_check');
+    const first = Array.isArray(r) ? (r[0] && (r[0].integrity_check || Object.values(r[0])[0])) : r;
+    return String(first).toLowerCase() === 'ok';
+  };
+  // 以「无 WAL」方式打开：rekey 必须在非 WAL 模式下进行；key 为 null 表示明文库不开加密。
+  const openRaw = (key) => {
+    const conn = new Database(dbPath);
+    if (key != null) conn.pragma(`key = '${sqlKey(key)}'`);
+    try { conn.pragma('wal_checkpoint(TRUNCATE)'); } catch (_) { /* 非 WAL 模式无 WAL 可 checkpoint */ }
+    conn.pragma('journal_mode = DELETE');
+    return conn;
+  };
+
+  // 先驱逐缓存连接（含 auth 中间件为本次请求打开的连接），确保转换期间本库无其它句柄
+  evictConn(slug);
+
+  let conn = null;
+  try {
+    // 1) 预检：原库能打开且完整
+    report('校验文件', '正在校验当前数据库完整性', 5);
+    await tick();
+    conn = openRaw(oldKey);
+    if (!integrityOk(conn)) throw new Error('当前数据库完整性校验未通过');
+    conn.close();
+    conn = null;
+
+    // 2) 备份原库主文件（已退出 WAL，无 -wal/-shm 需一并备份）
+    report('校验文件', '正在备份原数据库', 30);
+    await tick();
+    fs.copyFileSync(dbPath, backupPath);
+
+    // 3) rekey：加密→明文用空串；明文→加密用新生成的随机库钥匙
+    report('转换数据库', targetEncrypted ? '正在为数据库启用加密' : '正在移除数据库加密', 40);
+    await tick();
+    conn = openRaw(oldKey);
+    conn.pragma(`rekey = '${sqlKey(targetEncrypted ? newKey : '')}'`);
+    conn.close();
+    conn = null;
+
+    // 4) 转换后校验：用新状态重新打开并做完整性检查
+    report('校验文件', '正在校验转换结果', 75);
+    await tick();
+    conn = openRaw(targetEncrypted ? newKey : null);
+    if (!integrityOk(conn)) throw new Error('转换后完整性校验未通过');
+    conn.close();
+    conn = null;
+
+    // 5) 回写登记表（唯一的状态持久化点）
+    report('校验文件', '正在更新账号登记', 90);
+    await tick();
+    if (targetEncrypted) registryUpsert(slug, rec.username, wrapKey(newKey), 1);
+    else registrySetEncrypted(slug, 0); // 明文库保留原 wrapped_key 作占位
+
+    // 6) 清理备份与可能残留的 WAL/SHM
+    try { fs.rmSync(backupPath, { force: true }); } catch (_) { /* 忽略 */ }
+    cleanSidecars();
+    report('校验文件', '转换完成', 100);
+    await tick();
+    return { changed: true, encrypted: targetEncrypted };
+  } catch (err) {
+    try { if (conn) conn.close(); } catch (_) { /* 忽略 */ }
+    // 失败回滚：从备份还原原库文件，登记状态保持原样（备份删除失败则保留供人工处理）
+    try {
+      if (fs.existsSync(backupPath)) {
+        fs.copyFileSync(backupPath, dbPath);
+        fs.rmSync(backupPath, { force: true });
+        cleanSidecars();
+      }
+    } catch (_) { /* 回滚异常时保留备份文件，不掩盖原始错误 */ }
+    throw err;
+  }
 }
 
 // 后端就绪后的后台暖机：把一次性冷启动成本（require 原生 sqlite 模块、打开 index.db）
@@ -376,6 +513,9 @@ module.exports = {
   withDb,
   exportBundle,
   restoreBundle,
+  convertDbEncryption,
+  registrySetEncrypted,
+  evictConn,
   registryList,
   registryListValid,
   warmup,

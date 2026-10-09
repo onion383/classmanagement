@@ -129,4 +129,66 @@ router.delete('/members/:id', (req, res) => {
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
+// 移动职务：挂到 parentId(0=顶级) 下第 index 位（排序），index 为去掉自身后目标位置，可为 null 表示放在末尾
+router.post('/:id/move', (req, res) => {
+  try {
+    const id = Number(req.params.id);
+    const node = db.prepare('SELECT * FROM cadres WHERE id=?').get(id);
+    if (!node) return res.status(404).json({ error: '职务不存在' });
+    const parentId = Number(req.body.parent_id) || 0;
+    let index = Number.isFinite(req.body.index) ? Number(req.body.index) : null;
+    if (parentId === id) return res.status(400).json({ error: '上级不能是自身' });
+    if (parentId) {
+      let cur = parentId;
+      const visited = new Set();
+      while (cur) {
+        if (cur === id) return res.status(400).json({ error: '不能把职务挂到自己的下级' });
+        if (visited.has(cur)) break;
+        visited.add(cur);
+        const p = db.prepare('SELECT parent_id FROM cadres WHERE id=?').get(cur);
+        cur = p ? p.parent_id : 0;
+      }
+    }
+    const tx = db.transaction(() => {
+      const children = db.prepare('SELECT id FROM cadres WHERE parent_id=? ORDER BY sort_order, id')
+        .all(parentId).map(r => r.id).filter(x => x !== id);
+      if (index == null || index < 0) index = children.length;
+      if (index > children.length) index = children.length;
+      children.splice(index, 0, id);
+      const stmt = db.prepare('UPDATE cadres SET sort_order=? WHERE id=?');
+      children.forEach((cid, i) => stmt.run(i, cid));
+      db.prepare('UPDATE cadres SET parent_id=? WHERE id=?').run(parentId, id);
+    });
+    tx();
+    res.json({ tree: buildTree() });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// 移动担任学生：挂到 cadreId 下第 index 位（index 为去掉自身后的目标位置，null 表示末尾）
+router.post('/members/:id/move', (req, res) => {
+  try {
+    const id = Number(req.params.id);
+    const mem = db.prepare('SELECT * FROM cadre_members WHERE id=?').get(id);
+    if (!mem) return res.status(404).json({ error: '担任学生不存在' });
+    const cadreId = Number(req.body.cadre_id) || 0;
+    if (!db.prepare('SELECT id FROM cadres WHERE id=?').get(cadreId)) {
+      return res.status(400).json({ error: '职务不存在' });
+    }
+    let index = Number.isFinite(req.body.index) ? Number(req.body.index) : null;
+    const tx = db.transaction(() => {
+      const list = db.prepare('SELECT id FROM cadre_members WHERE cadre_id=? ORDER BY sort_order, id')
+        .all(cadreId).map(r => r.id).filter(x => x !== id);
+      if (index == null || index < 0) index = list.length;
+      if (index > list.length) index = list.length;
+      list.splice(index, 0, id);
+      const stmt = db.prepare('UPDATE cadre_members SET sort_order=? WHERE id=?');
+      list.forEach((mid, i) => stmt.run(i, mid));
+      db.prepare('UPDATE cadre_members SET cadre_id=? WHERE id=?').run(cadreId, id);
+    });
+    tx();
+    res.json({ tree: buildTree() });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+
 module.exports = router;

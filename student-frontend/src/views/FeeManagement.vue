@@ -22,8 +22,11 @@
 
     <!-- 工具栏按钮 -->
     <div class="mb-4 flex items-center gap-3 opbar">
-      <button @click="addNewRowAtBottom" class="bg-primary hover:bg-primary-hover text-text-inverse px-5 py-2 rounded">
+      <button @click="openAddDialog" v-preload="loadAddStudentDialog" class="bg-primary hover:bg-primary-hover text-text-inverse px-5 py-2 rounded">
         ＋ 添加记录
+      </button>
+      <button @click="searchPanelOpen = !searchPanelOpen" class="btn-search px-4 py-2 rounded flex items-center gap-1.5" title="搜索">
+        <IconGlyph name="search" :size="14" tint="current" /> 搜索
       </button>
       <button @click="refreshRecords" class="bg-text-muted hover:bg-text-secondary text-text-inverse px-4 py-2 rounded flex items-center gap-1 btn-refresh" title="刷新表格">
         <IconGlyph name="refresh" :size="14" tint="current" /> 刷新
@@ -35,25 +38,29 @@
       >
         <IconGlyph name="trash" :size="14" tint="current" /> 批量删除 ({{ selectedCount }})
       </button>
-      <button @click="importDialogVisible = true" class="bg-warning hover:bg-warning-hover text-text-inverse px-4 py-2 rounded flex items-center gap-1.5">
+      <button @click="importDialogVisible = true" v-preload="loadImportExcel" class="bg-warning hover:bg-warning-hover text-text-inverse px-4 py-2 rounded flex items-center gap-1.5">
         <IconGlyph name="download" :size="14" tint="current" /> 从 Excel 导入
       </button>
       <button
         @click="exportDialogVisible = true"
+        v-preload="loadExportExcel"
         class="bg-warning hover:bg-warning-hover text-text-inverse px-4 py-2 rounded flex items-center gap-1.5"
       >
         <IconGlyph name="download" :size="14" tint="current" /> 导出 Excel
       </button>
-      <button @click="dedupeDialogVisible = true" class="bg-danger hover:bg-danger-hover text-text-inverse px-4 py-2 rounded flex items-center gap-1.5">
+      <button @click="dedupeDialogVisible = true" v-preload="loadDeduplicateDialog" class="bg-danger hover:bg-danger-hover text-text-inverse px-4 py-2 rounded flex items-center gap-1.5">
         <IconGlyph name="search" :size="14" tint="current" /> 去除重复数据
       </button>
     </div>
 
     <SearchBar
+      :fields="searchableFields"
+      :visible="searchPanelOpen"
       :searchField="searchField"
       :keyword="searchKeyword"
       @update:keyword="searchKeyword = $event"
-      @close="closeSearch"
+      @update:searchField="onPickSearchField"
+      @close="onCloseSearch"
     />
 
     <ConfirmDialog
@@ -138,9 +145,10 @@
       :sortField="sortField"
       :sortOrder="sortOrder"
       :editingCell="editingCell"
+      :search-active="searchActive"
       :protectedColumns="['收据']"
       @contextmenu="openContextMenu"
-      @search="openSearch"
+      @search="onOpenStructuralSearch"
       @toggleSort="toggleSort"
       @saveNewRow="saveNewRow"
       @cancelNewRow="cancelNewRow"
@@ -183,6 +191,15 @@
       @delete-rows="onDeleteDuplicates"
       @cancel="dedupeDialogVisible = false"
     />
+    <AddStudentDialog
+      v-if="addMounted"
+      :visible="addDialogVisible"
+      :fields="addFields"
+      :required-field="'收支编码'"
+      :title="'添加记录'"
+      @confirm="onAddRecord"
+      @cancel="addDialogVisible = false"
+    />
   </div>
 </template>
 
@@ -199,9 +216,14 @@ import { resourceUrl } from '../utils/apiUrl'
 // 弹窗类组件懒加载：打开时才加载对应 chunk
 const ConfirmDialog = defineAsyncComponent(() => import('../components/base/ConfirmDialog.vue'))
 const ContextMenu = defineAsyncComponent(() => import('../components/base/ContextMenu.vue'))
-const ExportExcel = defineAsyncComponent(() => import('../components/import-export/ExportExcel.vue'))
-const ImportExcel = defineAsyncComponent(() => import('../components/import-export/ImportExcel.vue'))
-const DeduplicateDialog = defineAsyncComponent(() => import('../components/dialogs/DeduplicateDialog.vue'))
+const loadExportExcel = () => import('../components/import-export/ExportExcel.vue')
+const ExportExcel = defineAsyncComponent(loadExportExcel)
+const loadImportExcel = () => import('../components/import-export/ImportExcel.vue')
+const ImportExcel = defineAsyncComponent(loadImportExcel)
+const loadDeduplicateDialog = () => import('../components/dialogs/DeduplicateDialog.vue')
+const DeduplicateDialog = defineAsyncComponent(loadDeduplicateDialog)
+const loadAddStudentDialog = () => import('../components/dialogs/AddStudentDialog.vue')
+const AddStudentDialog = defineAsyncComponent(loadAddStudentDialog)
 
 const exportDialogVisible = ref(false)
 
@@ -212,6 +234,8 @@ const importMounted = ref(false)
 const dedupeMounted = ref(false)
 const dialogMounted = ref(false)
 const contextMenuMounted = ref(false)
+const addMounted = ref(false)
+const addDialogVisible = ref(false)
 
 const API_BASE = '/api'
 const DEFAULT_FIELDS = [
@@ -268,9 +292,24 @@ watch(() => importDialogVisible.value, v => { if (v) importMounted.value = true 
 watch(() => dedupeDialogVisible.value, v => { if (v) dedupeMounted.value = true })
 watch(() => dialog.value.visible, v => { if (v) dialogMounted.value = true })
 watch(() => contextMenu.value.visible, v => { if (v) contextMenuMounted.value = true })
+watch(() => addDialogVisible.value, v => { if (v) addMounted.value = true })
 
 const fetchRecords = fetchRows
-const { success: notifySuccess } = useNotification()
+const { success: notifySuccess, error: notifyError } = useNotification()
+
+// 搜索面板显隐（点工具「搜索」按钮弹出；表头🔍 触发的列搜索也用同一面板）
+const searchPanelOpen = ref(false)
+// 面板「取消」：关闭面板并清空搜索条件
+const onCloseSearch = () => {
+  searchPanelOpen.value = false
+  closeSearch()
+}
+// 面板「下拉选列」/表头🔍 触发：切换搜索列并弹出面板
+const onPickSearchField = name => {
+  searchPanelOpen.value = true
+  openSearch(name)
+}
+const onOpenStructuralSearch = onPickSearchField
 
 // Ctrl+Z / Ctrl+Shift+Z / Ctrl+Y 撤销、重做本页班费表
 useUndoShortcut('fee_records', {
@@ -286,6 +325,40 @@ async function refreshRecords() {
 }
 
 // ==================== 看板统计 ====================
+// 工具栏搜索下拉的可选列：业务字段剔除「收据」（收据为保护列，走收据管理流程，不在此填写）
+const searchableFields = computed(() =>
+  visibleFields.value.filter(f => f.name !== '收据')
+)
+// 搜索过滤进行中：表格行进入/离开采用上下级联动画。
+// 用「已选搜索列」判断而非关键字非空：清空关键字/恢复全表时同样保持级联，避免回退成水平滑动
+const searchActive = computed(() => !!searchField.value)
+
+// 弹窗表单字段：业务字段剔除「收据」（收据为保护列，走收据管理流程，不在此填写）
+const addFields = computed(() =>
+  visibleFields.value.filter(f => f.name !== '收据')
+)
+
+function openAddDialog() {
+  // 打开弹窗前，若存在未保存的内联新行先取消，避免两套新增状态并存
+  if (newRow.value) newRow.value = null
+  addDialogVisible.value = true
+}
+
+async function onAddRecord(data) {
+  if (!data['收支类型']) { notifyError('请选择收支类型'); return }
+  if (!data['收支金额']) { notifyError('请填写收支金额'); return }
+  if (!data['收支时间']) { notifyError('请选择收支时间'); return }
+  try {
+    // 弹窗不填收据，新增时置空，保持列存在
+    await axios.post(`${API_BASE}/fee-records`, { ...data, '收据': '' })
+    addDialogVisible.value = false
+    await fetchRecords()
+    notifySuccess('已添加记录')
+  } catch (err) {
+    notifyError(err.response?.data?.error || '添加失败')
+  }
+}
+
 const balance = computed(() => {
   // 收入为正，支出为负
   return feeRecords.value.reduce((sum, r) => {

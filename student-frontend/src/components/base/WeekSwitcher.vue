@@ -41,7 +41,7 @@ export default {
     currentWeek: { type: String, required: true },
     weeks: { type: Array, default: () => [] }
   },
-  emits: ['update:currentWeek'],
+  emits: ['update:currentWeek', 'direction'],
   computed: {
     weekOptions() {
       return this.weeks.map(w => ({ value: w.week_start, label: this.formatWeek(w.week_start) }));
@@ -58,12 +58,12 @@ export default {
   methods: {
     goPrev() {
       const idx = this.weeks.findIndex(w => w.week_start === this.currentWeek);
-      if (idx > 0) this.$emit('update:currentWeek', this.weeks[idx - 1].week_start);
+      if (idx > 0) { this.$emit('direction', 'prev'); this.$emit('update:currentWeek', this.weeks[idx - 1].week_start); }
     },
     goNext() {
       const idx = this.weeks.findIndex(w => w.week_start === this.currentWeek);
       if (idx !== -1 && idx < this.weeks.length - 1) {
-        this.$emit('update:currentWeek', this.weeks[idx + 1].week_start);
+        this.$emit('direction', 'next'); this.$emit('update:currentWeek', this.weeks[idx + 1].week_start);
       }
     },
     formatWeek(weekStart) {
@@ -95,6 +95,8 @@ export default {
 }
 /* 中间的时间单独框起来，作为这条栏的视觉中心 */
 .week-date {
+  box-sizing: border-box;
+  width: 250px;
   padding: 4px 14px;
   border-radius: 10px;
   border: 1px solid var(--color-border, #e5e7eb);
@@ -103,6 +105,7 @@ export default {
   font-weight: 600;
   letter-spacing: 0.5px;
   white-space: nowrap;
+  text-align: center;
 }
 /* 周下拉框：选中值居中（箭头绝对定位到右侧，否则会把文字挤偏左） */
 .week-select :deep(.av-select__trigger) {

@@ -16,11 +16,11 @@
     <h2 class="text-xl font-semibold text-text mb-4 flex items-center gap-2 min-h-7"><IconGlyph name="box" :size="20" /> 小组管理</h2>
     <div class="flex flex-nowrap items-center gap-3 mb-4 overflow-x-auto">
       <button v-if="activeDim" @click="openSettings" class="bg-primary hover:bg-primary-hover text-text-inverse px-4 py-2 rounded transition-theme flex items-center gap-1.5" title="当前维度设置"><IconGlyph name="settings" :size="14" tint="current" /> 设置</button>
-      <button @click="onSmartGroup" class="bg-primary hover:bg-primary-hover text-text-inverse px-4 py-2 rounded transition-theme">🧠 智能分组</button>
-      <button @click="loadAll" :disabled="loading" class="bg-text-muted hover:bg-text-secondary text-text-inverse px-4 py-2 rounded transition-theme disabled:opacity-50 flex items-center gap-1.5 btn-refresh">
+      <button v-preload="loadSmartGroupDialog" @click="onSmartGroup" class="bg-primary hover:bg-primary-hover text-text-inverse px-4 py-2 rounded transition-theme">🧠 智能分组</button>
+      <button @click="loadAll" class="bg-text-muted hover:bg-text-secondary text-text-inverse px-4 py-2 rounded flex items-center gap-1.5 btn-refresh">
         <IconGlyph name="refresh" :size="14" tint="current" /> 刷新
       </button>
-      <button @click="openExport" :disabled="loading || !active?.groups?.length" class="bg-warning hover:bg-warning-hover text-text-inverse px-4 py-2 rounded transition-theme disabled:opacity-50 flex items-center gap-1.5">
+      <button v-preload="loadExportExcel" @click="openExport" class="bg-warning hover:bg-warning-hover text-text-inverse px-4 py-2 rounded flex items-center gap-1.5">
         <IconGlyph name="download" :size="14" tint="current" /> 导出分组
       </button>
     </div>
@@ -72,7 +72,7 @@
                     draggable="true"
                     :data-index="i"
                     @dragstart="onMemberDragStart(g, m, i, $event)"
-                    :class="'cursor-grab ' + (i === 0 ? 'bg-info/5 border-b border-border' : 'border-b border-border/60 last:border-0') + ' ' + dropRowClass(g, i)"
+                    :class="'cursor-grab ' + (i === 0 ? 'bg-info/5 border-b border-border' : 'border-b border-border/60 last:border-0')"
                   >
                     <td class="px-1 w-6 text-center text-text-secondary cursor-grab select-none">⠿</td>
                     <td class="px-3 py-1.5">
@@ -131,7 +131,7 @@
                 draggable="true"
                 :data-index="i"
                 @dragstart="onMemberDragStart(g, m, i, $event)"
-                :class="'cursor-grab ' + (i === 0 ? 'bg-info/5 border-b border-border' : 'border-b border-border/60 last:border-0') + ' ' + dropRowClass(g, i)"
+                :class="'cursor-grab ' + (i === 0 ? 'bg-info/5 border-b border-border' : 'border-b border-border/60 last:border-0')"
               >
                 <td class="px-1 w-6 text-center text-text-secondary cursor-grab select-none">⠿</td>
                 <td class="px-3 py-1.5">
@@ -369,8 +369,10 @@ import { useUndoShortcut } from '../composables/useUndo.js';
 
 // 弹窗类组件懒加载：打开时才加载对应 chunk
 const ConfirmDialog = defineAsyncComponent(() => import('../components/base/ConfirmDialog.vue'));
-const SmartGroupDialog = defineAsyncComponent(() => import('../components/dialogs/SmartGroupDialog.vue'));
-const ExportExcel = defineAsyncComponent(() => import('../components/import-export/ExportExcel.vue'));
+const loadSmartGroupDialog = () => import('../components/dialogs/SmartGroupDialog.vue');
+const SmartGroupDialog = defineAsyncComponent(loadSmartGroupDialog);
+const loadExportExcel = () => import('../components/import-export/ExportExcel.vue');
+const ExportExcel = defineAsyncComponent(loadExportExcel);
 
 const { success, error, info } = useNotification();
 
@@ -500,9 +502,18 @@ async function fetchStudents() {
   } catch (e) { /* 学生列表不可用时不阻塞分组功能 */ }
 }
 const suggestState = reactive({ visible: false, member: null, top: 0, left: 0, width: 0, index: 0, keyword: '' });
+let suggestTimer = null;
+const MAX_SUGGEST = 50;
 const suggestedStudents = computed(() => {
   const kw = (suggestState.keyword || '').toLowerCase().trim();
-  return allStudents.value.filter(s => String(s.姓名 || '').toLowerCase().includes(kw));
+  const list = allStudents.value;
+  if (!kw) return list.slice(0, MAX_SUGGEST);
+  const matched = [];
+  for (let i = 0; i < list.length && matched.length < MAX_SUGGEST; i++) {
+    const s = list[i];
+    if (String(s.姓名 || '').toLowerCase().includes(kw)) matched.push(s);
+  }
+  return matched;
 });
 function positionSuggest(el) {
   if (!el) return;
@@ -521,15 +532,20 @@ function positionSuggest(el) {
 }
 function onMemberInput(m, e) {
   const el = e.currentTarget;
+  const value = e.target.value || '';
+  const wasShown = suggestState.visible;
   suggestState.member = m;
-  suggestState.keyword = e.target.value || '';
   suggestState.index = 0;
-  if (suggestedStudents.value.length > 0) {
-    // 等 DOM 稳定后再定位，避免输入与重排导致坐标漂移
-    nextTick(() => positionSuggest(el));
+  if (!wasShown) {
+    // 首次打开：同步应用关键字，且只定位一次（输入框位置在打字过程中不变，无需每次读布局）
+    clearTimeout(suggestTimer);
+    suggestState.keyword = value;
     suggestState.visible = true;
+    nextTick(() => positionSuggest(el));
   } else {
-    suggestState.visible = false;
+    // 已打开：关键字防抖，避免每次击键全量过滤学生列表
+    clearTimeout(suggestTimer);
+    suggestTimer = setTimeout(() => { suggestState.keyword = value; }, 120);
   }
 }
 function onMemberKeydown(m, e) {
@@ -556,6 +572,7 @@ function fillCandidate(s) {
   commitMember(m);
 }
 function closeSuggest() {
+  clearTimeout(suggestTimer);
   suggestState.visible = false;
   suggestState.member = null;
   suggestState.keyword = '';
@@ -575,6 +592,7 @@ const genderSections = computed(() => {
 });
 
 async function loadAll() {
+  if (loading.value) return;
   loading.value = true;
   try {
     // 已有选中维度：只刷新当前展示的表格，不跳转到第一个 tab
@@ -659,8 +677,8 @@ function openSettings() {
     leader_title: activeDim.value.leader_title,
     members_per_group: activeDim.value.members_per_group,
     group_count: activeDim.value.group_count,
-    male_group_count: activeDim.value.male_group_count,
-    female_group_count: activeDim.value.female_group_count,
+    male_group_count: activeDim.value.male_group_count || 3,
+    female_group_count: activeDim.value.female_group_count || 3,
     name_rule: 'custom',
   });
   showSettings.value = true;
@@ -813,7 +831,21 @@ function addMember(g) {
 // ============ 成员拖拽排序 / 跨组移动 ============
 const memberInputs = new Map();
 const lastAdded = ref(null);
-const dragState = reactive({ fromMemberId: null, fromGid: null, overGid: null, overIndex: null, pos: 'after' });
+// 非响应式：dragover 高频写入，若为响应式会触发整块分组卡片重渲染，故用普通对象
+const dragState = { fromMemberId: null, fromGid: null, overGid: null, overIndex: null, pos: 'after' };
+// 拖拽落点高亮：命令式增删 class，避免 dropRowClass 进入模板响应式依赖
+let _hlRow = null;
+let _hlPos = '';
+function setDropHighlight(row, pos) {
+  if (row === _hlRow && (row ? pos : '') === _hlPos) return;
+  if (_hlRow) _hlRow.classList.remove('drop-line', 'drop-before', 'drop-after');
+  _hlRow = row || null;
+  _hlPos = row ? pos : '';
+  if (_hlRow) {
+    _hlRow.classList.add('drop-line');
+    _hlRow.classList.add(pos === 'before' ? 'drop-before' : 'drop-after');
+  }
+}
 
 function setMemberInput(m, el) {
   if (el) memberInputs.set(m, el);
@@ -839,11 +871,15 @@ function onMemberDragOver(g, e) {
     dragState.overGid = g.id;
     dragState.overIndex = Number(row.dataset.index);
     dragState.pos = e.clientY - rect.top < rect.height / 2 ? 'before' : 'after';
+    setDropHighlight(row, dragState.pos);
   } else if (g.members.length > 0) {
     // 组内空白处 → 追加到末尾，高亮最后一行下缘
     dragState.overGid = g.id;
     dragState.overIndex = g.members.length - 1;
     dragState.pos = 'after';
+    const tb = e.currentTarget;
+    const last = tb ? tb.querySelector(`tr[data-index="${g.members.length - 1}"]`) : null;
+    setDropHighlight(last, 'after');
   }
 }
 
@@ -877,12 +913,7 @@ function clearDrag() {
   dragState.overGid = null;
   dragState.overIndex = null;
   dragState.pos = 'after';
-}
-
-// 拖拽命中行的高亮类（虚拟位置反馈）
-function dropRowClass(g, index) {
-  if (dragState.overGid !== g.id || dragState.overIndex !== index) return '';
-  return dragState.pos === 'before' ? 'drop-line drop-before' : 'drop-line drop-after';
+  setDropHighlight(null, 'after');
 }
 
 async function moveMember(memberId, targetGroupId, targetIndex) {

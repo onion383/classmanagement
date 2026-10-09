@@ -49,3 +49,18 @@
   --radius-card: 8px;
   --radius-full: 9999px;
 }
+
+/* ========== 无边框透明窗口（窗外亚克力）适配：基础主题 ==========
+   主窗口已统一为无边框透明 + 窗外亚克力（见 electron/main.js），
+   body 改为透明让桌面亚克力透出；内容区 main 用浅灰半透明磨砂淡色叠加，
+   既保留基础主题的浅色底与可读性，又透出亚克力「厚度」。 */
+:root[data-theme="base"] body {
+  background-color: transparent;
+}
+:root[data-theme="base"] main {
+  background-color: rgba(248, 250, 252, 0.55);
+}
+:root[data-theme="base"] .window-title-bar {
+  background: rgba(255, 255, 255, 0.35);
+  border-bottom: 1px solid rgba(0, 0, 0, 0.08);
+}

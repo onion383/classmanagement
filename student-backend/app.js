@@ -38,7 +38,9 @@ const authRoutes = require('./routes/auth');
 const accountRoutes = require('./routes/account');
 
 const app = express();
-const PORT = 3000;
+// 端口可用环境变量覆盖（默认 3000）：打包/日常运行行为不变，
+// 仅用于在同一台机器上并行起一个「隔离数据目录」的测试后端做性能测量。
+const PORT = Number(process.env.PORT) || 3000;
 
 app.use(cors());
 // Host 校验：仅接受本机回环地址的请求，阻断「任意网页/DNS rebinding 探测 localhost API」。

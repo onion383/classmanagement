@@ -9,7 +9,7 @@
         :key="tab.value"
         @click="$emit('update:modelValue', tab.value)"
         :class="[
-          'px-5 py-2.5 rounded-xl font-medium text-sm transition-all duration-300 ease-in-out',
+          'px-5 py-2.5 rounded-xl font-medium text-sm transition-[background-color,color,box-shadow,transform,scale] duration-300 ease-in-out',
           'hover:shadow-md hover:scale-105',
           modelValue === tab.value
             ? 'bg-info text-text-inverse shadow-lg shadow-info/30 tab-active'

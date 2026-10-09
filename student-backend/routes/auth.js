@@ -103,13 +103,16 @@ router.post('/login', (req, res) => {
 // 注册即新建一个独立的加密班主任库，并返回 12 词恢复密钥。
 // ---------------------------------------------------------------------------
 router.post('/register', (req, res) => {
-  const { username, password, role } = req.body || {};
+  const { username, password, role, encrypted } = req.body || {};
 
   // 仅班主任开放
   if (role !== 'teacher') {
     console.warn('[register] 非班主任角色被拒绝: role=', role);
     return res.status(403).json({ error: '该角色正在开发中，请先使用「班主任」注册' });
   }
+
+  // 保存方式：缺省加密（兼容现有调用）；显式 false/0/'0' 视为明文保存
+  const wantEncrypted = !(encrypted === false || encrypted === 0 || encrypted === '0');
 
   const uname = String(username || '').trim();
   if (uname.length < 2 || uname.length > 30) {
@@ -119,6 +122,12 @@ router.post('/register', (req, res) => {
   if (!/^[\w\u4e00-\u9fa5@.-]+$/.test(uname)) {
     console.warn('[register] 账号含非法字符:', uname);
     return res.status(400).json({ error: '账号包含非法字符' });
+  }
+
+  // 明文保存不允许设置密码（明文库没有库钥匙，无法承载密码保护）
+  if (!wantEncrypted && password) {
+    console.warn('[register] 明文保存模式禁止设置密码:', uname);
+    return res.status(400).json({ error: '明文保存模式下不允许设置密码' });
   }
 
   // 密码为空视为无密码登录，不加密；有密码则校验长度并加密存储
@@ -137,13 +146,26 @@ router.post('/register', (req, res) => {
 
   const hasPassword = !!passwordHash;
   if (!hasPassword) {
-    // 无密码账号无恢复密钥可抄写，直接创建
+    // 无密码账号无恢复密钥可抄写，直接创建（明文或密文均可）。
+    // 注册即签发登录态，便于首次引导继续设置班级信息并进入首页。
     try {
-      const { slug } = dbManager.createTeacher(uname, passwordHash, 'teacher');
-      console.log('[register] 无密码注册成功:', uname, 'slug:', slug);
+      const { slug } = dbManager.createTeacher(uname, passwordHash, 'teacher', wantEncrypted);
+      console.log('[register] 无密码注册成功:', uname, 'slug:', slug, 'encrypted:', wantEncrypted);
+      const token = jwt.sign(
+        { userId: 1, username: uname, role: 'teacher', dbSlug: slug },
+        SECRET,
+        { expiresIn: '7d' }
+      );
+      res.cookie('token', token, {
+        httpOnly: true,
+        sameSite: 'lax',
+        path: '/',
+        maxAge: 7 * 24 * 60 * 60 * 1000
+      });
       return res.json({
         message: '注册成功',
-        user: { username: uname, role: 'teacher', dbSlug: slug },
+        token,
+        user: { id: 1, username: uname, role: 'teacher', dbSlug: slug, hasPassword: false },
       });
     } catch (err) {
       console.error('[register] 注册抛异常:', uname, err.stack || err.message);
@@ -152,7 +174,7 @@ router.post('/register', (req, res) => {
     }
   }
 
-  // 有密码账号：先生成恢复密钥，存草稿；抄写通过后由 /api/register/confirm 真正建库。
+  // 有密码账号（必然加密）：先生成恢复密钥，存草稿；抄写通过后由 /api/register/confirm 真正建库。
   const phrase = pickPhrase();
   const restoreHash = deriveRestoreHash(phrase);
   const draftId = putDraft({ username: uname, passwordHash, role: 'teacher', restoreHash });

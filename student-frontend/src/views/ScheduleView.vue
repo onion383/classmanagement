@@ -14,7 +14,7 @@
           <section class="mb-10">
             <h2 class="text-xl font-semibold mb-4">📅 实行课表（临时）</h2>
             <div class="mb-4 flex items-center gap-3 opbar">
-              <button @click="activeSettingsVisible = true" class="bg-primary text-text-inverse px-4 py-2 rounded flex items-center gap-1.5"><IconGlyph name="settings" :size="14" tint="current" /> 设置</button>
+              <button @click="activeSettingsVisible = true" v-preload="loadSettingsDialog" class="bg-primary text-text-inverse px-4 py-2 rounded flex items-center gap-1.5"><IconGlyph name="settings" :size="14" tint="current" /> 设置</button>
               <button @click="refreshActive" class="bg-text-muted text-text-inverse px-4 py-2 rounded flex items-center gap-1.5 btn-refresh"><IconGlyph name="refresh" :size="14" tint="current" /> 刷新</button>
               <button @click="applyMasterToActive" class="bg-primary text-text-inverse px-4 py-2 rounded flex items-center gap-1.5"><IconGlyph name="upload" :size="14" tint="current" /> 从模板导入</button>
               <button @click="activeExportVisible = true" class="bg-warning text-text-inverse px-4 py-2 rounded">📥 导出 Excel</button>
@@ -65,7 +65,7 @@
           <section>
             <h2 class="text-xl font-semibold mb-4 flex items-center gap-2"><IconGlyph name="clipboard" :size="20" /> 一般课表（模板）</h2>
             <div class="mb-4 flex items-center gap-3 opbar">
-              <button @click="masterSettingsVisible = true" class="bg-primary text-text-inverse px-4 py-2 rounded flex items-center gap-1.5"><IconGlyph name="settings" :size="14" tint="current" /> 设置</button>
+              <button @click="masterSettingsVisible = true" v-preload="loadSettingsDialog" class="bg-primary text-text-inverse px-4 py-2 rounded flex items-center gap-1.5"><IconGlyph name="settings" :size="14" tint="current" /> 设置</button>
               <button @click="refreshMaster" class="bg-text-muted text-text-inverse px-4 py-2 rounded flex items-center gap-1.5 btn-refresh"><IconGlyph name="refresh" :size="14" tint="current" /> 刷新</button>
               <button @click="masterExportVisible = true" class="bg-warning text-text-inverse px-4 py-2 rounded flex items-center gap-1.5"><IconGlyph name="download" :size="14" tint="current" /> 导出 Excel</button>
             </div>
@@ -109,34 +109,59 @@
         </div>
 
         <!-- ==================== 历史课程表记录标签页（占位） ==================== -->
-        <div v-else-if="activeTab === 'history'">
-          
-          <div v-if="historyLoading" class="skeleton-block"></div>
-          <EmptySnapshot v-else-if="!historySnapshot" />
-          <GridView
-            v-else
-            :colHeaders="historyColHeaders"
-            :title="activeTitle"
-            :rows="historyDisplayRows"
-            :showPeriodColumn="true"
-            @update:cells="() => {}"
-            @swapRows="() => {}"
-            @swapColumns="() => {}"
-            @update:row-meta="() => {}"
-          />
+        <div v-else-if="activeTab === 'history'" class="relative">
+          <Transition :name="slideDir">
+            <div :key="historyCurrentWeek" class="history-content">
+              <div v-if="historyLoading" class="skeleton-block"></div>
+              <EmptySnapshot v-else-if="!historySnapshot" />
+              <GridView
+                v-else
+                :colHeaders="historyColHeaders"
+                :title="activeTitle"
+                :rows="historyDisplayRows"
+                :showPeriodColumn="true"
+                @update:cells="() => {}"
+                @swapRows="() => {}"
+                @swapColumns="() => {}"
+                @update:row-meta="() => {}"
+              />
+            </div>
+          </Transition>
+          <!-- 快照菜单栏：周切换 + 下拉框 + 保存/删除按钮，同处一条毛玻璃栏 -->
           <WeekSwitcher
             v-model:currentWeek="historyCurrentWeek"
             :weeks="historyWeeks"
             @update:currentWeek="loadHistorySnapshot"
-          />
-          <div class="text-center mt-4">
-            <button @click="captureHistorySnapshot" class="bg-primary text-text-inverse px-4 py-2 rounded">
-              📸 保存本周快照
-            </button>
-          </div>
+            @direction="onSwitchWeek"
+          >
+            <template #actions>
+              <button
+                @click="captureHistorySnapshot"
+                class="bg-primary text-text-inverse px-3 py-1.5 rounded whitespace-nowrap cursor-pointer"
+              >📸 保存本周快照</button>
+              <button
+                @click="requestDeleteHistorySnapshot"
+                :disabled="!canDeleteHistorySnapshot"
+                class="bg-danger text-text-inverse px-3 py-1.5 rounded whitespace-nowrap cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"
+              >🗑 删除本周快照</button>
+            </template>
+          </WeekSwitcher>
         </div>
       </template>
     </Tabs>
+
+    <!-- 删除历史快照确认弹窗 -->
+    <ConfirmDialog
+      v-if="deleteSnapshotMounted"
+      :visible="deleteSnapshotVisible"
+      title="删除历史快照"
+      :message="deleteSnapshotMessage"
+      type="confirm"
+      :showCancel="true"
+      confirmText="删除"
+      @confirm="confirmDeleteHistorySnapshot"
+      @cancel="deleteSnapshotVisible = false"
+    />
   </div>
 </template>
 
@@ -151,9 +176,12 @@ import WeekSwitcher from '../components/base/WeekSwitcher.vue';
 import { useNotification } from '../composables/useNotification.js';
 import { useUndoShortcut, recordGridCellUndo, recordGridSnapshotUndo } from '../composables/useUndo.js';
 
-// 弹窗类组件懒加载：打开时才加载对应 chunk
-const SettingsDialog = defineAsyncComponent(() => import('../components/dialogs/SettingsDialog.vue'));
+// 弹窗类组件懒加载：打开时才加载对应 chunk。loader 抽出为命名函数，
+// 可用 v-preload="loadXxx" 在悬停按钮时预取，点击时即时弹出。
+const loadSettingsDialog = () => import('../components/dialogs/SettingsDialog.vue');
+const SettingsDialog = defineAsyncComponent(loadSettingsDialog);
 const ExportExcel = defineAsyncComponent(() => import('../components/import-export/ExportExcel.vue'));
+const ConfirmDialog = defineAsyncComponent(() => import('../components/base/ConfirmDialog.vue'));
 
 const API_BASE = '/api';
 
@@ -196,16 +224,17 @@ const COURSE_CANDIDATES = [
 
 export default {
   name: 'ScheduleView',
-  components: { GridView, SettingsDialog, ExportExcel,Tabs,WeekSwitcher,EmptySnapshot },
+  components: { GridView, SettingsDialog, ExportExcel,Tabs,WeekSwitcher,EmptySnapshot, ConfirmDialog },
   setup() {
-    const { success } = useNotification()
+    const { success, error } = useNotification()
     const inst = getCurrentInstance()
     // Ctrl+Z / Ctrl+Shift+Z / Ctrl+Y 撤销/重做课表（当前页，含实行+一般两张表）
     useUndoShortcut('课程表', {
       onAfterUndo: async (label) => { await Promise.all([inst.proxy.loadMaster(), inst.proxy.loadActive()]); success(label ? `已撤销：${label}` : '已撤销') },
       onAfterRedo: async (label) => { await Promise.all([inst.proxy.loadMaster(), inst.proxy.loadActive()]); success(label ? `已重做：${label}` : '已重做') }
     })
-    return { notifySuccess: success }
+    // loadSettingsDialog 一并暴露：v-preload 的绑值在渲染函数里求值，模块作用域的加载器不挂实例会告警
+    return { notifySuccess: success, notifyError: error, loadSettingsDialog }
   },
   data() {
     return {
@@ -250,6 +279,10 @@ export default {
       historySettings: { sections: null, periods: [], days: ['周一','周二','周三','周四','周五'] },
       historyColHeaders: ['周一','周二','周三','周四','周五'],
       historyLoading: false,
+      // 周切换滑动方向：上一周="prev" 从右滑入，下一周="next" 从左滑入（应用于历史表格）
+      slideDir: 'next',
+      deleteSnapshotVisible: false,
+      deleteSnapshotMounted: false,
       courseCandidates: COURSE_CANDIDATES,
     };
   },
@@ -273,7 +306,8 @@ export default {
     masterSettingsVisible(n) { if (n) this.masterSettingsMounted = true },
     masterExportVisible(n) { if (n) this.masterExportMounted = true },
     activeSettingsVisible(n) { if (n) this.activeSettingsMounted = true },
-    activeExportVisible(n) { if (n) this.activeExportMounted = true }
+    activeExportVisible(n) { if (n) this.activeExportMounted = true },
+    deleteSnapshotVisible(n) { if (n) this.deleteSnapshotMounted = true }
   },
   computed: {
     // ---- 一般课表显示行 ----
@@ -364,6 +398,17 @@ export default {
     },
     activeTitle() {
       return this.semesterStart ? `第 ${this.weekNumber} 周 课程表` : '课程表';
+    },
+    canDeleteHistorySnapshot() {
+      return !!this.historyCurrentWeek && this.historyWeeks.some(w => w.week_start === this.historyCurrentWeek);
+    },
+    deleteSnapshotMessage() {
+      const w = this.historyCurrentWeek;
+      if (!w) return '';
+      const start = new Date(w);
+      const end = new Date(start);
+      end.setDate(end.getDate() + 6);
+      return `确定删除 ${start.toISOString().slice(0, 10)} ~ ${end.toISOString().slice(0, 10)} 的历史快照吗？删除后不可恢复。`;
     },
   },
   methods: {
@@ -844,9 +889,27 @@ export default {
           cells,
           settings
         });
-        alert('本周快照已保存');
+        this.notifySuccess('本周快照已保存');
         await this.fetchHistoryWeeks();
-      } catch (e) { alert('保存失败'); }
+      } catch (e) { this.notifyError('保存失败'); console.error(e); }
+    },
+    requestDeleteHistorySnapshot() {
+      if (!this.canDeleteHistorySnapshot) return;
+      this.deleteSnapshotVisible = true;
+    },
+    onSwitchWeek(dir) {
+      this.slideDir = dir;
+    },
+    async confirmDeleteHistorySnapshot() {
+      this.deleteSnapshotVisible = false;
+      const week = this.historyCurrentWeek;
+      if (!week) return;
+      try {
+        await axios.delete(`${API_BASE}/schedule/history/${week}`);
+        this.notifySuccess('该周快照已删除');
+        if (this.historyCurrentWeek === week) this.historySnapshot = null;
+        await this.fetchHistoryWeeks();
+      } catch (e) { alert('删除失败'); console.error(e); }
     },
     async saveActiveSettings(settings) {
       this.activeSettings = {
@@ -872,3 +935,25 @@ export default {
   }
 };
 </script>
+
+<style scoped>
+/* 历史表格周切换滑动动画：新旧表同向并行滑动（推拉感），不影响 WeekSwitcher */
+.history-content { width: 100%; }
+.next-enter-active, .next-leave-active,
+.prev-enter-active, .prev-leave-active {
+  transition: transform 0.25s ease, opacity 0.25s ease;
+}
+/* 退场表绝对定位到容器顶部，与进场表重叠实现并行滑动 */
+.next-leave-active, .prev-leave-active {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+}
+/* 下一周：向右推进（新表从左侧跟进向右移动，旧表向右滑出，同方向） */
+.next-enter-from { transform: translateX(-60px); opacity: 0; }
+.next-leave-to   { transform: translateX(60px); opacity: 0; }
+/* 上一周：向左推进（新表从右侧跟进向左移动，旧表向左滑出，同方向） */
+.prev-enter-from { transform: translateX(60px); opacity: 0; }
+.prev-leave-to   { transform: translateX(-60px); opacity: 0; }
+</style>

@@ -9,6 +9,7 @@ const BG_IMAGE_KEY = 'app-bg-image'
 const BG_MASK_KEY = 'app-bg-mask-opacity'
 const GLASS_KEY = 'app-glass-opacity'
 const ICON_STYLE_KEY = 'app-icon-style'
+const TOPBAR_COLOR_KEY = 'app-topbar-color'
 
 // 毛玻璃主题的内置默认背景图：放于 public/ 下，随前端一起打包，属前端静态资源，
 // 不经 resourceUrl/鉴权直接加载。用户选择本地图片后由 backgroundImage 覆盖它；清除则回此图。
@@ -20,6 +21,7 @@ const DEFAULT_GLASS_BG = import.meta.env.PROD
 const PRESETS = [
   { id: 'base', name: '彩色色块主题', editable: false },
   { id: 'glass', name: '毛玻璃主题', editable: true },
+  { id: 'glass2', name: '新毛玻璃主题', editable: true },
   { id: 'win11', name: 'Win11 主题', editable: true },
   { id: 'minimal', name: '极简主题', editable: true },
 ]
@@ -35,6 +37,8 @@ export const useThemeStore = defineStore('theme', () => {
   const glassOpacity = ref(parseFloat(localStorage.getItem(GLASS_KEY)) || 0.4)
   // 图标样式：'color'（彩色图标）| 'emoji'（Emoji）
   const iconStyle = ref(localStorage.getItem(ICON_STYLE_KEY) || 'color')
+  // 标题栏/侧边栏毛玻璃配色：'blue'（深蓝，旧款）| 'light'（白色调，新款默认）
+  const topbarColor = ref(localStorage.getItem(TOPBAR_COLOR_KEY) || 'light')
 
   const allThemes = computed(() => [
     ...PRESETS,
@@ -47,6 +51,8 @@ export const useThemeStore = defineStore('theme', () => {
 
   const applyTheme = () => {
     document.documentElement.dataset.theme = currentTheme.value
+    // 标题栏/侧边栏毛玻璃配色：写 data-topbar-color，CSS 据此切深蓝/白色调
+    document.documentElement.dataset.topbarColor = topbarColor.value
     Object.entries(customColors.value).forEach(([key, value]) => {
       document.documentElement.style.setProperty(`--${key}`, value)
     })
@@ -73,10 +79,10 @@ export const useThemeStore = defineStore('theme', () => {
     // 应用透明度设置
     document.documentElement.style.setProperty('--bg-mask-opacity', bgMaskOpacity.value)
     document.documentElement.style.setProperty('--glass-opacity', glassOpacity.value)
-    // 通知主进程：切换窗口边框类型（原生/无边框亚克力）。
-    // 仅当目标类型与当前不同时，主进程才会重建窗口（见 electron/main.js theme-chrome）。
+    // 通知主进程：窗口统一为无边框亚克力（恒 frameless）。主进程传 frameless 会触发
+    // recreateMainWindow 的「当前已相同」直接返回，故主题切换不会重建窗口（见 electron/main.js）。
     if (window.electron?.send) {
-      window.electron.send('theme-chrome', { mode: isWin11 ? 'frameless' : 'native' })
+      window.electron.send('theme-chrome', { mode: 'frameless' })
     }
   }
 
@@ -146,6 +152,12 @@ export const useThemeStore = defineStore('theme', () => {
     localStorage.setItem(ICON_STYLE_KEY, value)
   }
 
+  const setTopbarColor = (value) => {
+    topbarColor.value = value
+    localStorage.setItem(TOPBAR_COLOR_KEY, value)
+    document.documentElement.dataset.topbarColor = value
+  }
+
   watch(currentTheme, applyTheme)
   watch(backgroundImage, (val) => {
     localStorage.setItem(BG_IMAGE_KEY, val)
@@ -159,6 +171,7 @@ export const useThemeStore = defineStore('theme', () => {
     bgMaskOpacity,
     glassOpacity,
     iconStyle,
+    topbarColor,
     allThemes,
     currentThemeMeta,
     isPreset,
@@ -173,5 +186,6 @@ export const useThemeStore = defineStore('theme', () => {
     setBgMaskOpacity,
     setGlassOpacity,
     setIconStyle,
+    setTopbarColor,
   }
 })

@@ -10,8 +10,8 @@
           <section class="mb-4">
             <h2 class="text-xl font-semibold mb-4">🪑 当前座位</h2>
             <div class="mb-4 flex flex-wrap items-center gap-3 opbar">
-              <button @click="openSettings('active')" class="bg-primary text-text-inverse px-4 py-2 rounded flex items-center gap-1.5"><IconGlyph name="settings" :size="14" tint="current" /> 设置</button>
-              <button @click="smartArrangementVisible = true" class="bg-primary text-text-inverse px-4 py-2 rounded">🧠 智能排表</button>
+              <button @click="openSettings('active')" v-preload="loadSettingsDialog" class="bg-primary text-text-inverse px-4 py-2 rounded flex items-center gap-1.5"><IconGlyph name="settings" :size="14" tint="current" /> 设置</button>
+              <button @click="smartArrangementVisible = true" v-preload="loadArrangementDialog" class="bg-primary text-text-inverse px-4 py-2 rounded">🧠 智能排表</button>
               <button @click="refreshActive" class="bg-text-muted text-text-inverse px-4 py-2 rounded flex items-center gap-1.5 btn-refresh"><IconGlyph name="refresh" :size="14" tint="current" /> 刷新</button>
               <button @click="applyMasterToActive" class="bg-primary text-text-inverse px-4 py-2 rounded flex items-center gap-1.5"><IconGlyph name="upload" :size="14" tint="current" /> 从模板导入</button>
               <button @click="activeExportVisible = true" class="bg-warning text-text-inverse px-4 py-2 rounded flex items-center gap-1.5"><IconGlyph name="download" :size="14" tint="current" /> 导出 Excel</button>
@@ -45,7 +45,7 @@
           <section>
             <h2 class="text-xl font-semibold mb-4 flex items-center gap-2"><IconGlyph name="clipboard" :size="20" /> 座位模板</h2>
             <div class="mb-4 flex flex-wrap items-center gap-3 opbar">
-              <button @click="openSettings('master')" class="bg-primary text-text-inverse px-4 py-2 rounded flex items-center gap-1.5"><IconGlyph name="settings" :size="14" tint="current" /> 设置</button>
+              <button @click="openSettings('master')" v-preload="loadSettingsDialog" class="bg-primary text-text-inverse px-4 py-2 rounded flex items-center gap-1.5"><IconGlyph name="settings" :size="14" tint="current" /> 设置</button>
               <button @click="refreshMaster" class="bg-text-muted text-text-inverse px-4 py-2 rounded flex items-center gap-1.5 btn-refresh"><IconGlyph name="refresh" :size="14" tint="current" /> 刷新</button>
               <button @click="masterExportVisible = true" class="bg-warning text-text-inverse px-4 py-2 rounded flex items-center gap-1.5"><IconGlyph name="download" :size="14" tint="current" /> 导出 Excel</button>
             </div>
@@ -73,15 +73,20 @@
           </section>
         </div>
 
-        <div v-else-if="activeTab === 'history'">
-          <div v-if="historyLoading" class="skeleton-block"></div>
-          <EmptySnapshot v-else-if="!historySnapshot" />
-          <GridView v-else :colHeaders="historyColHeaders" :rows="historyDisplayRows" :hideMetaColumns="true" :showRowNumber="true" />
+        <div v-else-if="activeTab === 'history'" class="relative">
+          <Transition :name="slideDir">
+            <div :key="historyCurrentWeek" class="history-content">
+              <div v-if="historyLoading" class="skeleton-block"></div>
+              <EmptySnapshot v-else-if="!historySnapshot" />
+              <GridView v-else :colHeaders="historyColHeaders" :rows="historyDisplayRows" :hideMetaColumns="true" :showRowNumber="true" />
+            </div>
+          </Transition>
           <!-- 快照菜单栏：周切换 + 下拉框 + 保存/删除按钮，同处一条毛玻璃栏 -->
           <WeekSwitcher
             v-model:currentWeek="historyCurrentWeek"
             :weeks="historyWeeks"
             @update:currentWeek="loadHistorySnapshot"
+            @direction="onSwitchWeek"
           >
             <template #actions>
               <button
@@ -175,11 +180,14 @@ import { useUndoShortcut, recordGridSnapshotUndo } from '../composables/useUndo.
 import { useNotification } from '../composables/useNotification.js'
 import { syncStudentNamesFromRows } from '../composables/useSyncStudentNames.js'
 
-// 弹窗类组件懒加载：打开时才加载对应 chunk
+// 弹窗类组件懒加载：打开时才加载对应 chunk。loader 抽出为命名函数，
+// 可用 v-preload="loadXxx" 在悬停按钮时预取，点击时即时弹出。
 const ExportExcel = defineAsyncComponent(() => import('../components/import-export/ExportExcel.vue'))
-const SeatSettingsDialog = defineAsyncComponent(() => import('../components/dialogs/SeatSettingsDialog.vue'))
+const loadSettingsDialog = () => import('../components/dialogs/SeatSettingsDialog.vue')
+const SeatSettingsDialog = defineAsyncComponent(loadSettingsDialog)
 const ConfirmDialog = defineAsyncComponent(() => import('../components/base/ConfirmDialog.vue'))
-const SmartArrangementDialog = defineAsyncComponent(() => import('../components/dialogs/SmartArrangementDialog.vue'))
+const loadArrangementDialog = () => import('../components/dialogs/SmartArrangementDialog.vue')
+const SmartArrangementDialog = defineAsyncComponent(loadArrangementDialog)
 
 const API_BASE = '/api'
 
@@ -386,6 +394,9 @@ const historyCurrentWeek = ref('')
 const historySnapshot = ref(null)
 const historyData = ref({ mode: 'single', rows: 0, cols: 0, seats: [], showAisle: true })
 const historyLoading = ref(false)
+// 周切换滑动方向：上一周="prev" 从右滑入，下一周="next" 从左滑入（应用于历史表格）
+const slideDir = ref('next')
+function onSwitchWeek(dir) { slideDir.value = dir }
 
 const historyColHeaders = computed(() => {
   const { cols: c, mode: m, showAisle: sa } = historyData.value
@@ -477,9 +488,9 @@ async function captureHistorySnapshot() {
       seats: activeSeats.value,
       settings: { showAisle: activeShowAisle.value }
     })
-    alert('本周快照已保存')
+    notifySuccess('本周快照已保存')
     await fetchHistoryWeeks()
-  } catch (e) { alert('保存失败') }
+  } catch (e) { notifyError('保存失败'); console.error(e) }
 }
 
 // ==================== 删除历史快照 ====================
@@ -531,3 +542,25 @@ onMounted(() => {
   fetchAllStudents()
 })
 </script>
+
+<style scoped>
+/* 历史表格周切换滑动动画：新旧表同向并行滑动（推拉感），不影响 WeekSwitcher */
+.history-content { width: 100%; }
+.next-enter-active, .next-leave-active,
+.prev-enter-active, .prev-leave-active {
+  transition: transform 0.25s ease, opacity 0.25s ease;
+}
+/* 退场表绝对定位到容器顶部，与进场表重叠实现并行滑动 */
+.next-leave-active, .prev-leave-active {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+}
+/* 下一周：向右推进（新表从左侧跟进向右移动，旧表向右滑出，同方向） */
+.next-enter-from { transform: translateX(-60px); opacity: 0; }
+.next-leave-to   { transform: translateX(60px); opacity: 0; }
+/* 上一周：向左推进（新表从右侧跟进向左移动，旧表向左滑出，同方向） */
+.prev-enter-from { transform: translateX(60px); opacity: 0; }
+.prev-leave-to   { transform: translateX(-60px); opacity: 0; }
+</style>

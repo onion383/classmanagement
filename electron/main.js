@@ -6,6 +6,18 @@ const { Readable } = require('stream')
 const { exec } = require('child_process')
 const startupTimer = require('./startup-timer')
 
+// Node 编译缓存（code cache）：把主进程启动过程中加载的模块字节码缓存到磁盘，
+// 下一次启动直接复用、跳过解析 + 编译（仅对 Node 侧模块生效，收益在后续启动）。
+// 必须在其它业务模块 require 之前调用；目录固定放 userData 下，随版本/源码变更自动失效重建。
+function resolveCompileCacheDir() {
+  return path.join(app.getPath('userData'), 'node-compile-cache')
+}
+try {
+  const ccDir = resolveCompileCacheDir()
+  fs.mkdirSync(ccDir, { recursive: true })
+  if (typeof module.enableCompileCache === 'function') module.enableCompileCache(ccDir)
+} catch (_) { /* 编译缓存不可用时静默忽略，不影响启动 */ }
+
 // 安全通道主密钥（方案 A 的认证锚点 K_master）：本次运行周期内生成一次并复用于
 // 「后端 fork env 注入」+「preload IPC 提供渲染层」。只参与前后端 HKDF 派生态，
 // 不进线上传输。后端崩溃自动重启时复用同一值，保证已建立会话/前端持有的密钥仍一致。
@@ -32,8 +44,13 @@ function saveAppConfig(patch) {
   const next = { ...resolveAppConfig(), ...patch }
   if (!next.dataDir) delete next.dataDir
   if (!next.thumbsDir) delete next.thumbsDir
-  try { fs.writeFileSync(getAppConfigPath(), JSON.stringify(next, null, 2)) } catch (err) {
+  // 写失败必须抛错：否则「切配置」这一步会静默失败，而调用方（如数据目录搬迁）
+  // 会继续删掉旧目录，导致数据在新目录、配置却指向已删除的旧目录。
+  try {
+    fs.writeFileSync(getAppConfigPath(), JSON.stringify(next, null, 2))
+  } catch (err) {
     console.error('[main] 写入 app-config 失败:', err?.message || err)
+    throw new Error('配置文件写入失败：' + (err?.message || err))
   }
   return next
 }
@@ -79,80 +96,30 @@ function getDbMasterKey() {
   }
 }
 
-// electron-acrylic-window：原生模块，走 Win32 SetWindowCompositionAttribute 启用真·亚克力毛玻璃，
-// 不受 Win11「节能器」影响（Electron 原生 setBackgroundMaterial 会被节能器干扰变灰）。
+// ============ 窗口原生背景材质（BackgroundMaterial / 亚克力） ============
+// 使用 Electron 官方内置的 setBackgroundMaterial('acrylic'|'mica'|'none')，随主版本维护，
+// 替代已停更的 electron-acrylic-window。仅 Windows 11 22H2+ 生效，其余系统自动回退普通背景。
+// 备注：文档/经验记录原生材质在 Win11「节能器(省电)」开启时可能被干扰变灰，属系统级行为。
 //
-// 注意：该包的 package.json main 指向 dist/index.js，但 dist/ 未编译产物（只有 src TS 源码 + 编译好的
-// build/Release/vibrancy-wrapper.node），直接 require('electron-acrylic-window') 会失败。
-// 因此绕开 JS 层，直接加载已编译的 N-API 原生模块，并自行封装 setVibrancy（解析 theme 的 AARRGGBB，
-// 把 alpha 正确传给 Win32 —— 原库 vibrancy.ts 恒传 currentOpacity=0 导致模糊不可见）。
-//
-// 启动优化：原生模块**延迟到首次真正使用亚克力时**才 require（懒加载）。亚克力只对
-// 无边框(Win11)主窗口和桌面小组件有效，放到文件顶部同步加载会额外占用启动关键路径；
-// 改为首次 setVibrancy 时才加载 .node 二进制，命中模块缓存后后续调用零成本。
-let acrylicNative = null
-let setVibrancy = null
-
-function getAcrylicNative() {
-  if (acrylicNative === null) {
-    try {
-      // 原库编译产物：build/Release/vibrancy-wrapper.node（N-API 模块，跨 Electron 版本 ABI 稳定）
-      const nativePath = path.join(__dirname, '..', 'node_modules', 'electron-acrylic-window', 'build', 'Release', 'vibrancy-wrapper.node')
-      if (fs.existsSync(nativePath)) {
-        acrylicNative = require(nativePath)
-      }
-    } catch (err) {
-      console.error('[acrylic] 原生模块加载失败，亚克力降级为 CSS 回退:', err?.message || err)
-    }
-    // 懒加载只执行一次：无论成功与否都记录"已尝试"，避免每次调用都走 fs.existsSync/require
-    if (typeof acrylicNative !== 'object' || typeof acrylicNative?.setVibrancy !== 'function') {
-      acrylicNative = false
-    }
-  }
-  return acrylicNative || null
-}
-
-// theme 形如 'AARRGGBB'（alpha 在前，与原生 gradientColor 的 ARGB 一致）
-function parseARGB(theme) {
-  let hex = String(theme || '80FFFFFF').replace(/^#/, '')
-  if (hex.length === 6) hex = 'FF' + hex // 无 alpha 时默认不透明
-  const a = parseInt(hex.slice(0, 2), 16)
-  const r = parseInt(hex.slice(2, 4), 16)
-  const g = parseInt(hex.slice(4, 6), 16)
-  const b = parseInt(hex.slice(6, 8), 16)
-  return { r, g, b, a }
-}
-
-// 惰性设置亚克力：首次调用触发原生模块加载，返回 true 表示亚克力已成功开启
-setVibrancy = (win, options = {}) => {
-  const native = getAcrylicNative()
-  if (!native) return false
-  const { r, g, b, a } = parseARGB(options.theme)
-  const effect = options.effect === 'blur' ? 0 : 1 // 1 = acrylic（isRS4OrGreater 语义）
-  // 取原生窗口句柄（int32），供 Win32 SetWindowCompositionAttribute 使用
-  let hwnd
+// 主窗口为「不透明无边框」窗口，backgroundMaterial 绘制在窗口背景上；CSS 半透明元素 + backdrop-filter
+// 叠加即可磨砂透出材质。返回 true 表示已应用（系统支持时）。
+function applyBackgroundMaterial(win, material = 'acrylic') {
+  if (process.platform !== 'win32' || !win || win.isDestroyed()) return false
   try {
-    hwnd = win.getNativeWindowHandle().readInt32LE(0)
-  } catch (_) {
-    throw new TypeError('NOT_VALID_WINDOW')
+    const m = ['auto', 'none', 'mica', 'acrylic', 'tabbed'].includes(material) ? material : 'acrylic'
+    win.setBackgroundMaterial(m)
+    return m !== 'none'
+  } catch (err) {
+    console.error('[acrylic] setBackgroundMaterial 失败，回退普通背景:', err?.message || err)
+    return false
   }
-  native.setVibrancy(hwnd, effect, r, g, b, a)
-  return true
 }
 
-const disableVibrancy = (win) => {
-  const native = getAcrylicNative()
-  if (!native || typeof native.disableVibrancy !== 'function') return
-  let hwnd
-  try {
-    hwnd = win.getNativeWindowHandle().readInt32LE(0)
-  } catch (_) {
-    return
-  }
-  native.disableVibrancy(hwnd)
+// 关闭窗口系统背景材质（恢复普通背景）。用于：窗口销毁前 / 系统不支持时。
+const disableBackgroundMaterial = (win) => {
+  if (process.platform !== 'win32' || !win || win.isDestroyed()) return
+  try { win.setBackgroundMaterial('none') } catch (_) {}
 }
-
-console.log('[acrylic] 亚克力原生模块已进入懒加载（首次使用时才 require）')
 
 let mainWindow
 // 当前主窗口的边框模式：'native'（毛玻璃等其他主题，系统原生标题栏）| 'frameless'（Win11 主题，无边框自绘标题栏）。
@@ -210,15 +177,32 @@ if (isDev) {
   process.env.ELECTRON_DISABLE_SECURITY_WARNINGS = 'true'
 }
 
-function loadUrlWithRetry(win, url, retries = 30) {
-  win.loadURL(url).catch((err) => {
+// 等待开发服务器就绪后再让窗口导航。
+// 关键点：先用轻量 https 探测目标地址（不改变窗口显示内容），命中后才真正 loadURL，
+// 避免每次重试都导航一次、失败时窗口停在错误页（表现为白屏/报错闪现）。
+// 重试间隔 200ms（原来 1000ms），Vite 一就绪几乎立刻跳转。
+function loadUrlWithRetry(win, url, retries = 150, intervalMs = 200) {
+  if (!win || win.isDestroyed()) return
+  const https = require('https')
+  const req = https.get(url, { rejectUnauthorized: false }, (res) => {
+    res.resume() // 消耗响应体，避免内存泄漏
+    if (win.isDestroyed()) return
+    console.log(`[Electron] 开发服务器就绪，开始加载 ${url}`)
+    win.loadURL(url).catch((err) => {
+      console.error(`[Electron] 加载 ${url} 失败:`, err.message)
+    })
+  })
+  req.on('error', () => {
+    if (win.isDestroyed()) return
     if (retries > 0) {
-      console.log(`[Electron] 等待 ${url} 就绪，剩余重试 ${retries}...`)
-      setTimeout(() => loadUrlWithRetry(win, url, retries - 1), 1000)
+      // 200ms 一次的高频重试不再逐条打日志，每 25 次提示一次进度（约 5s）
+      if (retries % 25 === 0) console.log(`[Electron] 等待 ${url} 就绪，剩余重试 ${retries}...`)
+      setTimeout(() => loadUrlWithRetry(win, url, retries - 1, intervalMs), intervalMs)
     } else {
-      console.error(`[Electron] 无法加载 ${url}:`, err.message)
+      console.error(`[Electron] 无法加载 ${url}: 开发服务器未就绪`)
     }
   })
+  req.end()
 }
 
 // 开发模式：先加载本地 inline loading 页面，不等 Vite 就绪。
@@ -246,8 +230,8 @@ body{background:linear-gradient(160deg,#eef2ff 0%,#e2e8ff 100%)}
 </div></body></html>`
 
 // 轮询 Vite 开发服务器：用 https.get 轻量探测，不阻塞渲染进程。
-// Vite 就绪后导航到其 URL，并打开 DevTools。
-// 重试上限留足 ~4s 预算（现在轮询在创建窗口后立刻开始，比之前提前约 0.5s）。
+// Vite 就绪后导航到首页并打开 DevTools。
+// 重试上限留足 ~4s 预算（轮询在创建窗口后立刻开始）。
 function pollViteAndNavigate(win, retries = 40) {
   const https = require('https')
   const req = https.get('https://127.0.0.1:5173/', { rejectUnauthorized: false }, (res) => {
@@ -269,34 +253,31 @@ function pollViteAndNavigate(win, retries = 40) {
   req.end()
 }
 
-// 主窗口边框模式：'native'（毛玻璃等其他主题，系统原生标题栏）| 'frameless'（Win11 主题，无边框自绘标题栏）。
-// 边框无法在运行中切换，故跨模式切换时重建主窗口（此前 createMainWindow 已固定 no 边框）。
-function createMainWindow(mode = 'native') {
+// 主窗口统一「无边框透明 + 窗外亚克力」：所有主题一致，由渲染层自绘标题栏
+// （标题栏显示应用名），避免原生标题栏与侧边栏标题重复。边框类型不再随主题切换。
+function createMainWindow() {
   // （新窗口）关闭菜单状态复位：allowMainClose 不会在旧窗口关闭后自动清掉，
   // 若不清零，重建后的新主窗口点关闭会被静默放行、不再弹菜单。
   allowMainClose = false
   shutdownMenuOpen = false
   // 新窗口渲染层未加载完成，待其 ready 回报后才允许渲染层接管关闭菜单
   mainRendererShutdownReady = false
-  const isFrameless = mode === 'frameless'
-  mainWindowChrome = mode
+  const isFrameless = true
+  mainWindowChrome = 'frameless'
   const win = new BrowserWindow({
     width: 1280,
     height: 800,
     minWidth: 900,
     minHeight: 600,
     title: '班级管理系统',
-    // 边框模式随主题切换（切到不同边框类型时由 recreateMainWindow 重建，见 theme-chrome）：
-    //   - 毛玻璃等其他主题 → 系统原生边框，带最小化/最大化/关闭；
-    //   - Win11 主题 → 无边框 + 透明，用自绘标题栏，靠窗外亚克力模糊透出桌面。
-    frame: !isFrameless,
-    transparent: isFrameless,
-    // 启动消除白屏：原生边框窗口等首帧渲染完成（ready-to-show）再显示；
-    // 无边框(Win11)透明+亚克力窗口则用 show:true 立即显示——透明窗口在
-    // show:false+ready-to-show 下会因渲染太快而无法正常上屏（见组件移植经验）。
-    // backgroundColor 兜底防原生窗口白屏。
-    show: isFrameless,
-    backgroundColor: isFrameless ? '#00000000' : '#f9fafb',
+    // 全部主题统一：无边框 + 系统原生背景材质(backgroundMaterial)，用自绘标题栏。
+    // 不用 transparent（透明窗口会禁用系统材质）；backgroundMaterial 绘制在窗口背景，
+    // 渲染层用半透明元素 + backdrop-filter 磨砂透出。Win11 也据此自动为窗口加圆角。
+    frame: false,
+    transparent: false,
+    backgroundMaterial: 'acrylic',
+    show: true,
+    backgroundColor: '#f0f4f8',
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
       contextIsolation: true,
@@ -311,9 +292,8 @@ function createMainWindow(mode = 'native') {
       // webSecurity 仅开发模式关闭（用于加载自签名 https 的 Vite 服务）；
       // 生产环境必须保持开启，禁止在打包后关闭网页安全策略。
       webSecurity: !isDev,
-      // 窗口隐藏/最小化时自动节流渲染进程定时器与 rAF，降低后台内存与 CPU 占用
-      backgroundThrottling: true,
-      // 关闭拼写检查，节省渲染进程内存
+      // 后台节流：采用默认节流，窗口失焦/最小化/被遮挡时暂停后台重绘，降低后台 GPU/CPU 占用。
+      // 代价是切到其它应用时亚克力/毛玻璃可能退回纯灰，点回窗口即恢复。
       spellcheck: false,
       // 支持开发者工具（生产模式亦可手动打开，用于调试）
       devTools: true,
@@ -324,26 +304,10 @@ function createMainWindow(mode = 'native') {
   // 避免重建时旧窗口的 'closed' 事件把 mainWindow 置空，影响到刚创建的新窗口。
   mainWindow = win
 
-  // Win11 主题（无边框透明窗口）：开启窗外亚克力模糊。
-  // 其他主题为不透明的原生边框窗口，页面直接绘制背景，无需亚克力。
-  // 注意：必须「立即」调用而非等 ready-to-show——透明窗口在 Windows 上 ready-to-show
-  // 不可靠（小组件因此改用 show:true），等它可能永远不触发导致亚克力失效。
-  // 模块内部会 getNativeWindowHandle()，窗口同步创建后 handle 已有效，直接调用即可。
-  if (isFrameless && process.platform === 'win32' && setVibrancy) {
-    try {
-      setVibrancy(win, {
-        // AARRGGBB：alpha 不能为 0（否则亚克力模糊不可见，窗口呈不通透实体）。
-        // 用适度的白色着色（≈50% 白），让桌面背景模糊透出，同时保留磨砂质感。
-        theme: '80FFFFFF',
-        effect: 'acrylic',
-        disableOnBlur: false,
-        useCustomWindowRefreshMethod: false,
-      })
-      console.log('[acrylic] 主窗口亚克力已开启 (mode=frameless)')
-    } catch (err) {
-      // 若 handle 尚未就绪，交给 ready-to-show 兜底重试
-      console.error('[acrylic] 主窗口亚克力立即开启失败，等待 ready-to-show 重试:', err?.message || err)
-    }
+  // 所有主题统一（无边框 + 系统材质）：BrowserWindow 构造已带 backgroundMaterial: 'acrylic'，
+  // 无需再手动开启；这里仅在系统不支持时回退日志。透明度磨砂由渲染层 CSS backdrop-filter 完成。
+  if (process.platform === 'win32') {
+    applyBackgroundMaterial(win, 'acrylic')
   }
 
   if (isDev) {
@@ -379,21 +343,9 @@ function createMainWindow(mode = 'native') {
   win.once('ready-to-show', () => {
     startupTimer.mark('ready-to-show（窗口首次显示）')
 
-    // 无边框(Win11)透明窗口：此时 native handle 已就绪，开启窗外亚克力模糊透出桌面。
-    if (isFrameless && process.platform === 'win32' && setVibrancy) {
-      console.log('[acrylic] ready-to-show，开启窗外亚克力')
-      try {
-        setVibrancy(win, {
-          theme: '00FFFFFF', // alpha=0：只负责模糊，不染色、不画系统边框，边框/底色全交渲染层
-          effect: 'acrylic',
-          disableOnBlur: false,
-          useCustomWindowRefreshMethod: false,
-        })
-        console.log('[acrylic] 主窗口亚克力已开启')
-      } catch (err) {
-        // handle 异常或系统不支持时降级为 CSS 半透明回退
-        console.error('[acrylic] 主窗口亚克力开启失败，降级 CSS:', err?.message || err)
-      }
+    // 系统材质已在创建时配置；这里再次确认应用（窗口此刻完整可见，确保材质就绪）。
+    if (process.platform === 'win32') {
+      applyBackgroundMaterial(win, 'acrylic')
     }
 
     if (!win.isDestroyed()) win.show()
@@ -442,7 +394,8 @@ function createWidgetWindow() {
       sandbox: true,
       additionalArguments: ['--secure-channel'],
       webSecurity: !isDev,
-      backgroundThrottling: true,
+      // 后台节流：与主窗口一致关掉，确保持续重绘、亚克力/毛玻璃不因失焦变灰
+      backgroundThrottling: false,
       spellcheck: false,
       devTools: isDev,
     }
@@ -499,9 +452,11 @@ function createDesktopWidgetWindow() {
     width: 320,
     height: 540,
     frame: false,
-    // 需要 transparent: true 才能让 Win32 亚克力效果透出桌面背景
-    transparent: true,
-    backgroundColor: '#00000000',
+    // 不用 transparent（透明窗口会禁用系统背景材质）；改用不透明 + backgroundMaterial，
+    // 系统材质绘制在窗口背景上，渲染层半透明元素透出磨砂，与主窗口方案一致。
+    transparent: false,
+    backgroundMaterial: 'acrylic',
+    backgroundColor: '#f0f4f8',
     alwaysOnTop: false,
     skipTaskbar: true,
     resizable: false,
@@ -517,23 +472,16 @@ function createDesktopWidgetWindow() {
       sandbox: true,
       additionalArguments: ['--secure-channel'],
       webSecurity: !isDev,
-      backgroundThrottling: true,
+      // 后台节流：与主窗口一致关掉，确保持续重绘、亚克力/毛玻璃不因失焦变灰
+      backgroundThrottling: false,
       spellcheck: false,
       devTools: true,
     }
   })
 
-  // Windows 10/11 原生亚克力毛玻璃：走 Win32 API，不受 Win11「节能器」影响。
-  // 颜色 alpha 置 0，让 CSS 边框/底色成为唯一可见边框；关闭库的自定义刷新避免额外边框。
-  if (process.platform === 'win32' && setVibrancy) {
-    try {
-      setVibrancy(desktopWidgetWindow, {
-        theme: '00FFFFFF',
-        effect: 'acrylic',
-        disableOnBlur: false,
-        useCustomWindowRefreshMethod: false,
-      })
-    } catch (_) { /* 编译产物异常时忽略，走 CSS 半透明回退 */ }
+  // Windows 系统原生背景材质：BackgroundMaterial 已随窗口创建时配置，此处再次确认应用。
+  if (process.platform === 'win32') {
+    applyBackgroundMaterial(desktopWidgetWindow, 'acrylic')
   }
   // 初始位置：屏幕右上角，高度接近屏幕高度
   const { width: screenW, height: screenH } = screen.getPrimaryDisplay().workAreaSize
@@ -659,6 +607,8 @@ function compileBackendProcess() {
           ALBUM_THUMBS_DIR: thumbsDir,
           SECURE_MASTER: getMasterKey(),
           DB_MASTER_KEY: getDbMasterKey(),
+          // 后端模块编译缓存：让后续启动跳过 require 模块的解析 + 编译
+          NODE_COMPILE_CACHE: resolveCompileCacheDir(),
         },
       })
       backendProcess = child
@@ -673,8 +623,23 @@ function compileBackendProcess() {
       spawnDev(process.env.NODE_EXEC_PATH)
       return
     }
+    // 探测结果缓存到 userData：避免每次 dev 启动都先 spawn 一个 node 去问自己的路径
+    //（约 0.3–1s）。缓存的路径失效（node 被卸载/移动）时自动回退到重新探测。
+    const nodePathCache = path.join(app.getPath('userData'), 'dev-node-path.txt')
+    try {
+      const cached = fs.readFileSync(nodePathCache, 'utf8').trim()
+      if (cached && fs.existsSync(cached)) {
+        console.log('[main] 复用缓存的 node 路径:', cached)
+        spawnDev(cached)
+        return
+      }
+    } catch (_) { /* 无缓存，走探测 */ }
     execFile('node', ['-p', 'process.execPath'], { encoding: 'utf8' }, (err, out) => {
-      spawnDev(err ? 'node' : out.trim())
+      const execPath = err ? 'node' : out.trim()
+      if (!err) {
+        try { fs.writeFileSync(nodePathCache, execPath) } catch (_) { /* 写缓存失败不影响启动 */ }
+      }
+      spawnDev(execPath)
     })
     return
   }
@@ -696,6 +661,8 @@ function compileBackendProcess() {
       ELECTRON_RUN_AS_NODE: '1',
       SECURE_MASTER: getMasterKey(),
       DB_MASTER_KEY: getDbMasterKey(),
+      // 后端模块编译缓存：让后续启动跳过 require 模块的解析 + 编译
+      NODE_COMPILE_CACHE: resolveCompileCacheDir(),
     },
   })
 
@@ -760,41 +727,68 @@ const MIME = {
 }
 
 // 注册 app:// 协议：从打包产物目录安全地提供静态文件（支持 asar 内 fs 流式读取）。
+// 性能要点：不做任何逐请求的同步 fs（原 existsSync+statSync 会阻塞主进程），
+// 只在启动时 readdir 一次拿到顶级 html 入口名单，之后纯按路径规则直接流式读盘。
+// prod 下也不再逐请求打日志。
+const IMMUTABLE_ASSET_RE = /\.(js|css|wasm|png|jpe?g|gif|webp|svg|woff2?)$/i
+
 function setupAppProtocol() {
   if (isDev) return
   const distDir = path.join(__dirname, '../student-frontend/dist')
   const root = path.normalize(distDir)
+  const indexHtml = path.join(root, 'index.html')
+
+  // 顶级 html 入口（index/setup/widget/migration/desktop-widget…），仅枚举一次
+  let htmlEntries = new Set()
+  try {
+    htmlEntries = new Set(fs.readdirSync(distDir).filter((f) => f.endsWith('.html')))
+  } catch (_) {
+    // dist 缺失时不阻断启动，后续请求走 index.html 回退
+  }
+
+  const serveFile = (file, headers) =>
+    new Response(Readable.toWeb(fs.createReadStream(file)), { headers })
+  const serveIndex = () =>
+    serveFile(indexHtml, { 'content-type': MIME['.html'], 'cache-control': 'no-cache' })
+
   protocol.handle('app', (req) => {
+    let p
+    let file
     try {
       const url = new URL(req.url)
-      let p = decodeURIComponent(url.pathname)
+      p = decodeURIComponent(url.pathname)
       if (p === '/' || p === '') p = '/index.html'
+      file = path.normalize(path.join(root, p))
       // 防目录穿越
-      const file = path.normalize(path.join(root, p))
-      console.log(`[app://] 请求: ${p} → ${file}`)
       if (file !== root && !file.startsWith(root + path.sep)) {
-        console.log(`[app://] 禁止访问: ${file}`)
         return new Response('Forbidden', { status: 403 })
       }
-      // 目录或缺失：SPA 路由回退 index.html
-      if (!fs.existsSync(file) || fs.statSync(file).isDirectory()) {
-        console.log(`[app://] 文件不存在，回退 index.html: ${file}`)
-        return new Response(Readable.toWeb(fs.createReadStream(path.join(root, 'index.html'))), {
-          headers: { 'content-type': 'text/html; charset=utf-8' },
-        })
-      }
-      const ct = MIME[path.extname(file).toLowerCase()] || 'application/octet-stream'
-      // hash 命名的编译产物（.js/.css/.wasm/图片等）可长缓存，让二次及以后启动直接命中磁盘缓存，
-      // 免去每次重新读盘与解析前端 bundle，显著加快启动；入口 html 则 no-cache，避免升级后拿到旧壳。
-      const headers = { 'content-type': ct }
-      headers['cache-control'] = /\.(js|css|wasm|png|jpe?g|gif|webp|svg|woff2?)(\?.*)?$/i.test(file)
-        ? 'public, max-age=31536000, immutable'
-        : 'no-cache'
-      console.log(`[app://] 已提供: ${file} (${ct})`)
-      return new Response(Readable.toWeb(fs.createReadStream(file)), { headers })
     } catch (_) {
       return new Response('Not Found', { status: 404 })
     }
+
+    const ext = path.extname(file).toLowerCase()
+
+    // 无扩展名 → 客户端路由（SPA），回退入口 html
+    if (ext === '') return serveIndex()
+
+    if (ext === '.html') {
+      const name = p.replace(/^\/+/, '')
+      // 已登记的顶级入口直接给；其余 html 路径按 SPA 路由回退
+      if (!name.includes('/') && htmlEntries.has(name)) {
+        return serveFile(file, { 'content-type': MIME['.html'], 'cache-control': 'no-cache' })
+      }
+      return serveIndex()
+    }
+
+    // 其余带扩展名的静态资源（含 hash 命名的 bundle）：直接流式返回。
+    // hash 资源可长缓存，让后续启动直接命中 Chromium 磁盘缓存；字体等短名资源不缓存。
+    return serveFile(file, {
+      'content-type': MIME[ext] || 'application/octet-stream',
+      'cache-control': IMMUTABLE_ASSET_RE.test(file)
+        ? 'public, max-age=31536000, immutable'
+        : 'no-cache',
+    })
   })
 }
 
@@ -867,10 +861,20 @@ app.whenReady().then(() => {
     startBackend()
     startupTimer.mark('startBackend 完成')
 
-    // 主窗口立即创建：它加载的静态前端（app://local/index.html 或 dev 的 Vite）不依赖后端，
-    // 登录页/首页骨架无需后端即可渲染，前端通过 axios 响应重试兜底「后端未就绪」的短暂窗口。
-    createMainWindow()
-    startupTimer.mark('createMainWindow 完成')
+    // 全新安装（本机无任何账号库）先弹首次引导向导，完成后再进入主界面；
+    // 非首启维持原路径——主窗口立即创建，不增加任何串行等待。
+    // 开发（测试）模式默认进入引导便于调试：FORCE_SETUP=0 可强制关闭，=1 可强制开启。
+    const forceSetup = process.env.FORCE_SETUP === '1'
+      || (process.env.FORCE_SETUP !== '0' && !app.isPackaged)
+    if (forceSetup || looksLikeFirstRun()) {
+      createSetupWindow()
+      startupTimer.mark('createSetupWindow 完成')
+    } else {
+      // 主窗口立即创建：它加载的静态前端（app://local/index.html 或 dev 的 Vite）不依赖后端，
+      // 登录页/首页骨架无需后端即可渲染，前端通过 axios 响应重试兜底「后端未就绪」的短暂窗口。
+      createMainWindow()
+      startupTimer.mark('createMainWindow 完成')
+    }
 
     // 5s 后输出启动时间线并保存日志
     setTimeout(() => {
@@ -1278,11 +1282,10 @@ ipcMain.on('win-close', (event) => {
 })
 
 // ============ 主题 → 窗口边框/亚克力开关 ============
-// 渲染进程在切换主题时上报所需的边框类型：
-//   - 毛玻璃等其他主题 → 'native'：重建为系统原生边框（标题栏/最小化/最大化/关闭回归原生）；
-//   - Win11 主题 → 'frameless'：重建为无边框透明窗口，并在 createMainWindow 内开启窗外亚克力。
-// 边框无法在运行中切换，仅当目标类型与当前不同时才重建，避免重复刷新。
-// 重建会重载页面：主题、登录态均持久化在 localStorage，重载后由渲染层 applyTheme 恢复。
+// 主窗口已统一为「无边框透明 + 窗外亚克力」，不再随主题切换边框类型。
+// 渲染进程切换主题时上报所需边框类型，此处一律按 frameless 处理（与当前一致），
+// 不会触发重建，主题切换只需改 CSS。recreateMainWindow 保留，仅供未来确有
+// 切换边框类型的特殊场景复用（重建会重载页面，由渲染层 applyTheme 恢复）。
 function recreateMainWindow(mode) {
   if (!mainWindow || mainWindow.isDestroyed()) return
   if (mainWindowChrome === mode) return
@@ -1290,7 +1293,7 @@ function recreateMainWindow(mode) {
   const bounds = mainWindow.getBounds()
   const wasMaximized = mainWindow.isMaximized()
   mainWindow.destroy()
-  createMainWindow(mode)
+  createMainWindow()
   if (!mainWindow.isDestroyed()) {
     mainWindow.setBounds(bounds)
     if (wasMaximized) mainWindow.maximize()
@@ -1300,8 +1303,9 @@ function recreateMainWindow(mode) {
 ipcMain.on('theme-chrome', (event, { mode }) => {
   const win = BrowserWindow.fromWebContents(event.sender)
   if (!win || win !== mainWindow) return
-  const desired = mode === 'frameless' ? 'frameless' : 'native'
-  recreateMainWindow(desired)
+  // 统一无边框亚克力：无论渲染层报什么，都不再切换边框类型（mainWindowChrome 恒为 frameless，
+  // 传 frameless 会使 recreateMainWindow 直接 return，主题切换因此不再重建窗口）。
+  recreateMainWindow('frameless')
 })
 
 // 拖动中：使用 setContentBounds 与 setContentSize 保持一致，避免 setBounds/setSize 边界计算差异
@@ -1351,12 +1355,20 @@ ipcMain.on('to-main', (event, data) => {
 let lastDialogDir = null
 
 // 选择文件夹对话框
-ipcMain.handle('select-folder', async () => {
-  if (!mainWindow || mainWindow.isDestroyed()) return { filePaths: [] }
-  const result = await dialog.showOpenDialog(mainWindow, {
+ipcMain.handle('select-folder', async (event) => {
+  // 以调用方所在窗口为父窗口：首次安装引导期还没有主窗口，此时用引导窗口作父窗口，
+  // 否则（mainWindow 为空）会直接返回空数组，导致引导里的「修改」按钮点了没反应。
+  const senderWin = BrowserWindow.fromWebContents(event.sender)
+  const parent = (senderWin && !senderWin.isDestroyed())
+    ? senderWin
+    : (mainWindow && !mainWindow.isDestroyed() ? mainWindow : null)
+  const opts = {
     properties: ['openDirectory'],
     defaultPath: lastDialogDir || undefined,
-  })
+  }
+  const result = parent
+    ? await dialog.showOpenDialog(parent, opts)
+    : await dialog.showOpenDialog(opts)
   if (!result.canceled && result.filePaths.length > 0) {
     lastDialogDir = result.filePaths[0]
   }
@@ -1381,33 +1393,625 @@ ipcMain.handle('get-data-directories', () => {
   }
 })
 
-// 递归拷贝一个目录的内容（含子目录），用于数据目录整体搬迁
-function copyRecursive(src, dest) {
-  const entries = fs.readdirSync(src, { withFileTypes: true })
-  for (const ent of entries) {
-    const s = path.join(src, ent.name)
-    const d = path.join(dest, ent.name)
-    if (ent.isDirectory()) {
-      copyRecursive(s, d)
+// ========== 数据库迁移进度窗口 ==========
+// 待主窗口展示的提示：迁移时主窗口正在重建，先暂存于此，等新主窗口加载完成主动取走再弹提示条
+// 形如 { type: 'success'|'info'|'warning'|'error', message: string }
+let pendingMainNotification = null
+ipcMain.handle('get-pending-notification', () => {
+  const msg = pendingMainNotification
+  pendingMainNotification = null
+  return msg || null
+})
+
+// 迁移期间关闭所有其它窗口（主窗口/工具箱/桌面组件），只留一个不可关闭的进度窗口，
+// 避免用户在迁移进行中操作数据库或强行中断造成数据损坏。
+let migrationWindow = null
+let migrationRunning = false
+let migrationReadyResolve = null
+// 进度窗口渲染层是否已挂载：未挂载时无法展示失败原因，失败需直接重开主窗口，避免留下无法关闭的空窗口
+let migrationUiReady = false
+// 本次迁移的上下文（目标目录等）：失败后由用户在进度窗口上决定是否清理
+let migrationContext = null
+
+// 向进度窗口推送消息（窗口不存在/已销毁时静默忽略）
+function sendMigration(payload) {
+  if (migrationWindow && !migrationWindow.isDestroyed()) {
+    try { migrationWindow.webContents.send('from-main', payload) } catch (_) {}
+  }
+}
+
+// 创建进度窗口：无边框透明 + 圆角卡片，置顶、不可缩放、迁移期间禁止关闭
+function createMigrationWindow() {
+  migrationUiReady = false
+  const win = new BrowserWindow({
+    // 尺寸写死：进行中 / 完成 / 移动失败 三种状态共用同一固定尺寸，窗口不随内容变化、不可缩放
+    width: 460,
+    height: 280,
+    resizable: false,
+    frame: false,
+    // 与主窗口一致的毛玻璃方案：不用 transparent（透明窗口会禁用系统材质，backdrop-filter 无背景
+    // 可模糊 → 卡片整体全透明），改用系统亚克力 + 不透明底色，由渲染层半透明卡片磨砂透出。
+    // Win11 会据此自动给窗口加圆角。
+    transparent: false,
+    backgroundMaterial: 'acrylic',
+    backgroundColor: '#f0f4f8',
+    alwaysOnTop: true,
+    skipTaskbar: true,
+    maximizable: false,
+    minimizable: false,
+    fullscreenable: false,
+    center: true,
+    title: '迁移数据库',
+    webPreferences: {
+      preload: path.join(__dirname, 'preload.js'),
+      contextIsolation: true,
+      nodeIntegration: false,
+      sandbox: true,
+      additionalArguments: ['--secure-channel'],
+      webSecurity: !isDev,
+      spellcheck: false,
+      devTools: isDev,
+    },
+  })
+  migrationWindow = win
+
+  // 系统原生背景材质（亚克力）：与主窗口一致，窗口创建后确认应用一次（系统不支持时自动回退）
+  if (process.platform === 'win32') applyBackgroundMaterial(win, 'acrylic')
+
+  // 迁移进行中拦截关闭（系统 ✕ / Alt+F4）；失败后由「返回主界面」按钮放行
+  win.on('close', (e) => { if (migrationRunning) e.preventDefault() })
+  win.on('closed', () => { if (migrationWindow === win) migrationWindow = null })
+
+  if (isDev) {
+    loadUrlWithRetry(win, 'https://127.0.0.1:5173/migration.html')
+  } else {
+    win.loadURL('app://local/migration.html')
+  }
+  return win
+}
+
+// 等进度窗口渲染层挂载完成，避免首帧进度消息丢失；超时兜底以免阻塞迁移
+function waitMigrationReady(timeout = 4000) {
+  return new Promise((resolve) => {
+    let settled = false
+    const done = () => { if (settled) return; settled = true; migrationReadyResolve = null; resolve() }
+    migrationReadyResolve = done
+    setTimeout(done, timeout)
+  })
+}
+
+ipcMain.on('migration-ready', (event) => {
+  if (!migrationWindow || migrationWindow.isDestroyed()) return
+  if (event.sender !== migrationWindow.webContents) return
+  migrationUiReady = true
+  if (typeof migrationReadyResolve === 'function') migrationReadyResolve()
+})
+
+// 迁移失败后用户点击「返回主界面」/ 加密转换结束后进度窗口回报结果：
+//   - 数据目录搬迁：按用户选择决定是否清理目标目录，再重开主窗口
+//   - 数据库加密转换：由进度窗口回报 ok，主进程据此准备提示条后重开主窗口
+ipcMain.on('migration-dismiss', (event, data) => {
+  if (!migrationWindow || migrationWindow.isDestroyed()) return
+  if (event.sender !== migrationWindow.webContents) return
+  const ctx = migrationContext
+  if (ctx && ctx.mode === 'crypt') {
+    pendingMainNotification = data && data.ok
+      ? { type: 'success', message: ctx.encrypt ? '数据库加密已启用' : '数据库加密已关闭' }
+      : { type: 'info', message: ctx.encrypt ? '启用加密失败，数据库未发生改动' : '关闭加密失败，数据库未发生改动' }
+    reopenAfterMigration()
+    return
+  }
+  // 失败时不再自动清理：默认保留已复制内容，只有用户确认「确定」才清除
+  if (data && data.clean) cleanupMigrationTarget()
+  reopenAfterMigration()
+})
+
+// 清理迁移目标目录：仅清掉本次复制写入的内容（用户选定的既有空目录保留目录本身）
+function cleanupMigrationTarget() {
+  const ctx = migrationContext
+  if (!ctx) return
+  try {
+    if (ctx.createdTarget) fs.rmSync(ctx.target, { recursive: true, force: true })
+    else clearDir(ctx.target)
+  } catch (err) {
+    console.warn('[main] 清理迁移目标目录失败:', err?.message || err)
+  }
+}
+
+// 关闭除进度窗口外的全部窗口。必须先建好进度窗口再调用，保证窗口数不为 0，
+// 否则会触发 window-all-closed 让应用直接退出。
+function closeAllWindowsExceptMigration() {
+  if (!migrationWindow || migrationWindow.isDestroyed()) return
+  allowMainClose = true
+  shutdownMenuOpen = false
+  if (widgetWindow && !widgetWindow.isDestroyed()) widgetWindow.close()
+  if (desktopWidgetWindow && !desktopWidgetWindow.isDestroyed()) desktopWidgetWindow.close()
+  if (mainWindow && !mainWindow.isDestroyed()) mainWindow.close()
+}
+
+// 迁移结束统一重开主窗口，并关闭进度窗口。
+// 工具箱/桌面组件由主窗口渲染层就绪后回报 widgets-ready 自动按设置恢复，无需在此手动创建。
+function reopenAfterMigration() {
+  if (!mainWindow || mainWindow.isDestroyed()) createMainWindow()
+  migrationRunning = false
+  migrationContext = null
+  if (migrationWindow && !migrationWindow.isDestroyed()) migrationWindow.close()
+}
+
+// ========== 首次安装引导向导 ==========
+// 全新安装（本机无任何有效账号）时先弹出独立的引导窗口，用户完成初始化后才进入正式使用。
+// 复用 preload.js 与「无边框 + 系统亚克力」窗口方案，固定尺寸、不可缩放。
+let setupWindow = null
+let setupRunning = false
+let setupUiReady = false
+// 预热进度：窗口一打开即后台推进，渲染层可在任意时刻通过 get-setup-warmup 补齐状态
+let setupWarmup = { phase: '', detail: '', percent: 0, done: false }
+
+// 轮询后端 GET /api/accounts 直到返回 200（或超时）。返回有效账号数组；超时返回 null。
+async function waitBackendReady(timeout = 15000) {
+  const start = Date.now()
+  for (;;) {
+    try {
+      const res = await fetch('http://localhost:3000/api/accounts')
+      if (res.ok) {
+        const data = await res.json().catch(() => ({}))
+        return Array.isArray(data.accounts) ? data.accounts : []
+      }
+    } catch (_) { /* 后端尚未就绪，继续重试 */ }
+    if (Date.now() - start > timeout) return null
+    await new Promise((r) => setTimeout(r, 250))
+  }
+}
+
+// 快速首启判定：数据目录里还没有 index.db（从未初始化过任何账号库）
+function looksLikeFirstRun() {
+  try {
+    return !fs.existsSync(path.join(resolveDataDir(), 'index.db'))
+  } catch (_) { return false }
+}
+
+// 首启判定：FORCE_SETUP=1 强制为真；否则先看文件系统，再等后端就绪看有效账号是否为空
+async function detectFirstRun() {
+  if (process.env.FORCE_SETUP === '1') return true
+  if (looksLikeFirstRun()) return true
+  const accounts = await waitBackendReady()
+  return Array.isArray(accounts) && accounts.length === 0
+}
+
+// 向引导窗口推送预热进度（窗口不存在/已销毁时静默忽略）
+function sendSetupWarmup(payload) {
+  if (setupWindow && !setupWindow.isDestroyed()) {
+    try { setupWindow.webContents.send('from-main', payload) } catch (_) {}
+  }
+}
+function updateWarmup(phase, detail, percent, done = false) {
+  setupWarmup = { phase, detail, percent, done }
+  sendSetupWarmup({ type: 'setup-warmup', ...setupWarmup })
+}
+
+// 预热编排：真实的初始化动作（等后端就绪 + 建数据/缓存/编译缓存目录）。
+// 编译缓存的收益在后续启动，因此该步不阻塞用户操作。
+async function runSetupWarmup() {
+  if (setupWarmup.done) return
+  updateWarmup('启动服务', '正在启动本地服务', 15)
+  const accounts = await waitBackendReady()
+  if (accounts === null) {
+    updateWarmup('启动服务', '本地服务启动较慢，可先继续', 15, false)
+    return
+  }
+  updateWarmup('初始化数据目录', '正在准备数据目录', 55)
+  try {
+    fs.mkdirSync(resolveDataDir(), { recursive: true })
+    fs.mkdirSync(resolveThumbsDir(), { recursive: true })
+  } catch (_) { /* 目录创建失败不阻塞引导 */ }
+  await new Promise((r) => setTimeout(r, 60))
+  updateWarmup('准备编译缓存', '正在预热模块编译缓存', 85)
+  try { fs.mkdirSync(resolveCompileCacheDir(), { recursive: true }) } catch (_) {}
+  await new Promise((r) => setTimeout(r, 60))
+  updateWarmup('完成', '优化已自动完成~', 100, true)
+}
+
+// 创建引导窗口：固定尺寸、无边框、系统亚克力，引导期间禁止关闭
+function createSetupWindow() {
+  if (setupWindow && !setupWindow.isDestroyed()) {
+    setupWindow.focus()
+    return setupWindow
+  }
+  setupUiReady = false
+  const win = new BrowserWindow({
+    width: 800,
+    height: 540,
+    resizable: false,
+    maximizable: false,
+    fullscreenable: false,
+    frame: false,
+    // 与主窗口一致的毛玻璃方案：不用 transparent，改用系统亚克力 + 不透明底色，
+    // 由渲染层半透明卡片磨砂透出（Win11 会据此自动给窗口加圆角）。
+    transparent: false,
+    backgroundMaterial: 'acrylic',
+    backgroundColor: '#f0f4f8',
+    center: true,
+    title: '首次安装引导',
+    webPreferences: {
+      preload: path.join(__dirname, 'preload.js'),
+      contextIsolation: true,
+      nodeIntegration: false,
+      sandbox: true,
+      additionalArguments: ['--secure-channel'],
+      webSecurity: !isDev,
+      spellcheck: false,
+      devTools: isDev,
+    },
+  })
+  setupWindow = win
+  setupRunning = true
+
+  if (process.platform === 'win32') applyBackgroundMaterial(win, 'acrylic')
+
+  // 引导未完成前禁止关闭（系统 ✕ / Alt+F4）
+  win.on('close', (e) => { if (setupRunning) e.preventDefault() })
+  win.on('closed', () => { if (setupWindow === win) setupWindow = null })
+
+  if (isDev) {
+    // 与主窗口一致：先渲染本地 inline loading 页（窗口立即出画面，不再白屏），
+    // Vite 就绪后立即跳转到 setup.html；引导窗口不开 DevTools。
+    win.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(DEV_LOADING_HTML)}`)
+    win.webContents.on('did-finish-load', () => {
+      const u = win.webContents.getURL()
+      startupTimer.mark(u.startsWith('data:') ? '引导窗口 loading 页完成' : '引导页面加载完成')
+    })
+    // 直接探测 setup.html：命中即跳转，等待期间 Vite 已顺带编译好该页面
+    loadUrlWithRetry(win, 'https://127.0.0.1:5173/setup.html')
+  } else {
+    win.loadURL('app://local/setup.html')
+  }
+
+  // 窗口一打开即在后台开始预热
+  runSetupWarmup()
+  return win
+}
+
+ipcMain.on('setup-ready', (event) => {
+  if (!setupWindow || setupWindow.isDestroyed()) return
+  if (event.sender !== setupWindow.webContents) return
+  setupUiReady = true
+})
+
+// 引导完成：关闭引导窗口并创建主窗口（token 已写入同源 localStorage，主窗口据此直达首页）
+ipcMain.on('setup-complete', (event) => {
+  if (!setupWindow || setupWindow.isDestroyed()) return
+  if (event.sender !== setupWindow.webContents) return
+  setupRunning = false
+  pendingMainNotification = { type: 'success', message: '初始化完成，欢迎使用' }
+  if (!mainWindow || mainWindow.isDestroyed()) createMainWindow()
+  if (setupWindow && !setupWindow.isDestroyed()) setupWindow.close()
+})
+
+// 供晚挂载的渲染层补齐预热状态
+ipcMain.handle('get-setup-warmup', () => setupWarmup)
+
+// 引导期「储存设置」：写入初始数据/缓存目录。首次建库前直接写配置；
+// 若引导中已建库（数据目录已存在），复用安全搬迁流程移动文件，随后重启后端让新目录生效。
+ipcMain.handle('set-initial-data-dir', async (event, payload) => {
+  const p = payload || {}
+  const currentData = resolveDataDir()
+  let dataDir = null
+  if (p.dataDir) {
+    const t = path.resolve(String(p.dataDir))
+    if (t.toLowerCase() !== currentData.toLowerCase()) dataDir = t
+  }
+  let thumbsDir = null
+  if (p.thumbsDir) {
+    const t = path.resolve(String(p.thumbsDir))
+    if (t.toLowerCase() !== resolveThumbsDir().toLowerCase()) thumbsDir = t
+  }
+  if (!dataDir && !thumbsDir) {
+    return { ok: true, dataDir: currentData, thumbsDir: resolveThumbsDir(), changed: false }
+  }
+
+  if (dataDir) {
+    // 防循环：不允许把数据目录迁到它自身内部
+    const rel = path.relative(currentData, dataDir)
+    if (rel && !rel.startsWith('..') && !path.isAbsolute(rel)) {
+      throw new Error('新目录不能位于当前数据目录内部')
+    }
+    if (fs.existsSync(path.join(currentData, 'index.db'))) {
+      // 已建库：复用安全搬迁流程（预检非空 → 校验 → 复制 → 复检 → 写配置 → 删旧目录）
+      if (fs.existsSync(dataDir) && fs.readdirSync(dataDir).length > 0) {
+        throw new Error('目标目录非空，请选择空目录')
+      }
+      if (!fs.existsSync(dataDir)) fs.mkdirSync(dataDir, { recursive: true })
+      await migrateDataDir(currentData, dataDir) // 内部已停止后端并写配置
     } else {
-      fs.mkdirSync(path.dirname(d), { recursive: true })
-      fs.copyFileSync(s, d)
+      // 尚未建库：直接创建目录并写配置，无需搬迁
+      fs.mkdirSync(dataDir, { recursive: true })
+      saveAppConfig({ dataDir })
+    }
+  }
+  if (thumbsDir) {
+    fs.mkdirSync(thumbsDir, { recursive: true })
+    saveAppConfig({ thumbsDir })
+  }
+
+  // 重启后端让新目录生效（token 由同一 SECURE_MASTER 签发，重启后仍有效）
+  await stopBackendProcess()
+  startBackend()
+  return { ok: true, dataDir: resolveDataDir(), thumbsDir: resolveThumbsDir(), changed: true }
+})
+
+// ========== 数据目录搬迁：带进度的校验 + 复制 ==========
+const fsp = fs.promises
+
+// 递归列出目录下所有文件（相对路径 + 绝对路径），顺序稳定
+function listFilesRecursive(dir, prefix = '') {
+  const out = []
+  let entries
+  try { entries = fs.readdirSync(dir, { withFileTypes: true }) } catch (_) { return out }
+  for (const ent of entries) {
+    const rel = prefix ? `${prefix}/${ent.name}` : ent.name
+    const full = path.join(dir, ent.name)
+    if (ent.isDirectory()) out.push(...listFilesRecursive(full, rel))
+    else if (ent.isFile()) out.push({ rel, full })
+  }
+  return out
+}
+
+// 流式算文件 SHA-256，并按块回报已读字节（供进度条使用）
+async function sha256FileAsync(file, onBytes) {
+  const hash = crypto.createHash('sha256')
+  const fh = await fsp.open(file, 'r')
+  try {
+    const buf = Buffer.allocUnsafe(1 << 20) // 1MB
+    let pos = 0
+    for (;;) {
+      const { bytesRead } = await fh.read(buf, 0, buf.length, pos)
+      if (!bytesRead) break
+      hash.update(buf.subarray(0, bytesRead))
+      pos += bytesRead
+      if (onBytes) onBytes(bytesRead)
+    }
+  } finally {
+    await fh.close()
+  }
+  return hash.digest('hex')
+}
+
+// 复制单个文件，按块回报已写字节（供进度条使用）
+async function copyFileAsync(src, dst, onBytes) {
+  await fsp.mkdir(path.dirname(dst), { recursive: true })
+  const rh = await fsp.open(src, 'r')
+  const wh = await fsp.open(dst, 'w')
+  try {
+    const buf = Buffer.allocUnsafe(1 << 20)
+    let pos = 0
+    for (;;) {
+      const { bytesRead } = await rh.read(buf, 0, buf.length, pos)
+      if (!bytesRead) break
+      await wh.write(buf, 0, bytesRead, pos)
+      pos += bytesRead
+      if (onBytes) onBytes(bytesRead)
+    }
+  } finally {
+    await rh.close()
+    await wh.close()
+  }
+}
+
+// 建立目录清单：相对路径 → { size, hash }，并回报总文件数/总字节数（用于进度）
+async function buildInventory(dir, onProgress) {
+  const files = listFilesRecursive(dir).map((f) => ({ ...f, size: fs.statSync(f.full).size }))
+  const totalFiles = files.length
+  const totalBytes = files.reduce((s, f) => s + f.size, 0)
+  const map = new Map()
+  let doneFiles = 0
+  let doneBytes = 0
+  for (const f of files) {
+    const hash = await sha256FileAsync(f.full, (n) => {
+      doneBytes += n
+      if (onProgress) onProgress(doneFiles, totalFiles, doneBytes, totalBytes)
+    })
+    map.set(f.rel, { size: f.size, hash })
+    doneFiles += 1
+    if (onProgress) onProgress(doneFiles, totalFiles, doneBytes, totalBytes)
+  }
+  return { map, totalFiles, totalBytes }
+}
+
+// 目录整体指纹：对所有文件（按路径排序）的 路径+大小+内容哈希 再算一次 SHA-256。
+// 用于搬迁后做「全局哈希」兜底校验，能一并发现文件缺失、内容变化与多出文件。
+function globalHashOf(inventory) {
+  const hash = crypto.createHash('sha256')
+  for (const rel of [...inventory.keys()].sort()) {
+    const e = inventory.get(rel)
+    hash.update(`${rel}\u0000${e.size}\u0000${e.hash}\n`)
+  }
+  return hash.digest('hex')
+}
+
+// 清空目录内容但保留目录本身（用于回滚时优先保留用户选定的目录）
+function clearDir(dir) {
+  let entries = []
+  try { entries = fs.readdirSync(dir) } catch (_) { return }
+  for (const name of entries) {
+    try { fs.rmSync(path.join(dir, name), { recursive: true, force: true }) } catch (_) {}
+  }
+}
+
+// 进度上报节流：高频字节回调合并为最多每 60ms 一次 IPC，避免刷爆渲染进程
+function createProgressReporter() {
+  let lastSent = 0
+  let pending = null
+  let timer = null
+  const flush = () => {
+    timer = null
+    if (!pending) return
+    sendMigration(pending)
+    pending = null
+    lastSent = Date.now()
+  }
+  return (payload, force = false) => {
+    pending = payload
+    const now = Date.now()
+    if (force || now - lastSent >= 60) {
+      if (timer) { clearTimeout(timer); timer = null }
+      flush()
+    } else if (!timer) {
+      timer = setTimeout(flush, 60 - (now - lastSent))
     }
   }
 }
 
-// 停止后端子进程（不清 isQuitting 标志，便于随后重启）
-function stopBackendProcess() {
-  clearTimeout(backendRestartTimer)
-  if (backendProcess) {
-    try { backendProcess.kill() } catch (_) {}
-    backendProcess = null
+// 执行数据目录整体搬迁：预检 → 校验源文件 → 复制（字节进度）→ 复检（失败文件单拷 + 全局哈希）→ 写配置。
+// 任一步失败都抛错，由调用方清理目标目录、保留旧目录与旧配置并恢复后端。返回 { oldDirRemoved }。
+async function migrateDataDir(oldDir, target) {
+  const report = createProgressReporter()
+  const emit = (phase, filesDone, filesTotal, percent, detail) => {
+    report({
+      type: 'migration-progress',
+      phase,
+      filesDone,
+      filesTotal,
+      percent: Math.max(0, Math.min(100, Math.round(percent || 0))),
+      detail,
+    })
   }
+
+  // ---- 阶段「校验文件」：建立源目录清单（有效性预检已在进入迁移前完成） ----
+  if (!fs.existsSync(oldDir)) throw new Error('当前数据目录不存在')
+
+  // 停止后端，确保没有任何进程再读写这些数据库文件
+  emit('校验文件', 0, 0, 0, '正在停止数据读写')
+  await stopBackendProcess()
+
+  const source = await buildInventory(oldDir, (doneFiles, totalFiles, doneBytes, totalBytes) => {
+    emit('校验文件', doneFiles, totalFiles, totalBytes ? (doneBytes / totalBytes) * 100 : (totalFiles ? 100 : 0), '正在校验现有数据完整性')
+  })
+  const sourceGlobal = globalHashOf(source.map)
+  emit('校验文件', source.totalFiles, source.totalFiles, 100, '校验完成')
+  await new Promise((r) => setImmediate(r))
+
+  // ---- 阶段「复制文件」：按字节进度整体复制（文件级并发，最多 COPY_CONCURRENCY 个同时进行） ----
+  // 并发上限写死为 3：小文件多时能明显提速；再往上会让并发文件互相抢磁盘、反而更慢。
+  const COPY_CONCURRENCY = 3
+  emit('复制文件', 0, source.totalFiles, 0, '正在复制文件')
+  let copiedFiles = 0
+  let copiedBytes = 0
+  const rels = [...source.map.keys()]
+  let nextIdx = 0
+  // 每个 worker 从队列里不断取下一个文件复制，直到取空。
+  // copiedBytes / copiedFiles 只增不减，且 emit 内部已把百分比钳制到 0~100，多文件同时回报也保持单调推进。
+  const copyWorker = async () => {
+    while (nextIdx < rels.length) {
+      const rel = rels[nextIdx++]
+      const src = path.join(oldDir, rel)
+      const dst = path.join(target, rel)
+      try {
+        await copyFileAsync(src, dst, (n) => {
+          copiedBytes += n
+          emit('复制文件', copiedFiles, source.totalFiles, source.totalBytes ? (copiedBytes / source.totalBytes) * 100 : 100, `正在复制文件 ${Math.min(copiedFiles + 1, source.totalFiles)}/${source.totalFiles}`)
+        })
+      } catch (err) {
+        console.warn('[main] 复制文件失败，稍后单独重试:', rel, err?.message || err)
+      }
+      copiedFiles += 1
+      emit('复制文件', copiedFiles, source.totalFiles, source.totalBytes ? (copiedBytes / source.totalBytes) * 100 : 100)
+      await new Promise((r) => setImmediate(r))
+    }
+  }
+  await Promise.all(Array.from({ length: Math.min(COPY_CONCURRENCY, rels.length) }, () => copyWorker()))
+
+  // ---- 阶段「校验文件」：复检复制结果 ----
+  const verify = async () => {
+    const targetInv = await buildInventory(target, (doneFiles, totalFiles, doneBytes, totalBytes) => {
+      emit('校验文件', doneFiles, totalFiles, totalBytes ? (doneBytes / totalBytes) * 100 : (totalFiles ? 100 : 0), '正在校验复制后的文件')
+    })
+    const mismatched = []
+    for (const [rel, info] of source.map) {
+      const t = targetInv.map.get(rel)
+      if (!t || t.size !== info.size || t.hash !== info.hash) mismatched.push(rel)
+    }
+    // 目标多出源没有的文件同样视为不一致（防止复制到别处/脏数据）
+    for (const rel of targetInv.map.keys()) {
+      if (!source.map.has(rel)) mismatched.push(rel)
+    }
+    return { mismatched, targetInv }
+  }
+
+  emit('校验文件', 0, source.totalFiles, 0, '正在校验复制结果')
+  let result = await verify()
+
+  // 若发现部分文件失败：单独再复制一次这些文件（多出的则删除），随后再复检
+  if (result.mismatched.length > 0) {
+    const total = result.mismatched.length
+    emit('校验文件', 0, total, 0, `发现 ${total} 个文件不一致，正在单独重新复制`)
+    let redone = 0
+    for (const rel of result.mismatched) {
+      const src = path.join(oldDir, rel)
+      const dst = path.join(target, rel)
+      try {
+        if (fs.existsSync(src)) await copyFileAsync(src, dst)
+        else fs.rmSync(dst, { recursive: true, force: true }) // 源不存在 → 多余文件，删掉
+      } catch (err) {
+        console.warn('[main] 重拷失败:', rel, err?.message || err)
+      }
+      redone += 1
+      emit('校验文件', redone, total, (redone / total) * 100, '正在单独重新复制失败文件')
+      await new Promise((r) => setImmediate(r))
+    }
+    result = await verify()
+  }
+
+  // 全局哈希兜底：源目录与目标目录的整体指纹必须完全一致
+  if (result.mismatched.length > 0 || globalHashOf(result.targetInv.map) !== sourceGlobal) {
+    throw new Error(`新目录校验不一致（${result.mismatched.length} 个文件），已保留旧目录`)
+  }
+  emit('校验文件', source.totalFiles, source.totalFiles, 100, '校验完成')
+
+  // ---- 写配置：只有前面全部通过才切换；写失败则中止且不删旧目录 ----
+  try {
+    saveAppConfig({ dataDir: target })
+  } catch (err) {
+    throw new Error('配置文件写入失败，已中止搬迁并保留旧目录：' + (err?.message || err))
+  }
+
+  // ---- 删除旧目录：删不掉仅记为残留，不算搬迁失败 ----
+  let oldDirRemoved = true
+  try {
+    fs.rmSync(oldDir, { recursive: true, force: true })
+  } catch (err) {
+    oldDirRemoved = false
+    console.warn('[main] 旧数据目录删除失败（搬迁已完成，新目录可用，可手动清理）:', err?.message || err)
+  }
+  return { oldDirRemoved }
 }
 
-// 变更「数据库目录」：先停后端释放文件锁 → 把旧目录整体拷贝到新目录 → 更新配置 → 重启后端。
-// 采用「拷贝成功后再删旧目录」而非直接 move，避免中途失败时旧数据被破坏。
+// 停止后端子进程（不清 isQuitting 标志，便于随后重启）。
+// 返回 Promise：等进程真正退出后再 resolve。Windows 上 kill() 是异步的，若不等它
+// 退出就立刻拷贝/删除数据库文件，会因 .db/.db-wal/.db-shm 句柄尚未释放而 EBUSY/EPERM 失败。
+// 同时摘掉 exit→scheduleBackendRestart 监听：本次是「主动停止」，不应再被自动重启拉起来
+// （否则会和调用方的 startBackend() 一起 fork 出两个后端）。
+function stopBackendProcess() {
+  clearTimeout(backendRestartTimer)
+  const proc = backendProcess
+  backendProcess = null
+  if (!proc) return Promise.resolve()
+  try { proc.removeListener('exit', scheduleBackendRestart) } catch (_) { /* 忽略 */ }
+  return new Promise((resolve) => {
+    let settled = false
+    const done = () => { if (settled) return; settled = true; resolve() }
+    proc.once('exit', done)
+    try { proc.kill() } catch (_) { done() }
+    // 兜底：进程迟迟不退出也不能无限等待
+    setTimeout(done, 3000)
+  })
+}
+
+// 变更「数据库目录」：关闭全部其它窗口并弹出独立的迁移进度窗口，在其中完成
+//   预检（有效班主任库/无再读写）→ 校验源文件 → 复制（字节进度）→ 复检（失败单拷 + 全局哈希）→ 写配置；
+// 只有前面全部通过才切配置、删旧目录。配置写入失败会中止并保留旧目录，绝不产生「数据在新目录、
+// 配置却指向已删除旧目录」的错位状态。
 ipcMain.handle('set-data-dir', async (event, dir) => {
+  if (migrationRunning) throw new Error('已有数据库迁移正在进行，请稍候')
   const target = path.resolve(String(dir || ''))
   const oldDir = resolveDataDir()
   if (!target || target.toLowerCase() === oldDir.toLowerCase()) {
@@ -1418,26 +2022,79 @@ ipcMain.handle('set-data-dir', async (event, dir) => {
   if (rel && !rel.startsWith('..') && !path.isAbsolute(rel)) {
     throw new Error('新目录不能位于当前数据目录内部')
   }
-  if (target === oldDir) return { ok: true, dataDir: oldDir, changed: false }
-  if (!fs.existsSync(target)) fs.mkdirSync(target, { recursive: true })
-  // 目标目录须为空（或不存在），避免与已有文件/旧数据混淆
-  if (fs.readdirSync(target).length > 0 && fs.readdirSync(oldDir).length > 0) {
-    throw new Error('目标目录非空，请选择空目录')
+  // 目标目录须为空（不存在则创建）；在开窗、停后端之前先快速失败
+  let createdTarget = false
+  if (fs.existsSync(target)) {
+    if (fs.readdirSync(target).length > 0) throw new Error('目标目录非空，请选择空目录')
+  } else {
+    fs.mkdirSync(target, { recursive: true })
+    createdTarget = true
   }
-  stopBackendProcess()
+  // 预检：当前目录必须是有效的班主任数据库（登记表 + 主密钥），否则不进入迁移流程
+  if (!fs.existsSync(oldDir)) throw new Error('当前数据目录不存在')
+  if (!fs.existsSync(path.join(oldDir, 'index.db'))) throw new Error('当前数据目录缺少 index.db，无法确认数据库有效')
+  if (!fs.existsSync(path.join(oldDir, 'db-master.key'))) throw new Error('当前数据目录缺少 db-master.key，无法确认数据库有效')
+
+  migrationRunning = true
+  migrationContext = { target, createdTarget, oldDir }
+  // 先建好进度窗口，再关闭其它窗口：保证窗口数不为 0，避免触发 window-all-closed 退出应用
+  createMigrationWindow()
+  await waitMigrationReady()
+  closeAllWindowsExceptMigration()
+
   try {
-    copyRecursive(oldDir, target)
-    saveAppConfig({ dataDir: target })
-    fs.rmSync(oldDir, { recursive: true, force: true })
-  } catch (err) {
-    // 搬迁失败：删除可能已拷贝的部分，保留旧目录与人可读错误
-    try { fs.rmSync(target, { recursive: true, force: true }) } catch (_) {}
-    console.error('[main] 数据目录搬迁失败:', err?.message || err)
-    throw new Error('数据搬迁失败：' + (err?.message || err))
-  } finally {
+    const { oldDirRemoved } = await migrateDataDir(oldDir, target)
+    // 成功：配置已切到新目录 → 重启后端（读取新 DATA_DIR）→ 重开主窗口并弹出成功提示条
+    sendMigration({ type: 'migration-done' })
+    await new Promise((r) => setTimeout(r, 700))
+    pendingMainNotification = { type: 'success', message: '数据库移动成功' }
     startBackend()
+    reopenAfterMigration()
+    return { ok: true, dataDir: target, changed: true, oldDirRemoved }
+  } catch (err) {
+    console.error('[main] 数据目录搬迁失败:', err?.message || err)
+    // 失败：旧目录与旧配置原样保留；新目录不再自动清理，交由用户在进度窗口确认后手动清除
+    startBackend()
+    // 失败提示条：用「提示」而非「错误」，语义为「搬迁未生效、数据安全」；用户关掉进度窗口后新主窗口展示
+    pendingMainNotification = { type: 'info', message: '数据库移动失败，原数据库未发生改动' }
+    sendMigration({ type: 'migration-error', message: err?.message || String(err), target })
+    // 进度窗口渲染层未挂载（无法询问用户）时，直接重开主窗口，保留已复制内容待手动清理
+    if (!migrationUiReady) reopenAfterMigration()
+    throw new Error(err?.message || String(err))
   }
-  return { ok: true, dataDir: target, changed: true }
+})
+
+// 变更「数据库加密方式」：复用数据目录迁移那套流程——关闭全部其它窗口、只留独立进度窗口，
+// 完成后自动重开主窗口并经提示条反馈结果。实际转换由后端的 NDJSON 流接口执行
+// （只有后端加载 SQLCipher 原生模块，且 rekey 是同步阻塞操作），进度窗口渲染层承接进度并回报结果。
+ipcMain.handle('set-db-encryption', async (event, payload) => {
+  if (migrationRunning) throw new Error('已有数据库任务正在进行，请稍候')
+  const encrypt = !!(payload && payload.encrypt)
+  // 先取当前登录令牌交给进度窗口调用后端接口：接口只从 JWT 取 slug，绝不接受客户端传入 slug
+  let token = null
+  try {
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      token = await mainWindow.webContents.executeJavaScript('localStorage.getItem("token")', true)
+    }
+  } catch (_) { token = null }
+  if (!token) throw new Error('登录状态已失效，请重新登录后再试')
+
+  migrationRunning = true
+  migrationContext = { mode: 'crypt', encrypt }
+  // 先建好进度窗口，再关闭其它窗口：保证窗口数不为 0，避免触发 window-all-closed 退出应用
+  createMigrationWindow()
+  await waitMigrationReady()
+  if (!migrationUiReady) {
+    // 进度窗口渲染层未就绪：无法执行转换，直接放弃并恢复（此时其它窗口尚未关闭）
+    migrationRunning = false
+    migrationContext = null
+    if (migrationWindow && !migrationWindow.isDestroyed()) migrationWindow.close()
+    throw new Error('进度窗口加载失败，请重试')
+  }
+  closeAllWindowsExceptMigration()
+  // 通知进度窗口开始转换（携带目标状态与登录令牌），其完成后经 migration-dismiss 回报结果
+  sendMigration({ type: 'crypt-start', encrypt, token })
+  return { ok: true, started: true, encrypt }
 })
 
 // 变更「相册缩略图缓存目录」：缩略图是可再生的缓存，无需搬迁文件，
@@ -1449,9 +2106,10 @@ ipcMain.handle('set-thumbs-dir', async (event, dir) => {
     return { ok: true, thumbsDir: oldDir, changed: false }
   }
   fs.mkdirSync(target, { recursive: true })
+  // 配置写入失败必须中止，不能继续重启后端去用一个尚未生效的目录
   saveAppConfig({ thumbsDir: target })
-  stopBackendProcess()
-  try { startBackend() } catch (_) {}
+  await stopBackendProcess()
+  startBackend()
   return { ok: true, thumbsDir: target, changed: true, oldThumbsDir: oldDir }
 })
 
@@ -1542,6 +2200,17 @@ ipcMain.handle('save-file', async (event, { defaultName, data }) => {
     return { canceled: false, filePath: result.filePath }
   } catch (err) {
     return { canceled: true, error: err.message }
+  }
+})
+
+// 导出文件保存后：用系统默认应用打开
+ipcMain.handle('open-file', async (event, { filePath }) => {
+  if (!filePath) return { success: false, error: 'no filePath' }
+  try {
+    const error = await shell.openPath(filePath)
+    return { success: !error, error: error || null }
+  } catch (err) {
+    return { success: false, error: err.message }
   }
 })
 

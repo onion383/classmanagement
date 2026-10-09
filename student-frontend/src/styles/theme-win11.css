@@ -83,3 +83,14 @@
   opacity: var(--win11-frost, 0.3);
   mix-blend-mode: overlay;
 }
+
+/* ========== 弹窗遮罩额外 CSS 模糊 ==========
+   各弹窗遮罩是手写的固定暗层（fixed inset-0 + bg-black/40~50）。
+   在 Win11（背景透明的亚克力窗口）里，给这些遮罩额外叠加一层 CSS 模糊，
+   使弹窗下层的页面/桌面内容被磨砂，贴近毛玻璃弹窗的质感。
+   限定 win11 主题，不影响毛玻璃/极简等其它主题。 */
+:root[data-theme="win11"] [class*="inset-0"][class*="bg-black/"]:not([class*="bg-black/9"]) {
+  /* 弹窗遮罩：透明底（不加纯色压暗）+ 背景模糊，磨砂虚化下层页面 */
+  background-color: rgba(0, 0, 0, 0);
+  backdrop-filter: blur(18px) saturate(1.1);
+}
