@@ -1,0 +1,33 @@
+FFmpeg 精简构建信息 / Build Information
+=======================================
+
+产物 / Artifact
+  文件:   ffmpeg.exe
+  sha256: 7D5E0533ED0976DAC670CB0A932A6556B84A45330A227D72A596A72B076272F8
+  大小:   6742016 字节
+
+许可 / License
+  FFmpeg 8.1.3，LGPL version 2.1 or later。
+  构建时未启用 --enable-gpl / --enable-nonfree / --enable-version3，
+  因此不含任何 GPL-only 组件（未链接 x264 / x265 / xvid 等外部库）。
+  许可全文见同目录 COPYING.LGPLv2.1。
+
+用途与合规说明 / Purpose & Compliance
+  本二进制仅用于「相册视频抽帧生成封面」。主程序以「独立进程 + 命令行」方式
+  调用它（execFile），不与其链接。此组合属于 mere aggregation，
+  LGPL 义务不向主程序传导。
+
+上游源码 / Upstream Source
+  URL:    https://ffmpeg.org/releases/ffmpeg-8.1.3.tar.xz
+  sha256: 7138D28C96D9D3E3AF4EE3D8CAD72741F8FFB40DA90C1112235DEA3ECD3178A3
+  校验依据: 官方 release tarball 内含 RELEASE 文件（值 8.1.3），git 快照不含该文件。
+
+对应源码与构建脚本 / Corresponding Source
+  完整 configure 白名单与编译步骤见同目录 build.sh（属 LGPL 定义的
+  "Corresponding Source"，即用于控制编译和安装的脚本）。
+
+工具链 / Toolchain
+  mingw-w64 GCC 8.1.0 (x86_64-w64-mingw32, posix-seh)
+  GNU Make 4.2.1
+  静态链接（-static），产物仅依赖 Windows 系统 DLL：
+  KERNEL32 / msvcrt / USER32 / SHELL32 / bcrypt / PSAPI

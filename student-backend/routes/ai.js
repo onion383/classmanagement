@@ -683,12 +683,19 @@ router.post('/upload', upload.single('file'), async (req, res) => {
       if (ext === '.txt' || ext === '.csv' || ext === '.md' || ext === '.json' || ext === '.xml' || ext === '.html') {
         text = fs.readFileSync(tempPath, 'utf-8');
       }
-      // PDF：用 pdf-parse 提取文本
+      // PDF：用 pdf-parse 提取文本（v2 起导出 PDFParse 类，不再是可调用函数）
       else if (ext === '.pdf') {
-        const pdf = require('pdf-parse');
-        const dataBuffer = fs.readFileSync(tempPath);
-        const data = await pdf(dataBuffer);
-        text = data.text;
+        // pdfjs 在 Node 下需要 DOMMatrix 全局；此前由 35MB 的 @napi-rs/canvas 提供。
+        // 本应用只做文本提取（不渲染），改用纯 JS 轻量补丁，从而打包时剔除 canvas。
+        // 必须在本行之前安装，pdf-parse 内部会用到该全局。
+        require('../services/pdfDomShim');
+        const { PDFParse } = require('pdf-parse');
+        const parser = new PDFParse({ data: fs.readFileSync(tempPath) });
+        try {
+          text = (await parser.getText()).text;
+        } finally {
+          await parser.destroy();
+        }
       }
       // Word (.docx)：用 mammoth 提取文本
       else if (ext === '.docx' || ext === '.doc') {

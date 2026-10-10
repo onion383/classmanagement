@@ -29,6 +29,18 @@ function msFromStart() {
   return Date.now() - startTime
 }
 
+// 结构化时间线：供性能面板读取（不改动原有 report/saveLog 的日志输出格式）。
+// 返回 { total, marks: [{ label, at, delta }] }，at/delta 单位均为毫秒。
+function getTimeline() {
+  const list = marks.map((m, i) => ({
+    label: m.name,
+    at: m.elapsed,
+    delta: i === 0 ? 0 : m.elapsed - marks[i - 1].elapsed,
+  }))
+  const total = marks.length > 0 ? marks[marks.length - 1].elapsed : 0
+  return { total, marks: list }
+}
+
 function report() {
   console.log('\n========== 启动时间线 ==========')
   if (marks.length === 0) {
@@ -74,4 +86,4 @@ function saveLog(filePath) {
   } catch (_) { /* 忽略写入失败 */ }
 }
 
-module.exports = { mark, msFromStart, report, saveLog }
+module.exports = { mark, msFromStart, report, saveLog, getTimeline }

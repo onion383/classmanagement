@@ -23,6 +23,8 @@ const validSendChannels = [
   'win-close',
   // 关闭选择弹窗：渲染层把用户选择的关闭范围回传给主进程
   'shutdown-action',
+  // 启动失败兜底：用户点「退出应用」
+  'quit-app',
   // Win11 主题：主窗口窗外亚克力开关
   'theme-chrome',
   // 渲染层回报/切换「桌面小组件」启用状态（主进程据此按需创建/关闭桌面小组件窗口）
@@ -69,6 +71,21 @@ const validInvokeChannels = [
   'get-setup-warmup',
   // 主窗口加载后取走主进程暂存的待展示提示（如「数据库移动成功」）
   'get-pending-notification',
+  // 后端就绪状态查询（兜住「先就绪、后注册监听」的竞态）
+  'backend-status',
+  // 启动阶段状态查询（加载页灰色副标题显示「程序正在干嘛」）
+  'boot-status',
+  // 启动失败兜底：手动重启后端 / 查询当前是否处于失败态
+  'restart-backend',
+  'backend-failure',
+  // 运行期：请求没拿到响应时，让主进程立刻做一次健康探测（把失败操作变成探针）
+  'probe-backend',
+  // 性能面板：内存快照 / 重启前端 / 重启小组件 / 手动回收 / 上次启动耗时
+  'perf-snapshot',
+  'perf-restart-frontend',
+  'perf-restart-widget',
+  'perf-gc',
+  'perf-startup',
 ]
 
 // 白名单：仅允许以下主进程 -> 渲染进程推送通道

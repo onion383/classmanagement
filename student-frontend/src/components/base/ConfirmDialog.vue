@@ -39,7 +39,7 @@
 
       <div class="mt-4">
         <button v-if="showCancel" @click="$emit('cancel')" class="bg-surface-hover border-none px-4 py-1.5 rounded mr-2 cursor-pointer">{{ cancelText }}</button>
-        <button @click="$emit('confirm')" class="bg-info text-text-inverse border-none px-4 py-1.5 rounded cursor-pointer">{{ confirmText }}</button>
+        <button @click="$emit('confirm')" :disabled="confirmDisabled" class="bg-info text-text-inverse border-none px-4 py-1.5 rounded cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed">{{ confirmText }}</button>
       </div>
     </div>
   </div>
@@ -60,6 +60,8 @@ export default {
     title: String,
     type: String,
     showCancel: Boolean,
+    // 确定按钮禁用（如倒计时未结束时置灰不可点）
+    confirmDisabled: Boolean,
     confirmText: { type: String, default: '确定' },
     cancelText: { type: String, default: '取消' },
     columnName: String,

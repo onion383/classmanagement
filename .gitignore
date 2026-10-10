@@ -28,6 +28,8 @@ cert.pem
 release*/
 dist/
 *.exe
+# 例外：随包分发的 FFmpeg LGPL 二进制需入库（避免每次重新编译）
+!resources/ffmpeg/ffmpeg.exe
 
 # 操作系统文件
 .DS_Store
@@ -35,15 +37,20 @@ Thumbs.db
 
 # 测试数据
 *.db
+# SQLite WAL/SHM 运行时边车文件（避免误提交）
+*-shm
+*-wal
+
+# 本地测试脚本（不入库）
+testjs/
 
 # 缓存
 .vite/
+.perf-data/
+.trae/
 *.log
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
 pnpm-debug.log*
 lerna-debug.log*
-
-# 运行时随包二进制（FFmpeg LGPL 等大文件，不入库）
-resources/

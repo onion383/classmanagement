@@ -6,13 +6,13 @@
 //
 // 定位策略（依次生效，找到即返回）：
 //   1. 环境变量 FFMPEG_PATH（显式指定的可执行文件）
-//   2. FFMPEG_HOME 目录（含其一级子目录，兼容 gyan 解压出来的 bin/ 结构）
+//   2. FFMPEG_HOME 目录（含其一级子目录，兼容解压出的 bin/ 结构）
 //   3. <userData>/ffmpeg（缓存目录：按需下载的 LGPL 版落盘于此）
 //   4. 随包/源码目录 resources/ffmpeg（构建时若放好 LGPL 二进制则直接使用）
 //   5. 系统 PATH 中的 ffmpeg
 //
-// ensureFfmpeg() 在定位不到时，会从 gyan.dev 下载 LGPL 构建并解压到 <userData>/ffmpeg
-// 缓存，保证首次用到视频封面也能生成；下载/解压失败则返回 null（缩略图回退占位）。
+// ensureFfmpeg() 在定位不到时，会从 BtbN/FFmpeg-Builds 下载 LGPL 构建并解压到 <userData>/ffmpeg
+// 缓存，保证首次用到视频封面也能生成；下载/解压失败则返回 ''（缩略图回退占位）。
 
 const fs = require('fs');
 const fsp = fs.promises;
@@ -49,9 +49,12 @@ function verifySha256(filePath, expected) {
 
 const IS_WIN = process.platform === 'win32';
 const EXE_NAME = IS_WIN ? 'ffmpeg.exe' : 'ffmpeg';
-// 默认下载 LGPL 版 FFmpeg（不含 GPL-only 编码器）；可用 FFMPEG_LGPL_URL 覆盖
+// 兜底下载 LGPL 版 FFmpeg（不含 GPL-only 编码器）；可用 FFMPEG_LGPL_URL 覆盖。
+// 正常情况下随包已内置 LGPL 版 ffmpeg.exe（resources/ffmpeg），此处仅为极端兜底。
+// 采用 BtbN/FFmpeg-Builds 的 "latest" 固定标签（长期可用），LGPL 资产 ZIP 解压后为
+// ffmpeg-master-latest-win64-lgpl/bin/ffmpeg.exe，可由下方 findFfmpeg 的一级子目录探测命中。
 const LGPL_URL = process.env.FFMPEG_LGPL_URL ||
-  'https://www.gyan.dev/ffmpeg/builds/ffmpeg-release-lgpl.zip';
+  'https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/ffmpeg-master-latest-win64-lgpl.zip';
 // 缓存目录：<userData>/ffmpeg
 const CACHE_DIR = path.join(dbManager.dataDir, 'ffmpeg');
 
@@ -68,7 +71,7 @@ function findFfmpeg(subjects) {
     if (!subj) continue;
     const exe = path.join(subj, EXE_NAME);
     if (exists(exe)) return exe;
-    // 一级子目录（兼容 gyan 解压的 ffmpeg-x.y-full_build-lgpl/bin）
+    // 一级子目录（兼容 BtbN 解压出的 ffmpeg-master-latest-win64-lgpl/bin 等结构）
     if (isDir(subj)) {
       for (const name of dirsIn(subj)) {
         const child = path.join(subj, name, EXE_NAME);

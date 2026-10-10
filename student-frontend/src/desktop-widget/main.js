@@ -3,6 +3,7 @@ import DesktopWidget from './DesktopWidget.vue'
 import axios from 'axios'
 import '../styles/index.css'
 import { setupSecureAxios } from '../composables/secureAxios'
+import { waitForBackendReady } from '../utils/backendReady'
 
 // 桌面组件在桌面常驻，不依赖主窗口的登录态同步。
 // 通过 IPC 从主进程获取当前 token（主窗口保存的），避免 cookie 跨域读取问题。
@@ -42,7 +43,7 @@ axios.interceptors.response.use(
       const retryCount = config.__retryCount || 0
       if (retryCount < 6) {
         config.__retryCount = retryCount + 1
-        await new Promise(r => setTimeout(r, 500 * config.__retryCount))
+        await waitForBackendReady(200 * config.__retryCount)
         return axios(config)
       }
     }

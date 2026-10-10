@@ -1,10 +1,14 @@
-const { app, BrowserWindow, ipcMain, desktopCapturer, screen, dialog, shell, protocol, Menu, globalShortcut, Notification, safeStorage } = require('electron')
+const { app, BrowserWindow, ipcMain, desktopCapturer, screen, dialog, shell, protocol, session, Menu, globalShortcut, Notification, safeStorage } = require('electron')
 const path = require('path')
 const fs = require('fs')
 const crypto = require('crypto')
-const { Readable } = require('stream')
-const { exec } = require('child_process')
 const startupTimer = require('./startup-timer')
+const { getPrivateWorkingSetKB } = require('./privateWorkingSet')
+
+// 性能面板：暴露 GC。
+// 必须在 app ready 之前追加开关，主进程与各渲染进程才会提供 global.gc / window.gc；
+// 所有调用处仍用 typeof gc === 'function' 兜底（如某些运行环境不生效）。
+app.commandLine.appendSwitch('js-flags', '--expose-gc')
 
 // Node 编译缓存（code cache）：把主进程启动过程中加载的模块字节码缓存到磁盘，
 // 下一次启动直接复用、跳过解析 + 编译（仅对 Node 侧模块生效，收益在后续启动）。
@@ -37,8 +41,13 @@ function getMasterKey() {
 function getAppConfigPath() {
   return path.join(app.getPath('userData'), 'app-config.json')
 }
+// 内存缓存：启动阶段 resolveDataDir / resolveThumbsDir / getDbMasterKey 会反复调用，
+// 原先每次都同步 readFileSync 一次。同一进程内配置的唯一写入点是 saveAppConfig，保存后刷新缓存。
+let appConfigCache = null
 function resolveAppConfig() {
-  try { return JSON.parse(fs.readFileSync(getAppConfigPath(), 'utf8')) || {} } catch (_) { return {} }
+  if (appConfigCache) return appConfigCache
+  try { appConfigCache = JSON.parse(fs.readFileSync(getAppConfigPath(), 'utf8')) || {} } catch (_) { appConfigCache = {} }
+  return appConfigCache
 }
 function saveAppConfig(patch) {
   const next = { ...resolveAppConfig(), ...patch }
@@ -52,6 +61,7 @@ function saveAppConfig(patch) {
     console.error('[main] 写入 app-config 失败:', err?.message || err)
     throw new Error('配置文件写入失败：' + (err?.message || err))
   }
+  appConfigCache = next
   return next
 }
 // 数据库主目录：默认 userData/data，可被用户配置覆盖
@@ -65,6 +75,10 @@ function resolveThumbsDir() {
   if (cfg.thumbsDir) return path.resolve(cfg.thumbsDir)
   return path.join(resolveDataDir(), 'album-thumbs')
 }
+
+// 首启判定涉及同步读盘（app-config.json + existsSync index.db），提前到模块加载阶段完成，
+// 不占用 whenReady → 建窗的关键路径。looksLikeFirstRun 是函数声明，此处调用已被提升。
+const firstRunAtStartup = looksLikeFirstRun()
 
 let dbMasterKey = null
 function getDbMasterKey() {
@@ -128,6 +142,17 @@ let mainWindowChrome = 'native'
 let widgetWindow
 let desktopWidgetWindow
 let backendProcess
+// 后端就绪状态：由后端子进程的 backend-ready 上报置位；供两种场景使用——
+// 1) 就绪瞬间向所有已存在的渲染窗口广播；2) 晚于就绪才加载的窗口用 backend-status 查询兜住竞态
+let backendReady = false
+// 主进程侧的「等后端就绪」等待者：就绪上报到来时统一唤醒（见 waitForBackendReadySignal）
+const backendReadyWaiters = new Set()
+// 启动失败兜底：后端长时间起不来（看门狗超时）或自动重启用尽后置位，
+// 向所有窗口广播 from-main{type:'backend-failed'}，由启动占位页给出「重启后端 / 退出应用」。
+let backendFailed = false
+let backendFailTimer = null
+// 看门狗时长：SIM_BACKEND_FAIL 为测试开关（故意让后端起不来），用短超时便于快速看到失败提示
+const BACKEND_FAIL_TIMEOUT = process.env.SIM_BACKEND_FAIL ? 3000 : 30000
 
 // 关闭确认菜单状态：
 //   shutdownMenuOpen —— 菜单已弹出时不再重复弹（close 事件可能反复触发）；
@@ -146,6 +171,11 @@ const isDev = !app.isPackaged
 // 并把用户注意力拉回到已存在的主窗口。
 const gotSingleInstanceLock = app.requestSingleInstanceLock()
 
+// 注意：后端 fork 不能提前到这里（ready 之前）。fork 的 env 需要 DB_MASTER_KEY，而该值来自
+// safeStorage 解密的 db-master.key；Windows 上 safeStorage.isEncryptionAvailable() 只有
+// ready 之后才返回 true，提前调用会走进「生成随机新密钥」分支，导致加密库无法打开。
+// 因此后端仍在 whenReady 内、建窗之后启动（见下方 app.whenReady 处）。
+
 // 用户又尝试启动一次（重复点击图标/快捷键）时，唤起已存在的主窗口而不是新开
 app.on('second-instance', () => {
   if (mainWindow && !mainWindow.isDestroyed()) {
@@ -155,22 +185,18 @@ app.on('second-instance', () => {
   }
 })
 
+// 测试/调试用：INP_DEBUG=1 时开启 Chromium 远程调试端口，供 scripts/inp-probe.mjs 通过 CDP
+// 注入 INP 观测器并派发真实输入事件进行交互性能测量。仅本地测试使用，默认不开启。
+if (process.env.INP_DEBUG) {
+  app.commandLine.appendSwitch('remote-debugging-port', '9222')
+}
+
 // 打包模式用自定义 app:// 安全协议加载前端，避免 file:// 的「不透明 origin」导致
 // localStorage 仅会话内生效、每次重启即清空（表现：重新登录 + 设置还原）。
 // 标准+安全+supportFetchAPI 使其成为真实持久化的 origin。
 protocol.registerSchemesAsPrivileged([
-  { scheme: 'app', privileges: { standard: true, secure: true, supportFetchAPI: true, corsEnabled: true, stream: true } }
+  { scheme: 'app', privileges: { standard: true, secure: true, supportFetchAPI: true, corsEnabled: true, stream: true, codeCache: true } }
 ])
-
-// 开发模式：忽略自签名 HTTPS 证书错误
-app.on('certificate-error', (event, webContents, url, error, certificate, callback) => {
-  if (isDev) {
-    event.preventDefault()
-    callback(true)
-  } else {
-    callback(false)
-  }
-})
 
 // 禁用控制台安全警告（仅开发模式）
 if (isDev) {
@@ -178,16 +204,17 @@ if (isDev) {
 }
 
 // 等待开发服务器就绪后再让窗口导航。
-// 关键点：先用轻量 https 探测目标地址（不改变窗口显示内容），命中后才真正 loadURL，
+// 关键点：先用轻量 http 探测目标地址（不改变窗口显示内容），命中后才真正 loadURL，
 // 避免每次重试都导航一次、失败时窗口停在错误页（表现为白屏/报错闪现）。
 // 重试间隔 200ms（原来 1000ms），Vite 一就绪几乎立刻跳转。
 function loadUrlWithRetry(win, url, retries = 150, intervalMs = 200) {
   if (!win || win.isDestroyed()) return
-  const https = require('https')
-  const req = https.get(url, { rejectUnauthorized: false }, (res) => {
+  const http = require('http')
+  const req = http.get(url, (res) => {
     res.resume() // 消耗响应体，避免内存泄漏
     if (win.isDestroyed()) return
     console.log(`[Electron] 开发服务器就绪，开始加载 ${url}`)
+    setBootStatus('开发服务器已就绪，正在加载界面…')
     win.loadURL(url).catch((err) => {
       console.error(`[Electron] 加载 ${url} 失败:`, err.message)
     })
@@ -208,7 +235,9 @@ function loadUrlWithRetry(win, url, retries = 150, intervalMs = 200) {
 // 开发模式：先加载本地 inline loading 页面，不等 Vite 就绪。
 // 这样窗口能在 < 1s 内弹出（显示 loading 动画），
 // 后台轮询 Vite 就绪后自动跳转到热更新页面。
-const DEV_LOADING_HTML = `<!DOCTYPE html>
+// 主窗口与引导窗口共用这一份模板（仅文案不同），保证 dev 下 loading 页只出现「一个画面」。
+function devLoadingHtml(title = '班级管理系统', tip = '正在启动…') {
+  return `<!DOCTYPE html>
 <html>
 <head><meta charset="UTF-8">
 <style>
@@ -225,21 +254,35 @@ body{background:linear-gradient(160deg,#eef2ff 0%,#e2e8ff 100%)}
 <circle cx="11" cy="11" r="8" fill="none" stroke="rgba(30,64,175,.25)" stroke-width="3"/>
 <circle class="spin" cx="11" cy="11" r="8" fill="none" stroke="#1e40af" stroke-width="3" stroke-dasharray="42" stroke-dashoffset="12" stroke-linecap="round"/>
 </svg>
-<span class="l">班级管理系统</span>
-<span class="t">启动开发服务器…</span>
-</div></body></html>`
+<span class="l">${title}</span>
+<span class="t" id="boot-tip">${tip}</span>
+</div>
+<script>
+(function(){
+  var el=document.getElementById('boot-tip');
+  if(!el) return;
+  var api=window.electron;
+  if(api&&api.on){api.on('from-main',function(m){if(m&&m.type==='boot-status'&&m.text){el.textContent=m.text}})}
+  if(api&&api.invoke){api.invoke('boot-status').then(function(t){if(t){el.textContent=t}}).catch(function(){})}
+})();
+</script>
+</body></html>`
+}
 
-// 轮询 Vite 开发服务器：用 https.get 轻量探测，不阻塞渲染进程。
+// 轮询 Vite 开发服务器：用 http.get 轻量探测，不阻塞渲染进程。
 // Vite 就绪后导航到首页并打开 DevTools。
 // 重试上限留足 ~4s 预算（轮询在创建窗口后立刻开始）。
 function pollViteAndNavigate(win, retries = 40) {
-  const https = require('https')
-  const req = https.get('https://127.0.0.1:5173/', { rejectUnauthorized: false }, (res) => {
+  const http = require('http')
+  const req = http.get('http://127.0.0.1:5173/', (res) => {
     res.resume() // 消耗响应体，避免内存泄漏
     startupTimer.mark('Vite 就绪，开始跳转')
+    setBootStatus('开发服务器已就绪，正在加载界面…')
     if (win && !win.isDestroyed()) {
-      win.loadURL('https://127.0.0.1:5173/')
-      win.webContents.openDevTools()
+      win.loadURL('http://127.0.0.1:5173/')
+      // INP 测量时不开 DevTools：停靠的 DevTools 会改变内容区尺寸并叠加额外 CDP 开销，
+      // 干扰布局与交互耗时，导致测量失真。
+      if (!process.env.INP_DEBUG) win.webContents.openDevTools()
       win.webContents.once('did-finish-load', () => {
         startupTimer.mark('Vite 页面加载完成')
       })
@@ -276,7 +319,10 @@ function createMainWindow() {
     frame: false,
     transparent: false,
     backgroundMaterial: 'acrylic',
-    show: true,
+    // 首屏显示时机：先隐藏，等首帧内容绘制完成（ready-to-show）后再显示，避免窗口先露出一层
+    // 空亚克力底。dev 下首帧是内联 loading 页、prod 下是 index.html 的 splash 占位，
+    // 二者都是不透明画面，因此窗口出现的那一刻就是「毛玻璃 + 内容」，与引导窗口同一套做法。
+    show: false,
     backgroundColor: '#f0f4f8',
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
@@ -305,14 +351,13 @@ function createMainWindow() {
   mainWindow = win
 
   // 所有主题统一（无边框 + 系统材质）：BrowserWindow 构造已带 backgroundMaterial: 'acrylic'，
-  // 无需再手动开启；这里仅在系统不支持时回退日志。透明度磨砂由渲染层 CSS backdrop-filter 完成。
-  if (process.platform === 'win32') {
-    applyBackgroundMaterial(win, 'acrylic')
-  }
+  // 此处不再重复调 setBackgroundMaterial（省掉启动关键路径上一次 DWM 往返）。
+  // 透明度磨砂由渲染层 CSS backdrop-filter 完成。
 
   if (isDev) {
     // 第一步：加载本地 inline 页面，窗口立即显示（< 1s）
-    win.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(DEV_LOADING_HTML)}`)
+    setBootStatus('正在启动开发服务器…')
+    win.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(devLoadingHtml())}`)
     startupTimer.mark('开始加载 loading 页面')
     // loading 页首帧只作计时标记，不阻塞下面的 Vite 轮询
     win.webContents.once('did-finish-load', () => {
@@ -322,33 +367,32 @@ function createMainWindow() {
     // 就绪后自动跳转。Vite 已在运行时可直接跳转，省下等 loading 页加载的数百毫秒。
     pollViteAndNavigate(win)
   } else {
+    setBootStatus('正在加载界面…')
     win.loadURL('app://local/index.html')
-    // 生产模式：监听渲染进程的 [startup] 日志，记录 Vue 挂载时间
-    win.webContents.on('console-message', (event, level, message) => {
-      if (message.startsWith('[startup]')) {
-        startupTimer.mark(message.replace('[startup] ', ''))
-      }
-    })
   }
 
-  // 监听渲染进程的 [startup] 日志（开发模式也监听，Vite 页面跳转后生效）
+  // 监听渲染进程的 [startup] 日志，记录 Vue 挂载等首屏耗时。
+  // 开发模式的 Vite 页面在跳转后才生效，此监听同样覆盖。
   win.webContents.on('console-message', (event, level, message) => {
     if (message.startsWith('[startup]')) {
       startupTimer.mark(message.replace('[startup] ', ''))
     }
   })
 
-  // 首帧渲染完成后再显示窗口，消除「先白屏再渲染」的启动观感。
+  // 首帧渲染完成后再显示窗口，消除「先露出一层空亚克力（或白屏）再渲染」的启动观感。
+  // 兜底：渲染层异常导致 ready-to-show 始终不触发时也先把窗口显示出来（此时已加载的
+  // 占位页保证不是空白），避免应用看起来「没启动」。正常情况 ready-to-show 会先到并取消它。
+  // 注意：不要改用 dom-ready 提前显示——type="module" 脚本是 defer 的，DOMContentLoaded 会等
+  // 入口 bundle 执行完才触发，实测 dom-ready 始终晚于 ready-to-show，提前不了。
+  win.__revealTimer = setTimeout(() => revealWindow(win), 1500)
+
   // 用局部 win 判断/显示，避免重建时 mainWindow 被旧窗口 closed 置空导致新窗口无法显示。
   win.once('ready-to-show', () => {
     startupTimer.mark('ready-to-show（窗口首次显示）')
-
-    // 系统材质已在创建时配置；这里再次确认应用（窗口此刻完整可见，确保材质就绪）。
-    if (process.platform === 'win32') {
-      applyBackgroundMaterial(win, 'acrylic')
-    }
-
-    if (!win.isDestroyed()) win.show()
+    clearTimeout(win.__revealTimer)
+    // 显示前再次确认系统亚克力材质（隐藏状态下创建时材质可能尚未生效），
+    // 确保窗口出现的那一刻就是「毛玻璃 + 内容」，而不是一层空底色。
+    revealWindow(win)
   })
 
   // 主窗口关闭拦截：点击关闭时不直接关闭，而在窗口中央弹出"怎样关闭"菜单。
@@ -410,7 +454,7 @@ function createWidgetWindow() {
   }
 
   if (isDev) {
-    loadUrlWithRetry(widgetWindow, 'https://127.0.0.1:5173/widget.html')
+    loadUrlWithRetry(widgetWindow, 'http://127.0.0.1:5173/widget.html')
   } else {
     widgetWindow.loadURL('app://local/widget.html')
   }
@@ -440,9 +484,34 @@ function createWidgetWindow() {
     }
   })
 
+  // 身份守卫：重启小组件时旧窗口的 closed 可能晚于新窗口创建触发，
+  // 若不加判断会把刚建好的新引用置空（mainWindow 已是这种写法）。
+  const self = widgetWindow
   widgetWindow.on('closed', () => {
-    widgetWindow = null
+    if (widgetWindow === self) widgetWindow = null
   })
+}
+
+// 上次工具箱浮窗的位置：销毁窗口前记下，重建时恢复，避免「关掉再打开」跳回屏幕左侧中间
+let lastWidgetBounds = null
+
+// 工具箱浮窗的会话级显隐：隐藏即销毁，避免渲染进程常驻占用内存（约 20MB 量级）。
+// 重新启用时按需重建并恢复上次位置；重建后浮窗自身会重新拉取状态，无需外部还原。
+function hideWidgetWindow() {
+  if (!widgetWindow || widgetWindow.isDestroyed()) return
+  try { lastWidgetBounds = widgetWindow.getBounds() } catch (_) { /* 忽略 */ }
+  try { widgetWindow.destroy() } catch (_) { /* 忽略 */ }
+  widgetWindow = null
+}
+
+function showWidgetWindow() {
+  if (!widgetWindow || widgetWindow.isDestroyed()) {
+    createWidgetWindow()
+    if (lastWidgetBounds && widgetWindow && !widgetWindow.isDestroyed()) {
+      try { widgetWindow.setPosition(lastWidgetBounds.x, lastWidgetBounds.y) } catch (_) { /* 忽略 */ }
+    }
+  }
+  if (widgetWindow && !widgetWindow.isDestroyed()) widgetWindow.show()
 }
 
 // 创建桌面小组件：常驻桌面、鼠标穿透、不挡应用
@@ -494,13 +563,14 @@ function createDesktopWidgetWindow() {
   }
 
   if (isDev) {
-    desktopWidgetWindow.loadURL('https://127.0.0.1:5173/desktop-widget.html')
+    desktopWidgetWindow.loadURL('http://127.0.0.1:5173/desktop-widget.html')
   } else {
     desktopWidgetWindow.loadURL('app://local/desktop-widget.html')
   }
 
+  const self = desktopWidgetWindow
   desktopWidgetWindow.on('closed', () => {
-    desktopWidgetWindow = null
+    if (desktopWidgetWindow === self) desktopWidgetWindow = null
   })
 }
 
@@ -531,6 +601,39 @@ function backendLog(text) {
 
 let backendRestartCount = 0
 let backendRestartTimer = null
+
+// ===== 运行期心跳（检测「假死」）=====
+// 后端可能「假死」：进程还在，但事件循环被同步操作（如 better-sqlite3 慢查询/锁等待）卡住，
+// 既不退出也不响应。exit 事件不会触发，只能靠主进程主动探测。
+// 每 30s 发一次 ping，单次等待 pong 上限 4s，连续 2 次无响应（约 1 分钟）才判定异常 ——
+// 给合法长任务留足余量，避免误判后重启进程打断写库。
+// 安全余量 = 间隔 × 次数，两个旋钮可互换：这里取「低频 + 少次」，误杀窗口约 1 分钟。
+// 代价是纯周期检测最坏要等 ~1 分钟，所以另有「请求失败触发即时探测」兜住体验（见 probe-backend）。
+const HEARTBEAT_INTERVAL = 30000
+const HEARTBEAT_TIMEOUT = 4000
+const HEARTBEAT_FAIL_LIMIT = 2
+// 运行期崩溃测试开关（SIM_BACKEND_CRASH，默认关闭）：
+//   once — 后端就绪 N 秒后杀掉它，重连的实例正常 → 验证「提示条 → 自动恢复」
+//   dead — 同上，但此后重连实例的就绪上报一律忽略 → 验证「5 次失败 → 全屏失败页」
+const SIM_BACKEND_CRASH = process.env.SIM_BACKEND_CRASH || ''
+const SIM_BACKEND_CRASH_MS = Number(process.env.SIM_BACKEND_CRASH_MS) || 5000
+let simCrashFired = false
+// 运行期异常后最多重连 5 次，仍失败则复用「启动失败」页面（重启后端 / 退出应用）
+const RECONNECT_MAX = 5
+// dead 模式下必然等不到就绪，缩短单次等待让测试更快走到全屏
+const RECONNECT_READY_TIMEOUT = SIM_BACKEND_CRASH === 'dead' ? 3000 : 10000
+let heartbeatTimer = null
+let heartbeatAwaitTimer = null
+let heartbeatPending = false
+let heartbeatFailStreak = 0
+let heartbeatRunning = false
+let reconnecting = false
+// 一次性即时探测（probe-backend）的状态：与周期性心跳互不干扰
+let probeWaiter = null
+let probing = false
+// 性能面板：后端内存自报 / GC 的一次性等待者（各自独立，别复用 probeWaiter）
+let memWaiter = null
+let gcWaiter = null
 
 // 后端就绪检测：仅用于 stdout 分片匹配 + 日志，不再作为建窗信号
 // （主窗口在 whenReady 后立即创建，与后端并行启动）
@@ -600,6 +703,8 @@ function compileBackendProcess() {
       const child = fork(backendPath, [], {
         cwd: backendDir,
         execPath,
+        // 性能面板：让后端进程也暴露 global.gc，用于「回收」按钮
+        execArgv: ['--expose-gc'],
         stdio: ['ignore', 'pipe', 'pipe', 'ipc'],
         env: {
           ...process.env,
@@ -618,6 +723,7 @@ function compileBackendProcess() {
       child.on('exit', onExit)
       child.on('exit', scheduleBackendRestart)
       child.on('disconnect', onDisconnect)
+      child.on('message', onBackendMessage)
     }
     if (process.env.NODE_EXEC_PATH) {
       spawnDev(process.env.NODE_EXEC_PATH)
@@ -653,6 +759,8 @@ function compileBackendProcess() {
   backendProcess = fork(backendPath, [], {
     cwd: backendDir,
     execPath: process.execPath,
+    // 性能面板：让后端进程也暴露 global.gc，用于「回收」按钮
+    execArgv: ['--expose-gc'],
     stdio: ['ignore', 'pipe', 'pipe', 'ipc'],
     env: {
       ...process.env,
@@ -672,6 +780,7 @@ function compileBackendProcess() {
   backendProcess.on('exit', onExit)
   backendProcess.on('exit', scheduleBackendRestart)
   backendProcess.on('disconnect', onDisconnect)
+  backendProcess.on('message', onBackendMessage)
 }
 
 function startBackend() {
@@ -681,27 +790,490 @@ function startBackend() {
     ensureBackendLogStream()
     if (backendLogStream) backendLogStream.write(`[fatal] ${msg}`)
     console.error(`[main] ${msg}`)
+    // 自动重启用尽：直接进入失败态，让用户能手动重试或退出，而不是静默卡在加载页
+    markBackendFailed()
     return
   }
 
   ensureBackendLogStream()
   backendLog(`[main] 正在启动后端 (第 ${backendRestartCount + 1} 次)...\n`)
 
+  // 每次 fork 前复位就绪标记：重启期间前端应重新等待新的 backend-ready
+  backendReady = false
+  setBootStatus('正在启动本地服务…')
+  armBackendFailWatchdog()
   compileBackendProcess()
 }
 
-// 后端子进程退出后自动重启：用一个短延迟把退出与重启解耦，避免同一个 exit 触发多次重启。
+// 启动阶段状态：加载页（inline loading 页 / setup.html 占位）的灰色副标题实时显示
+// 「程序正在干嘛」。渲染层订阅 from-main 的 boot-status 事件，也可用 boot-status 查询兜住
+// 「页面先加载、状态后更新」的竞态。文案只在变化时广播。
+let bootStatusText = ''
+function setBootStatus(text) {
+  if (!text || text === bootStatusText) return
+  bootStatusText = text
+  const wins = [mainWindow, widgetWindow, desktopWidgetWindow, migrationWindow, setupWindow]
+  for (const w of wins) {
+    try { if (w && !w.isDestroyed()) w.webContents.send('from-main', { type: 'boot-status', text }) } catch (_) { /* 忽略 */ }
+  }
+}
+
+// 后端子进程消息：心跳应答（pong）与就绪上报（backend-ready）。
+// 就绪后广播给所有已存在的渲染窗口（广播 + backend-status 查询两者并存：广播覆盖
+// 「窗口先存在」，查询覆盖「窗口后加载」）
+function onBackendMessage(msg) {
+  if (!msg) return
+  // 心跳应答：清掉等待计时并复位连续失败计数
+  if (msg.type === 'pong') {
+    heartbeatPending = false
+    heartbeatFailStreak = 0
+    clearTimeout(heartbeatAwaitTimer)
+    heartbeatAwaitTimer = null
+    // 同时唤醒可能正在等待的即时探测
+    if (probeWaiter) probeWaiter(true)
+    return
+  }
+  // 性能面板：唤醒后端内存自报等待者
+  if (msg.type === 'mem-report') {
+    if (memWaiter) memWaiter(msg.mem || null)
+    return
+  }
+  // 性能面板：唤醒后端 GC 等待者
+  if (msg.type === 'gc-report') {
+    if (gcWaiter) gcWaiter(!!msg.ok)
+    return
+  }
+  if (msg.type !== 'backend-ready') return
+  // 测试开关：SIM_BACKEND_FAIL 下故意忽略就绪上报，模拟「后端一直起不来」，用于验证失败提示
+  if (process.env.SIM_BACKEND_FAIL) return
+  // dead 模式：首次崩溃之后，重连实例的就绪上报全部忽略 → 重连必然超时失败 → 走满 5 次进全屏
+  if (SIM_BACKEND_CRASH === 'dead' && simCrashFired) return
+  backendReady = true
+  // 已成功启动过：累计的重启计数清零，避免长生命周期里累计到上限后不再自动恢复
+  backendRestartCount = 0
+  clearBackendFailure()
+  setBootStatus('本地服务已就绪')
+  startHeartbeat()
+  if (SIM_BACKEND_CRASH) armSimCrash()
+  // 唤醒主进程侧「等后端就绪」的等待者（引导页的 detectFirstRun / runSetupWarmup 等）
+  for (const fn of [...backendReadyWaiters]) fn()
+  const wins = [mainWindow, widgetWindow, desktopWidgetWindow, migrationWindow, setupWindow]
+  for (const w of wins) {
+    try { if (w && !w.isDestroyed()) w.webContents.send('from-main', { type: 'backend-ready' }) } catch (_) { /* 忽略 */ }
+  }
+}
+
+// 后端子进程退出（非主动停止）→ 走与心跳异常相同的重连流程。
+// 用一个短延迟把退出与重连解耦，避免同一个 exit 触发多次重连。
 // 绑定发生在「实际 fork 成立后」（见 compileBackendProcess 内两种 fork 分支），
 // 兼容开发模式下「异步探测 system node 后才 fork」的场景。
 function scheduleBackendRestart() {
   clearTimeout(backendRestartTimer)
   backendRestartTimer = setTimeout(() => {
-    if (app.isQuitting) return
-    backendRestartCount += 1
+    if (app.isQuitting || reconnecting) return
     backendProcess = null
-    startBackend()
+    handleBackendDown('后端进程意外退出')
   }, 1500)
 }
+
+// ===== 启动失败兜底 =====
+// 场景一：后端进程不退出但始终起不来（如端口被占，后端自身在无限重试）→ 靠看门狗超时判定。
+// 场景二：后端反复崩溃、自动重启次数用尽（见 startBackend）→ 直接判定。
+// 判定后广播 backend-failed，启动占位页显示「重启后端 / 退出应用」；后端恢复时广播 failed:false。
+function broadcastBackendFailed(failed) {
+  const wins = [mainWindow, widgetWindow, desktopWidgetWindow, migrationWindow, setupWindow]
+  for (const w of wins) {
+    try { if (w && !w.isDestroyed()) w.webContents.send('from-main', { type: 'backend-failed', failed }) } catch (_) { /* 忽略 */ }
+  }
+}
+
+function markBackendFailed() {
+  if (backendFailed) return
+  backendFailed = true
+  clearTimeout(backendFailTimer)
+  backendFailTimer = null
+  backendLog('[main] 后端启动失败（超时或自动重启用尽），已提示用户重试或退出\n')
+  setBootStatus('本地服务启动失败')
+  broadcastBackendFailed(true)
+}
+
+function clearBackendFailure() {
+  clearTimeout(backendFailTimer)
+  backendFailTimer = null
+  if (!backendFailed) return
+  backendFailed = false
+  broadcastBackendFailed(false)
+}
+
+function armBackendFailWatchdog() {
+  clearTimeout(backendFailTimer)
+  backendFailTimer = setTimeout(() => {
+    if (app.isQuitting || backendReady) return
+    markBackendFailed()
+  }, BACKEND_FAIL_TIMEOUT)
+}
+
+// ===== 运行期心跳 + 重连 =====
+// 探测：每 HEARTBEAT_INTERVAL 发一次 ping，单次等待 HEARTBEAT_TIMEOUT；
+// 连续 HEARTBEAT_FAIL_LIMIT 次超时判定后端异常（假死），进入重连流程。
+function startHeartbeat() {
+  if (heartbeatRunning) return
+  heartbeatRunning = true
+  heartbeatFailStreak = 0
+  heartbeatPending = false
+  clearInterval(heartbeatTimer)
+  clearTimeout(heartbeatAwaitTimer)
+  heartbeatTimer = setInterval(heartbeatTick, HEARTBEAT_INTERVAL)
+}
+
+function stopHeartbeat() {
+  heartbeatRunning = false
+  heartbeatPending = false
+  heartbeatFailStreak = 0
+  clearInterval(heartbeatTimer)
+  clearTimeout(heartbeatAwaitTimer)
+  heartbeatTimer = null
+  heartbeatAwaitTimer = null
+}
+
+function heartbeatTick() {
+  if (app.isQuitting || reconnecting || heartbeatPending) return
+  const proc = backendProcess
+  if (!proc) return
+  heartbeatPending = true
+  try {
+    proc.send({ type: 'ping', t: Date.now() })
+  } catch (_) {
+    heartbeatPending = false
+    return
+  }
+  clearTimeout(heartbeatAwaitTimer)
+  heartbeatAwaitTimer = setTimeout(() => {
+    if (app.isQuitting || reconnecting || !heartbeatPending) return
+    heartbeatPending = false
+    // 进程已被替换（主动重启 / 迁移中停后端 / 已崩走重连），本次超时不计入
+    if (proc !== backendProcess) return
+    heartbeatFailStreak += 1
+    backendLog(`[main] 后端心跳超时（第 ${heartbeatFailStreak}/${HEARTBEAT_FAIL_LIMIT} 次）\n`)
+    if (heartbeatFailStreak >= HEARTBEAT_FAIL_LIMIT) handleBackendDown('后端无响应（疑似假死）')
+  }, HEARTBEAT_TIMEOUT)
+}
+
+// 运行期崩溃测试：就绪后 N 秒杀掉后端进程，模拟「跑着跑着后端崩了」，
+// 用来验证心跳/重连/全屏失败页整条链路。仅在设置 SIM_BACKEND_CRASH 时生效。
+function armSimCrash() {
+  if (simCrashFired) return
+  simCrashFired = true
+  backendLog(`[main] SIM_BACKEND_CRASH=${SIM_BACKEND_CRASH}：${SIM_BACKEND_CRASH_MS}ms 后杀掉后端\n`)
+  setTimeout(() => {
+    if (app.isQuitting) return
+    const proc = backendProcess
+    if (!proc) return
+    backendLog('[main] SIM：模拟后端崩溃\n')
+    try { proc.kill() } catch (_) { /* 忽略 */ }
+  }, SIM_BACKEND_CRASH_MS)
+}
+
+// 广播运行期重连状态：渲染层据此显示「后端异常，正在重新连接（n/5）」，恢复后隐藏
+function broadcastBackendReconnecting(active, attempt) {
+  const wins = [mainWindow, widgetWindow, desktopWidgetWindow, migrationWindow, setupWindow]
+  for (const w of wins) {
+    try { if (w && !w.isDestroyed()) w.webContents.send('from-main', { type: 'backend-reconnecting', active, attempt, max: RECONNECT_MAX }) } catch (_) { /* 忽略 */ }
+  }
+}
+
+// 后端异常（假死或意外退出）统一入口：最多重连 RECONNECT_MAX 次，每次 fork 后等就绪信号，
+// 任一次成功即恢复心跳并广播解除提示；全部失败则复用「启动失败」页面（重启后端 / 退出应用）。
+async function handleBackendDown(reason) {
+  if (reconnecting || app.isQuitting) return
+  reconnecting = true
+  stopHeartbeat()
+  backendLog(`[main] ${reason}，开始重连（最多 ${RECONNECT_MAX} 次）\n`)
+  for (let attempt = 1; attempt <= RECONNECT_MAX; attempt++) {
+    if (app.isQuitting) { reconnecting = false; return }
+    broadcastBackendReconnecting(true, attempt)
+    setBootStatus(`后端异常，正在重新连接（${attempt}/${RECONNECT_MAX}）…`)
+    try { await stopBackendProcess() } catch (_) { /* 忽略 */ }
+    if (app.isQuitting) { reconnecting = false; return }
+    backendRestartCount = 0
+    startBackend()
+    setBootStatus(`后端异常，正在重新连接（${attempt}/${RECONNECT_MAX}）…`)
+    const ok = await waitForBackendReadySignal(RECONNECT_READY_TIMEOUT)
+    if (ok) {
+      // 就绪后 onBackendMessage 已重启心跳并广播 backend-ready
+      reconnecting = false
+      backendLog(`[main] 后端第 ${attempt} 次重连成功\n`)
+      broadcastBackendReconnecting(false, 0)
+      return
+    }
+    backendLog(`[main] 后端第 ${attempt} 次重连失败\n`)
+  }
+  reconnecting = false
+  broadcastBackendReconnecting(false, 0)
+  markBackendFailed()
+}
+
+// 用户点「重启后端」：复位重试计数与失败标记，先停掉旧进程再重新 fork，并重新武装看门狗
+ipcMain.handle('restart-backend', async () => {
+  clearBackendFailure()
+  backendRestartCount = 0
+  backendReady = false
+  try { await stopBackendProcess() } catch (_) { /* 忽略 */ }
+  startBackend()
+  return { ok: true }
+})
+
+// 失败态查询：兜住「主进程先失败、窗口后加载」的竞态
+ipcMain.handle('backend-failure', () => backendFailed)
+
+// 单次 ping：等 pong 回来的同时校验进程身份，避免把「已被替换的进程」算成成功
+function pingOnce(proc) {
+  return new Promise((resolve) => {
+    if (!proc || proc !== backendProcess) return resolve(false)
+    let timer = null
+    const finish = (v) => {
+      if (probeWaiter !== finish) return
+      probeWaiter = null
+      clearTimeout(timer)
+      resolve(v)
+    }
+    probeWaiter = finish
+    timer = setTimeout(() => finish(false), HEARTBEAT_TIMEOUT)
+    try { proc.send({ type: 'ping', t: Date.now() }) } catch (_) { finish(false) }
+  })
+}
+
+// 渲染层上报「请求没拿到响应」（连接被拒/中断）时调用：立刻做一次健康探测。
+// 把用户的每一次失败操作变成探针，不必等下一个 30s 心跳周期才发现后端不可达。
+// 探测成功 → 只是偶发（如请求被取消），不做任何处理；探测失败 → 后端确实不可达，立即走重连。
+// 启动阶段（backendReady 为假）一律不介入：那时该由启动看门狗与失败页负责，避免两套机制并行。
+ipcMain.handle('probe-backend', async () => {
+  if (app.isQuitting || !backendReady) return { ok: false, skipped: true }
+  if (reconnecting) return { ok: false, reconnecting: true }
+  if (probing) return { ok: false, skipped: true }
+  const proc = backendProcess
+  if (!proc) return { ok: false, reconnecting: true }
+  probing = true
+  let alive = false
+  try {
+    alive = await pingOnce(proc)
+  } finally {
+    probing = false
+  }
+  if (alive) return { ok: true }
+  backendLog('[main] 前端上报请求无响应，即时探测亦失败，进入重连\n')
+  // 不 await：立即把结果还给渲染层，重连在后台推进
+  handleBackendDown('后端不可达（前端请求失败触发）')
+  return { ok: false, reconnecting: true }
+})
+
+// ========== 性能面板 ==========
+// 向后端发消息做一次性查询（内存自报 / GC），照 pingOnce 的一次性等待者写法，
+// 但使用各自独立的 waiter 变量，避免与 probeWaiter / 心跳互相干扰。
+function queryBackendMemory(timeout = 1500) {
+  return new Promise((resolve) => {
+    const proc = backendProcess
+    if (!proc || !backendReady) return resolve(null)
+    let timer = null
+    const finish = (v) => {
+      if (memWaiter !== finish) return
+      memWaiter = null
+      clearTimeout(timer)
+      resolve(v)
+    }
+    memWaiter = finish
+    timer = setTimeout(() => finish(null), timeout)
+    try { proc.send({ type: 'mem-query' }) } catch (_) { finish(null) }
+  })
+}
+
+function queryBackendGc(timeout = 1500) {
+  return new Promise((resolve) => {
+    const proc = backendProcess
+    if (!proc || !backendReady) return resolve(null)
+    let timer = null
+    const finish = (v) => {
+      if (gcWaiter !== finish) return
+      gcWaiter = null
+      clearTimeout(timer)
+      resolve(v)
+    }
+    gcWaiter = finish
+    timer = setTimeout(() => finish(null), timeout)
+    try { proc.send({ type: 'gc-request' }) } catch (_) { finish(null) }
+  })
+}
+
+// 把 app.getAppMetrics() 的一条记录转成面板用的内存/CPU 结构。
+// 注意：只能在 app ready 后调用；memory.workingSetSize / privateBytes 单位为 KB。
+function metricToMem(m) {
+  return {
+    pid: m.pid,
+    workingSetKB: m.memory?.workingSetSize ?? null,
+    privateKB: m.memory?.privateBytes ?? null,
+    cpu: m.cpu?.percentCPUUsage ?? null,
+  }
+}
+
+// 通过 CDP 触发某个渲染进程的 GC；DevTools 已打开时 attach 会失败，整段吞掉异常
+async function collectRendererGarbage(wc) {
+  if (!wc || wc.isDestroyed()) return false
+  try {
+    wc.debugger.attach('1.3')
+  } catch (_) {
+    return false
+  }
+  try {
+    await wc.debugger.sendCommand('HeapProfiler.collectGarbage')
+    return true
+  } catch (_) {
+    return false
+  } finally {
+    try { wc.debugger.detach() } catch (_) { /* 断开失败忽略 */ }
+  }
+}
+
+// 内存快照：逐个进程列出（主进程 / 各渲染窗口 / GPU / 各服务进程 / 后端），
+// 并额外给出前端、后端、小组件三个「可重启目标」的存活状态。
+ipcMain.handle('perf-snapshot', async () => {
+  // 渲染进程按所属窗口取友好名（同一 pid 后写覆盖，主窗口优先级最高）
+  const labelByPid = new Map()
+  const addWin = (label, win) => {
+    try {
+      if (win && !win.isDestroyed() && !win.webContents.isDestroyed()) {
+        labelByPid.set(win.webContents.getOSProcessId(), label)
+      }
+    } catch (_) { /* 忽略 */ }
+  }
+  addWin('迁移窗口', migrationWindow)
+  addWin('引导窗口', setupWindow)
+  addWin('桌面组件', desktopWidgetWindow)
+  addWin('小组件', widgetWindow)
+  addWin('前端窗口', mainWindow)
+
+  const procs = []
+  let metrics = []
+  try { metrics = app.getAppMetrics() } catch (_) { metrics = [] }
+
+  // 主进程
+  const browser = metrics.find((m) => m.type === 'Browser')
+  if (browser) procs.push({ key: 'main', name: '主进程', kind: 'main', ...metricToMem(browser) })
+
+  // 各渲染进程
+  for (const m of metrics.filter((x) => x.type === 'Tab')) {
+    procs.push({
+      key: `tab-${m.pid}`,
+      name: labelByPid.get(m.pid) || '渲染进程',
+      kind: 'renderer',
+      ...metricToMem(m),
+    })
+  }
+
+  // GPU 进程
+  for (const m of metrics.filter((x) => x.type === 'GPU')) {
+    procs.push({ key: `gpu-${m.pid}`, name: 'GPU 进程', kind: 'gpu', ...metricToMem(m) })
+  }
+
+  // 各服务进程（网络/存储/音频等，取 Chromium 给的服务名）
+  for (const m of metrics.filter((x) => x.type === 'Utility')) {
+    procs.push({
+      key: `util-${m.pid}`,
+      name: m.serviceName || m.name || '服务进程',
+      kind: 'utility',
+      ...metricToMem(m),
+    })
+  }
+
+  // 后端：Node 子进程不在 getAppMetrics 里，由它用 process.memoryUsage() 自报（字节 → KB）
+  const mem = await queryBackendMemory()
+  if (mem) {
+    procs.push({
+      key: 'backend',
+      name: '后端',
+      kind: 'backend',
+      pid: backendProcess?.pid ?? null,
+      workingSetKB: Math.round((mem.rss || 0) / 1024),
+      // Node 不直接暴露「私有提交量」，用 V8 堆 + external（native 分配）近似，
+      // 以便与 Chromium 各进程的 privateBytes 口径对齐。
+      privateKB: Math.round(((mem.heapUsed || 0) + (mem.external || 0)) / 1024),
+      cpu: null,
+    })
+  }
+
+  // 内存口径统一改为「专用工作集」（与任务管理器「进程」页一致），逐进程按 pid 覆盖。
+  // 计数器不可用（非 Windows / koffi 缺失）时 privWsKB 留空，前端回退到 Electron 自带口径。
+  const pwMap = getPrivateWorkingSetKB()
+  if (pwMap) {
+    for (const p of procs) {
+      const kb = p.pid == null ? undefined : pwMap.get(p.pid)
+      if (typeof kb === 'number') p.privWsKB = Math.round(kb)
+    }
+  }
+
+  // 存活状态按窗口/进程本身判定，不依赖指标里能否匹配到 pid
+  const alive = {
+    front: !!(mainWindow && !mainWindow.isDestroyed()),
+    widget: !!((widgetWindow && !widgetWindow.isDestroyed()) || (desktopWidgetWindow && !desktopWidgetWindow.isDestroyed())),
+    backend: !!mem,
+  }
+
+  return { procs, alive }
+})
+
+// 重启前端：直接重载主窗口页面
+ipcMain.handle('perf-restart-frontend', () => {
+  if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.reload()
+  return { ok: true }
+})
+
+// 重启小组件：销毁并重建原本存在的窗口，并尊重用户开关（关掉的不重新拉起）
+ipcMain.handle('perf-restart-widget', () => {
+  // 工具箱浮窗：仅当原本存在时重建；重建后按会话级开关决定显隐
+  if (widgetWindow && !widgetWindow.isDestroyed()) {
+    // 隐藏态下窗口已被销毁，能进到这里说明当前可见；直接「销毁后重建」即完成重启
+    hideWidgetWindow()
+    showWidgetWindow()
+  }
+  // 桌面组件：仅当原本存在（说明当前已启用）时重建
+  if (desktopWidgetWindow && !desktopWidgetWindow.isDestroyed()) {
+    try { desktopWidgetWindow.destroy() } catch (_) { /* 忽略 */ }
+    desktopWidgetWindow = null
+    if (desktopEnabled) createDesktopWidgetWindow()
+  }
+  return { ok: true }
+})
+
+// 手动 GC：主进程 global.gc + 各渲染进程 CDP 回收 + 后端自报 GC
+ipcMain.handle('perf-gc', async () => {
+  // 主进程
+  let main = false
+  try {
+    if (typeof global.gc === 'function') { global.gc(); main = true }
+  } catch (_) { /* 忽略 */ }
+
+  // 渲染进程逐个回收（前端主窗口 + 工具箱/桌面组件）
+  const front = await collectRendererGarbage(mainWindow && !mainWindow.isDestroyed() ? mainWindow.webContents : null)
+  let widget = false
+  if (widgetWindow && !widgetWindow.isDestroyed()) {
+    widget = await collectRendererGarbage(widgetWindow.webContents)
+  } else if (desktopWidgetWindow && !desktopWidgetWindow.isDestroyed()) {
+    widget = await collectRendererGarbage(desktopWidgetWindow.webContents)
+  }
+
+  // 后端
+  const backend = (await queryBackendGc()) === true
+
+  return { main, front, widget, backend }
+})
+
+// 上次启动耗时与打点时间线
+ipcMain.handle('perf-startup', () => startupTimer.getTimeline())
+
+// 用户点「退出应用」：置退出标志以跳过主窗口「关闭确认菜单」的拦截，直接退出
+ipcMain.on('quit-app', () => {
+  app.isQuitting = true
+  app.quit()
+})
 
 // 打包模式静态资源 MIME 表
 const MIME = {
@@ -732,6 +1304,38 @@ const MIME = {
 // prod 下也不再逐请求打日志。
 const IMMUTABLE_ASSET_RE = /\.(js|css|wasm|png|jpe?g|gif|webp|svg|woff2?)$/i
 
+// 渲染进程 V8 代码缓存：把构建产物的 JS（首屏约 250KB）解析 + 编译结果缓存到磁盘，
+// 第 2 次及以后启动直接复用。与主进程的 NODE_COMPILE_CACHE 对称。
+// 注意：app:// 属自定义协议，除注册时声明 codeCache:true 外，还需在此显式指定缓存目录；
+// 必须在首个页面加载前调用。不可用时静默忽略（退回 Chromium 默认行为）。
+// 缓存条目按资源内容哈希命名，应用更新后旧条目永不命中，会随版本累积（实测可达 50MB+）。
+// 故按应用版本号做一次性清理：版本未变则零开销直接返回；版本变化时后台异步删除旧条目，
+// 不阻塞启动，删除失败（文件被占用）静默忽略，下次启动再试。
+function pruneStaleCodeCache(dir) {
+  const marker = path.join(dir, '.cc-version')
+  const cur = app.getVersion()
+  let prev = ''
+  try { prev = fs.readFileSync(marker, 'utf8').trim() } catch (_) {}
+  if (prev === cur) return
+  fs.promises.readdir(dir, { withFileTypes: true })
+    .then((entries) => Promise.all(entries
+      .filter((e) => e.name !== '.cc-version')
+      .map((e) => fs.promises.rm(path.join(dir, e.name), { recursive: true, force: true }).catch(() => {}))))
+    .then(() => fs.promises.writeFile(marker, cur, 'utf8').catch(() => {}))
+    .catch(() => {})
+}
+
+function setupRendererCodeCache() {
+  try {
+    const dir = path.join(app.getPath('userData'), 'renderer-code-cache')
+    fs.mkdirSync(dir, { recursive: true })
+    pruneStaleCodeCache(dir)
+    session.defaultSession.setCodeCachePath(dir)
+  } catch (err) {
+    console.error('[main] 渲染进程代码缓存不可用，跳过:', err?.message || err)
+  }
+}
+
 function setupAppProtocol() {
   if (isDev) return
   const distDir = path.join(__dirname, '../student-frontend/dist')
@@ -746,6 +1350,8 @@ function setupAppProtocol() {
     // dist 缺失时不阻断启动，后续请求走 index.html 回退
   }
 
+  // 懒加载 stream：只有生产模式的静态资源流式返回用得到，挪出主进程启动关键路径
+  const { Readable } = require('stream')
   const serveFile = (file, headers) =>
     new Response(Readable.toWeb(fs.createReadStream(file)), { headers })
   const serveIndex = () =>
@@ -853,20 +1459,22 @@ app.whenReady().then(() => {
   }
 
   try {
+    // 渲染进程 V8 代码缓存：必须在首个页面加载前设置，故紧跟 ready 先做。
+    setupRendererCodeCache()
+
     setupAppProtocol()
     startupTimer.mark('协议注册完成')
 
-    // 先 fire 后端：fork 子进程立刻启动，与下方 createMainWindow 的同步初始化并行推进，
-    // 不再等主窗口创建完成后再启动后端（省去串行等待，后端更早就绪）。
-    startBackend()
-    startupTimer.mark('startBackend 完成')
-
+    // 先建窗口、后 fire 后端：窗口创建位于首屏关键路径上（用户第一眼看到的就是它），
+    // 而 fork 有 ~60ms 同步开销（spawn 子进程）。后端是独立子进程，前端靠 backend-ready
+    // 事件 + 退避重试兜底「后端稍晚就绪」，因此调换顺序无副作用。
+    // （不能把 fork 提到 ready 之前：DB_MASTER_KEY 依赖 safeStorage，见文件上方说明。）
     // 全新安装（本机无任何账号库）先弹首次引导向导，完成后再进入主界面；
     // 非首启维持原路径——主窗口立即创建，不增加任何串行等待。
-    // 开发（测试）模式默认进入引导便于调试：FORCE_SETUP=0 可强制关闭，=1 可强制开启。
+    // 首次引导默认只在「本机全新安装」（firstRunAtStartup，即数据目录无 index.db）时出现；
+    // 开发模式不再默认进入，调试需要时用 FORCE_SETUP=1 强制开启。
     const forceSetup = process.env.FORCE_SETUP === '1'
-      || (process.env.FORCE_SETUP !== '0' && !app.isPackaged)
-    if (forceSetup || looksLikeFirstRun()) {
+    if (forceSetup || firstRunAtStartup) {
       createSetupWindow()
       startupTimer.mark('createSetupWindow 完成')
     } else {
@@ -875,6 +1483,9 @@ app.whenReady().then(() => {
       createMainWindow()
       startupTimer.mark('createMainWindow 完成')
     }
+
+    startBackend()
+    startupTimer.mark('startBackend 完成')
 
     // 5s 后输出启动时间线并保存日志
     setTimeout(() => {
@@ -951,6 +1562,12 @@ function stopUsbWatch() {
 
 // 读取开关状态（供设置页初始化）
 ipcMain.handle('get-usb-auto-open', () => ({ enabled: usbAutoOpenEnabled }))
+
+// 后端就绪状态查询：兜住「后端先就绪、渲染层后注册监听」的竞态（广播事件会漏掉这类窗口）
+ipcMain.handle('backend-status', () => backendReady)
+
+// 启动阶段状态查询：加载页据此补齐当前「程序正在干嘛」（兜住「页面后加载」的竞态）
+ipcMain.handle('boot-status', () => bootStatusText)
 
 // 在系统默认浏览器打开外链
 ipcMain.handle('open-external', (event, url) => {
@@ -1163,7 +1780,7 @@ ipcMain.on('widget-context-menu', (event) => {
       label: '本次退出',
       click: () => {
         sessionWidgetEnabled = false
-        if (widgetWindow && !widgetWindow.isDestroyed()) widgetWindow.hide()
+        hideWidgetWindow()
         // 通知设置页同步「本次启用工具箱」开关为关闭
         mainWindow?.webContents.send('from-main', { type: 'session-widget-changed' })
       },
@@ -1175,10 +1792,9 @@ ipcMain.on('widget-context-menu', (event) => {
 // 会话级「本次启用工具箱」：仅影响本次运行浮窗显隐，不持久化
 ipcMain.on('widget-set-session-visible', (event, enabled) => {
   sessionWidgetEnabled = !!enabled
-  if (widgetWindow && !widgetWindow.isDestroyed()) {
-    if (sessionWidgetEnabled) widgetWindow.show()
-    else widgetWindow.hide()
-  }
+  // 开启即按需重建并显示；关闭即销毁窗口释放渲染进程，位置由 lastWidgetBounds 记忆
+  if (sessionWidgetEnabled) showWidgetWindow()
+  else hideWidgetWindow()
 })
 
 // 读取会话级开关；未初始化（尚未注入本次默认值）返回 null
@@ -1463,7 +2079,7 @@ function createMigrationWindow() {
   win.on('closed', () => { if (migrationWindow === win) migrationWindow = null })
 
   if (isDev) {
-    loadUrlWithRetry(win, 'https://127.0.0.1:5173/migration.html')
+    loadUrlWithRetry(win, 'http://127.0.0.1:5173/migration.html')
   } else {
     win.loadURL('app://local/migration.html')
   }
@@ -1544,8 +2160,29 @@ function reopenAfterMigration() {
 let setupWindow = null
 let setupRunning = false
 let setupUiReady = false
-// 预热进度：窗口一打开即后台推进，渲染层可在任意时刻通过 get-setup-warmup 补齐状态
+// 预热进度：引导界面完全加载完成后才后台推进，渲染层可在任意时刻通过 get-setup-warmup 补齐状态
 let setupWarmup = { phase: '', detail: '', percent: 0, done: false }
+let setupWarmupStarted = false
+
+// 等待后端就绪信号（主进程侧）：已就绪立即返回 true；否则等 backend-ready 上报，
+// 超时返回 false（此时由调用方继续退避重试兜底）。与渲染层 utils/backendReady.js 契约一致。
+function waitForBackendReadySignal(timeout = 15000) {
+  if (backendReady) return Promise.resolve(true)
+  return new Promise((resolve) => {
+    let done = false
+    let timer = null
+    const onReady = () => finish(true)
+    const finish = (v) => {
+      if (done) return
+      done = true
+      backendReadyWaiters.delete(onReady)
+      clearTimeout(timer)
+      resolve(v)
+    }
+    backendReadyWaiters.add(onReady)
+    timer = setTimeout(() => finish(backendReady), timeout)
+  })
+}
 
 // 轮询后端 GET /api/accounts 直到返回 200（或超时）。返回有效账号数组；超时返回 null。
 async function waitBackendReady(timeout = 15000) {
@@ -1559,7 +2196,8 @@ async function waitBackendReady(timeout = 15000) {
       }
     } catch (_) { /* 后端尚未就绪，继续重试 */ }
     if (Date.now() - start > timeout) return null
-    await new Promise((r) => setTimeout(r, 250))
+    // 优先等就绪信号：后端一就绪立即重试；信号缺失时退化为 250ms 退避
+    await waitForBackendReadySignal(250)
   }
 }
 
@@ -1592,7 +2230,8 @@ function updateWarmup(phase, detail, percent, done = false) {
 // 预热编排：真实的初始化动作（等后端就绪 + 建数据/缓存/编译缓存目录）。
 // 编译缓存的收益在后续启动，因此该步不阻塞用户操作。
 async function runSetupWarmup() {
-  if (setupWarmup.done) return
+  if (setupWarmupStarted) return
+  setupWarmupStarted = true
   updateWarmup('启动服务', '正在启动本地服务', 15)
   const accounts = await waitBackendReady()
   if (accounts === null) {
@@ -1609,6 +2248,14 @@ async function runSetupWarmup() {
   try { fs.mkdirSync(resolveCompileCacheDir(), { recursive: true }) } catch (_) {}
   await new Promise((r) => setTimeout(r, 60))
   updateWarmup('完成', '优化已自动完成~', 100, true)
+}
+
+// 显示窗口（主窗口 / 引导窗口共用）：显示前再次确认系统亚克力材质（隐藏状态下创建时材质
+// 可能尚未生效），确保窗口出现的那一刻就是「毛玻璃 + 内容」，而不是一层空底色。
+function revealWindow(win) {
+  if (!win || win.isDestroyed()) return
+  if (process.platform === 'win32') applyBackgroundMaterial(win, 'acrylic')
+  win.show()
 }
 
 // 创建引导窗口：固定尺寸、无边框、系统亚克力，引导期间禁止关闭
@@ -1631,6 +2278,9 @@ function createSetupWindow() {
     backgroundMaterial: 'acrylic',
     backgroundColor: '#f0f4f8',
     center: true,
+    // 首屏显示时机：dev 下先隐藏，等渲染层挂载完成（setup-ready）后再显示，避免先露出空的亚克力底；
+    // prod 下静态文件加载极快，直接显示（占位页是纯内联 HTML/CSS，不依赖 JS），窗口"秒出画面"。
+    show: !isDev,
     title: '首次安装引导',
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
@@ -1646,28 +2296,36 @@ function createSetupWindow() {
   setupWindow = win
   setupRunning = true
 
-  if (process.platform === 'win32') applyBackgroundMaterial(win, 'acrylic')
+  // 兜底（仅 dev：窗口初始隐藏）：渲染层异常/过慢时也先把窗口显示出来，
+  // 此时 setup.html 的占位保证不是空白。正常情况下 setup-ready 会先到并取消此定时器。
+  if (isDev) win.__revealTimer = setTimeout(() => revealWindow(win), 1500)
 
   // 引导未完成前禁止关闭（系统 ✕ / Alt+F4）
   win.on('close', (e) => { if (setupRunning) e.preventDefault() })
-  win.on('closed', () => { if (setupWindow === win) setupWindow = null })
+  win.on('closed', () => {
+    clearTimeout(win.__revealTimer)
+    if (setupWindow === win) setupWindow = null
+  })
+
+  // 启动计时点：dev 下先记 loading 页、跳转后记真实页面；prod 下直接记引导页面首帧
+  win.webContents.on('did-finish-load', () => {
+    const u = win.webContents.getURL()
+    startupTimer.mark(u.startsWith('data:') ? '引导窗口 loading 页完成' : '引导页面加载完成')
+  })
 
   if (isDev) {
     // 与主窗口一致：先渲染本地 inline loading 页（窗口立即出画面，不再白屏），
     // Vite 就绪后立即跳转到 setup.html；引导窗口不开 DevTools。
-    win.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(DEV_LOADING_HTML)}`)
-    win.webContents.on('did-finish-load', () => {
-      const u = win.webContents.getURL()
-      startupTimer.mark(u.startsWith('data:') ? '引导窗口 loading 页完成' : '引导页面加载完成')
-    })
+    // 与主窗口共用同一份 loading 模板（标题同为「班级管理系统」），
+    // 灰色副标题由 boot-status 实时驱动，不出现两种不同的加载画面
+    win.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(devLoadingHtml())}`)
     // 直接探测 setup.html：命中即跳转，等待期间 Vite 已顺带编译好该页面
-    loadUrlWithRetry(win, 'https://127.0.0.1:5173/setup.html')
+    loadUrlWithRetry(win, 'http://127.0.0.1:5173/setup.html')
   } else {
     win.loadURL('app://local/setup.html')
   }
 
-  // 窗口一打开即在后台开始预热
-  runSetupWarmup()
+  // 预热不在此处启动：等引导界面完全加载完成（setup-ready）后再后台进行
   return win
 }
 
@@ -1675,6 +2333,12 @@ ipcMain.on('setup-ready', (event) => {
   if (!setupWindow || setupWindow.isDestroyed()) return
   if (event.sender !== setupWindow.webContents) return
   setupUiReady = true
+  // 引导界面已挂载：dev 下此刻显示窗口（毛玻璃与引导界面同时出现）；prod 下窗口本就已显示
+  clearTimeout(setupWindow.__revealTimer)
+  revealWindow(setupWindow)
+  startupTimer.mark('引导界面挂载完成')
+  // 界面完全加载完成后，再让出一次事件循环，随后才在后台开始预热（不与首帧显示抢资源）
+  setTimeout(() => { runSetupWarmup() }, 0)
 })
 
 // 引导完成：关闭引导窗口并创建主窗口（token 已写入同源 localStorage，主窗口据此直达首页）
@@ -1992,6 +2656,10 @@ async function migrateDataDir(oldDir, target) {
 // （否则会和调用方的 startBackend() 一起 fork 出两个后端）。
 function stopBackendProcess() {
   clearTimeout(backendRestartTimer)
+  // 主动停止后端（迁移 / 加密转换 / 重连 / 退出）时一并停掉心跳，
+  // 避免探测一个已不在的进程而被误判为「后端无响应」
+  stopHeartbeat()
+  backendReady = false
   const proc = backendProcess
   backendProcess = null
   if (!proc) return Promise.resolve()

@@ -1,7 +1,6 @@
 import { createRouter, createWebHistory, createWebHashHistory } from 'vue-router'
 import axios from 'axios'
 import { ensureDashboardData } from '../composables/useDashboardData'
-import { useNotification } from '../composables/useNotification'
 
 const routes = [
   { path: '/', name: 'dashboard', component: () => import('../views/DashboardView.vue') },
@@ -52,20 +51,11 @@ router.beforeEach(async (to, from) => {
     return to.path === '/login' ? true : '/login'
   }
 
-  // 已登录（本地有有效 token）。仅首次导航时向后端发一次轻量登录态校验：
-  // 若 token 已被后端作废（如账号/数据库变更），在这里直接回登录页。
-  // 守卫处于 pending 期间 Vue 不会挂载目标组件，因此内部页不会闪现。
+  // 已登录（本地有有效 token）。首次导航时向后端发一次轻量登录态校验，但**不阻塞首屏**：
+  // 校验在后台进行，若 token 已被后端作废（如账号/数据库变更），由响应拦截器统一处理 401
+  // （清 token + 提示 + 回登录页）。这样后端未就绪时首屏不再干等 /api/me 的往返。
   if (from.matched.length === 0) {
-    try {
-      await axios.get('/api/me', { __skipAuth: true })
-    } catch (err) {
-      if (err.response && err.response.status === 401) {
-        localStorage.removeItem('token')
-        useNotification().error('登录已过期，请重新登录', 5000)
-        return to.path === '/login' ? true : '/login'
-      }
-      // 其它错误（后端未就绪等）放行，交由请求重试/401 拦截器兜底
-    }
+    axios.get('/api/me').catch(() => {})
   }
 
   // 已登录进入首页：提前并发拉取 Dashboard 数据，让数据与组件下载/挂载并行，减少首屏等待

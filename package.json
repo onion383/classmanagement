@@ -7,6 +7,7 @@
     "dev": "cd student-frontend && npm run dev",
     "electron": "electron .",
     "electron:dev": "concurrently --names \"Vite,Electron\" --prefix-colors \"blue,green\" --kill-others \"npm run dev\" \"electron .\"",
+    "inp": "node scripts/inp-probe.mjs",
     "build": "cd student-frontend && npm run build",
     "electron:build": "npm run build && electron-builder",
     "postinstall": "cd student-backend && npm install"
@@ -16,12 +17,15 @@
     "better-sqlite3-multiple-ciphers": "^13.0.3",
     "cors": "^2.8.6",
     "express": "^5.2.1",
+    "extract-zip": "^2.0.1",
     "jsonwebtoken": "^9.0.3",
+    "koffi": "^3.3.3",
+    "mammoth": "^1.12.1",
     "multer": "^2.1.1",
-    "mysql2": "^3.22.3",
+    "pdf-parse": "^2.4.5",
     "sharp": "^0.35.3",
-    "sortablejs": "^1.15.7",
-    "trash": "^10.1.1"
+    "trash": "^10.1.1",
+    "xlsx": "^0.18.5"
   },
   "devDependencies": {
     "@electron/rebuild": "^4.2.0",
