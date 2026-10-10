@@ -28,7 +28,9 @@
         <Sidebar />
         <main class="flex-1 min-w-0 p-6 bg-bg overflow-auto">
           <router-view v-slot="{ Component }">
-            <KeepAlive :max="10">
+            <!-- 缓存全部业务页面：当前共 15 个（不含 /login 与 /account 重定向），取 16 留 1 个余量。
+                 实测多缓存几个页面仅多几 MB，故不再按最近访问淘汰。 -->
+            <KeepAlive :max="16">
               <component :is="Component" />
             </KeepAlive>
           </router-view>
@@ -39,6 +41,28 @@
 
   <!-- 全局通知弹窗 -->
   <NotificationToast />
+
+  <!-- 运行期后端异常：真挂了才全屏复用启动失败页（蓝字标题 + 蓝色感叹号三角 + 重试/退出）。
+       重连过程静默进行，不占屏、不弹提示条。 -->
+  <Teleport to="body">
+    <div v-if="backendDead" class="backend-overlay">
+      <svg class="warn-icon" width="36" height="36" viewBox="0 0 24 24" fill="none"
+           stroke="#1e40af" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/>
+        <line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/>
+      </svg>
+      <span class="logo">班级管理系统</span>
+      <div class="fail-box">
+        <div class="fail-msg">后台启动失败，请点击下面按钮重试或退出应用重试</div>
+        <div class="fail-row">
+          <button class="fail-btn primary" :disabled="reconnectRetrying" @click="retryBackendFromDead">
+            {{ reconnectRetrying ? '重启中…' : '重启后端' }}
+          </button>
+          <button class="fail-btn" @click="quitAppFromDead">退出应用</button>
+        </div>
+      </div>
+    </div>
+  </Teleport>
 
   <!-- 关闭选择弹窗：点主窗口关闭按钮时居中弹出（复用 dialog-transition 动画） -->
   <ShutdownMenuDialog
@@ -135,6 +159,12 @@ export default {
       shutdownHasDesktop: false,
       // 主进程消息监听（on 返回的 wrapper，供 beforeUnmount off）
       ipcFromMain: null,
+      // 运行期后端异常：真挂了才全屏显示启动失败页（蓝色三角 + 蓝字），重连过程静默
+      backendDead: false,
+      // 是否曾经就绪过：只有「启动成功后再异常」才由本页接管，
+      // 启动阶段的失败提示归首屏占位页负责，避免两层全屏遮罩叠在一起
+      backendEverReady: false,
+      reconnectRetrying: false,
     }
   },
   computed: {
@@ -188,6 +218,8 @@ export default {
     this.themeStore = useThemeStore()
     this.setupShutdownIpc()
     this.fetchPendingNotification()
+    // 兜住「就绪广播早于本组件创建」的竞态：查一次当前状态，确保之后运行期异常能接管提示
+    window.electron?.invoke('backend-status').then((ok) => { if (ok) this.backendEverReady = true }).catch(() => {})
   },
   beforeUnmount() {
     window.removeEventListener('resize', this.onWindowResize)
@@ -305,6 +337,19 @@ export default {
       window.electron?.send('win-close')
     },
 
+    // ---- 运行期后端异常 ----
+    // 复用启动失败页的两个动作
+    async retryBackendFromDead() {
+      if (this.reconnectRetrying) return
+      this.reconnectRetrying = true
+      try { await window.electron?.invoke('restart-backend') } catch (_) {}
+      // 后端已重新 fork：整页重载重走一遍启动流程（若仍起不来会再次显示失败提示）
+      setTimeout(() => location.reload(), 400)
+    },
+    quitAppFromDead() {
+      window.electron?.send('quit-app')
+    },
+
     // 取走主进程暂存的待展示提示（如数据库迁移完成）。迁移会重建主窗口，
     // 提示无法在迁移时推送到尚未加载的渲染层，故由主窗口加载后主动取走再弹提示条。
     async fetchPendingNotification() {
@@ -323,7 +368,21 @@ export default {
       // 告知主进程：渲染层已就绪，可接管关闭菜单（弹窗生命周期内有 IPC 时此标记生效）
       window.electron?.send('shutdown-action', { type: 'ready' })
       this.ipcFromMain = window.electron?.on('from-main', (data) => {
-        if (data && data.type === 'shutdown-menu') {
+        if (!data) return
+        // 运行期后端异常状态（心跳探测 / 进程退出后主进程发起的重连）
+        if (data.type === 'backend-ready') {
+          this.backendEverReady = true
+          this.backendDead = false
+          this.reconnectRetrying = false
+          return
+        }
+        if (data.type === 'backend-failed') {
+          // 启动阶段的失败由首屏占位页接管；本页只接管「跑起来之后再挂」
+          if (!this.backendEverReady) return
+          this.backendDead = !!data.failed
+          return
+        }
+        if (data.type === 'shutdown-menu') {
           // 若用户上次选了「下次不再提示」，则直接按上次的范围执行，不再弹窗
           const remembered = this.getRememberedShutdown()
           if (remembered && remembered.action) {
@@ -371,6 +430,26 @@ export default {
 </script>
 
 <style>
+/* 运行期后端异常遮罩：完全复用启动失败页的观感（同底色、同蓝字标题、同按钮），
+   仅在后端确实重启失败时显示，重连过程不占屏。 */
+.backend-overlay {
+  position: fixed; inset: 0; z-index: 2147483000;
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
+  gap: 18px;
+  background: linear-gradient(160deg, #eef2ff 0%, #e2e8ff 100%);
+  font-family: -apple-system, "Segoe UI", "Microsoft YaHei", sans-serif;
+}
+.backend-overlay .logo { font-size: 22px; font-weight: 600; color: #1e40af; letter-spacing: 1px; }
+.backend-overlay .fail-box { display: flex; flex-direction: column; align-items: center; gap: 12px; }
+.backend-overlay .fail-msg { font-size: 13px; color: #b91c1c; }
+.backend-overlay .fail-row { display: flex; gap: 10px; }
+.backend-overlay .fail-btn {
+  font-size: 13px; padding: 6px 16px; border-radius: 6px; cursor: pointer;
+  border: 1px solid rgba(30, 64, 175, .35); background: #fff; color: #1e40af;
+}
+.backend-overlay .fail-btn.primary { background: #1e40af; border-color: #1e40af; color: #fff; }
+.backend-overlay .fail-btn:disabled { opacity: .5; cursor: default; }
+
 /* 无边框自绘标题栏：拖拽区 + 右侧窗口控制按钮。
    用全局样式而非 scoped，确保对登录页与主体布局一致生效。 */
 .window-title-bar {

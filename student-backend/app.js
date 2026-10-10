@@ -101,6 +101,10 @@ function startServer(port) {
   const server = app.listen(port, () => {
     console.log(`✅ 服务器已启动：http://localhost:${port}`);
 
+    // 就绪上报：通过 fork 的 IPC 通道告知主进程「端口已监听」，由主进程转发给各渲染窗口。
+    // 前端据此在就绪瞬间发起首个请求，不再靠固定退避重试去「撞」端口。
+    try { if (process.send) process.send({ type: 'backend-ready', port }) } catch (_) { /* 非 fork 场景忽略 */ }
+
     // 就绪信号后立即后台暖机：把「require sqlite 原生模块 + 打开 index/default 库并 initSchema」
     // 的一次性冷启动成本放到首个用户请求到达前悄悄完成，避免登录/首屏请求干等 cold start 而转圈。
     // 暖机失败静默，后续请求照常懒加载兜底，不影响功能。
@@ -192,5 +196,28 @@ function startServer(port) {
   // 优雅退出：收到 SIGTERM 时关闭服务器
   process.on('SIGTERM', () => server.close(() => process.exit(0)));
 }
+
+// 心跳应答：主进程周期性发 ping，这里的回调只有在事件循环空闲时才会被执行。
+// 若后端「假死」（进程尚在但事件循环被同步操作卡住，如 better-sqlite3 慢查询/锁等待），
+// pong 会随之延迟或不来，主进程据此判定异常并重连。纯内存操作，不碰数据库、不写日志。
+process.on('message', (msg) => {
+  if (!msg) return;
+  // 性能面板：内存自报（process.memoryUsage()，单位字节，由主进程换算）
+  if (msg.type === 'mem-query') {
+    try { if (process.send) process.send({ type: 'mem-report', mem: process.memoryUsage() }) } catch (_) { /* 通道断开忽略 */ }
+    return;
+  }
+  // 性能面板：手动 GC（需以 --expose-gc 启动才有 global.gc）
+  if (msg.type === 'gc-request') {
+    let ok = false;
+    try {
+      if (typeof global.gc === 'function') { global.gc(); ok = true; }
+    } catch (_) { ok = false; }
+    try { if (process.send) process.send({ type: 'gc-report', ok }) } catch (_) { /* 通道断开忽略 */ }
+    return;
+  }
+  if (msg.type !== 'ping') return;
+  try { if (process.send) process.send({ type: 'pong', t: msg.t }) } catch (_) { /* 通道断开忽略 */ }
+});
 
 startServer(PORT);

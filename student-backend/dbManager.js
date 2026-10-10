@@ -250,6 +250,12 @@ function registrySetEncrypted(slug, encrypted) {
   indexDb.prepare('UPDATE registry SET encrypted = ? WHERE slug = ?').run(encrypted ? 1 : 0, slug);
 }
 
+// 从 index 登记表移除账号（删除账号用）
+function registryDelete(slug) {
+  ensureIndex();
+  indexDb.prepare('DELETE FROM registry WHERE slug = ?').run(slug);
+}
+
 // 列出所有已登记的班主任账号（供登录页「从数据库注册」加载账号）
 function registryList() {
   ensureIndex();
@@ -292,6 +298,20 @@ function createTeacher(username, passwordHash, role, encrypted = true) {
 
   registryUpsert(slug, username, encrypted ? wrapKey(passphrase) : '', encrypted ? 1 : 0);
   return { slug };
+}
+
+// 彻底删除一个班主任账号：关闭其库连接 → 删除库文件及 WAL 边车 → 清除 index 登记。
+// 顺序刻意如此：只有库文件确实删掉后才摘登记，避免出现「登记已摘、库文件仍在」的割裂；
+// 若删除文件失败会抛出，此时登记与账号保持原样，用户可重试。
+// 注意：uploads / 相册缩略图等为多账号共享资源，不属于单个账号，不在此清理。
+function deleteTeacher(slug) {
+  if (!slug || slug === 'default') throw new Error('无效的账号标识');
+  evictConn(slug);
+  const base = path.join(dataDir, `${slug}.db`);
+  fs.rmSync(base, { force: true });
+  fs.rmSync(`${base}-wal`, { force: true });
+  fs.rmSync(`${base}-shm`, { force: true });
+  registryDelete(slug);
 }
 
 // 通过账号定位并打开其对应的班主任库（供登录 / 忘记密码使用）。
@@ -501,6 +521,7 @@ function warmup() {
 module.exports = {
   ensureIndex,
   createTeacher,
+  deleteTeacher,
   resolveByUsername,
   resolveByDbFile,
   registryFindByUsername,
@@ -515,6 +536,7 @@ module.exports = {
   restoreBundle,
   convertDbEncryption,
   registrySetEncrypted,
+  registryDelete,
   evictConn,
   registryList,
   registryListValid,

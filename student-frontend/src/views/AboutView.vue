@@ -1,4 +1,4 @@
-﻿<template>
+<template>
   <div>
     <div class="w-full bg-surface shadow-md rounded-xl mb-6 px-5 py-3 border border-border min-h-[4.5rem] flex items-center">
       <h1 class="text-2xl font-bold text-text flex items-center gap-2"><IconGlyph name="about" /> 关于软件</h1>
@@ -287,7 +287,7 @@ const libGroups = [
       { desc: '图片处理', name: 'Sharp', url: 'https://github.com/lovell/sharp', license: 'Apache-2.0' },
       { desc: '跨域支持', name: 'cors', url: 'https://github.com/expressjs/cors', license: 'MIT' },
       { desc: '文件上传', name: 'Multer', url: 'https://github.com/expressjs/multer', license: 'MIT' },
-      { desc: '视频抽帧', name: 'FFmpeg（LGPL 构建）', url: 'https://github.com/BtbN/FFmpeg-Builds', license: 'LGPL' },
+      { desc: '视频抽帧', name: 'FFmpeg（LGPL 构建）', url: 'https://ffmpeg.org', license: 'LGPL-2.1-or-later' },
       { desc: '压缩包解压', name: 'extract-zip', url: 'https://github.com/inchingorg/extract-zip', license: 'MIT' },
       { desc: 'Word 转换', name: 'Mammoth', url: 'https://github.com/mwilliamson/mammoth.js', license: 'BSD-2-Clause' },
       { desc: 'PDF 解析', name: 'pdf-parse', url: 'https://github.com/PhilippKurz30/node-pdf-parse', license: 'MIT' },

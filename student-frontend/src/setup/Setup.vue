@@ -233,6 +233,7 @@
 <script>
 import axios from 'axios'
 import { useThemeStore } from '../stores/theme'
+import { waitForBackendReady } from '../utils/backendReady'
 
 // 主题预览色：仅用于「主题选择」的缩略示意（真实配色由各主题 CSS 变量驱动）
 const PREVIEW = {
@@ -564,7 +565,8 @@ export default {
           return true
         } catch (_) {}
         if (Date.now() - start > timeout) return false
-        await new Promise((r) => setTimeout(r, 300))
+        // 优先等就绪信号：后端一就绪立即重试；信号缺失时退化为 300ms 退避
+        await waitForBackendReady(300)
       }
     },
   },

@@ -235,4 +235,19 @@ router.put('/password', auth(), (req, res) => {
   }
 });
 
+// 删除当前登录账号：关闭并删除该账号的库文件、清除 index 登记，不可恢复。
+// 仅删本账号自身的数据；uploads 等为多账号共享资源，不做清理。
+router.delete('/', auth(), (req, res) => {
+  try {
+    const slug = (req.user && req.user.dbSlug) || 'default';
+    const rec = dbManager.registryFindBySlug(slug);
+    if (!rec) return res.status(404).json({ error: '账号不存在或已被删除' });
+    dbManager.deleteTeacher(slug);
+    res.clearCookie('token');
+    res.json({ message: '账号已删除' });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 module.exports = router;

@@ -223,6 +223,54 @@
       </div>
     </div>
 
+    <!-- ========== 性能 ========== -->
+    <div class="mb-6">
+      <h2 class="text-xl font-semibold text-text mb-4 flex items-center gap-2"><IconGlyph name="sliders" :size="20" /> 性能</h2>
+      <div class="bg-surface rounded-lg border border-border p-6">
+        <!-- 三列等宽：前端 / 后端 / 小组件（名称 / 状态 / 按钮 纵向排列） -->
+        <div class="grid grid-cols-3 gap-4">
+          <div class="flex flex-col items-center gap-2 rounded-lg border border-border bg-bg p-4">
+            <span class="text-sm text-text-muted">前端</span>
+            <span class="text-sm font-medium" :class="perfAlive.front ? 'text-text' : 'text-text-muted'">{{ perfAlive.front ? '正常' : '未运行' }}</span>
+            <button @click="restartFrontend" class="bg-bg hover:bg-surface-hover text-text border border-border px-3 py-1.5 rounded text-sm transition-theme">重启前端</button>
+          </div>
+          <div class="flex flex-col items-center gap-2 rounded-lg border border-border bg-bg p-4">
+            <span class="text-sm text-text-muted">后端</span>
+            <span class="text-sm font-medium" :class="perfAlive.backend ? 'text-text' : 'text-text-muted'">{{ perfAlive.backend ? '正常' : '未运行' }}</span>
+            <button @click="restartBackend" :disabled="busyRestartBackend" class="bg-bg hover:bg-surface-hover text-text border border-border px-3 py-1.5 rounded text-sm transition-theme disabled:opacity-50">{{ busyRestartBackend ? '重启中…' : '重启后端' }}</button>
+          </div>
+          <div class="flex flex-col items-center gap-2 rounded-lg border border-border bg-bg p-4">
+            <span class="text-sm text-text-muted">小组件</span>
+            <span class="text-sm font-medium" :class="perfAlive.widget ? 'text-text' : 'text-text-muted'">{{ perfAlive.widget ? '正常' : '未运行' }}</span>
+            <button @click="restartWidget" :disabled="busyRestartWidget" class="bg-bg hover:bg-surface-hover text-text border border-border px-3 py-1.5 rounded text-sm transition-theme disabled:opacity-50">{{ busyRestartWidget ? '重启中…' : '重启小组件' }}</button>
+          </div>
+        </div>
+
+        <!-- 内存占用：逐进程一条，条形宽度带过渡；「回收」按钮宽度固定，切换文案时不跳动 -->
+        <div class="border-t border-border pt-6 mt-6">
+          <div class="flex items-center justify-between mb-4">
+            <span class="text-sm font-medium text-text">内存占用</span>
+            <button @click="recycleAll" :disabled="busyGc" class="w-24 text-center bg-primary hover:bg-primary-hover text-text-inverse px-4 py-1.5 rounded text-sm transition-theme disabled:opacity-50">{{ busyGc ? '回收中…' : '回收' }}</button>
+          </div>
+          <div class="space-y-3">
+            <div v-for="row in perfRows" :key="row.key" class="flex items-center gap-3">
+              <span class="w-32 flex-shrink-0 truncate text-sm" :class="row.isTotal ? 'text-text font-medium' : 'text-text-secondary'" :title="row.name">{{ row.name }}</span>
+              <div class="flex-1 h-2.5 rounded-full bg-bg border border-border overflow-hidden">
+                <div class="h-full rounded-full bg-primary" :style="{ width: barPct(row.memKB) + '%', transition: 'width 480ms cubic-bezier(0.4, 0, 0.2, 1), background-color 250ms' }"></div>
+              </div>
+              <span class="w-20 flex-shrink-0 text-right text-sm text-text" :class="row.isTotal ? 'font-medium' : ''" style="font-variant-numeric: tabular-nums;">{{ fmtMem(row.memKB) }}</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- 上次启动耗时 -->
+        <div class="border-t border-border pt-6 mt-6 flex items-center gap-4">
+          <span class="text-sm text-text-muted">上次启动耗时</span>
+          <span class="text-sm font-medium text-text" style="font-variant-numeric: tabular-nums;">{{ perfStartupTotal }} ms</span>
+        </div>
+      </div>
+    </div>
+
     <!-- ========== 保存路径设置 ========== -->
     <div class="mb-6">
       <h2 class="text-xl font-semibold text-text mb-4 flex items-center gap-2"><IconGlyph name="folder" :size="20" /> 保存路径设置</h2>
@@ -305,6 +353,20 @@
       </div>
     </div>
 
+    <!-- ========== 危险操作 ========== -->
+    <div class="mb-6">
+      <h2 class="text-xl font-semibold text-text mb-4 flex items-center gap-2"><IconGlyph name="trash" :size="20" /> 危险操作</h2>
+      <div class="bg-surface rounded-lg border border-border p-6">
+        <div class="flex items-center justify-between flex-wrap gap-4">
+          <div class="space-y-2 text-text-secondary">
+            <p class="font-medium text-text">删除账号</p>
+            <p class="text-sm text-text-muted">删除当前账号及其全部数据，操作不可恢复。</p>
+          </div>
+          <button @click="openDeleteAccount" class="bg-danger hover:bg-danger-hover text-text-inverse px-4 py-2 rounded transition-theme">删除账号</button>
+        </div>
+      </div>
+    </div>
+
     <!-- 内嵌弹窗：修改用户名 -->
     <Teleport to="body">
     <Transition name="dialog" v-if="modalType === 'username'">
@@ -369,11 +431,14 @@
     <ConfirmDialog
       v-if="dialogMounted"
       :visible="dialog.visible"
+      :title="dialog.title"
       :message="dialog.message"
       :type="dialog.type"
       :showCancel="dialog.showCancel"
+      :confirmText="dialog.confirmText"
+      :confirmDisabled="dialog.confirmDisabled"
       @confirm="onDialogConfirm"
-      @cancel="dialog.visible = false"
+      @cancel="onDialogCancel"
     />
   </div>
 </template>
@@ -386,6 +451,7 @@ import { useThemeStore } from '../stores/theme'
 import { storeToRefs } from 'pinia'
 import { resourceUrl } from '../utils/apiUrl'
 import '../styles/dialog-transition.css'
+import { useNotification } from '../composables/useNotification'
 
 // 弹窗类组件懒加载：打开时才加载对应 chunk
 const ConfirmDialog = defineAsyncComponent(() => import('../components/base/ConfirmDialog.vue'))
@@ -437,6 +503,8 @@ export default {
       },
       dialogMounted: false,
       dialogCallback: null,
+      // 「删除账号」倒计时定时器
+      deleteTimer: null,
       // 工具箱设置
       toolboxEnabled: true,
       sessionEnabled: true,
@@ -466,6 +534,14 @@ export default {
       // Background image
       bgImageUrl: '',
       bgImageFileName: '',
+      // 性能面板：逐进程内存列表 + 三个重启目标的存活状态
+      perfProcs: [],
+      perfAlive: { front: false, backend: false, widget: false },
+      perfStartupTotal: 0,
+      busyGc: false,
+      busyRestartBackend: false,
+      busyRestartWidget: false,
+      _perfTimer: null,
       presetThemes: [
         { id: 'base', name: '彩色色块主题' },
         { id: 'glass', name: '毛玻璃主题' },
@@ -496,6 +572,26 @@ export default {
     _undoKeyLabels() {
       return { students: '学生表', fee_records: '收费记录', leave_records: '请假记录', score_records: '成绩记录', group_manage: '分组管理', album: '班级相册' }
     },
+    // 性能面板：逐进程内存行，按占用从高到低排序，「总计」固定插在最上方
+    // 占用优先取 privWsKB（专用工作集，与任务管理器「进程」页口径一致）；
+    // 取不到（非 Windows / 计数器不可用）时回退到 privateKB（私有提交量）
+    perfRows() {
+      const rows = this.perfProcs.map(p => ({
+        key: p.key,
+        name: p.name,
+        memKB: typeof p.privWsKB === 'number'
+          ? p.privWsKB
+          : (typeof p.privateKB === 'number' ? p.privateKB : null),
+      }))
+      const total = rows.reduce((sum, r) => sum + (r.memKB || 0), 0)
+      rows.sort((a, b) => (b.memKB || 0) - (a.memKB || 0))
+      return [{ key: '__total__', name: '总计', memKB: total, isTotal: true }, ...rows]
+    },
+    // 条形相对比例的分母：以总计为 100%，各进程的条即「占总量比例」
+    perfMaxKB() {
+      const totalRow = this.perfRows.find(r => r.isTotal)
+      return Math.max(1, (totalRow && totalRow.memKB) || 0)
+    },
   },
   mounted() {
     this.selectedThemeId = this.currentTheme
@@ -507,11 +603,24 @@ export default {
     this.loadUsbAutoOpen()
     this.loadDataDirs()
     this.loadDbEncryption()
+    // 性能面板：先取一次启动耗时，轮询由 _startPerfPolling 负责
+    this.loadStartup()
+    this._startPerfPolling()
     this._fromMainHandler = window.electron?.on('from-main', (data) => {
       if (data && data.type === 'session-widget-changed') this.loadSession()
     })
   },
+  // 设置页被 KeepAlive 缓存：切走页面走 deactivated 而非 beforeUnmount，
+  // 必须在这里停掉轮询，否则离开设置页后仍会每 1.8s 采样一次（常驻开销）。
+  activated() {
+    this._startPerfPolling()
+  },
+  deactivated() {
+    this._stopPerfPolling()
+  },
   beforeUnmount() {
+    this.clearDeleteTimer()
+    this._stopPerfPolling()
     if (this._fromMainHandler) {
       window.electron?.off('from-main', this._fromMainHandler)
     }
@@ -596,10 +705,22 @@ export default {
       this.dialogCallback = onConfirm
     },
     onDialogConfirm() {
+      this.clearDeleteTimer()
       this.dialog.visible = false
       if (this.dialogCallback) {
         this.dialogCallback()
         this.dialogCallback = null
+      }
+    },
+    // 取消/关闭弹窗：一并停掉倒计时定时器
+    onDialogCancel() {
+      this.clearDeleteTimer()
+      this.dialog.visible = false
+    },
+    clearDeleteTimer() {
+      if (this.deleteTimer) {
+        clearInterval(this.deleteTimer)
+        this.deleteTimer = null
       }
     },
     async changeUsername() {
@@ -635,6 +756,42 @@ export default {
         localStorage.removeItem('currentUser')
         this.$router.push('/login')
       })
+    },
+    // 打开「删除账号」警告弹窗：确定按钮先置灰，10 秒倒计时结束后才可点击
+    openDeleteAccount() {
+      this.clearDeleteTimer()
+      this.dialog = {
+        visible: true,
+        title: '警告',
+        message: '删除账号后无法恢复，请谨慎决定',
+        type: 'confirm',
+        showCancel: true,
+        confirmText: '确定(10)',
+        confirmDisabled: true,
+      }
+      this.dialogCallback = () => this.performDeleteAccount()
+      let remain = 10
+      this.deleteTimer = setInterval(() => {
+        remain -= 1
+        if (remain <= 0) {
+          this.clearDeleteTimer()
+          this.dialog.confirmText = '确定'
+          this.dialog.confirmDisabled = false
+        } else {
+          this.dialog.confirmText = `确定(${remain})`
+        }
+      }, 1000)
+    },
+    // 真正删除当前账号：删除后清除本地登录态并回到登录页
+    async performDeleteAccount() {
+      try {
+        await axios.delete('/api/account')
+        localStorage.removeItem('token')
+        localStorage.removeItem('currentUser')
+        this.$router.push('/login')
+      } catch (err) {
+        this.showAlert(err.response?.data?.error || '删除失败')
+      }
     },
     async exportDb() {
       const needsPassword = !!this.user.hasPassword
@@ -907,6 +1064,105 @@ export default {
         }
       } catch (err) {
         console.error('选择文件夹失败:', err)
+      }
+    },
+    // ==================== 性能面板 ====================
+    // 轮询开关：进入页面（含从 KeepAlive 恢复）开始，离开即停，避免常驻采样
+    _startPerfPolling() {
+      if (this._perfTimer) return
+      this.loadPerf()
+      this._perfTimer = setInterval(() => {
+        if (document.visibilityState !== 'visible') return
+        this.loadPerf()
+      }, 1800)
+    },
+    _stopPerfPolling() {
+      if (!this._perfTimer) return
+      clearInterval(this._perfTimer)
+      this._perfTimer = null
+    },
+    // 提示条：复用项目统一的 useNotification
+    notifySuccess(msg) {
+      useNotification().success(msg)
+    },
+    notifyError(msg) {
+      useNotification().error(msg)
+    },
+    // 取一次逐进程内存快照，并更新三个重启目标的存活状态
+    async loadPerf() {
+      try {
+        const snap = await window.electron?.invoke('perf-snapshot')
+        if (snap) {
+          this.perfProcs = Array.isArray(snap.procs) ? snap.procs : []
+          this.perfAlive = {
+            front: !!(snap.alive && snap.alive.front),
+            backend: !!(snap.alive && snap.alive.backend),
+            widget: !!(snap.alive && snap.alive.widget),
+          }
+        }
+      } catch (_) { /* 后端未就绪等场景静默忽略 */ }
+    },
+    // 取上次启动耗时
+    async loadStartup() {
+      try {
+        const t = await window.electron?.invoke('perf-startup')
+        this.perfStartupTotal = Math.round(t?.total || 0)
+      } catch (_) {}
+    },
+    // KB → MB 文本；无数据时占位，保持列宽稳定
+    fmtMem(kb) {
+      if (kb === null || kb === undefined) return '--'
+      return `${Math.round(kb / 1024)} MB`
+    },
+    // 条形宽度百分比：以总计为分母，最小值 3% 让很小的值也可见，封顶 100%
+    barPct(kb) {
+      if (!kb) return 0
+      return Math.min(100, Math.max(3, Math.round((kb / this.perfMaxKB) * 100)))
+    },
+    // 手动回收：主进程 + 各渲染进程 + 后端
+    async recycleAll() {
+      if (this.busyGc) return
+      this.busyGc = true
+      try {
+        await window.electron?.invoke('perf-gc')
+        await this.loadPerf()
+        this.notifySuccess('已执行内存回收')
+      } catch (_) {
+        this.notifyError('内存回收失败')
+      } finally {
+        this.busyGc = false
+      }
+    },
+    // 重启前端：页面会自行重载，无需提示
+    restartFrontend() {
+      window.electron?.invoke('perf-restart-frontend')
+    },
+    // 重启后端：复用已有的 restart-backend 通道
+    async restartBackend() {
+      if (this.busyRestartBackend) return
+      this.busyRestartBackend = true
+      try {
+        await window.electron?.invoke('restart-backend')
+        await this.loadPerf()
+        this.notifySuccess('后端已重启')
+      } catch (_) {
+        this.notifyError('后端重启失败')
+      } finally {
+        this.busyRestartBackend = false
+      }
+    },
+    // 重启小组件：销毁并重建原本存在的窗口
+    async restartWidget() {
+      if (this.busyRestartWidget) return
+      this.busyRestartWidget = true
+      try {
+        await window.electron?.invoke('perf-restart-widget')
+        await this.loadPerf()
+        this.notifySuccess('小组件已重启')
+      } catch (_) {
+        this.notifyError('小组件重启失败')
+      } finally {
+        this.busyRestartWidget = false
       }
     },
   },

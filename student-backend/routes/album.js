@@ -10,7 +10,7 @@ const { moveToTrash, deleteThumb } = require('../albumOps');
 const { ensureFfmpeg } = require('../services/ffmpeg');
 
 // 服务端缩略图/视频封面生成
-// 注：sharp 与 ffmpeg-static 都是重的依赖，改为用到时（genThumb 生成缩略图）才 require，
+// 注：sharp 与 ffmpeg 服务都是重的依赖，改为用到时（genThumb 生成缩略图）才 require，
 // 避免随 app.js 顶层 require(album) 一起在启动阶段加载，拖慢后端就绪。
 // 缩略图缓存目录：统一放 DATA_DIR/album-thumbs（与数据库同层，随 userData 持久化）。
 // 打包后 __dirname 位于只读 asar 内，不能把写入目录建立在 __dirname 下。
