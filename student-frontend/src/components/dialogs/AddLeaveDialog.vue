@@ -116,6 +116,8 @@
 <script>
 import '../../styles/dialog-transition.css'
 import { useNotification } from '../../composables/useNotification.js'
+import { formatDateTimeLocal, formatDateTime } from '../../utils/dateTime.js'
+
 export default {
   name: 'AddLeaveDialog',
   props: {
@@ -126,8 +128,6 @@ export default {
     editingRecord: { type: Object, default: null }
   },
   data() {
-    const today = new Date();
-    const p = n => String(n).padStart(2, '0');
     return {
       keyword: '',
       listVisible: false,
@@ -165,13 +165,11 @@ export default {
   methods: {
     // datetime-local 输入值格式
     toInput(d) {
-      const p = n => String(n).padStart(2, '0');
-      return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}T${p(d.getHours())}:${p(d.getMinutes())}`;
+      return formatDateTimeLocal(d);
     },
     // 存储展示格式：YYYY-MM-DD HH:mm
     toFmt(d) {
-      const p = n => String(n).padStart(2, '0');
-      return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`;
+      return formatDateTime(d);
     },
     reset() {
       this.keyword = '';

@@ -8,6 +8,7 @@ const dbManager = require('../dbManager');
 const { moveToTrash, deleteThumb } = require('../albumOps');
 // 懒加载：ffmpeg 只为视频封面抓帧时使用，且可能触发按需下载，故不随顶层 require 加载
 const { ensureFfmpeg } = require('../services/ffmpeg');
+const { now } = require('../utils/sql');
 
 // 服务端缩略图/视频封面生成
 // 注：sharp 与 ffmpeg 服务都是重的依赖，改为用到时（genThumb 生成缩略图）才 require，
@@ -35,12 +36,6 @@ function contentTypeOf(fileName) {
   const ext = path.extname(fileName).slice(1).toLowerCase() || (isVideo ? 'mp4' : 'jpeg');
   const mime = isVideo ? (ext === 'mkv' ? 'video/x-matroska' : `video/${ext === 'ogv' ? 'ogg' : ext}`) : `image/${ext}`;
   return mime;
-}
-
-function now() {
-  const d = new Date();
-  const p = n => String(n).padStart(2, '0');
-  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`;
 }
 
 function dateKey(t) {

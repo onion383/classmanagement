@@ -14,9 +14,9 @@
 // =========================================================================
 
 const { app, BrowserWindow, ipcMain, Menu, screen } = require('electron')
-const path = require('path')
 const startupTimer = require('./startup-timer')
 const { applyBackgroundMaterial } = require('./window-material')
+const { buildWebPreferences } = require('./web-prefs')
 
 const isDev = !app.isPackaged
 
@@ -67,18 +67,9 @@ function createWidgetWindow() {
     maximizable: false,
     minimizable: false,
     fullscreenable: false,
-    webPreferences: {
-      preload: path.join(__dirname, '..', 'preload.js'),
-      contextIsolation: true,
-      nodeIntegration: false,
-      sandbox: true,
-      additionalArguments: ['--secure-channel'],
-      webSecurity: !isDev,
-      // 后台节流：与主窗口一致关掉，确保持续重绘、亚克力/毛玻璃不因失焦变灰
-      backgroundThrottling: false,
-      spellcheck: false,
-      devTools: isDev,
-    }
+    // 渲染进程安全配置见 web-prefs.js。浮窗需持续重绘，关闭后台节流，
+    // 避免失焦时亚克力/毛玻璃变灰
+    webPreferences: buildWebPreferences({ backgroundThrottling: false })
   })
 
   // 初始位置：屏幕左边缘中间（窗口相对视觉位置偏移 -M，让图标仍贴在左边缘）
@@ -167,18 +158,8 @@ function createDesktopWidgetWindow() {
     minimizable: false,
     fullscreenable: false,
     show: true,
-    webPreferences: {
-      preload: path.join(__dirname, '..', 'preload.js'),
-      contextIsolation: true,
-      nodeIntegration: false,
-      sandbox: true,
-      additionalArguments: ['--secure-channel'],
-      webSecurity: !isDev,
-      // 后台节流：与主窗口一致关掉，确保持续重绘、亚克力/毛玻璃不因失焦变灰
-      backgroundThrottling: false,
-      spellcheck: false,
-      devTools: true,
-    }
+    // 渲染进程安全配置见 web-prefs.js。桌面组件常驻需持续重绘，关闭后台节流
+    webPreferences: buildWebPreferences({ devTools: true, backgroundThrottling: false })
   })
 
   // Windows 系统原生背景材质：BackgroundMaterial 已随窗口创建时配置，此处再次确认应用。

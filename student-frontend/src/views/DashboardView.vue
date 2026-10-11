@@ -191,6 +191,7 @@ import AnimatedClock from '../components/AnimatedClock.vue'
 import ClippedText from '../components/ClippedText.vue'
 import ClassInfoDialog from '../components/dialogs/ClassInfoDialog.vue'
 import { useNotification } from '../composables/useNotification.js'
+import { pad2, formatDate } from '../utils/dateTime.js'
 
 const router = useRouter()
 const { success: notifySuccess, error: notifyError } = useNotification()
@@ -205,8 +206,7 @@ function getWeekDayIndex(d) {
 // ========== 数据 ==========
 const now = ref(new Date())
 const today = computed(() => {
-  const d = now.value
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+  return formatDate(now.value)
 })
 const todayWeekIndex = computed(() => getWeekDayIndex(now.value))
 
@@ -379,7 +379,7 @@ const monthIncome = computed(() => {
   const month = now.value.getMonth() + 1
   return fees.value.reduce((sum, r) => {
     const dateStr = String(r['收支时间'] || '')
-    if (!dateStr.startsWith(`${year}-${String(month).padStart(2, '0')}`)) return sum
+    if (!dateStr.startsWith(`${year}-${pad2(month)}`)) return sum
     const amount = Number(r['收支金额'] || 0)
     const type = String(r['收支类型'] || '').trim()
     return type !== '支出' ? sum + Math.abs(amount) : sum
@@ -390,7 +390,7 @@ const monthExpense = computed(() => {
   const month = now.value.getMonth() + 1
   return fees.value.reduce((sum, r) => {
     const dateStr = String(r['收支时间'] || '')
-    if (!dateStr.startsWith(`${year}-${String(month).padStart(2, '0')}`)) return sum
+    if (!dateStr.startsWith(`${year}-${pad2(month)}`)) return sum
     const amount = Number(r['收支金额'] || 0)
     const type = String(r['收支类型'] || '').trim()
     return type === '支出' ? sum + Math.abs(amount) : sum
@@ -433,7 +433,7 @@ function getStudentName(id) {
 function formatLeaveTime(leave) {
   if (!leave.开始时间) return ''
   const dt = new Date(leave.开始时间)
-  return `${dt.getHours()}:${String(dt.getMinutes()).padStart(2, '0')}`
+  return `${dt.getHours()}:${pad2(dt.getMinutes())}`
 }
 
 // ========== 加载数据 ==========

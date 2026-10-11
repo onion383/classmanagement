@@ -166,6 +166,7 @@ import LeaveTimeline from '../components/base/LeaveTimeline.vue'
 import DynamicTable from '../components/tables/DynamicTable.vue'
 import { useNotification } from '../composables/useNotification.js'
 import { recordCellUndo, recordRowInsert, recordRowDelete, recordRowUpdate, useUndoShortcut } from '../composables/useUndo.js'
+import { formatDate } from '../utils/dateTime.js'
 
 // 弹窗类组件懒加载：打开时才加载对应 chunk
 const loadAddScoreDialog = () => import('../components/dialogs/AddScoreDialog.vue')
@@ -247,9 +248,7 @@ export default {
       ]
     },
     todayStart() {
-      const d = new Date()
-      const p = n => String(n).padStart(2, '0')
-      return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`
+      return formatDate(new Date())
     },
     timelineNodeTypes() {
       return [

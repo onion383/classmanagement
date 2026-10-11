@@ -1,6 +1,7 @@
 const express = require('express');
 const router = express.Router();
 const { db } = require('../db');
+const { registerHistoryRoutes } = require('./historyRoutes');
 
 // cells 结构：{ 劳动项目名: { 星期几: [学生姓名,...] } }
 // settings 结构：{ days: ['周一',...], items: [{name, difficulty, count}, ...] }
@@ -179,60 +180,12 @@ router.post('/apply-master', (req, res) => {
 });
 
 // ======================== 历史快照 ========================
-router.get('/history', (req, res) => {
-  try {
-    const rows = db.prepare('SELECT week_start, created_at FROM duty_history ORDER BY week_start DESC').all();
-    res.json(rows);
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
-});
-
-router.get('/history/:weekStart', (req, res) => {
-  try {
-    const { weekStart } = req.params;
-    const row = db.prepare('SELECT * FROM duty_history WHERE week_start = ?').get(weekStart);
-    if (!row) return res.json(null);
-    res.json({
-      week_start: row.week_start,
-      cells: parseCell(row),
-      settings: parseSettings(row.settings),
-      created_at: row.created_at
-    });
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
-});
-
-router.post('/snapshot', (req, res) => {
-  try {
-    const { week_start, cells, settings } = req.body;
-    if (!week_start) return res.status(400).json({ error: '缺少周开始日期' });
-
-    const exists = db.prepare('SELECT id FROM duty_history WHERE week_start = ?').get(week_start);
-    if (exists) {
-      db.prepare('UPDATE duty_history SET cells=?, settings=? WHERE week_start=?')
-        .run(JSON.stringify(cells || {}), JSON.stringify(settings || {}), week_start);
-    } else {
-      db.prepare('INSERT INTO duty_history (week_start, cells, settings) VALUES (?,?,?)')
-        .run(week_start, JSON.stringify(cells || {}), JSON.stringify(settings || {}));
-    }
-    res.json({ message: '快照已保存' });
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
-});
-
-// 删除某一周的历史快照
-router.delete('/history/:weekStart', (req, res) => {
-  try {
-    const { weekStart } = req.params;
-    const info = db.prepare('DELETE FROM duty_history WHERE week_start = ?').run(weekStart);
-    if (!info.changes) return res.status(404).json({ error: '该周快照不存在' });
-    res.json({ message: '快照已删除' });
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
+// 四组路由（列表 / 单周 / 保存 / 删除）与 schedule 同构，走公共实现。
+// duty 的 cells/settings 存的是对象，解析失败回退 {}；写入时对空值回退 {}。
+registerHistoryRoutes(router, {
+  table: 'duty_history',
+  parseSnapshot: (row) => ({ cells: parseCell(row), settings: parseSettings(row.settings) }),
+  stringifySnapshot: (cells, settings) => [JSON.stringify(cells || {}), JSON.stringify(settings || {})],
 });
 
 module.exports = router;

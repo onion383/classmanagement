@@ -39,6 +39,7 @@
 <script>
 import '../../styles/dialog-transition.css'
 import { useNotification } from '../../composables/useNotification.js'
+import { formatDate } from '../../utils/dateTime.js'
 
 export default {
   name: 'AddCountdownDialog',
@@ -47,10 +48,8 @@ export default {
     editingRecord: { type: Object, default: null }
   },
   data() {
-    const today = new Date()
-    const p = n => String(n).padStart(2, '0')
     return {
-      form: { name: '', deadline: `${today.getFullYear()}-${p(today.getMonth() + 1)}-${p(today.getDate())}`, includeDay: false }
+      form: { name: '', deadline: formatDate(new Date()), includeDay: false }
     }
   },
   computed: {
@@ -64,9 +63,7 @@ export default {
   },
   methods: {
     reset() {
-      const today = new Date()
-      const p = n => String(n).padStart(2, '0')
-      return { name: '', deadline: `${today.getFullYear()}-${p(today.getMonth() + 1)}-${p(today.getDate())}`, includeDay: false }
+      return { name: '', deadline: formatDate(new Date()), includeDay: false }
     },
     presetFromRecord(r) {
       return {

@@ -11,6 +11,7 @@
 
 <script setup>
 import { ref, onMounted, onUnmounted } from 'vue'
+import { pad2 } from '../utils/dateTime.js'
 
 const props = defineProps({
   // 时间模板，占位符（大写补零、小写不补零）：{H}/{h}时 {M}/{m}分 {S}/{s}秒
@@ -20,7 +21,7 @@ const props = defineProps({
 })
 
 const WEEK_CN = ['日', '一', '二', '三', '四', '五', '六']
-const pad = n => String(n).padStart(2, '0')
+const pad = pad2
 // 普通空格在逐字符 span 渲染宽度不可靠/易被折叠，统一替换为不折叠的空格（&nbsp;），
 // 保证日期与星期之间人为加的空格有稳定的视觉宽度。
 const NBSP = '\u00A0'

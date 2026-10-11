@@ -1,25 +1,10 @@
 const express = require('express');
 const router = express.Router();
 const { db } = require('../db');
+const { now, cleanUp, buildInsert, buildUpdate } = require('../utils/sql');
 
 // 允许前端更新的字段白名单
 const EDITABLE = ['姓名', '学号', '类型', '项目', '分值', '原因', '加分时间', 'source', 'group_name', '成员数'];
-
-function now() {
-  const d = new Date();
-  const p = n => String(n).padStart(2, '0');
-  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`;
-}
-
-function cleanUp(data) {
-  const row = {};
-  EDITABLE.forEach(k => {
-    if (data[k] !== undefined) row[k] = (data[k] === '' || data[k] === null) ? null : data[k];
-  });
-  if (row['分值'] !== undefined && row['分值'] !== null) row['分值'] = Number(row['分值']);
-  if (row['成员数'] !== undefined && row['成员数'] !== null) row['成员数'] = Number(row['成员数']);
-  return row;
-}
 
 // GET /api/scores 全量列表（按加分时间倒序）
 router.get('/', (req, res) => {
@@ -67,9 +52,7 @@ router.post('/', (req, res) => {
     data.加分时间 = body.加分时间 || now();
     data.created_at = now();
 
-    const cols = Object.keys(data).map(c => `"${c}"`).join(',');
-    const ph = Object.keys(data).map(() => '?').join(',');
-    const result = db.prepare(`INSERT INTO score_records (${cols}) VALUES (${ph})`).run(...Object.values(data));
+    const result = buildInsert('score_records', data);
     res.json({ id: result.lastInsertRowid, message: '添加加分成功' });
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -79,10 +62,11 @@ router.post('/', (req, res) => {
 // PUT /api/scores/:id 编辑
 router.put('/:id', (req, res) => {
   try {
-    const row = cleanUp(req.body || {});
+    const row = cleanUp(req.body || {}, EDITABLE);
+    if (row['分值'] !== undefined && row['分值'] !== null) row['分值'] = Number(row['分值']);
+    if (row['成员数'] !== undefined && row['成员数'] !== null) row['成员数'] = Number(row['成员数']);
     if (Object.keys(row).length === 0) return res.status(400).json({ error: '没有可更新的字段' });
-    const setClause = Object.keys(row).map(k => `"${k}" = ?`).join(', ');
-    db.prepare(`UPDATE score_records SET ${setClause} WHERE id = ?`).run(...Object.values(row), Number(req.params.id));
+    buildUpdate('score_records', row, req.params.id);
     res.json({ message: '修改成功' });
   } catch (err) {
     res.status(500).json({ error: err.message });

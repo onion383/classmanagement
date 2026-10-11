@@ -1,23 +1,10 @@
 const express = require('express');
 const router = express.Router();
 const { db, renumber } = require('../db');
+const { now, cleanUp, maxPosition, buildInsert, buildUpdate } = require('../utils/sql');
 
 // 允许前端更新的字段白名单
 const EDITABLE = ['姓名', '类型', '开始时间', '结束时间', '家长联系电话', '学生联系电话', '状态', '返校时间', '备注'];
-
-function now() {
-  const d = new Date();
-  const p = n => String(n).padStart(2, '0');
-  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`;
-}
-
-function cleanUp(data) {
-  const row = {};
-  EDITABLE.forEach(k => {
-    if (data[k] !== undefined) row[k] = (data[k] === '' || data[k] === null) ? null : data[k];
-  });
-  return row;
-}
 
 function listOrders() {
   return db.prepare('SELECT * FROM leave_records ORDER BY position, id').all();
@@ -62,12 +49,8 @@ router.post('/', (req, res) => {
     data.返校时间 = null;
     data.created_at = now();
 
-    const maxPos = db.prepare('SELECT MAX(position) AS maxPos FROM leave_records').get().maxPos || 0;
-    data.position = maxPos + 1;
-
-    const cols = Object.keys(data).map(c => `"${c}"`).join(',');
-    const ph = Object.keys(data).map(() => '?').join(',');
-    const result = db.prepare(`INSERT INTO leave_records (${cols}) VALUES (${ph})`).run(...Object.values(data));
+    data.position = maxPosition('leave_records') + 1;
+    const result = buildInsert('leave_records', data);
     renumber('leave_records');
     res.json({ id: result.lastInsertRowid, message: '添加请假成功' });
   } catch (err) {
@@ -78,10 +61,9 @@ router.post('/', (req, res) => {
 // PUT /api/leaves/:id 编辑
 router.put('/:id', (req, res) => {
   try {
-    const row = cleanUp(req.body || {});
+    const row = cleanUp(req.body || {}, EDITABLE);
     if (Object.keys(row).length === 0) return res.status(400).json({ error: '没有可更新的字段' });
-    const setClause = Object.keys(row).map(k => `"${k}" = ?`).join(', ');
-    db.prepare(`UPDATE leave_records SET ${setClause} WHERE id = ?`).run(...Object.values(row), Number(req.params.id));
+    buildUpdate('leave_records', row, req.params.id);
     res.json({ message: '修改成功' });
   } catch (err) {
     res.status(500).json({ error: err.message });

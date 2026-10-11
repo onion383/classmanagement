@@ -7,7 +7,7 @@
     "dev": "cd student-frontend && npm run dev",
     "electron": "electron .",
     "electron:dev": "concurrently --names \"Vite,Electron\" --prefix-colors \"blue,green\" --kill-others \"npm run dev\" \"electron .\"",
-    "inp": "node scripts/inp-probe.mjs",
+    "inp": "node testjs/inp-probe.mjs",
     "build": "cd student-frontend && npm run build",
     "build:win:inno": "node electron/inno/compile.mjs",
     "electron:build": "npm run build && electron-builder --dir && npm run build:win:inno",

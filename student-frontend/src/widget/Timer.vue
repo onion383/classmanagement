@@ -25,7 +25,7 @@
           ▲
         </button>
         <div v-else class="arrow-placeholder"></div>
-        <div class="digit">{{ formatDigit(display.hours) }}</div>
+        <div class="digit">{{ pad2(display.hours) }}</div>
         <button
           v-if="showArrows"
           class="arrow"
@@ -48,7 +48,7 @@
           ▲
         </button>
         <div v-else class="arrow-placeholder"></div>
-        <div class="digit">{{ formatDigit(display.minutes) }}</div>
+        <div class="digit">{{ pad2(display.minutes) }}</div>
         <button
           v-if="showArrows"
           class="arrow"
@@ -71,7 +71,7 @@
           ▲
         </button>
         <div v-else class="arrow-placeholder"></div>
-        <div class="digit">{{ formatDigit(display.seconds) }}</div>
+        <div class="digit">{{ pad2(display.seconds) }}</div>
         <button
           v-if="showArrows"
           class="arrow"
@@ -95,6 +95,7 @@
 
 <script setup>
 import { ref, computed, onUnmounted } from 'vue'
+import { pad2 } from '../utils/dateTime.js'
 
 const emit = defineEmits(['close'])
 
@@ -118,10 +119,6 @@ const display = computed(() => {
 })
 
 const showArrows = computed(() => mode.value === 'countdown' && !running.value)
-
-function formatDigit(n) {
-  return String(n).padStart(2, '0')
-}
 
 function switchMode(newMode) {
   if (running.value) pause()
