@@ -237,22 +237,27 @@
     <div class="mb-6">
       <h2 class="text-xl font-semibold text-text mb-4 flex items-center gap-2"><IconGlyph name="sliders" :size="20" /> 性能</h2>
       <div class="bg-surface rounded-lg border border-border p-6">
-        <!-- 三列等宽：前端 / 后端 / 小组件（名称 / 状态 / 按钮 纵向排列） -->
-        <div class="grid grid-cols-3 gap-4">
+        <!-- 四列等宽：前端 / 后端 / 小组件 / 全局（名称 / 状态 / 按钮 纵向排列） -->
+        <div class="grid grid-cols-4 gap-4">
           <div class="flex flex-col items-center gap-2 rounded-lg border border-border bg-bg p-4">
             <span class="text-sm text-text-muted">前端</span>
             <span class="text-sm font-medium" :class="perfAlive.front ? 'text-text' : 'text-text-muted'">{{ perfAlive.front ? '正常' : '未运行' }}</span>
-            <button @click="restartFrontend" class="bg-bg hover:bg-surface-hover text-text border border-border px-3 py-1.5 rounded text-sm transition-theme">重启前端</button>
+            <button @click="restartFrontend" class="bg-info hover:bg-info-hover text-text-inverse border border-border px-3 py-1.5 rounded text-sm transition-theme">重启前端</button>
           </div>
           <div class="flex flex-col items-center gap-2 rounded-lg border border-border bg-bg p-4">
             <span class="text-sm text-text-muted">后端</span>
             <span class="text-sm font-medium" :class="perfAlive.backend ? 'text-text' : 'text-text-muted'">{{ perfAlive.backend ? '正常' : '未运行' }}</span>
-            <button @click="restartBackend" :disabled="busyRestartBackend" class="bg-bg hover:bg-surface-hover text-text border border-border px-3 py-1.5 rounded text-sm transition-theme disabled:opacity-50">{{ busyRestartBackend ? '重启中…' : '重启后端' }}</button>
+            <button @click="restartBackend" :disabled="busyRestartBackend" class="bg-info hover:bg-info-hover text-text-inverse border border-border px-3 py-1.5 rounded text-sm transition-theme disabled:opacity-50">{{ busyRestartBackend ? '重启中…' : '重启后端' }}</button>
           </div>
           <div class="flex flex-col items-center gap-2 rounded-lg border border-border bg-bg p-4">
             <span class="text-sm text-text-muted">小组件</span>
             <span class="text-sm font-medium" :class="perfAlive.widget ? 'text-text' : 'text-text-muted'">{{ perfAlive.widget ? '正常' : '未运行' }}</span>
-            <button @click="restartWidget" :disabled="busyRestartWidget" class="bg-bg hover:bg-surface-hover text-text border border-border px-3 py-1.5 rounded text-sm transition-theme disabled:opacity-50">{{ busyRestartWidget ? '重启中…' : '重启小组件' }}</button>
+            <button @click="restartWidget" :disabled="busyRestartWidget" class="bg-info hover:bg-info-hover text-text-inverse border border-border px-3 py-1.5 rounded text-sm transition-theme disabled:opacity-50">{{ busyRestartWidget ? '重启中…' : '重启小组件' }}</button>
+          </div>
+          <div class="flex flex-col items-center gap-2 rounded-lg border border-border bg-bg p-4">
+            <span class="text-sm text-text-muted">全局</span>
+            <span class="text-sm font-medium" :class="perfAllAlive ? 'text-text' : 'text-text-muted'">{{ perfAllAlive ? '正常' : '部分未启动' }}</span>
+            <button @click="restartAll" :disabled="busyRestartAll" class="bg-info hover:bg-info-hover text-text-inverse border border-border px-3 py-1.5 rounded text-sm transition-theme disabled:opacity-50">{{ busyRestartAll ? '重启中…' : '全部重启' }}</button>
           </div>
         </div>
 
@@ -289,7 +294,7 @@
         <!-- 上次启动耗时 -->
         <div class="border-t border-border pt-6 mt-6 flex items-center gap-4">
           <span class="text-sm text-text-muted">上次启动耗时</span>
-          <span class="text-sm font-medium text-text" style="font-variant-numeric: tabular-nums;">{{ perfStartupTotal }} ms</span>
+          <span class="text-sm font-medium text-text" style="font-variant-numeric: tabular-nums;">{{ (perfStartupTotal / 1000).toFixed(3) }} s</span>
         </div>
       </div>
     </div>
@@ -392,8 +397,8 @@
 
     <!-- 内嵌弹窗：修改用户名 -->
     <Teleport to="body">
-    <Transition name="dialog" v-if="modalType === 'username'">
-      <div class="fixed inset-0 bg-black/50 flex items-center justify-center z-[10001]" @click.self="closeModal">
+    <Transition name="dialog">
+      <div v-if="modalType === 'username'" class="fixed inset-0 bg-black/50 flex items-center justify-center z-[10001]" @click.self="closeModal">
         <div class="dialog-card bg-surface rounded-lg p-6 w-96 border border-border shadow-lg">
           <h3 class="text-lg font-bold text-text mb-4">修改用户名</h3>
           <input v-model="newUsername" placeholder="新用户名" class="border border-border bg-surface text-text p-2 w-full mb-3 rounded" />
@@ -409,8 +414,8 @@
 
     <!-- 内嵌弹窗：修改密码 -->
     <Teleport to="body">
-    <Transition name="dialog" v-if="modalType === 'password'">
-      <div class="fixed inset-0 bg-black/50 flex items-center justify-center z-[10001]" @click.self="closeModal">
+    <Transition name="dialog">
+      <div v-if="modalType === 'password'" class="fixed inset-0 bg-black/50 flex items-center justify-center z-[10001]" @click.self="closeModal">
         <div class="dialog-card bg-surface rounded-lg p-6 w-96 border border-border shadow-lg">
           <h3 class="text-lg font-bold text-text mb-4">修改密码</h3>
           <input v-model="oldPassword" type="password" placeholder="原密码" autocomplete="current-password" class="border border-border bg-surface text-text p-2 w-full mb-3 rounded" />
@@ -426,8 +431,8 @@
 
     <!-- 内嵌弹窗：导出数据库 -->
     <Teleport to="body">
-    <Transition name="dialog" v-if="modalType === 'export'">
-      <div class="fixed inset-0 bg-black/50 flex items-center justify-center z-[10001]" @click.self="closeModal">
+    <Transition name="dialog">
+      <div v-if="modalType === 'export'" class="fixed inset-0 bg-black/50 flex items-center justify-center z-[10001]" @click.self="closeModal">
         <div class="dialog-card bg-surface rounded-lg p-6 w-96 border border-border shadow-lg">
           <h3 class="text-lg font-bold text-text mb-4">导出数据库</h3>
           <p class="text-xs text-text-muted mb-3">导出当前库（业务数据 + 应用设置 + 账号），换机后用对应的密码恢复。</p>
@@ -575,6 +580,7 @@ export default {
       busyGc: false,
       busyRestartBackend: false,
       busyRestartWidget: false,
+      busyRestartAll: false,
       _perfTimer: null,
       presetThemes: [
         { id: 'base', name: '彩色色块主题' },
@@ -605,6 +611,11 @@ export default {
     },
     _undoKeyLabels() {
       return { students: '学生表', fee_records: '收费记录', leave_records: '请假记录', score_records: '成绩记录', group_manage: '分组管理', album: '班级相册' }
+    },
+    // 性能面板：全局存活状态——三个目标全部存活才算「正常」，否则「部分未启动」
+    perfAllAlive() {
+      const a = this.perfAlive
+      return !!(a.front && a.backend && a.widget)
     },
     // 性能面板：逐进程内存行，按占用从高到低排序
     // 占用优先取 privWsKB（专用工作集，与任务管理器「进程」页口径一致）；
@@ -1210,6 +1221,30 @@ export default {
         this.notifyError('小组件重启失败')
       } finally {
         this.busyRestartWidget = false
+      }
+    },
+    // 全部重启：打包版直接重启 Electron 本体（主进程/前端/小组件/后端一并重启）。
+    // 开发模式下 Electron 由 `npm run electron:dev` 的 concurrently --kill-others 托管，
+    // app.relaunch 让 Electron 退出时会连带杀掉 Vite，新实例拿不到 dev server 会卡在
+    // 加载页（停在「本地服务已就绪」），故 dev 退化为软重启：后端/小组件重启 + 前端重载。
+    restartAll() {
+      if (this.busyRestartAll) return
+      this.busyRestartAll = true
+      if (import.meta.env.DEV) {
+        this._softRestartAll()
+      } else {
+        window.electron?.invoke('perf-relaunch-app')
+      }
+    },
+    async _softRestartAll() {
+      try {
+        await window.electron?.invoke('restart-backend')
+        await window.electron?.invoke('perf-restart-widget')
+        this.notifySuccess('正在重启全部进程')
+        window.electron?.invoke('perf-restart-frontend')
+      } catch (_) {
+        this.notifyError('全部重启失败')
+        this.busyRestartAll = false
       }
     },
   },

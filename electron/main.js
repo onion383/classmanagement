@@ -1,9 +1,22 @@
-const { app, BrowserWindow, ipcMain, desktopCapturer, screen, dialog, shell, protocol, session, Menu, Tray, nativeImage, globalShortcut, Notification, safeStorage } = require('electron')
+// 只保留 main.js 自身还在用的出口：托盘/菜单/通知/快捷键随各自模块迁出后不再需要
+// （Menu/Tray/nativeImage/globalShortcut/Notification → tray.js 等，screen → widget.js）
+const { app, BrowserWindow, ipcMain, shell, protocol, Menu, clipboard } = require('electron')
 const path = require('path')
 const fs = require('fs')
 const crypto = require('crypto')
-const startupTimer = require('./startup-timer')
-const { getPrivateWorkingSetKB } = require('./privateWorkingSet')
+const startupTimer = require('./main/startup-timer')
+// 内存采样与主密钥派生已分别迁至 perf.js / config.js 内部使用，main.js 不再直接引用
+const { resolveCompileCacheDir, getMasterKey, saveAppConfig, resolveDataDir, resolveThumbsDir } = require('./main/config')
+const { setupRendererCodeCache, setupAppProtocol } = require('./main/protocol')
+const { applyBackgroundMaterial } = require('./main/window-material')
+const usb = require('./main/usb')
+const updater = require('./main/updater')
+const dialogs = require('./main/dialogs')
+const apps = require('./main/apps')
+const perf = require('./main/perf')
+const tray = require('./main/tray')
+const backend = require('./main/backend')
+const widget = require('./main/widget')
 
 // 应用窗口/任务栏图标：与托盘同源，随 electron/**/* 一起打包，开发与生产均能直接读取。
 // Windows 任务栏优先取窗口图标，设置后不再显示 Electron 默认图标（打包版还会用 win.icon 作为 exe 图标）。
@@ -16,159 +29,110 @@ app.commandLine.appendSwitch('js-flags', '--expose-gc')
 
 // Node 编译缓存（code cache）：把主进程启动过程中加载的模块字节码缓存到磁盘，
 // 下一次启动直接复用、跳过解析 + 编译（仅对 Node 侧模块生效，收益在后续启动）。
-// 必须在其它业务模块 require 之前调用；目录固定放 userData 下，随版本/源码变更自动失效重建。
-function resolveCompileCacheDir() {
-  return path.join(app.getPath('userData'), 'node-compile-cache')
-}
+// 目录固定放 userData 下（见 config.js 的 resolveCompileCacheDir），随版本/源码变更自动失效重建。
 try {
   const ccDir = resolveCompileCacheDir()
   fs.mkdirSync(ccDir, { recursive: true })
   if (typeof module.enableCompileCache === 'function') module.enableCompileCache(ccDir)
 } catch (_) { /* 编译缓存不可用时静默忽略，不影响启动 */ }
 
-// 安全通道主密钥（方案 A 的认证锚点 K_master）：本次运行周期内生成一次并复用于
-// 「后端 fork env 注入」+「preload IPC 提供渲染层」。只参与前后端 HKDF 派生态，
-// 不进线上传输。后端崩溃自动重启时复用同一值，保证已建立会话/前端持有的密钥仍一致。
-let channelMasterKey = null
-function getMasterKey() {
-  if (!channelMasterKey) channelMasterKey = crypto.randomBytes(32).toString('hex')
-  return channelMasterKey
-}
-
-// DB 静态加密主密钥（方案 A：首启现场随机生成 + safeStorage/DPAPI 持久化）：
-// 取代原先明文写在 student-backend/.env、随安装包分发的 DB_MASTER_KEY。
-// - Windows 上 safeStorage 底层走 DPAPI，密文绑定当前系统用户，解开安装包拿不到明文。
-// - 首启：文件不存在 → 生成随机 32 字节 → 加密写 userData/data/db-master.key。
-// - 之后：解密文件复用同一把钥匙，保证持久库可连续打开。
-// - 兜底：safeStorage 不可用（非 Windows 等）时仅返回运行期随机值，不落明文文件。
-// 数据目录/缓存目录解析（app-config.json，存于 userData，独立于业务数据目录以便启动即读）
-function getAppConfigPath() {
-  return path.join(app.getPath('userData'), 'app-config.json')
-}
-// 内存缓存：启动阶段 resolveDataDir / resolveThumbsDir / getDbMasterKey 会反复调用，
-// 原先每次都同步 readFileSync 一次。同一进程内配置的唯一写入点是 saveAppConfig，保存后刷新缓存。
-let appConfigCache = null
-function resolveAppConfig() {
-  if (appConfigCache) return appConfigCache
-  try { appConfigCache = JSON.parse(fs.readFileSync(getAppConfigPath(), 'utf8')) || {} } catch (_) { appConfigCache = {} }
-  return appConfigCache
-}
-function saveAppConfig(patch) {
-  const next = { ...resolveAppConfig(), ...patch }
-  if (!next.dataDir) delete next.dataDir
-  if (!next.thumbsDir) delete next.thumbsDir
-  // 写失败必须抛错：否则「切配置」这一步会静默失败，而调用方（如数据目录搬迁）
-  // 会继续删掉旧目录，导致数据在新目录、配置却指向已删除的旧目录。
-  try {
-    fs.writeFileSync(getAppConfigPath(), JSON.stringify(next, null, 2))
-  } catch (err) {
-    console.error('[main] 写入 app-config 失败:', err?.message || err)
-    throw new Error('配置文件写入失败：' + (err?.message || err))
-  }
-  appConfigCache = next
-  return next
-}
-// 数据库主目录：默认 userData/data，可被用户配置覆盖
-function resolveDataDir() {
-  const cfg = resolveAppConfig()
-  return cfg.dataDir ? path.resolve(cfg.dataDir) : path.join(app.getPath('userData'), 'data')
-}
-// 相册缩略图缓存目录：默认位于数据目录下 album-thumbs，可单独配置为独立缓存位置
-function resolveThumbsDir() {
-  const cfg = resolveAppConfig()
-  if (cfg.thumbsDir) return path.resolve(cfg.thumbsDir)
-  return path.join(resolveDataDir(), 'album-thumbs')
-}
-
 // 首启判定涉及同步读盘（app-config.json + existsSync index.db），提前到模块加载阶段完成，
 // 不占用 whenReady → 建窗的关键路径。looksLikeFirstRun 是函数声明，此处调用已被提升。
 const firstRunAtStartup = looksLikeFirstRun()
 
-let dbMasterKey = null
-function getDbMasterKey() {
-  if (dbMasterKey) return dbMasterKey
-  // 主密钥文件与数据库同目录存放，随数据目录一起迁移；解析用配置后的 dataDir，保证两者一致
-  const keyFile = path.join(resolveDataDir(), 'db-master.key')
-  try {
-    if (fs.existsSync(keyFile) && safeStorage.isEncryptionAvailable()) {
-      const blob = fs.readFileSync(keyFile)
-      try {
-        dbMasterKey = safeStorage.decryptString(blob)
-        return dbMasterKey
-      } catch { /* 密文损坏/密钥变更，退回重新生成 */ }
-    }
-    dbMasterKey = crypto.randomBytes(32).toString('hex')
-    if (safeStorage.isEncryptionAvailable()) {
-      try {
-        fs.mkdirSync(path.dirname(keyFile), { recursive: true })
-        fs.writeFileSync(keyFile, safeStorage.encryptString(dbMasterKey))
-      } catch (err) {
-        console.error('[main] DB 主密钥持久化失败，将仅本次运行有效:', err?.message || err)
-      }
-    }
-    return dbMasterKey
-  } catch (err) {
-    console.error('[main] DB 主密钥初始化失败，使用运行期随机值:', err?.message || err)
-    dbMasterKey = crypto.randomBytes(32).toString('hex')
-    return dbMasterKey
-  }
-}
-
 // ============ 窗口原生背景材质（BackgroundMaterial / 亚克力） ============
-// 使用 Electron 官方内置的 setBackgroundMaterial('acrylic'|'mica'|'none')，随主版本维护，
-// 替代已停更的 electron-acrylic-window。仅 Windows 11 22H2+ 生效，其余系统自动回退普通背景。
-// 备注：文档/经验记录原生材质在 Win11「节能器(省电)」开启时可能被干扰变灰，属系统级行为。
-//
-// 主窗口为「不透明无边框」窗口，backgroundMaterial 绘制在窗口背景上；CSS 半透明元素 + backdrop-filter
-// 叠加即可磨砂透出材质。返回 true 表示已应用（系统支持时）。
-function applyBackgroundMaterial(win, material = 'acrylic') {
-  if (process.platform !== 'win32' || !win || win.isDestroyed()) return false
-  try {
-    const m = ['auto', 'none', 'mica', 'acrylic', 'tabbed'].includes(material) ? material : 'acrylic'
-    win.setBackgroundMaterial(m)
-    return m !== 'none'
-  } catch (err) {
-    console.error('[acrylic] setBackgroundMaterial 失败，回退普通背景:', err?.message || err)
-    return false
-  }
-}
-
-// 关闭窗口系统背景材质（恢复普通背景）。用于：窗口销毁前 / 系统不支持时。
-const disableBackgroundMaterial = (win) => {
-  if (process.platform !== 'win32' || !win || win.isDestroyed()) return
-  try { win.setBackgroundMaterial('none') } catch (_) {}
-}
+// 见 window-material.js：applyBackgroundMaterial / disableBackgroundMaterial
 
 let mainWindow
 // 当前主窗口的边框模式：'native'（毛玻璃等其他主题，系统原生标题栏）| 'frameless'（Win11 主题，无边框自绘标题栏）。
 // 边框无法在运行中切换，故跨模式切换时重建主窗口。
 let mainWindowChrome = 'native'
-let widgetWindow
-let desktopWidgetWindow
-let backendProcess
-// 后端就绪状态：由后端子进程的 backend-ready 上报置位；供两种场景使用——
-// 1) 就绪瞬间向所有已存在的渲染窗口广播；2) 晚于就绪才加载的窗口用 backend-status 查询兜住竞态
-let backendReady = false
-// 主进程侧的「等后端就绪」等待者：就绪上报到来时统一唤醒（见 waitForBackendReadySignal）
-const backendReadyWaiters = new Set()
-// 启动失败兜底：后端长时间起不来（看门狗超时）或自动重启用尽后置位，
-// 向所有窗口广播 from-main{type:'backend-failed'}，由启动占位页给出「重启后端 / 退出应用」。
-let backendFailed = false
-let backendFailTimer = null
-// 看门狗时长：SIM_BACKEND_FAIL 为测试开关（故意让后端起不来），用短超时便于快速看到失败提示
-const BACKEND_FAIL_TIMEOUT = process.env.SIM_BACKEND_FAIL ? 3000 : 30000
 
-// 关闭确认菜单状态：
-//   shutdownMenuOpen —— 菜单已弹出时不再重复弹（close 事件可能反复触发）；
-//   allowMainClose  —— 用户已从菜单选择关闭主窗口，放行本次 close（绕过弹出菜单）。
-let shutdownMenuOpen = false
-let allowMainClose = false
+// 工具箱浮窗 / 桌面小组件窗口及其状态、相关 IPC
+// 已迁至 widget.js（见 widget.js：createWidgetWindow / registerWidgetIpc / setDesktopEnabled）
 
-// 「本次启用工具箱」会话级开关：仅影响本次运行浮窗显隐（不持久）。
-// null = 尚未由浮窗初始化（浮窗会以持久「是否启用工具箱」作为本次默认注入）。
-let sessionWidgetEnabled = null
+// 后端子进程、就绪/失败状态、心跳/重连、启动状态文案（boot-status）
+// 已迁至 backend.js（见 backend.js：startBackend / stopBackendProcess / setBootStatus / registerBackendIpc）
+
+// 关闭确认菜单状态（shutdownMenuOpen / allowMainClose / mainRendererShutdownReady）
+// 与系统托盘已迁至 tray.js（见 tray.js：handleMainClose / resetShutdownState / registerTrayIpc）
 
 const isDev = !app.isPackaged
+
+// ============ 启动耗时锚点：「后端就绪」+「首屏渲染完成」============
+// 「上次启动耗时」的口径：主进程启动 → 后端就绪与首屏渲染完成两者都满足的那一刻。
+// 只取后端就绪偏早（界面还没出来），只取首屏也偏早（此刻往往还没有数据）；取较晚者最接近
+// 「点开就能用」。引导场景下 setup-ready 即视为首屏渲染完成，从而天然剔除用户在引导页的停留。
+let backendStartupReady = false
+let firstScreenRendered = false
+function tryEndStartup() {
+  if (backendStartupReady && firstScreenRendered) {
+    startupTimer.end('后端就绪且首屏渲染完成')
+  }
+}
+backend.onFirstReady(() => {
+  backendStartupReady = true
+  tryEndStartup()
+})
+
+// U盘自动打开 IPC：与原先一致在模块加载阶段注册（不依赖 app ready）
+usb.registerUsbIpc()
+
+// 版本更新 IPC：与原先一致在模块加载阶段注册。状态广播只发给主窗口（与旧实现一致，
+// 内部自带判空 + isDestroyed），故把出口函数注入 updater。
+updater.registerUpdateIpc((payload) => {
+  if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send('from-main', payload)
+})
+
+// 文件/文件夹对话框与本地文件读写 IPC：与其余模块一致在模块加载阶段注册
+dialogs.registerDialogsIpc({
+  getMainWindow: () => mainWindow,
+  getWidgetWindow: () => widget.getWidgetWindow(),
+})
+
+// 常用软件（选择文件 + 启动）IPC
+apps.registerAppsIpc({ getMainWindow: () => mainWindow })
+
+// 性能面板 IPC + 内存采样（窗口/后端句柄以 getter 注入，调用时取当前值）
+perf.registerPerfIpc({
+  getMainWindow: () => mainWindow,
+  getWidgetWindow: () => widget.getWidgetWindow(),
+  getDesktopWidgetWindow: () => widget.getDesktopWidgetWindow(),
+  setDesktopWidgetWindow: (w) => widget.setDesktopWidgetWindow(w),
+  getMigrationWindow: () => migrationWindow,
+  getSetupWindow: () => setupWindow,
+  getBackendProcess: () => backend.getBackendProcess(),
+  isBackendReady: () => backend.isBackendReady(),
+  isDesktopEnabled: () => widget.isDesktopEnabled(),
+  hideWidgetWindow: () => widget.hideWidgetWindow(),
+  showWidgetWindow: () => widget.showWidgetWindow(),
+  createDesktopWidgetWindow: () => widget.createDesktopWidgetWindow(),
+})
+
+// 托盘 + 无边框窗口控制 + 关闭确认菜单（窗口/重建入口以 getter 注入）
+tray.registerTrayIpc({
+  getMainWindow: () => mainWindow,
+  getWidgetWindow: () => widget.getWidgetWindow(),
+  getDesktopWidgetWindow: () => widget.getDesktopWidgetWindow(),
+  createMainWindow,
+})
+
+// 后端生命周期 IPC（restart-backend / backend-failure / probe-backend / backend-status / boot-status）
+// 广播目标窗口以 getter 注入，调用时取当前值
+backend.registerBackendIpc({
+  getMainWindow: () => mainWindow,
+  getWidgetWindow: () => widget.getWidgetWindow(),
+  getDesktopWidgetWindow: () => widget.getDesktopWidgetWindow(),
+  getMigrationWindow: () => migrationWindow,
+  getSetupWindow: () => setupWindow,
+})
+
+// 工具箱浮窗 / 桌面小组件 IPC（widgets-ready / widget-* / to-widget / to-main 等）
+// 主窗口引用以 getter 注入，开发用「就绪后再导航」加载器以闭包注入
+widget.registerWidgetIpc({
+  getMainWindow: () => mainWindow,
+  loadUrlWithRetry,
+})
 
 // 单实例锁：防止手快点多次图标导致同时跑出多个应用实例。
 // 第一个实例拿到锁；后续实例 requestSingleInstanceLock 返回 false，直接退出，
@@ -183,7 +147,7 @@ const gotSingleInstanceLock = app.requestSingleInstanceLock()
 // 用户又尝试启动一次（重复点击图标/快捷键）时，唤起已存在的主窗口而不是新开
 app.on('second-instance', () => {
   // 用户又点了一次图标：有主窗口就唤起，没有（已关闭进托盘）就重建
-  destroyTray()
+  tray.destroyTray()
   if (mainWindow && !mainWindow.isDestroyed()) {
     if (mainWindow.isMinimized()) mainWindow.restore()
     mainWindow.show()
@@ -222,7 +186,7 @@ function loadUrlWithRetry(win, url, retries = 150, intervalMs = 200) {
     res.resume() // 消耗响应体，避免内存泄漏
     if (win.isDestroyed()) return
     console.log(`[Electron] 开发服务器就绪，开始加载 ${url}`)
-    setBootStatus('开发服务器已就绪，正在加载界面…')
+    backend.setBootStatus('开发服务器已就绪，正在加载界面…')
     win.loadURL(url).catch((err) => {
       console.error(`[Electron] 加载 ${url} 失败:`, err.message)
     })
@@ -285,7 +249,7 @@ function pollViteAndNavigate(win, retries = 40) {
   const req = http.get('http://127.0.0.1:5173/', (res) => {
     res.resume() // 消耗响应体，避免内存泄漏
     startupTimer.mark('Vite 就绪，开始跳转')
-    setBootStatus('开发服务器已就绪，正在加载界面…')
+    backend.setBootStatus('开发服务器已就绪，正在加载界面…')
     if (win && !win.isDestroyed()) {
       win.loadURL('http://127.0.0.1:5173/')
       // INP 测量时不开 DevTools：停靠的 DevTools 会改变内容区尺寸并叠加额外 CDP 开销，
@@ -308,13 +272,9 @@ function pollViteAndNavigate(win, retries = 40) {
 // （标题栏显示应用名），避免原生标题栏与侧边栏标题重复。边框类型不再随主题切换。
 function createMainWindow() {
   // 主窗口（重）建时移除托盘图标：主窗口已恢复，无需再驻留托盘
-  destroyTray()
-  // （新窗口）关闭菜单状态复位：allowMainClose 不会在旧窗口关闭后自动清掉，
-  // 若不清零，重建后的新主窗口点关闭会被静默放行、不再弹菜单。
-  allowMainClose = false
-  shutdownMenuOpen = false
-  // 新窗口渲染层未加载完成，待其 ready 回报后才允许渲染层接管关闭菜单
-  mainRendererShutdownReady = false
+  tray.destroyTray()
+  // （新窗口）关闭菜单状态复位（allowMainClose / shutdownMenuOpen / mainRendererShutdownReady）
+  tray.resetShutdownState()
   const isFrameless = true
   mainWindowChrome = 'frameless'
   const win = new BrowserWindow({
@@ -367,7 +327,7 @@ function createMainWindow() {
 
   if (isDev) {
     // 第一步：加载本地 inline 页面，窗口立即显示（< 1s）
-    setBootStatus('正在启动开发服务器…')
+    backend.setBootStatus('正在启动开发服务器…')
     win.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(devLoadingHtml())}`)
     startupTimer.mark('开始加载 loading 页面')
     // loading 页首帧只作计时标记，不阻塞下面的 Vite 轮询
@@ -378,16 +338,29 @@ function createMainWindow() {
     // 就绪后自动跳转。Vite 已在运行时可直接跳转，省下等 loading 页加载的数百毫秒。
     pollViteAndNavigate(win)
   } else {
-    setBootStatus('正在加载界面…')
+    backend.setBootStatus('正在加载界面…')
     win.loadURL('app://local/index.html')
   }
 
   // 监听渲染进程的 [startup] 日志，记录 Vue 挂载等首屏耗时。
   // 开发模式的 Vite 页面在跳转后才生效，此监听同样覆盖。
+  // 仅记录「首次加载」：重启前端（webContents.reload）会重新打这些日志，若继续记录，
+  // 其 elapsed 以主进程已运行的时长为基准，会把重启前的时间也一并算进启动耗时——故首屏完成后停收。
+  let rendererStartupLogged = false
   win.webContents.on('console-message', (event, level, message) => {
+    if (rendererStartupLogged) return
     if (message.startsWith('[startup]')) {
       startupTimer.mark(message.replace('[startup] ', ''))
+      // 首屏渲染完成：Vue 挂载结束（启动锚点条件之一，见 tryEndStartup）
+      if (message.includes('Vue 挂载完成')) {
+        firstScreenRendered = true
+        tryEndStartup()
+      }
     }
+  })
+  // 非 data: 页面（真正的应用首屏）加载完成 → 首屏日志已收完，之后的重载不再计入启动时间线
+  win.webContents.on('did-finish-load', () => {
+    if (!win.webContents.getURL().startsWith('data:')) rendererStartupLogged = true
   })
 
   // 首帧渲染完成后再显示窗口，消除「先露出一层空亚克力（或白屏）再渲染」的启动观感。
@@ -400,6 +373,7 @@ function createMainWindow() {
   // 用局部 win 判断/显示，避免重建时 mainWindow 被旧窗口 closed 置空导致新窗口无法显示。
   win.once('ready-to-show', () => {
     startupTimer.mark('ready-to-show（窗口首次显示）')
+    // 启动锚点不在此处：改为「后端就绪 + 首屏渲染完成」两者满足时（见 tryEndStartup）。
     clearTimeout(win.__revealTimer)
     // 显示前再次确认系统亚克力材质（隐藏状态下创建时材质可能尚未生效），
     // 确保窗口出现的那一刻就是「毛玻璃 + 内容」，而不是一层空底色。
@@ -410,15 +384,7 @@ function createMainWindow() {
   // 覆盖系统 ✕ 与无边框自绘标题栏的关闭按钮（二者最终都触发 close 事件）。
   // 正在整体退出（app.quit）或用户已在菜单里选定关闭主窗口时不拦截。
   win.on('close', (e) => {
-    if (app.isQuitting || allowMainClose) return
-    e.preventDefault()
-    if (shutdownMenuOpen) return
-    shutdownMenuOpen = true
-    // 关闭菜单由渲染层（主页面）弹出，复用现有弹窗组件与动画；
-    // 仅当渲染层尚未就绪/不可用时回退到主进程原生菜单。
-    if (!requestShutdownMenu(win)) {
-      showShutdownMenu(win) // —— 由 requestShutdownMenu 内部针对未就绪的情况再置回 false
-    }
+    tray.handleMainClose(e, win)
   })
 
   win.on('closed', () => {
@@ -429,929 +395,15 @@ function createMainWindow() {
   })
 }
 
-// 小组件窗口四周留出的阴影绘制边距（px）。
-// 渲染层用同值 padding 让「视觉内容」贴回原位置，因此窗口比内容大 2*M，且窗口位置相对视觉位置偏移 -M。
-const WIDGET_SHADOW_MARGIN = 16
-
-function createWidgetWindow() {
-  widgetWindow = new BrowserWindow({
-    width: 48 + WIDGET_SHADOW_MARGIN * 2,
-    height: 48 + WIDGET_SHADOW_MARGIN * 2,
-    frame: false,
-    transparent: true,
-    alwaysOnTop: true,
-    skipTaskbar: true,
-    resizable: false,
-    hasShadow: false,
-    maximizable: false,
-    minimizable: false,
-    fullscreenable: false,
-    webPreferences: {
-      preload: path.join(__dirname, 'preload.js'),
-      contextIsolation: true,
-      nodeIntegration: false,
-      sandbox: true,
-      additionalArguments: ['--secure-channel'],
-      webSecurity: !isDev,
-      // 后台节流：与主窗口一致关掉，确保持续重绘、亚克力/毛玻璃不因失焦变灰
-      backgroundThrottling: false,
-      spellcheck: false,
-      devTools: isDev,
-    }
-  })
-
-  // 初始位置：屏幕左边缘中间（窗口相对视觉位置偏移 -M，让图标仍贴在左边缘）
-  const { height: screenH } = require('electron').screen.getPrimaryDisplay().workAreaSize
-  widgetWindow.setPosition(-WIDGET_SHADOW_MARGIN, Math.round(screenH / 2 - 24) - WIDGET_SHADOW_MARGIN)
-
-  if (process.platform === 'darwin') {
-    widgetWindow.setWindowButtonVisibility(false)
-  }
-
-  if (isDev) {
-    loadUrlWithRetry(widgetWindow, 'http://127.0.0.1:5173/widget.html')
-  } else {
-    widgetWindow.loadURL('app://local/widget.html')
-  }
-
-  widgetWindow.on('blur', () => {
-    if (widgetWindow && !widgetWindow.isDestroyed()) {
-      widgetWindow.webContents.send('from-main', { type: 'blur' })
-    }
-  })
-
-  // 窗口被拖动后做边界保护（防止完全拖出屏幕）
-  widgetWindow.on('moved', () => {
-    if (widgetWindow && !widgetWindow.isDestroyed()) {
-      const [x, y] = widgetWindow.getPosition()
-      const [width, height] = currentWidgetSize
-      const { width: screenW, height: screenH } = require('electron').screen.getPrimaryDisplay().workAreaSize
-
-      let newX = x
-      let newY = y
-      const minVisible = 50
-      newX = Math.max(-width + minVisible, Math.min(newX, screenW - minVisible))
-      newY = Math.max(-height + minVisible, Math.min(newY, screenH - minVisible))
-
-      if (newX !== x || newY !== y) {
-        widgetWindow.setPosition(newX, newY)
-      }
-    }
-  })
-
-  // 身份守卫：重启小组件时旧窗口的 closed 可能晚于新窗口创建触发，
-  // 若不加判断会把刚建好的新引用置空（mainWindow 已是这种写法）。
-  const self = widgetWindow
-  widgetWindow.on('closed', () => {
-    if (widgetWindow === self) widgetWindow = null
-  })
-}
-
-// 上次工具箱浮窗的位置：销毁窗口前记下，重建时恢复，避免「关掉再打开」跳回屏幕左侧中间
-let lastWidgetBounds = null
-
-// 工具箱浮窗的会话级显隐：隐藏即销毁，避免渲染进程常驻占用内存（约 20MB 量级）。
-// 重新启用时按需重建并恢复上次位置；重建后浮窗自身会重新拉取状态，无需外部还原。
-function hideWidgetWindow() {
-  if (!widgetWindow || widgetWindow.isDestroyed()) return
-  try { lastWidgetBounds = widgetWindow.getBounds() } catch (_) { /* 忽略 */ }
-  try { widgetWindow.destroy() } catch (_) { /* 忽略 */ }
-  widgetWindow = null
-}
-
-function showWidgetWindow() {
-  if (!widgetWindow || widgetWindow.isDestroyed()) {
-    createWidgetWindow()
-    if (lastWidgetBounds && widgetWindow && !widgetWindow.isDestroyed()) {
-      try { widgetWindow.setPosition(lastWidgetBounds.x, lastWidgetBounds.y) } catch (_) { /* 忽略 */ }
-    }
-  }
-  if (widgetWindow && !widgetWindow.isDestroyed()) widgetWindow.show()
-}
-
-// 创建桌面小组件：常驻桌面、鼠标穿透、不挡应用
-function createDesktopWidgetWindow() {
-  if (desktopWidgetWindow && !desktopWidgetWindow.isDestroyed()) return
-  desktopWidgetWindow = new BrowserWindow({
-    width: 320,
-    height: 540,
-    frame: false,
-    // 不用 transparent（透明窗口会禁用系统背景材质）；改用不透明 + backgroundMaterial，
-    // 系统材质绘制在窗口背景上，渲染层半透明元素透出磨砂，与主窗口方案一致。
-    transparent: false,
-    backgroundMaterial: 'acrylic',
-    backgroundColor: '#f0f4f8',
-    alwaysOnTop: false,
-    skipTaskbar: true,
-    resizable: false,
-    hasShadow: false,
-    maximizable: false,
-    minimizable: false,
-    fullscreenable: false,
-    show: true,
-    webPreferences: {
-      preload: path.join(__dirname, 'preload.js'),
-      contextIsolation: true,
-      nodeIntegration: false,
-      sandbox: true,
-      additionalArguments: ['--secure-channel'],
-      webSecurity: !isDev,
-      // 后台节流：与主窗口一致关掉，确保持续重绘、亚克力/毛玻璃不因失焦变灰
-      backgroundThrottling: false,
-      spellcheck: false,
-      devTools: true,
-    }
-  })
-
-  // Windows 系统原生背景材质：BackgroundMaterial 已随窗口创建时配置，此处再次确认应用。
-  if (process.platform === 'win32') {
-    applyBackgroundMaterial(desktopWidgetWindow, 'acrylic')
-  }
-  // 初始位置：屏幕右上角，高度接近屏幕高度
-  const { width: screenW, height: screenH } = screen.getPrimaryDisplay().workAreaSize
-  const widgetHeight = Math.round(screenH * 0.95)
-  desktopWidgetWindow.setContentSize(320, widgetHeight)
-  desktopWidgetWindow.setPosition(screenW - 340, Math.round((screenH - widgetHeight) / 2))
-
-  if (process.platform === 'darwin') {
-    desktopWidgetWindow.setWindowButtonVisibility(false)
-  }
-
-  if (isDev) {
-    desktopWidgetWindow.loadURL('http://127.0.0.1:5173/desktop-widget.html')
-  } else {
-    desktopWidgetWindow.loadURL('app://local/desktop-widget.html')
-  }
-
-  const self = desktopWidgetWindow
-  desktopWidgetWindow.on('closed', () => {
-    if (desktopWidgetWindow === self) desktopWidgetWindow = null
-  })
-}
-
-// 后端日志文件：位于用户数据目录，用于持久化记录后端启动/崩溃原因，方便排查无需再抓终端
-let backendLogStream = null
-
-function getBackendLogPath() {
-  return path.join(app.getPath('userData'), 'data', 'backend.log')
-}
-
-function ensureBackendLogStream() {
-  if (backendLogStream) return
-  try {
-    const logPath = getBackendLogPath()
-    fs.mkdirSync(path.dirname(logPath), { recursive: true })
-    backendLogStream = fs.createWriteStream(logPath, { flags: 'a' })
-    fs.appendFileSync(logPath, `\n===== Electron 启动后端 @ ${new Date().toISOString()} =====\n`)
-  } catch (err) {
-    console.error('[main] 无法创建后端日志文件:', err.message)
-  }
-}
-
-function backendLog(text) {
-  ensureBackendLogStream()
-  if (backendLogStream) backendLogStream.write(text)
-  process.stdout.write(`[backend] ${text}`)
-}
-
-let backendRestartCount = 0
-let backendRestartTimer = null
-
-// ===== 运行期心跳（检测「假死」）=====
-// 后端可能「假死」：进程还在，但事件循环被同步操作（如 better-sqlite3 慢查询/锁等待）卡住，
-// 既不退出也不响应。exit 事件不会触发，只能靠主进程主动探测。
-// 每 30s 发一次 ping，单次等待 pong 上限 4s，连续 2 次无响应（约 1 分钟）才判定异常 ——
-// 给合法长任务留足余量，避免误判后重启进程打断写库。
-// 安全余量 = 间隔 × 次数，两个旋钮可互换：这里取「低频 + 少次」，误杀窗口约 1 分钟。
-// 代价是纯周期检测最坏要等 ~1 分钟，所以另有「请求失败触发即时探测」兜住体验（见 probe-backend）。
-const HEARTBEAT_INTERVAL = 30000
-const HEARTBEAT_TIMEOUT = 4000
-const HEARTBEAT_FAIL_LIMIT = 2
-// 运行期崩溃测试开关（SIM_BACKEND_CRASH，默认关闭）：
-//   once — 后端就绪 N 秒后杀掉它，重连的实例正常 → 验证「提示条 → 自动恢复」
-//   dead — 同上，但此后重连实例的就绪上报一律忽略 → 验证「5 次失败 → 全屏失败页」
-const SIM_BACKEND_CRASH = process.env.SIM_BACKEND_CRASH || ''
-const SIM_BACKEND_CRASH_MS = Number(process.env.SIM_BACKEND_CRASH_MS) || 5000
-let simCrashFired = false
-// 运行期异常后最多重连 5 次，仍失败则复用「启动失败」页面（重启后端 / 退出应用）
-const RECONNECT_MAX = 5
-// dead 模式下必然等不到就绪，缩短单次等待让测试更快走到全屏
-const RECONNECT_READY_TIMEOUT = SIM_BACKEND_CRASH === 'dead' ? 3000 : 10000
-let heartbeatTimer = null
-let heartbeatAwaitTimer = null
-let heartbeatPending = false
-let heartbeatFailStreak = 0
-let heartbeatRunning = false
-let reconnecting = false
-// 一次性即时探测（probe-backend）的状态：与周期性心跳互不干扰
-let probeWaiter = null
-let probing = false
-// 性能面板：后端内存自报 / GC 的一次性等待者（各自独立，别复用 probeWaiter）
-let memWaiter = null
-let gcWaiter = null
-
-// 后端就绪检测：仅用于 stdout 分片匹配 + 日志，不再作为建窗信号
-// （主窗口在 whenReady 后立即创建，与后端并行启动）
-let readyBuffer = ''
-
-// 项目根目录（含 node_modules 里的 electron 等）
-const appRootDir = path.join(__dirname, '..')
-
-function getBackendPaths() {
-  const backendDir = isDev
-    ? path.join(appRootDir, 'student-backend')
-    : path.join(process.resourcesPath, 'app.asar.unpacked', 'student-backend')
-  const backendPath = path.join(backendDir, 'app.js')
-  return { backendDir, backendPath }
-}
-
-// 开发模式子进程：使用系统 node（child_process.fork）。开发环境本就安装 Node，
-// 用它启动稳定、可打印「服务器已启动」，也避免 Electron 内置 Node 在开发机上
-// 的 crashpad 进程级崩溃。
-// 打包模式子进程：child_process.fork + execPath=electron.exe + ELECTRON_RUN_AS_NODE=1，
-// 以 Electron 内置 Node 的纯 Node 模式运行后端，目标机无需安装 Node.js，
-// 实现免依赖分发（原生模块已通过 @electron/rebuild 针对 Electron ABI 重编译）。
-function compileBackendProcess() {
-  const { backendDir, backendPath } = getBackendPaths()
-  const dataDir = resolveDataDir()
-  const thumbsDir = resolveThumbsDir()
-  fs.mkdirSync(dataDir, { recursive: true })
-  fs.mkdirSync(thumbsDir, { recursive: true })
-
-  // 统一的输出/退出处理
-  const onData = (chunk) => {
-    backendLog(chunk)
-    detectBackendReady(chunk)
-  }
-  const onErrData = (chunk) => {
-    ensureBackendLogStream()
-    if (backendLogStream) backendLogStream.write(`[err] ${chunk}`)
-    process.stderr.write(`[backend:err] ${chunk}`)
-  }
-  const onProcessorError = (err) => {
-    const msg = `后端启动失败(error): ${err?.message || err}\n`
-    ensureBackendLogStream()
-    if (backendLogStream) backendLogStream.write(`[fatal] ${msg}`)
-    console.error('[main]', msg)
-  }
-  const onExit = (code, signal) => {
-    const msg = `后端进程退出，码: ${code}, signal: ${signal} @ ${new Date().toISOString()}\n`
-    ensureBackendLogStream()
-    if (backendLogStream) backendLogStream.write(`[exit] ${msg}`)
-    console.log(`[main] ${msg}`)
-  }
-  const onDisconnect = () => {
-    const msg = `后端进程已断开连接 @ ${new Date().toISOString()}\n`
-    ensureBackendLogStream()
-    if (backendLogStream) backendLogStream.write(`[disconnect] ${msg}`)
-    console.log(`[main] ${msg}`)
-  }
-
-  if (isDev) {
-    // 开发模式：托管系统 node。注意：Electron 主进程中 child_process.fork 默认
-    // execPath 是 process.execPath（electron.exe），会导致子进程用 Electron 内置
-    // Node 运行后端并崩溃。必须显式指定系统 node 的可执行文件路径。
-    // 用异步 exec 探测系统 node（而非 execFileSync 同步阻塞主线程），
-    // 让后端 fork 与 createMainWindow 的初始化真正并行推进。
-    const { fork, execFile } = require('child_process')
-    const spawnDev = (execPath) => {
-      const child = fork(backendPath, [], {
-        cwd: backendDir,
-        execPath,
-        // 性能面板：让后端进程也暴露 global.gc，用于「回收」按钮
-        execArgv: ['--expose-gc'],
-        stdio: ['ignore', 'pipe', 'pipe', 'ipc'],
-        env: {
-          ...process.env,
-          DATA_DIR: dataDir,
-          ALBUM_THUMBS_DIR: thumbsDir,
-          SECURE_MASTER: getMasterKey(),
-          DB_MASTER_KEY: getDbMasterKey(),
-          // 后端模块编译缓存：让后续启动跳过 require 模块的解析 + 编译
-          NODE_COMPILE_CACHE: resolveCompileCacheDir(),
-        },
-      })
-      backendProcess = child
-      child.stdout?.on('data', onData)
-      child.stderr?.on('data', onErrData)
-      child.on('error', onProcessorError)
-      child.on('exit', onExit)
-      child.on('exit', scheduleBackendRestart)
-      child.on('disconnect', onDisconnect)
-      child.on('message', onBackendMessage)
-    }
-    if (process.env.NODE_EXEC_PATH) {
-      spawnDev(process.env.NODE_EXEC_PATH)
-      return
-    }
-    // 探测结果缓存到 userData：避免每次 dev 启动都先 spawn 一个 node 去问自己的路径
-    //（约 0.3–1s）。缓存的路径失效（node 被卸载/移动）时自动回退到重新探测。
-    const nodePathCache = path.join(app.getPath('userData'), 'dev-node-path.txt')
-    try {
-      const cached = fs.readFileSync(nodePathCache, 'utf8').trim()
-      if (cached && fs.existsSync(cached)) {
-        console.log('[main] 复用缓存的 node 路径:', cached)
-        spawnDev(cached)
-        return
-      }
-    } catch (_) { /* 无缓存，走探测 */ }
-    execFile('node', ['-p', 'process.execPath'], { encoding: 'utf8' }, (err, out) => {
-      const execPath = err ? 'node' : out.trim()
-      if (!err) {
-        try { fs.writeFileSync(nodePathCache, execPath) } catch (_) { /* 写缓存失败不影响启动 */ }
-      }
-      spawnDev(execPath)
-    })
-    return
-  }
-
-  // 打包模式：用 Electron 内置 Node 以「纯 Node 模式」运行后端。
-  // 关键：execPath 指向 process.execPath（electron.exe）+ ELECTRON_RUN_AS_NODE=1，
-  // 让子进程以纯 Node.js 运行时启动，不连接 Electron crashpad，也不初始化界面，
-  // 因此不会出现 utilityProcess 在 Windows 上的「not connected」进程级崩溃。
-  // 原生模块已针对 Electron ABI 重编译（@electron/rebuild），目标机无需安装 Node.js。
-  const { fork } = require('child_process')
-  backendProcess = fork(backendPath, [], {
-    cwd: backendDir,
-    execPath: process.execPath,
-    // 性能面板：让后端进程也暴露 global.gc，用于「回收」按钮
-    execArgv: ['--expose-gc'],
-    stdio: ['ignore', 'pipe', 'pipe', 'ipc'],
-    env: {
-      ...process.env,
-      DATA_DIR: dataDir,
-      ALBUM_THUMBS_DIR: thumbsDir,
-      ELECTRON_RUN_AS_NODE: '1',
-      SECURE_MASTER: getMasterKey(),
-      DB_MASTER_KEY: getDbMasterKey(),
-      // 后端模块编译缓存：让后续启动跳过 require 模块的解析 + 编译
-      NODE_COMPILE_CACHE: resolveCompileCacheDir(),
-    },
-  })
-
-  backendProcess.stdout?.on('data', onData)
-  backendProcess.stderr?.on('data', onErrData)
-  backendProcess.on('error', onProcessorError)
-  backendProcess.on('exit', onExit)
-  backendProcess.on('exit', scheduleBackendRestart)
-  backendProcess.on('disconnect', onDisconnect)
-  backendProcess.on('message', onBackendMessage)
-}
-
-function startBackend() {
-  // 重启保护：仅当应用仍在运行时才重启，且限制最多 10 次，避免无限崩溃循环刷屏
-  if (backendRestartCount >= 10) {
-    const msg = `后端在启动阶段连续崩溃 ${backendRestartCount} 次，已停止自动重启。请查看日志：${getBackendLogPath()}\n`
-    ensureBackendLogStream()
-    if (backendLogStream) backendLogStream.write(`[fatal] ${msg}`)
-    console.error(`[main] ${msg}`)
-    // 自动重启用尽：直接进入失败态，让用户能手动重试或退出，而不是静默卡在加载页
-    markBackendFailed()
-    return
-  }
-
-  ensureBackendLogStream()
-  backendLog(`[main] 正在启动后端 (第 ${backendRestartCount + 1} 次)...\n`)
-
-  // 每次 fork 前复位就绪标记：重启期间前端应重新等待新的 backend-ready
-  backendReady = false
-  setBootStatus('正在启动本地服务…')
-  armBackendFailWatchdog()
-  compileBackendProcess()
-}
-
-// 启动阶段状态：加载页（inline loading 页 / setup.html 占位）的灰色副标题实时显示
-// 「程序正在干嘛」。渲染层订阅 from-main 的 boot-status 事件，也可用 boot-status 查询兜住
-// 「页面先加载、状态后更新」的竞态。文案只在变化时广播。
-let bootStatusText = ''
-function setBootStatus(text) {
-  if (!text || text === bootStatusText) return
-  bootStatusText = text
-  const wins = [mainWindow, widgetWindow, desktopWidgetWindow, migrationWindow, setupWindow]
-  for (const w of wins) {
-    try { if (w && !w.isDestroyed()) w.webContents.send('from-main', { type: 'boot-status', text }) } catch (_) { /* 忽略 */ }
-  }
-}
-
-// 后端子进程消息：心跳应答（pong）与就绪上报（backend-ready）。
-// 就绪后广播给所有已存在的渲染窗口（广播 + backend-status 查询两者并存：广播覆盖
-// 「窗口先存在」，查询覆盖「窗口后加载」）
-function onBackendMessage(msg) {
-  if (!msg) return
-  // 心跳应答：清掉等待计时并复位连续失败计数
-  if (msg.type === 'pong') {
-    heartbeatPending = false
-    heartbeatFailStreak = 0
-    clearTimeout(heartbeatAwaitTimer)
-    heartbeatAwaitTimer = null
-    // 同时唤醒可能正在等待的即时探测
-    if (probeWaiter) probeWaiter(true)
-    return
-  }
-  // 性能面板：唤醒后端内存自报等待者
-  if (msg.type === 'mem-report') {
-    if (memWaiter) memWaiter(msg.mem || null)
-    return
-  }
-  // 性能面板：唤醒后端 GC 等待者
-  if (msg.type === 'gc-report') {
-    if (gcWaiter) gcWaiter(!!msg.ok)
-    return
-  }
-  if (msg.type !== 'backend-ready') return
-  // 测试开关：SIM_BACKEND_FAIL 下故意忽略就绪上报，模拟「后端一直起不来」，用于验证失败提示
-  if (process.env.SIM_BACKEND_FAIL) return
-  // dead 模式：首次崩溃之后，重连实例的就绪上报全部忽略 → 重连必然超时失败 → 走满 5 次进全屏
-  if (SIM_BACKEND_CRASH === 'dead' && simCrashFired) return
-  backendReady = true
-  // 已成功启动过：累计的重启计数清零，避免长生命周期里累计到上限后不再自动恢复
-  backendRestartCount = 0
-  clearBackendFailure()
-  setBootStatus('本地服务已就绪')
-  startHeartbeat()
-  if (SIM_BACKEND_CRASH) armSimCrash()
-  // 唤醒主进程侧「等后端就绪」的等待者（引导页的 detectFirstRun / runSetupWarmup 等）
-  for (const fn of [...backendReadyWaiters]) fn()
-  const wins = [mainWindow, widgetWindow, desktopWidgetWindow, migrationWindow, setupWindow]
-  for (const w of wins) {
-    try { if (w && !w.isDestroyed()) w.webContents.send('from-main', { type: 'backend-ready' }) } catch (_) { /* 忽略 */ }
-  }
-}
-
-// 后端子进程退出（非主动停止）→ 走与心跳异常相同的重连流程。
-// 用一个短延迟把退出与重连解耦，避免同一个 exit 触发多次重连。
-// 绑定发生在「实际 fork 成立后」（见 compileBackendProcess 内两种 fork 分支），
-// 兼容开发模式下「异步探测 system node 后才 fork」的场景。
-function scheduleBackendRestart() {
-  clearTimeout(backendRestartTimer)
-  backendRestartTimer = setTimeout(() => {
-    if (app.isQuitting || reconnecting) return
-    backendProcess = null
-    handleBackendDown('后端进程意外退出')
-  }, 1500)
-}
-
-// ===== 启动失败兜底 =====
-// 场景一：后端进程不退出但始终起不来（如端口被占，后端自身在无限重试）→ 靠看门狗超时判定。
-// 场景二：后端反复崩溃、自动重启次数用尽（见 startBackend）→ 直接判定。
-// 判定后广播 backend-failed，启动占位页显示「重启后端 / 退出应用」；后端恢复时广播 failed:false。
-function broadcastBackendFailed(failed) {
-  const wins = [mainWindow, widgetWindow, desktopWidgetWindow, migrationWindow, setupWindow]
-  for (const w of wins) {
-    try { if (w && !w.isDestroyed()) w.webContents.send('from-main', { type: 'backend-failed', failed }) } catch (_) { /* 忽略 */ }
-  }
-}
-
-function markBackendFailed() {
-  if (backendFailed) return
-  backendFailed = true
-  clearTimeout(backendFailTimer)
-  backendFailTimer = null
-  backendLog('[main] 后端启动失败（超时或自动重启用尽），已提示用户重试或退出\n')
-  setBootStatus('本地服务启动失败')
-  broadcastBackendFailed(true)
-}
-
-function clearBackendFailure() {
-  clearTimeout(backendFailTimer)
-  backendFailTimer = null
-  if (!backendFailed) return
-  backendFailed = false
-  broadcastBackendFailed(false)
-}
-
-function armBackendFailWatchdog() {
-  clearTimeout(backendFailTimer)
-  backendFailTimer = setTimeout(() => {
-    if (app.isQuitting || backendReady) return
-    markBackendFailed()
-  }, BACKEND_FAIL_TIMEOUT)
-}
-
-// ===== 运行期心跳 + 重连 =====
-// 探测：每 HEARTBEAT_INTERVAL 发一次 ping，单次等待 HEARTBEAT_TIMEOUT；
-// 连续 HEARTBEAT_FAIL_LIMIT 次超时判定后端异常（假死），进入重连流程。
-function startHeartbeat() {
-  if (heartbeatRunning) return
-  heartbeatRunning = true
-  heartbeatFailStreak = 0
-  heartbeatPending = false
-  clearInterval(heartbeatTimer)
-  clearTimeout(heartbeatAwaitTimer)
-  heartbeatTimer = setInterval(heartbeatTick, HEARTBEAT_INTERVAL)
-}
-
-function stopHeartbeat() {
-  heartbeatRunning = false
-  heartbeatPending = false
-  heartbeatFailStreak = 0
-  clearInterval(heartbeatTimer)
-  clearTimeout(heartbeatAwaitTimer)
-  heartbeatTimer = null
-  heartbeatAwaitTimer = null
-}
-
-function heartbeatTick() {
-  if (app.isQuitting || reconnecting || heartbeatPending) return
-  const proc = backendProcess
-  if (!proc) return
-  heartbeatPending = true
-  try {
-    proc.send({ type: 'ping', t: Date.now() })
-  } catch (_) {
-    heartbeatPending = false
-    return
-  }
-  clearTimeout(heartbeatAwaitTimer)
-  heartbeatAwaitTimer = setTimeout(() => {
-    if (app.isQuitting || reconnecting || !heartbeatPending) return
-    heartbeatPending = false
-    // 进程已被替换（主动重启 / 迁移中停后端 / 已崩走重连），本次超时不计入
-    if (proc !== backendProcess) return
-    heartbeatFailStreak += 1
-    backendLog(`[main] 后端心跳超时（第 ${heartbeatFailStreak}/${HEARTBEAT_FAIL_LIMIT} 次）\n`)
-    if (heartbeatFailStreak >= HEARTBEAT_FAIL_LIMIT) handleBackendDown('后端无响应（疑似假死）')
-  }, HEARTBEAT_TIMEOUT)
-}
-
-// 运行期崩溃测试：就绪后 N 秒杀掉后端进程，模拟「跑着跑着后端崩了」，
-// 用来验证心跳/重连/全屏失败页整条链路。仅在设置 SIM_BACKEND_CRASH 时生效。
-function armSimCrash() {
-  if (simCrashFired) return
-  simCrashFired = true
-  backendLog(`[main] SIM_BACKEND_CRASH=${SIM_BACKEND_CRASH}：${SIM_BACKEND_CRASH_MS}ms 后杀掉后端\n`)
-  setTimeout(() => {
-    if (app.isQuitting) return
-    const proc = backendProcess
-    if (!proc) return
-    backendLog('[main] SIM：模拟后端崩溃\n')
-    try { proc.kill() } catch (_) { /* 忽略 */ }
-  }, SIM_BACKEND_CRASH_MS)
-}
-
-// 广播运行期重连状态：渲染层据此显示「后端异常，正在重新连接（n/5）」，恢复后隐藏
-function broadcastBackendReconnecting(active, attempt) {
-  const wins = [mainWindow, widgetWindow, desktopWidgetWindow, migrationWindow, setupWindow]
-  for (const w of wins) {
-    try { if (w && !w.isDestroyed()) w.webContents.send('from-main', { type: 'backend-reconnecting', active, attempt, max: RECONNECT_MAX }) } catch (_) { /* 忽略 */ }
-  }
-}
-
-// 后端异常（假死或意外退出）统一入口：最多重连 RECONNECT_MAX 次，每次 fork 后等就绪信号，
-// 任一次成功即恢复心跳并广播解除提示；全部失败则复用「启动失败」页面（重启后端 / 退出应用）。
-async function handleBackendDown(reason) {
-  if (reconnecting || app.isQuitting) return
-  reconnecting = true
-  stopHeartbeat()
-  backendLog(`[main] ${reason}，开始重连（最多 ${RECONNECT_MAX} 次）\n`)
-  for (let attempt = 1; attempt <= RECONNECT_MAX; attempt++) {
-    if (app.isQuitting) { reconnecting = false; return }
-    broadcastBackendReconnecting(true, attempt)
-    setBootStatus(`后端异常，正在重新连接（${attempt}/${RECONNECT_MAX}）…`)
-    try { await stopBackendProcess() } catch (_) { /* 忽略 */ }
-    if (app.isQuitting) { reconnecting = false; return }
-    backendRestartCount = 0
-    startBackend()
-    setBootStatus(`后端异常，正在重新连接（${attempt}/${RECONNECT_MAX}）…`)
-    const ok = await waitForBackendReadySignal(RECONNECT_READY_TIMEOUT)
-    if (ok) {
-      // 就绪后 onBackendMessage 已重启心跳并广播 backend-ready
-      reconnecting = false
-      backendLog(`[main] 后端第 ${attempt} 次重连成功\n`)
-      broadcastBackendReconnecting(false, 0)
-      return
-    }
-    backendLog(`[main] 后端第 ${attempt} 次重连失败\n`)
-  }
-  reconnecting = false
-  broadcastBackendReconnecting(false, 0)
-  markBackendFailed()
-}
-
-// 用户点「重启后端」：复位重试计数与失败标记，先停掉旧进程再重新 fork，并重新武装看门狗
-ipcMain.handle('restart-backend', async () => {
-  clearBackendFailure()
-  backendRestartCount = 0
-  backendReady = false
-  try { await stopBackendProcess() } catch (_) { /* 忽略 */ }
-  startBackend()
-  return { ok: true }
-})
-
-// 失败态查询：兜住「主进程先失败、窗口后加载」的竞态
-ipcMain.handle('backend-failure', () => backendFailed)
-
-// 单次 ping：等 pong 回来的同时校验进程身份，避免把「已被替换的进程」算成成功
-function pingOnce(proc) {
-  return new Promise((resolve) => {
-    if (!proc || proc !== backendProcess) return resolve(false)
-    let timer = null
-    const finish = (v) => {
-      if (probeWaiter !== finish) return
-      probeWaiter = null
-      clearTimeout(timer)
-      resolve(v)
-    }
-    probeWaiter = finish
-    timer = setTimeout(() => finish(false), HEARTBEAT_TIMEOUT)
-    try { proc.send({ type: 'ping', t: Date.now() }) } catch (_) { finish(false) }
-  })
-}
-
-// 渲染层上报「请求没拿到响应」（连接被拒/中断）时调用：立刻做一次健康探测。
-// 把用户的每一次失败操作变成探针，不必等下一个 30s 心跳周期才发现后端不可达。
-// 探测成功 → 只是偶发（如请求被取消），不做任何处理；探测失败 → 后端确实不可达，立即走重连。
-// 启动阶段（backendReady 为假）一律不介入：那时该由启动看门狗与失败页负责，避免两套机制并行。
-ipcMain.handle('probe-backend', async () => {
-  if (app.isQuitting || !backendReady) return { ok: false, skipped: true }
-  if (reconnecting) return { ok: false, reconnecting: true }
-  if (probing) return { ok: false, skipped: true }
-  const proc = backendProcess
-  if (!proc) return { ok: false, reconnecting: true }
-  probing = true
-  let alive = false
-  try {
-    alive = await pingOnce(proc)
-  } finally {
-    probing = false
-  }
-  if (alive) return { ok: true }
-  backendLog('[main] 前端上报请求无响应，即时探测亦失败，进入重连\n')
-  // 不 await：立即把结果还给渲染层，重连在后台推进
-  handleBackendDown('后端不可达（前端请求失败触发）')
-  return { ok: false, reconnecting: true }
-})
-
-// ========== 性能面板 ==========
-// 向后端发消息做一次性查询（内存自报 / GC），照 pingOnce 的一次性等待者写法，
-// 但使用各自独立的 waiter 变量，避免与 probeWaiter / 心跳互相干扰。
-function queryBackendMemory(timeout = 1500) {
-  return new Promise((resolve) => {
-    const proc = backendProcess
-    if (!proc || !backendReady) return resolve(null)
-    let timer = null
-    const finish = (v) => {
-      if (memWaiter !== finish) return
-      memWaiter = null
-      clearTimeout(timer)
-      resolve(v)
-    }
-    memWaiter = finish
-    timer = setTimeout(() => finish(null), timeout)
-    try { proc.send({ type: 'mem-query' }) } catch (_) { finish(null) }
-  })
-}
-
-// 串行化后端内存查询：内存历史采样与面板快照可能并发，而二者共用同一个 memWaiter，
-// 不串行会让先发起的查询被覆盖而超时。这里用一条 Promise 链排队，保证同一时刻只有一个查询在途。
-let memQueryChain = Promise.resolve()
-function queryBackendMemorySerial(timeout = 1500) {
-  const run = () => queryBackendMemory(timeout)
-  const p = memQueryChain.then(run, run)
-  memQueryChain = p.then(() => {}, () => {})
-  return p
-}
-
-function queryBackendGc(timeout = 1500) {
-  return new Promise((resolve) => {
-    const proc = backendProcess
-    if (!proc || !backendReady) return resolve(null)
-    let timer = null
-    const finish = (v) => {
-      if (gcWaiter !== finish) return
-      gcWaiter = null
-      clearTimeout(timer)
-      resolve(v)
-    }
-    gcWaiter = finish
-    timer = setTimeout(() => finish(null), timeout)
-    try { proc.send({ type: 'gc-request' }) } catch (_) { finish(null) }
-  })
-}
-
-// 把 app.getAppMetrics() 的一条记录转成面板用的内存/CPU 结构。
-// 注意：只能在 app ready 后调用；memory.workingSetSize / privateBytes 单位为 KB。
-function metricToMem(m) {
-  return {
-    pid: m.pid,
-    workingSetKB: m.memory?.workingSetSize ?? null,
-    privateKB: m.memory?.privateBytes ?? null,
-    cpu: m.cpu?.percentCPUUsage ?? null,
-  }
-}
-
-// 通过 CDP 触发某个渲染进程的 GC；DevTools 已打开时 attach 会失败，整段吞掉异常
-async function collectRendererGarbage(wc) {
-  if (!wc || wc.isDestroyed()) return false
-  try {
-    wc.debugger.attach('1.3')
-  } catch (_) {
-    return false
-  }
-  try {
-    await wc.debugger.sendCommand('HeapProfiler.collectGarbage')
-    return true
-  } catch (_) {
-    return false
-  } finally {
-    try { wc.debugger.detach() } catch (_) { /* 断开失败忽略 */ }
-  }
-}
-
-// 收集逐进程内存列表（主进程 / 各渲染窗口 / GPU / 各服务进程 / 后端）。
-// 面板快照与内存历史采样共用，保证两处口径一致。
-async function collectProcList() {
-  // 渲染进程按所属窗口取友好名（同一 pid 后写覆盖，主窗口优先级最高）
-  const labelByPid = new Map()
-  const addWin = (label, win) => {
-    try {
-      if (win && !win.isDestroyed() && !win.webContents.isDestroyed()) {
-        labelByPid.set(win.webContents.getOSProcessId(), label)
-      }
-    } catch (_) { /* 忽略 */ }
-  }
-  addWin('迁移窗口', migrationWindow)
-  addWin('引导窗口', setupWindow)
-  addWin('桌面组件', desktopWidgetWindow)
-  addWin('小组件', widgetWindow)
-  addWin('前端窗口', mainWindow)
-
-  const procs = []
-  let metrics = []
-  try { metrics = app.getAppMetrics() } catch (_) { metrics = [] }
-
-  // 主进程
-  const browser = metrics.find((m) => m.type === 'Browser')
-  if (browser) procs.push({ key: 'main', name: '主进程', kind: 'main', ...metricToMem(browser) })
-
-  // 各渲染进程
-  for (const m of metrics.filter((x) => x.type === 'Tab')) {
-    procs.push({
-      key: `tab-${m.pid}`,
-      name: labelByPid.get(m.pid) || '渲染进程',
-      kind: 'renderer',
-      ...metricToMem(m),
-    })
-  }
-
-  // GPU 进程
-  for (const m of metrics.filter((x) => x.type === 'GPU')) {
-    procs.push({ key: `gpu-${m.pid}`, name: 'GPU 进程', kind: 'gpu', ...metricToMem(m) })
-  }
-
-  // 各服务进程（网络/存储/音频等，取 Chromium 给的服务名）
-  for (const m of metrics.filter((x) => x.type === 'Utility')) {
-    procs.push({
-      key: `util-${m.pid}`,
-      name: m.serviceName || m.name || '服务进程',
-      kind: 'utility',
-      ...metricToMem(m),
-    })
-  }
-
-  // 后端：Node 子进程不在 getAppMetrics 里，由它用 process.memoryUsage() 自报（字节 → KB）
-  const mem = await queryBackendMemorySerial()
-  if (mem) {
-    procs.push({
-      key: 'backend',
-      name: '后端',
-      kind: 'backend',
-      pid: backendProcess?.pid ?? null,
-      workingSetKB: Math.round((mem.rss || 0) / 1024),
-      // Node 不直接暴露「私有提交量」，用 V8 堆 + external（native 分配）近似，
-      // 以便与 Chromium 各进程的 privateBytes 口径对齐。
-      privateKB: Math.round(((mem.heapUsed || 0) + (mem.external || 0)) / 1024),
-      cpu: null,
-    })
-  }
-
-  // 内存口径统一改为「专用工作集」（与任务管理器「进程」页一致），逐进程按 pid 覆盖。
-  // 计数器不可用（非 Windows / koffi 缺失）时 privWsKB 留空，前端回退到 Electron 自带口径。
-  const pwMap = getPrivateWorkingSetKB()
-  if (pwMap) {
-    for (const p of procs) {
-      const kb = p.pid == null ? undefined : pwMap.get(p.pid)
-      if (typeof kb === 'number') p.privWsKB = Math.round(kb)
-    }
-  }
-  return procs
-}
-
-// 单个进程在面板采用的内存口径：优先专用工作集，回退私有提交量
-function procMemKB(p) {
-  if (typeof p.privWsKB === 'number') return p.privWsKB
-  if (typeof p.privateKB === 'number') return p.privateKB
-  return 0
-}
-
-// ========== 内存历史：总计 / 平均（近一分钟）/ 最高（自启动起）==========
-// 由主进程定时采样，不依赖设置页是否打开——「最高」自程序启动即开始统计。
-const MEM_SAMPLE_INTERVAL = 5000
-const MEM_AVG_WINDOW = 60000
-let memHistory = []        // [{ t, kb }]，仅保留近一分钟的样本
-let memMaxKB = 0           // 自启动以来的最高总计
-let memSampleTimer = null
-let memSampling = false
-
-function recordMemSample(kb) {
-  if (!kb || kb <= 0) return
-  const now = Date.now()
-  memHistory.push({ t: now, kb })
-  const cutoff = now - MEM_AVG_WINDOW
-  while (memHistory.length && memHistory[0].t < cutoff) memHistory.shift()
-  if (kb > memMaxKB) memMaxKB = kb
-}
-
-function memAvgKB() {
-  if (!memHistory.length) return 0
-  let sum = 0
-  for (const h of memHistory) sum += h.kb
-  return Math.round(sum / memHistory.length)
-}
-
-async function sampleMemTotal() {
-  if (memSampling) return
-  memSampling = true
-  try {
-    const procs = await collectProcList()
-    recordMemSample(procs.reduce((s, p) => s + procMemKB(p), 0))
-  } catch (_) { /* 采样失败静默忽略 */ }
-  finally { memSampling = false }
-}
-
-function startMemSampling() {
-  if (memSampleTimer) return
-  sampleMemTotal()
-  memSampleTimer = setInterval(sampleMemTotal, MEM_SAMPLE_INTERVAL)
-}
-
-// 内存快照：逐进程列表 + 前端/后端/小组件存活状态 + 总计/平均/最高汇总
-ipcMain.handle('perf-snapshot', async () => {
-  const procs = await collectProcList()
-  const total = procs.reduce((s, p) => s + procMemKB(p), 0)
-  // 面板打开时也记一笔，让「平均/最高」与逐进程列表的当前值保持同步
-  recordMemSample(total)
-  // 按用途分组：前端（主窗口渲染进程）/ 后端 / 其他（主进程、GPU、其他渲染/服务进程）
-  const frontKB = procs.reduce((s, p) => s + (p.name === '前端窗口' ? procMemKB(p) : 0), 0)
-  const backendKB = procs.reduce((s, p) => s + (p.kind === 'backend' ? procMemKB(p) : 0), 0)
-  const otherKB = Math.max(0, total - frontKB - backendKB)
-  // 存活状态按窗口/进程本身判定，不依赖指标里能否匹配到 pid
-  const alive = {
-    front: !!(mainWindow && !mainWindow.isDestroyed()),
-    widget: !!((widgetWindow && !widgetWindow.isDestroyed()) || (desktopWidgetWindow && !desktopWidgetWindow.isDestroyed())),
-    backend: procs.some((p) => p.kind === 'backend'),
-  }
-  return { procs, alive, total, avg1min: memAvgKB(), max: memMaxKB, frontKB, backendKB, otherKB }
-})
-
-// 重启前端：直接重载主窗口页面
-ipcMain.handle('perf-restart-frontend', () => {
-  if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.reload()
-  return { ok: true }
-})
-
-// 重启小组件：销毁并重建原本存在的窗口，并尊重用户开关（关掉的不重新拉起）
-ipcMain.handle('perf-restart-widget', () => {
-  // 工具箱浮窗：仅当原本存在时重建；重建后按会话级开关决定显隐
-  if (widgetWindow && !widgetWindow.isDestroyed()) {
-    // 隐藏态下窗口已被销毁，能进到这里说明当前可见；直接「销毁后重建」即完成重启
-    hideWidgetWindow()
-    showWidgetWindow()
-  }
-  // 桌面组件：仅当原本存在（说明当前已启用）时重建
-  if (desktopWidgetWindow && !desktopWidgetWindow.isDestroyed()) {
-    try { desktopWidgetWindow.destroy() } catch (_) { /* 忽略 */ }
-    desktopWidgetWindow = null
-    if (desktopEnabled) createDesktopWidgetWindow()
-  }
-  return { ok: true }
-})
-
-// 手动 GC：主进程 global.gc + 各渲染进程 CDP 回收 + 后端自报 GC
-ipcMain.handle('perf-gc', async () => {
-  // 主进程
-  let main = false
-  try {
-    if (typeof global.gc === 'function') { global.gc(); main = true }
-  } catch (_) { /* 忽略 */ }
-
-  // 渲染进程逐个回收（前端主窗口 + 工具箱/桌面组件）
-  const front = await collectRendererGarbage(mainWindow && !mainWindow.isDestroyed() ? mainWindow.webContents : null)
-  let widget = false
-  if (widgetWindow && !widgetWindow.isDestroyed()) {
-    widget = await collectRendererGarbage(widgetWindow.webContents)
-  } else if (desktopWidgetWindow && !desktopWidgetWindow.isDestroyed()) {
-    widget = await collectRendererGarbage(desktopWidgetWindow.webContents)
-  }
-
-  // 后端
-  const backend = (await queryBackendGc()) === true
-
-  return { main, front, widget, backend }
-})
-
-// 上次启动耗时与打点时间线
-ipcMain.handle('perf-startup', () => startupTimer.getTimeline())
+// 小组件窗口（工具箱浮窗 / 桌面小组件）的创建与显隐、相关 IPC
+// 已迁至 widget.js（见 widget.js：createWidgetWindow / hideWidgetWindow / showWidgetWindow /
+//   createDesktopWidgetWindow / setDesktopEnabled / registerWidgetIpc）
+
+// ========== 后端生命周期 ==========
+// 见 backend.js：startBackend / stopBackendProcess / shutdownBackend / setBootStatus /
+//   waitForBackendReadySignal / registerBackendIpc（backend-status / boot-status / probe-backend 等）
+
+// 见 perf.js：registerPerfIpc（perf-snapshot / perf-restart-frontend / perf-restart-widget / perf-gc / perf-startup）/ startMemSampling
 
 // 用户点「退出应用」：置退出标志以跳过主窗口「关闭确认菜单」的拦截，直接退出
 ipcMain.on('quit-app', () => {
@@ -1359,396 +411,45 @@ ipcMain.on('quit-app', () => {
   app.quit()
 })
 
-// 打包模式静态资源 MIME 表
-const MIME = {
-  '.html': 'text/html; charset=utf-8',
-  '.js': 'text/javascript; charset=utf-8',
-  '.mjs': 'text/javascript; charset=utf-8',
-  '.css': 'text/css; charset=utf-8',
-  '.json': 'application/json; charset=utf-8',
-  '.map': 'application/json; charset=utf-8',
-  '.png': 'image/png',
-  '.jpg': 'image/jpeg',
-  '.jpeg': 'image/jpeg',
-  '.gif': 'image/gif',
-  '.svg': 'image/svg+xml',
-  '.webp': 'image/webp',
-  '.ico': 'image/x-icon',
-  '.woff': 'font/woff',
-  '.woff2': 'font/woff2',
-  '.ttf': 'font/ttf',
-  '.otf': 'font/otf',
-  '.eot': 'application/vnd.ms-fontobject',
-  '.wasm': 'application/wasm',
-}
-
-// 注册 app:// 协议：从打包产物目录安全地提供静态文件（支持 asar 内 fs 流式读取）。
-// 性能要点：不做任何逐请求的同步 fs（原 existsSync+statSync 会阻塞主进程），
-// 只在启动时 readdir 一次拿到顶级 html 入口名单，之后纯按路径规则直接流式读盘。
-// prod 下也不再逐请求打日志。
-const IMMUTABLE_ASSET_RE = /\.(js|css|wasm|png|jpe?g|gif|webp|svg|woff2?)$/i
-
-// 渲染进程 V8 代码缓存：把构建产物的 JS（首屏约 250KB）解析 + 编译结果缓存到磁盘，
-// 第 2 次及以后启动直接复用。与主进程的 NODE_COMPILE_CACHE 对称。
-// 注意：app:// 属自定义协议，除注册时声明 codeCache:true 外，还需在此显式指定缓存目录；
-// 必须在首个页面加载前调用。不可用时静默忽略（退回 Chromium 默认行为）。
-// 缓存条目按资源内容哈希命名，应用更新后旧条目永不命中，会随版本累积（实测可达 50MB+）。
-// 故按应用版本号做一次性清理：版本未变则零开销直接返回；版本变化时后台异步删除旧条目，
-// 不阻塞启动，删除失败（文件被占用）静默忽略，下次启动再试。
-function pruneStaleCodeCache(dir) {
-  const marker = path.join(dir, '.cc-version')
-  const cur = app.getVersion()
-  let prev = ''
-  try { prev = fs.readFileSync(marker, 'utf8').trim() } catch (_) {}
-  if (prev === cur) return
-  fs.promises.readdir(dir, { withFileTypes: true })
-    .then((entries) => Promise.all(entries
-      .filter((e) => e.name !== '.cc-version')
-      .map((e) => fs.promises.rm(path.join(dir, e.name), { recursive: true, force: true }).catch(() => {}))))
-    .then(() => fs.promises.writeFile(marker, cur, 'utf8').catch(() => {}))
-    .catch(() => {})
-}
-
-function setupRendererCodeCache() {
-  try {
-    const dir = path.join(app.getPath('userData'), 'renderer-code-cache')
-    fs.mkdirSync(dir, { recursive: true })
-    pruneStaleCodeCache(dir)
-    session.defaultSession.setCodeCachePath(dir)
-  } catch (err) {
-    console.error('[main] 渲染进程代码缓存不可用，跳过:', err?.message || err)
+// 原生右键菜单：渲染层在「页面未自行处理右键」时发来请求（见前端 main.js 的全局 contextmenu 监听）。
+// Electron 默认不提供右键菜单，此前输入框/文本区右键没有任何反应；这里按上下文弹出系统原生菜单
+// （用 role 让系统负责文案本地化与撤销/剪切等可用态），右键手感更接近桌面应用。
+ipcMain.on('show-native-context-menu', (event, opts = {}) => {
+  const win = BrowserWindow.fromWebContents(event.sender)
+  if (!win || win.isDestroyed()) return
+  const template = []
+  if (opts.isEditable && !opts.readOnly) {
+    template.push(
+      { role: 'undo' }, { role: 'redo' }, { type: 'separator' },
+      { role: 'cut' }, { role: 'copy' }, { role: 'paste' }, { type: 'separator' },
+      { role: 'selectAll' },
+    )
+  } else if (opts.hasSelection) {
+    // 只读输入框 / 普通选中文本：只给复制
+    template.push({ role: 'copy' })
   }
-}
-
-function setupAppProtocol() {
-  if (isDev) return
-  const distDir = path.join(__dirname, '../student-frontend/dist')
-  const root = path.normalize(distDir)
-  const indexHtml = path.join(root, 'index.html')
-
-  // 顶级 html 入口（index/setup/widget/migration/desktop-widget…），仅枚举一次
-  let htmlEntries = new Set()
-  try {
-    htmlEntries = new Set(fs.readdirSync(distDir).filter((f) => f.endsWith('.html')))
-  } catch (_) {
-    // dist 缺失时不阻断启动，后续请求走 index.html 回退
+  if (opts.linkURL) {
+    if (template.length) template.push({ type: 'separator' })
+    template.push(
+      { label: '在浏览器中打开', click: () => { try { shell.openExternal(opts.linkURL) } catch (_) {} } },
+      { label: '复制链接地址', click: () => clipboard.writeText(opts.linkURL) },
+    )
   }
-
-  // 懒加载 stream：只有生产模式的静态资源流式返回用得到，挪出主进程启动关键路径
-  const { Readable } = require('stream')
-  const serveFile = (file, headers) =>
-    new Response(Readable.toWeb(fs.createReadStream(file)), { headers })
-  const serveIndex = () =>
-    serveFile(indexHtml, { 'content-type': MIME['.html'], 'cache-control': 'no-cache' })
-
-  protocol.handle('app', (req) => {
-    let p
-    let file
-    try {
-      const url = new URL(req.url)
-      p = decodeURIComponent(url.pathname)
-      if (p === '/' || p === '') p = '/index.html'
-      file = path.normalize(path.join(root, p))
-      // 防目录穿越
-      if (file !== root && !file.startsWith(root + path.sep)) {
-        return new Response('Forbidden', { status: 403 })
-      }
-    } catch (_) {
-      return new Response('Not Found', { status: 404 })
-    }
-
-    const ext = path.extname(file).toLowerCase()
-
-    // 无扩展名 → 客户端路由（SPA），回退入口 html
-    if (ext === '') return serveIndex()
-
-    if (ext === '.html') {
-      const name = p.replace(/^\/+/, '')
-      // 已登记的顶级入口直接给；其余 html 路径按 SPA 路由回退
-      if (!name.includes('/') && htmlEntries.has(name)) {
-        return serveFile(file, { 'content-type': MIME['.html'], 'cache-control': 'no-cache' })
-      }
-      return serveIndex()
-    }
-
-    // 其余带扩展名的静态资源（含 hash 命名的 bundle）：直接流式返回。
-    // hash 资源可长缓存，让后续启动直接命中 Chromium 磁盘缓存；字体等短名资源不缓存。
-    return serveFile(file, {
-      'content-type': MIME[ext] || 'application/octet-stream',
-      'cache-control': IMMUTABLE_ASSET_RE.test(file)
-        ? 'public, max-age=31536000, immutable'
-        : 'no-cache',
-    })
-  })
-}
-
-// 「桌面小组件按需创建」：主窗口渲染层延迟到「首帧真正空闲」才回报，主进程据此错峰创建桌面小组件窗口，
-// 无固定延迟；未启用则不创建。
-let desktopEnabled = true
-
-function scheduleCreateDesktop() {
-  if (!desktopEnabled) return
-  if (!desktopWidgetWindow || desktopWidgetWindow.isDestroyed()) {
-    createDesktopWidgetWindow()
-    startupTimer.mark('桌面组件创建完成')
-  }
-}
-
-function setDesktopEnabled(enabled) {
-  desktopEnabled = !!enabled
-  if (desktopEnabled) {
-    scheduleCreateDesktop()
-  } else if (desktopWidgetWindow && !desktopWidgetWindow.isDestroyed()) {
-    // 关闭桌面小组件窗口（不影响主窗口与后端，不触发 window-all-closed 退出）
-    desktopWidgetWindow.close()
-  }
-}
-
-// 主窗口渲染层空闲回报：同时创建工具箱浮窗，并（按启用状态）创建/关闭桌面小组件窗口
-ipcMain.on('widgets-ready', (event, enabled) => {
-  if (!mainWindow || mainWindow.isDestroyed()) return
-  if (event.sender !== mainWindow.webContents) return
-  if (!widgetWindow || widgetWindow.isDestroyed()) {
-    createWidgetWindow()
-    startupTimer.mark('widget 创建完成')
-  }
-  setDesktopEnabled(!!enabled)
+  if (!template.length) return
+  Menu.buildFromTemplate(template).popup({ window: win })
 })
 
-// 设置页切换「桌面小组件」开关时实时建/关窗口（不依赖空闲时机）
-ipcMain.on('desktop-widget-enabled', (event, enabled) => {
-  if (!mainWindow || mainWindow.isDestroyed()) return
-  if (event.sender !== mainWindow.webContents) return
-  setDesktopEnabled(enabled)
-})
+// ========== 渲染层静态资源（app:// 协议 + 渲染进程代码缓存） ==========
+// 见 protocol.js：setupRendererCodeCache / setupAppProtocol
 
-// 后端就绪检测：后端 app.listen 回调会打印「服务器已启动」，这里仅作日志提示，
-// 不再触发建窗（主窗口已提前创建）。stdout 可能被分片，做滚动缓冲 + 子串匹配。
-function detectBackendReady(chunk) {
-  readyBuffer += String(chunk)
-  if (readyBuffer.length > 4096) readyBuffer = readyBuffer.slice(-4096)
-  if (!/服务器已启动|listening|server started/i.test(readyBuffer)) return
-  readyBuffer = ''
-  startupTimer.mark('后端就绪')
-  console.log('[main] 后端已就绪')
-}
+// 「桌面小组件按需创建」与 widgets-ready / desktop-widget-enabled 已迁至 widget.js
+// （见 widget.js：scheduleCreateDesktop / setDesktopEnabled / registerWidgetIpc）
+
+// 后端就绪检测（detectBackendReady / readyBuffer）已随后端生命周期迁至 backend.js：
+// backend.js 在 startBackend 里自行监听子进程 stdout 并做滚动缓冲 + 子串匹配，此处不再保留副本。
 
 // ========== 版本更新（自建：GitHub Releases + Inno Setup 静默升级）==========
-// 已移除 electron-updater，改为自建三段式流程：
-//   1) 检查：请求 GitHub releases/latest，比较 tag 与当前版本；
-//   2) 下载：把 release 里的 Inno 安装包资产下到 userData 临时目录（边下边报进度）；
-//   3) 安装：update-install 时用 Inno 静默参数启动安装包并退出本进程（装完自动重启）。
-// 主进程是更新状态的唯一权威来源，渲染层通过 from-main{type:'update-state'} 订阅；
-// IPC 通道名与状态字段与旧实现完全一致，前端无需任何改动。
-
-// GitHub 仓库信息（原先在 electron-builder.json 的 publish 里，现仅保留在代码常量中）
-const UPDATE_REPO = { owner: 'onion383', repo: 'classmanagement' }
-// Inno 安装包资产名匹配（如「班集-Setup-0.8.0.exe」）
-const UPDATE_ASSET_RE = /setup.*\.exe$/i
-// 检查超时沿用既有 10s 风格；下载体积较大，整体超时放宽到 5 分钟
-const UPDATE_CHECK_TIMEOUT = 10000
-const UPDATE_DOWNLOAD_TIMEOUT = 300000
-
-// 更新状态快照：主进程是唯一权威来源，渲染层通过 from-main{type:'update-state'} 订阅
-let updateState = {
-  status: 'idle', // idle | checking | available | downloading | downloaded | not-available | error
-  currentVersion: app.getVersion(),
-  latestVersion: null,
-  percent: 0,
-  error: null,
-}
-
-// 已下载到本地的安装包绝对路径（供 update-install 使用）
-let downloadedInstallerPath = null
-// 流程互斥：避免重复检查 / 并发下载
-let updateFlowRunning = false
-
-function broadcastUpdateState() {
-  const payload = { type: 'update-state', state: { ...updateState } }
-  if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send('from-main', payload)
-}
-
-function setUpdateState(patch) {
-  updateState = { ...updateState, ...patch }
-  broadcastUpdateState()
-}
-
-// 版本比较：a > b 返回 1，a < b 返回 -1，相等返回 0
-function compareVersions(a, b) {
-  const pa = String(a || '').replace(/^v/i, '').split('.').map((n) => parseInt(n, 10) || 0)
-  const pb = String(b || '').replace(/^v/i, '').split('.').map((n) => parseInt(n, 10) || 0)
-  const len = Math.max(pa.length, pb.length)
-  for (let i = 0; i < len; i++) {
-    const diff = (pa[i] || 0) - (pb[i] || 0)
-    if (diff !== 0) return diff > 0 ? 1 : -1
-  }
-  return 0
-}
-
-// 把底层报错转成对用户友好的提示
-function friendlyUpdateError(err) {
-  const msg = (err && err.message) || String(err || '')
-  console.log('[update] 检查失败：', msg)
-  if (/ENOTFOUND|EAI_AGAIN|ETIMEDOUT|ECONNREFUSED|fetch failed|network|socket hang up|aborted/i.test(msg)) {
-    return '网络连接失败，请检查网络后重试'
-  }
-  if (/404|not found|no published|cannot find/i.test(msg)) {
-    return '未找到可用更新（仓库中暂无发布版本）'
-  }
-  return msg || '未知错误'
-}
-
-// 请求 GitHub Releases 最新发布（带超时中断，失败抛错交由上层映射为友好文案）
-async function fetchLatestRelease() {
-  const controller = new AbortController()
-  const timer = setTimeout(() => controller.abort(), UPDATE_CHECK_TIMEOUT)
-  try {
-    const url = `https://api.github.com/repos/${UPDATE_REPO.owner}/${UPDATE_REPO.repo}/releases/latest`
-    const res = await fetch(url, {
-      headers: { Accept: 'application/vnd.github+json', 'User-Agent': 'campus-assistant' },
-      signal: controller.signal,
-    })
-    if (!res.ok) {
-      const err = new Error(res.status === 404 ? '仓库中暂无发布版本' : `请求失败（HTTP ${res.status}）`)
-      err.status = res.status
-      throw err
-    }
-    return await res.json()
-  } finally {
-    clearTimeout(timer)
-  }
-}
-
-// 从 release 资产中挑选 Inno 安装包（文件名形如「*-Setup-*.exe」）
-function pickSetupAsset(release) {
-  const assets = Array.isArray(release && release.assets) ? release.assets : []
-  return assets.find((a) => UPDATE_ASSET_RE.test(String((a && a.name) || ''))) || null
-}
-
-// 开发/调试路径：仅直连探测 GitHub Releases，不下载、不安装
-async function checkUpdateViaGitHub() {
-  setUpdateState({ status: 'checking', error: null, percent: 0 })
-  try {
-    const data = await fetchLatestRelease()
-    const latest = String((data && data.tag_name) || '').replace(/^v/i, '')
-    const current = app.getVersion()
-    if (latest && compareVersions(latest, current) > 0) {
-      setUpdateState({ status: 'available', latestVersion: latest, error: null })
-    } else {
-      setUpdateState({ status: 'not-available', latestVersion: latest || current, percent: 0, error: null })
-    }
-  } catch (err) {
-    setUpdateState({ status: 'error', error: friendlyUpdateError(err) })
-  }
-}
-
-// 下载安装包到 userData/update-cache 并推送 downloading 进度；失败时清理半成品并抛出
-async function downloadInstaller(asset, version) {
-  const { Readable } = require('stream')
-  const { pipeline } = require('stream/promises')
-  const dir = path.join(app.getPath('userData'), 'update-cache')
-  fs.mkdirSync(dir, { recursive: true })
-  const fileName = String((asset && asset.name) || `班集-Setup-${version}.exe`)
-  const target = path.join(dir, fileName)
-  try { fs.rmSync(target, { force: true }) } catch (_) { /* 清理旧文件失败忽略 */ }
-
-  const controller = new AbortController()
-  const timer = setTimeout(() => controller.abort(), UPDATE_DOWNLOAD_TIMEOUT)
-  try {
-    const res = await fetch(asset.browser_download_url, {
-      headers: { 'User-Agent': 'campus-assistant' },
-      signal: controller.signal,
-    })
-    if (!res.ok) throw new Error(`下载失败（HTTP ${res.status}）`)
-    const total = Number(res.headers.get('content-length')) || Number(asset.size) || 0
-    let received = 0
-    // Node fetch 返回 web ReadableStream，转成 Node 流后边写边算百分比
-    const nodeStream = Readable.fromWeb(res.body)
-    nodeStream.on('data', (chunk) => {
-      received += chunk.length
-      if (total > 0) setUpdateState({ status: 'downloading', percent: Math.round((received / total) * 100) })
-    })
-    await pipeline(nodeStream, fs.createWriteStream(target))
-    // 服务端给了 Content-Length 时校验完整性
-    if (total > 0 && fs.statSync(target).size !== total) throw new Error('下载文件不完整')
-    downloadedInstallerPath = target
-  } catch (err) {
-    try { fs.rmSync(target, { force: true }) } catch (_) { /* 忽略 */ }
-    downloadedInstallerPath = null
-    throw err
-  } finally {
-    clearTimeout(timer)
-  }
-}
-
-// 打包环境完整流程：checking → （无更新）not-available / （有更新）available → downloading → downloaded
-async function runUpdateFlow() {
-  if (!app.isPackaged || updateFlowRunning) return
-  updateFlowRunning = true
-  // 同步先推 checking（在首个 await 之前，保证 update-check 返回的快照即 checking）
-  setUpdateState({ status: 'checking', error: null, percent: 0 })
-  try {
-    const release = await fetchLatestRelease()
-    const latest = String((release && release.tag_name) || '').replace(/^v/i, '')
-    const current = app.getVersion()
-    if (!latest || compareVersions(latest, current) <= 0) {
-      setUpdateState({ status: 'not-available', latestVersion: latest || current, percent: 0, error: null })
-      return
-    }
-    setUpdateState({ status: 'available', latestVersion: latest, error: null, percent: 0 })
-    const asset = pickSetupAsset(release)
-    if (!asset) {
-      setUpdateState({ status: 'error', error: '未找到安装包（发布资产中缺少 Setup 安装程序）' })
-      return
-    }
-    await downloadInstaller(asset, latest)
-    setUpdateState({ status: 'downloaded', latestVersion: latest, percent: 100, error: null })
-  } catch (err) {
-    setUpdateState({ status: 'error', error: friendlyUpdateError(err) })
-  } finally {
-    updateFlowRunning = false
-  }
-}
-
-ipcMain.handle('get-app-version', () => app.getVersion())
-
-// 检查更新：进入「关于」页 / 手动点击触发；立即返回当前状态快照，后续变化走 from-main 广播
-ipcMain.handle('update-check', async () => {
-  if (app.isPackaged) {
-    // 打包环境：后台走完整「检查 + 下载」流程（立即返回，结果靠事件推送）
-    runUpdateFlow()
-    return { ...updateState }
-  }
-  // 未打包（开发/调试）：仅直连探测，不下载、不安装
-  await checkUpdateViaGitHub()
-  return { ...updateState }
-})
-
-// 用户确认后：以 Inno 静默参数启动已下载的安装包，随后退出本进程（安装器装完会自动重启）
-ipcMain.on('update-install', () => {
-  if (!app.isPackaged) return
-  if (!downloadedInstallerPath || !fs.existsSync(downloadedInstallerPath)) {
-    setUpdateState({ status: 'error', error: '安装包尚未下载完成' })
-    return
-  }
-  try {
-    const { spawn } = require('child_process')
-    // Inno 静默安装参数：
-    //   /SILENT             无界面安装
-    //   /CLOSEAPPLICATIONS  自动关闭占用目标文件的旧进程
-    //   /RESTARTAPPLICATIONS 安装完成后自动重启被关闭的应用
-    const child = spawn(downloadedInstallerPath, ['/SILENT', '/CLOSEAPPLICATIONS', '/RESTARTAPPLICATIONS'], {
-      detached: true,
-      stdio: 'ignore',
-    })
-    child.unref()
-    // 置退出标志（跳过「关闭确认/托盘存活」逻辑）并退出，释放单实例锁供安装器替换文件
-    app.isQuitting = true
-    setTimeout(() => app.quit(), 500)
-  } catch (err) {
-    setUpdateState({ status: 'error', error: friendlyUpdateError(err) })
-  }
-})
+// 见 updater.js：registerUpdateIpc（get-app-version / update-check / update-install）/ runUpdateFlow
 
 app.whenReady().then(() => {
   startupTimer.mark('app.whenReady 就绪')
@@ -1772,11 +473,11 @@ app.whenReady().then(() => {
     // （不能把 fork 提到 ready 之前：DB_MASTER_KEY 依赖 safeStorage，见文件上方说明。）
     // 全新安装（本机无任何账号库）先弹首次引导向导，完成后再进入主界面；
     // 非首启维持原路径——主窗口立即创建，不增加任何串行等待。
-    // 首次引导默认只在「本机全新安装」（firstRunAtStartup，即数据目录无 index.db）时出现；
-    // 开发模式默认进入（便于预览引导页），调试需要跳过时用 FORCE_SETUP=0 关闭。
+    // 首次引导默认只在「本机全新安装」（firstRunAtStartup，即数据目录无 index.db）时出现，
+    // 开发模式不再默认进入；需要预览引导页时用 FORCE_SETUP=1，跳过时用 FORCE_SETUP=0。
     const forceSetup = process.env.FORCE_SETUP === '1'
     const skipSetup = process.env.FORCE_SETUP === '0'
-    if (!skipSetup && (isDev || forceSetup || firstRunAtStartup)) {
+    if (!skipSetup && (forceSetup || firstRunAtStartup)) {
       createSetupWindow()
       startupTimer.mark('createSetupWindow 完成')
     } else {
@@ -1786,15 +487,15 @@ app.whenReady().then(() => {
       startupTimer.mark('createMainWindow 完成')
     }
 
-    startBackend()
+    backend.startBackend()
     startupTimer.mark('startBackend 完成')
 
     // 性能面板内存历史：自启动即开始定时采样「总计」，用于「平均（近一分钟）/ 最高（自启动起）」
-    startMemSampling()
+    perf.startMemSampling()
 
     // 版本更新：启动后延迟做一次「检查 + 下载」（避开首屏关键路径，仅打包环境）
     if (app.isPackaged) {
-      setTimeout(() => { runUpdateFlow() }, 8000)
+      setTimeout(() => { updater.runUpdateFlow() }, 8000)
     }
 
     // 5s 后输出启动时间线并保存日志
@@ -1806,8 +507,8 @@ app.whenReady().then(() => {
     // U盘自动打开非启动关键路径：延后到主窗口创建后再读配置/开监听，
     // 避免 loadUsbAutoOpenConfig 读盘与 getDriveLetters 同步遍历盘符阻塞主窗口创建。
     setTimeout(() => {
-      loadUsbAutoOpenConfig()
-      if (usbAutoOpenEnabled) startUsbWatch()
+      usb.loadUsbAutoOpenConfig()
+      if (usb.isUsbAutoOpenEnabled()) usb.startUsbWatch()
     }, 0)
   } catch (err) {
     console.error('[main] app.whenReady 初始化失败:', err)
@@ -1817,67 +518,9 @@ app.whenReady().then(() => {
 })
 
 // ========== U盘自动打开 ==========
-// 检测到新 U 盘插入时，自动用文件资源管理器打开它（仅 Windows 生效）。
-// 开关持久化在 userData/usb-auto-open.json，与后端业务数据库解耦，主进程启动即可读到。
-let usbAutoOpenEnabled = false
-let usbPollTimer = null
-let knownDrives = new Set()
+// 见 usb.js：registerUsbIpc / loadUsbAutoOpenConfig / startUsbWatch
 
-function getUsbConfigPath() {
-  return path.join(app.getPath('userData'), 'usb-auto-open.json')
-}
-
-function loadUsbAutoOpenConfig() {
-  try {
-    usbAutoOpenEnabled = !!JSON.parse(fs.readFileSync(getUsbConfigPath(), 'utf8')).enabled
-  } catch (_) {
-    usbAutoOpenEnabled = false
-  }
-}
-
-function saveUsbAutoOpenConfig(enabled) {
-  try { fs.writeFileSync(getUsbConfigPath(), JSON.stringify({ enabled })) } catch (_) {}
-}
-
-// 遍历 A-Z，返回当前所有存在的盘符集合（fs.access 探测，零依赖）
-function getDriveLetters() {
-  const drives = new Set()
-  for (let i = 65; i <= 90; i++) {
-    const drive = `${String.fromCharCode(i)}:\\`
-    try { fs.accessSync(drive); drives.add(drive) } catch (_) {}
-  }
-  return drives
-}
-
-function startUsbWatch() {
-  if (usbPollTimer || !usbAutoOpenEnabled) return
-  // 用启动瞬间已挂载的盘做基线，避免把「本就在」的 U 盘误打开一次
-  knownDrives = getDriveLetters()
-  usbPollTimer = setInterval(() => {
-    const current = getDriveLetters()
-    for (const drive of current) {
-      if (!knownDrives.has(drive)) {
-        console.log(`[main] 检测到新存储设备：${drive}，自动打开`)
-        shell.openPath(drive)
-      }
-    }
-    knownDrives = current
-  }, 1500)
-}
-
-function stopUsbWatch() {
-  clearInterval(usbPollTimer)
-  usbPollTimer = null
-}
-
-// 读取开关状态（供设置页初始化）
-ipcMain.handle('get-usb-auto-open', () => ({ enabled: usbAutoOpenEnabled }))
-
-// 后端就绪状态查询：兜住「后端先就绪、渲染层后注册监听」的竞态（广播事件会漏掉这类窗口）
-ipcMain.handle('backend-status', () => backendReady)
-
-// 启动阶段状态查询：加载页据此补齐当前「程序正在干嘛」（兜住「页面后加载」的竞态）
-ipcMain.handle('boot-status', () => bootStatusText)
+// 后端就绪 / 启动阶段状态查询（backend-status / boot-status）已迁至 backend.js 的 registerBackendIpc
 
 // 在系统默认浏览器打开外链
 ipcMain.handle('open-external', (event, url) => {
@@ -1887,362 +530,17 @@ ipcMain.handle('open-external', (event, url) => {
 })
 
 // ========== 桌面小组件·常用软件 ==========
-// 列表已改由后端数据库持久化（/api/widget-settings/apps），主进程仅负责
-// 「选择软件文件+提取图标」和「点击启动」两项平台能力。
-// 每项：{ id, name, path, icon }（icon 为提取自 exe/.lnk 图标的 dataURL，可为空）。
+// 见 apps.js：registerAppsIpc（apps-select-file / apps-launch）
 
-// 解析 .lnk 快捷方式的目标可执行程序路径（仅接受 .exe 目标，供取图标用）
-async function resolveLnkTarget(lnkPath) {
-  const { execFile } = require('child_process')
-  return new Promise((resolve) => {
-    const ps = [
-      '-NoProfile', '-NonInteractive', '-Command',
-      `$s=(New-Object -ComObject WScript.Shell).CreateShortcut('${lnkPath.replace(/'/g, "''")}'); if($s.TargetPath){$s.TargetPath}`,
-    ]
-    execFile('powershell.exe', ps, { timeout: 8000 }, (err, stdout) => {
-      if (err) return resolve('')
-      const target = (stdout || '').trim()
-      resolve(path.extname(target).toLowerCase() === '.exe' ? target : '')
-    })
-  })
-}
-
-// 打开"选择软件程序/快捷方式"对话框，并提取其图标为 dataURL 返回
-ipcMain.handle('apps-select-file', async () => {
-  if (!mainWindow || mainWindow.isDestroyed()) return { canceled: true, error: '无主窗口' }
-  const result = await dialog.showOpenDialog(mainWindow, {
-    title: '选择常用软件',
-    properties: ['openFile'],
-    defaultPath: lastDialogDir || undefined,
-    filters: [
-      { name: '可执行程序与快捷方式', extensions: ['exe', 'lnk', 'bat', 'cmd'] },
-      { name: '所有文件', extensions: ['*'] },
-    ],
-  })
-  if (result.canceled || result.filePaths.length === 0) return { canceled: true }
-  const filePath = result.filePaths[0]
-  lastDialogDir = path.dirname(filePath)
-  const ext = path.extname(filePath).toLowerCase()
-  let name = path.basename(filePath, ext) || filePath
-  // bat/cmd 显示名字会带扩展名，去掉小尾巴，更整洁
-  if (['.bat', '.cmd'].includes(ext)) name = path.basename(filePath, ext)
-  let icon = ''
-  try {
-    // 快捷方式(.lnk)本身取不到目标程序图标，先解析出目标 exe 再取其图标
-    const iconTarget = ext === '.lnk' ? await resolveLnkTarget(filePath) : ''
-    const img = await app.getFileIcon(iconTarget || filePath, { size: 'large' })
-    icon = img.toDataURL()
-  } catch (_) { /* 图标提取失败则留空 */ }
-  return { canceled: false, filePath, name, icon }
-})
-
-// 点击启动常用软件（.lnk/.exe/.bat 均可走 shell.openPath）
-ipcMain.handle('apps-launch', (event, filePath) => {
-  if (typeof filePath !== 'string' || !filePath) return { error: '路径为空' }
-  shell.openPath(filePath)
-  return {}
-})
-
-// 设置开关：持久化并实时启停监听
-ipcMain.handle('set-usb-auto-open', (event, enabled) => {
-  usbAutoOpenEnabled = !!enabled
-  saveUsbAutoOpenConfig(usbAutoOpenEnabled)
-  if (usbAutoOpenEnabled) startUsbWatch()
-  else stopUsbWatch()
-  return { enabled: usbAutoOpenEnabled }
-})
-
-// 调整小组件窗口大小（带边界保护，防止超出屏幕）
-// 入参 [width, height] 为「视觉内容」尺寸；窗口实际会比它大 2*M，四周多出的部分用于绘制阴影。
-// 窗口位置保持不变——因为渲染层内容相对窗口固定偏移 M，所以视觉内容在屏幕上的位置不会变。
-ipcMain.on('widget-resize', (event, [width, height]) => {
-  if (widgetWindow && !widgetWindow.isDestroyed()) {
-    const M = WIDGET_SHADOW_MARGIN
-    widgetWindow.setContentSize(width + M * 2, height + M * 2)
-    const [actualW, actualH] = widgetWindow.getContentSize()
-    currentWidgetSize = [actualW, actualH]
-
-    // 回执：告知渲染层窗口尺寸已生效，便于其「先改尺寸、再显示内容」，避免固定延时造成的空窗
-    try { widgetWindow.webContents.send('from-main', { type: 'widget-resized', width: actualW, height: actualH }) } catch (_) { /* 忽略 */ }
-
-    // 边界保护：保证「视觉内容」（去掉阴影边距后的部分）不越出屏幕。
-    // 因视觉内容相对窗口左上角偏移 M，窗口本身允许向外溢出 M。
-    const [x, y] = widgetWindow.getPosition()
-    const { width: screenW, height: screenH } = require('electron').screen.getPrimaryDisplay().workAreaSize
-
-    let newX = Math.min(Math.max(x, -M), screenW - width - M)
-    let newY = Math.min(Math.max(y, -M), screenH - height - M)
-
-    if (newX !== x || newY !== y) {
-      widgetWindow.setPosition(newX, newY)
-    }
-  }
-})
-
-// 将窗口移动到指定位置
-ipcMain.on('widget-move-to', (event, position) => {
-  if (widgetWindow && !widgetWindow.isDestroyed()) {
-    const { height: screenH } = require('electron').screen.getPrimaryDisplay().workAreaSize
-    const [winWidth, winHeight] = widgetWindow.getSize()
-    if (position === 'left-middle') {
-      const x = 0
-      const y = Math.round((screenH - winHeight) / 2)
-      widgetWindow.setPosition(x, y)
-    }
-  }
-})
-
-let lastIconPosition = null
-let currentWidgetSize = [48, 48] // 记录预期窗口尺寸，防止拖动时漂移
-let dragStartWindowPos = null
-let dragStartMousePos = null
-let dragStartWindowSize = null
-
-// 将窗口居中显示（同时保存居中前的位置，以便关闭工具后恢复）
-ipcMain.on('widget-center', () => {
-  if (widgetWindow && !widgetWindow.isDestroyed()) {
-    lastIconPosition = widgetWindow.getPosition()
-    widgetWindow.center()
-  }
-})
-
-// 恢复图标之前保存的位置
-ipcMain.on('widget-restore-position', () => {
-  if (widgetWindow && !widgetWindow.isDestroyed() && lastIconPosition) {
-    widgetWindow.setPosition(lastIconPosition[0], lastIconPosition[1])
-  }
-})
-
-// 全屏小组件（用于注释工具）
-let preFullscreenBounds = null
-ipcMain.on('widget-fullscreen', () => {
-  if (widgetWindow && !widgetWindow.isDestroyed()) {
-    preFullscreenBounds = {
-      pos: widgetWindow.getPosition(),
-      size: widgetWindow.getContentSize()
-    }
-    const { x, y, width, height } = screen.getPrimaryDisplay().bounds
-    widgetWindow.setPosition(x, y)
-    widgetWindow.setContentSize(width, height)
-    widgetWindow.setAlwaysOnTop(true)
-    widgetWindow.focus()
-    currentWidgetSize = [width, height]
-  }
-})
-
-// 从全屏恢复
-ipcMain.on('widget-restore', () => {
-  if (widgetWindow && !widgetWindow.isDestroyed() && preFullscreenBounds) {
-    widgetWindow.setPosition(preFullscreenBounds.pos[0], preFullscreenBounds.pos[1])
-    widgetWindow.setContentSize(preFullscreenBounds.size[0], preFullscreenBounds.size[1])
-    widgetWindow.setAlwaysOnTop(true)
-    widgetWindow.focus()
-    currentWidgetSize = preFullscreenBounds.size
-    preFullscreenBounds = null
-  }
-})
-
-// 设置窗口是否忽略鼠标事件（true=透明区域穿透，false=正常接收）
-ipcMain.on('widget-set-ignore-mouse', (event, ignore) => {
-  if (widgetWindow && !widgetWindow.isDestroyed()) {
-    widgetWindow.setIgnoreMouseEvents(ignore, { forward: true })
-  }
-})
-
-// 设置工具箱可见性
-ipcMain.on('widget-set-visible', (event, visible) => {
-  if (widgetWindow && !widgetWindow.isDestroyed()) {
-    if (visible) {
-      widgetWindow.setOpacity(1)
-      widgetWindow.setIgnoreMouseEvents(false)
-      widgetWindow.focus()
-    } else {
-      widgetWindow.setOpacity(0)
-      widgetWindow.setIgnoreMouseEvents(true, { forward: true })
-    }
-  }
-})
-
-// 拖动开始：记录窗口初始位置、尺寸和鼠标初始位置
-ipcMain.on('widget-drag-start', (event, { screenX, screenY }) => {
-  if (widgetWindow && !widgetWindow.isDestroyed()) {
-    dragStartWindowPos = widgetWindow.getPosition()
-    dragStartWindowSize = widgetWindow.getSize()
-    dragStartMousePos = [screenX, screenY]
-  }
-})
-
-// 工具箱浮窗右键菜单：当前提供「本次退出」，仅关闭浮窗（隐藏 widget），主程序与后端保留运行
-ipcMain.on('widget-context-menu', (event) => {
-  const win = BrowserWindow.fromWebContents(event.sender)
-  const menu = Menu.buildFromTemplate([
-    {
-      label: '本次退出',
-      click: () => {
-        sessionWidgetEnabled = false
-        hideWidgetWindow()
-        // 通知设置页同步「本次启用工具箱」开关为关闭
-        mainWindow?.webContents.send('from-main', { type: 'session-widget-changed' })
-      },
-    },
-  ])
-  menu.popup({ window: win || undefined })
-})
-
-// 会话级「本次启用工具箱」：仅影响本次运行浮窗显隐，不持久化
-ipcMain.on('widget-set-session-visible', (event, enabled) => {
-  sessionWidgetEnabled = !!enabled
-  // 开启即按需重建并显示；关闭即销毁窗口释放渲染进程，位置由 lastWidgetBounds 记忆
-  if (sessionWidgetEnabled) showWidgetWindow()
-  else hideWidgetWindow()
-})
-
-// 读取会话级开关；未初始化（尚未注入本次默认值）返回 null
-ipcMain.handle('get-session-widget-visible', () => sessionWidgetEnabled)
-
-// 桌面组件获取主窗口的 token（跨渲染进程共享，避免 cookie/localStorage 隔离）
-ipcMain.handle('get-main-token', () => {
-  if (mainWindow && !mainWindow.isDestroyed()) {
-    return mainWindow.webContents.executeJavaScript('localStorage.getItem("token")', true)
-  }
-  return null
-})
+// 工具箱浮窗相关 IPC（widget-resize / widget-move-to / widget-center / widget-fullscreen /
+//   widget-set-visible / widget-drag-* / widget-context-menu / get-session-widget-visible /
+//   get-main-token 等）已迁至 widget.js 的 registerWidgetIpc
 
 // 安全通道主密钥：提供给渲染进程（含工具箱/桌面组件）参与前后端 HKDF 派生态。
 ipcMain.handle('get-master-key', () => getMasterKey())
 
-// ============ 无边框自绘标题栏的窗口控制 ============
-// 关闭确认菜单：点主窗口右上角关闭时居中弹出，让用户选择关闭范围。
-// 菜单由**渲染层**用现有弹窗组件 + dialog-transition 动画弹出（触感一致）；
-// 仅当渲染层尚未就绪（如启动瞬间点系统 ✕）时，回退到主进程原生菜单。
-// 核心约束：只要还有任意窗口（含工具箱/桌面组件）存在，就由 window-all-closed 保证不关后端；
-// 当最后一个窗口（组件）被关闭后自动触发 window-all-closed，从而关闭后端并退出。
-
-// 渲染层是否已就绪可弹关闭菜单：由渲染层 ready 时经 shutdown-action 回报
-let mainRendererShutdownReady = false
-
-// 请求渲染层在窗口中央弹出关闭菜单；渲染层未就绪/发送失败返回 false
-function requestShutdownMenu(win) {
-  if (!mainRendererShutdownReady) return false
-  const ex = (w) => !!(w && !w.isDestroyed())
-  try {
-    win.webContents.send('from-main', {
-      type: 'shutdown-menu',
-      hasToolbox: ex(widgetWindow),
-      hasDesktop: ex(desktopWidgetWindow),
-    })
-    return true
-  } catch (_) {
-    return false
-  }
-}
-
-// 统一的「按所选范围关闭」逻辑：渲染层回传与原生菜单回退共用，避免重复
-function closeMainWith(action) {
-  shutdownMenuOpen = false
-  if (action === 'all') { app.quit(); return }
-  // 关闭组件（桌面组件窗口或工具箱窗口）后再关主窗口；组件未开启时无副作用
-  if (action === 'toolbox' && widgetWindow && !widgetWindow.isDestroyed()) widgetWindow.close()
-  if (action === 'desktop' && desktopWidgetWindow && !desktopWidgetWindow.isDestroyed()) desktopWidgetWindow.close()
-  // 先创建托盘再关主窗口：即便主窗口是最后一个窗口，window-all-closed 也能据此保持后台运行
-  // （若先关窗，window-all-closed 可能已先触发 shutdownBackend 并退出应用）
-  createTray()
-  allowMainClose = true
-  if (mainWindow && !mainWindow.isDestroyed()) mainWindow.close() // 主窗口关闭：组件保留时后端仍存活
-}
-
-// ============ 系统托盘 ============
-// 主窗口关闭后（程序与后端仍在后台运行）显示托盘图标；左键点击重新打开主窗口，
-// 右键菜单可「恢复主窗口 / 完全退出」。托盘只在主窗口关闭时出现，主窗口恢复后销毁。
-let appTray = null
-
-function createTray() {
-  if (appTray) return
-  try {
-    // 用 fs 读取后再建图：打包后 __dirname 位于 asar 内，读文件可被 Electron 透明重定向，
-    // 比直接把 asar 内路径交给 nativeImage 更稳妥
-    const icon = nativeImage.createFromBuffer(fs.readFileSync(path.join(__dirname, 'tray-icon.png')))
-    if (icon.isEmpty()) return
-    appTray = new Tray(icon)
-  } catch (_) {
-    appTray = null
-    return
-  }
-  appTray.setToolTip('班集')
-  appTray.setContextMenu(Menu.buildFromTemplate([
-    { label: '恢复主窗口', click: () => showMainFromTray() },
-    { type: 'separator' },
-    { label: '完全退出', click: () => { app.isQuitting = true; app.quit() } },
-  ]))
-  appTray.on('click', () => showMainFromTray())
-}
-
-function destroyTray() {
-  if (!appTray) return
-  try { appTray.destroy() } catch (_) { /* 忽略 */ }
-  appTray = null
-}
-
-// 从托盘恢复主窗口：已存在则唤起，已关闭则重建，并移除托盘图标
-function showMainFromTray() {
-  destroyTray()
-  if (mainWindow && !mainWindow.isDestroyed()) {
-    if (mainWindow.isMinimized()) mainWindow.restore()
-    mainWindow.show()
-    mainWindow.focus()
-  } else {
-    createMainWindow()
-  }
-}
-
-// 渲染层回报：就绪标记 / 用户选择（action）/ 取消
-ipcMain.on('shutdown-action', (event, data) => {
-  if (!data) return
-  if (data === 'ready' || data?.type === 'ready') { mainRendererShutdownReady = true; return }
-  if (data === 'cancel' || data?.action === 'cancel') { shutdownMenuOpen = false; return }
-  const action = (typeof data === 'string' ? data : data?.action)
-  closeMainWith(action === 'desktop' || action === 'toolbox' || action === 'all' || action === 'main' ? action : 'main')
-})
-
-// 原生菜单回退：仅渲染层未就绪时使用
-function showShutdownMenu(win) {
-  shutdownMenuOpen = true
-  const ex = (w) => !!(w && !w.isDestroyed())
-  const bounds = win.getBounds()
-  // 组件不存在（未开启）时对应菜单项置灰，避免点了没反应造成困惑
-  const menu = Menu.buildFromTemplate([
-    { label: '关闭主窗口', click: () => closeMainWith('main') },
-    { label: '关闭主窗口和工具箱', enabled: ex(widgetWindow), click: () => closeMainWith('toolbox') },
-    { label: '关闭主窗口和桌面组件', enabled: ex(desktopWidgetWindow), click: () => closeMainWith('desktop') },
-    { type: 'separator' },
-    { label: '关闭所有窗口及其后端', click: () => closeMainWith('all') },
-  ])
-  // 菜单关闭（Esc / 点击空白）时复位，允许下次再弹
-  menu.popup({
-    window: win,
-    x: Math.round(bounds.x + bounds.width / 2),
-    y: Math.round(bounds.y + bounds.height / 2),
-    callback: () => { shutdownMenuOpen = false },
-  })
-}
-
-// 最小化
-ipcMain.on('win-minimize', (event) => {
-  const win = BrowserWindow.fromWebContents(event.sender)
-  if (win) win.minimize()
-})
-// 最大化 / 还原
-ipcMain.on('win-maximize-toggle', (event) => {
-  const win = BrowserWindow.fromWebContents(event.sender)
-  if (!win) return
-  if (win.isMaximized()) win.unmaximize()
-  else win.maximize()
-})
-// 关闭
-ipcMain.on('win-close', (event) => {
-  const win = BrowserWindow.fromWebContents(event.sender)
-  if (win) win.close()
-})
+// 见 tray.js：registerTrayIpc（shutdown-action / win-minimize / win-maximize-toggle / win-close）/
+// handleMainClose / resetShutdownState / createTray / destroyTray / isTrayAlive / beginCloseWithoutMenu
 
 // ============ 主题 → 窗口边框/亚克力开关 ============
 // 主窗口已统一为「无边框透明 + 窗外亚克力」，不再随主题切换边框类型。
@@ -2271,90 +569,12 @@ ipcMain.on('theme-chrome', (event, { mode }) => {
   recreateMainWindow('frameless')
 })
 
-// 拖动中：使用 setContentBounds 与 setContentSize 保持一致，避免 setBounds/setSize 边界计算差异
-ipcMain.on('widget-drag-move', (event, { screenX, screenY }) => {
-  if (widgetWindow && !widgetWindow.isDestroyed() && dragStartWindowPos && dragStartMousePos && dragStartWindowSize) {
-    const dx = screenX - dragStartMousePos[0]
-    const dy = screenY - dragStartMousePos[1]
-    let newX = Math.round(dragStartWindowPos[0] + dx)
-    let newY = Math.round(dragStartWindowPos[1] + dy)
+// 工具箱浮窗的拖动/移动/尺寸/全屏/鼠标穿透，以及 to-widget / to-main 转发，
+// 全部由 widget.js 的 registerWidgetIpc 注册（见本文件上方 widget.registerWidgetIpc 调用）。
 
-    const [width, height] = dragStartWindowSize
-    const { width: screenW, height: screenH } = require('electron').screen.getPrimaryDisplay().workAreaSize
-
-    const minVisible = 50
-    newX = Math.max(-width + minVisible, Math.min(newX, screenW - minVisible))
-    newY = Math.max(-height + minVisible, Math.min(newY, screenH - minVisible))
-
-    widgetWindow.setContentBounds({ x: newX, y: newY, width, height })
-  }
-})
-
-// 拖动结束：确保尺寸正确
-ipcMain.on('widget-drag-end', () => {
-  if (widgetWindow && !widgetWindow.isDestroyed()) {
-    const w = currentWidgetSize[0]
-    const h = currentWidgetSize[1]
-    widgetWindow.setContentSize(w, h)
-  }
-})
-
-// 主应用 -> 小组件
-ipcMain.on('to-widget', (event, data) => {
-  if (widgetWindow && !widgetWindow.isDestroyed()) {
-    widgetWindow.webContents.send('from-main', data)
-  }
-})
-
-// 小组件 -> 主应用
-ipcMain.on('to-main', (event, data) => {
-  if (mainWindow && !mainWindow.isDestroyed()) {
-    mainWindow.webContents.send('from-widget', data)
-  }
-})
-
-// Electron 43 起，未传 defaultPath 时对话框默认打开「下载」目录，且系统不再记忆上次访问目录
-// （43.0 breaking change）。这里自行记忆上次目录并回填 defaultPath，恢复 31 之前的体验。
-let lastDialogDir = null
-
-// 选择文件夹对话框
-ipcMain.handle('select-folder', async (event) => {
-  // 以调用方所在窗口为父窗口：首次安装引导期还没有主窗口，此时用引导窗口作父窗口，
-  // 否则（mainWindow 为空）会直接返回空数组，导致引导里的「修改」按钮点了没反应。
-  const senderWin = BrowserWindow.fromWebContents(event.sender)
-  const parent = (senderWin && !senderWin.isDestroyed())
-    ? senderWin
-    : (mainWindow && !mainWindow.isDestroyed() ? mainWindow : null)
-  const opts = {
-    properties: ['openDirectory'],
-    defaultPath: lastDialogDir || undefined,
-  }
-  const result = parent
-    ? await dialog.showOpenDialog(parent, opts)
-    : await dialog.showOpenDialog(opts)
-  if (!result.canceled && result.filePaths.length > 0) {
-    lastDialogDir = result.filePaths[0]
-  }
-  return result
-})
-
-// 在文件管理器中打开指定文件夹
-ipcMain.handle('open-folder', async (event, folderPath) => {
-  if (!folderPath) return { error: '路径为空' }
-  shell.openPath(folderPath)
-  return {}
-})
-
-// ========== 数据目录 / 缓存目录（可自定义，含整体搬迁） ==========
-// 当前数据目录与缓存目录信息（供设置页展示）
-ipcMain.handle('get-data-directories', () => {
-  return {
-    dataDir: resolveDataDir(),
-    thumbsDir: resolveThumbsDir(),
-    defaultDataDir: path.join(app.getPath('userData'), 'data'),
-    screenshotDir: path.join(app.getPath('pictures'), 'screenshots'),
-  }
-})
+// ========== 文件/文件夹对话框与本地文件读写 ==========
+// 见 dialogs.js：registerDialogsIpc（select-folder / open-folder / select-image-file /
+// save-background-image / save-file / open-file / screenshot-capture / note-save / get-data-directories）
 
 // ========== 数据库迁移进度窗口 ==========
 // 待主窗口展示的提示：迁移时主窗口正在重建，先暂存于此，等新主窗口加载完成主动取走再弹提示条
@@ -2485,8 +705,9 @@ function cleanupMigrationTarget() {
 // 否则会触发 window-all-closed 让应用直接退出。
 function closeAllWindowsExceptMigration() {
   if (!migrationWindow || migrationWindow.isDestroyed()) return
-  allowMainClose = true
-  shutdownMenuOpen = false
+  tray.beginCloseWithoutMenu()
+  const widgetWindow = widget.getWidgetWindow()
+  const desktopWidgetWindow = widget.getDesktopWidgetWindow()
   if (widgetWindow && !widgetWindow.isDestroyed()) widgetWindow.close()
   if (desktopWidgetWindow && !desktopWidgetWindow.isDestroyed()) desktopWidgetWindow.close()
   if (mainWindow && !mainWindow.isDestroyed()) mainWindow.close()
@@ -2511,25 +732,7 @@ let setupUiReady = false
 let setupWarmup = { phase: '', detail: '', percent: 0, done: false }
 let setupWarmupStarted = false
 
-// 等待后端就绪信号（主进程侧）：已就绪立即返回 true；否则等 backend-ready 上报，
-// 超时返回 false（此时由调用方继续退避重试兜底）。与渲染层 utils/backendReady.js 契约一致。
-function waitForBackendReadySignal(timeout = 15000) {
-  if (backendReady) return Promise.resolve(true)
-  return new Promise((resolve) => {
-    let done = false
-    let timer = null
-    const onReady = () => finish(true)
-    const finish = (v) => {
-      if (done) return
-      done = true
-      backendReadyWaiters.delete(onReady)
-      clearTimeout(timer)
-      resolve(v)
-    }
-    backendReadyWaiters.add(onReady)
-    timer = setTimeout(() => finish(backendReady), timeout)
-  })
-}
+// 等待后端就绪信号（主进程侧）已迁至 backend.js：backend.waitForBackendReadySignal
 
 // 轮询后端 GET /api/accounts 直到返回 200（或超时）。返回有效账号数组；超时返回 null。
 async function waitBackendReady(timeout = 15000) {
@@ -2544,7 +747,7 @@ async function waitBackendReady(timeout = 15000) {
     } catch (_) { /* 后端尚未就绪，继续重试 */ }
     if (Date.now() - start > timeout) return null
     // 优先等就绪信号：后端一就绪立即重试；信号缺失时退化为 250ms 退避
-    await waitForBackendReadySignal(250)
+    await backend.waitForBackendReadySignal(250)
   }
 }
 
@@ -2695,6 +898,9 @@ ipcMain.on('setup-ready', (event) => {
   clearTimeout(setupWindow.__revealTimer)
   revealWindow(setupWindow)
   startupTimer.mark('引导界面挂载完成')
+  // 引导界面即本场景的「首屏」：视为首屏渲染完成，配合后端就绪定锚点（引导页停留不计入启动耗时）。
+  firstScreenRendered = true
+  tryEndStartup()
   // 界面完全加载完成后，再让出一次事件循环，随后才在后台开始预热（不与首帧显示抢资源）
   setTimeout(() => { runSetupWarmup() }, 0)
 })
@@ -2770,8 +976,8 @@ ipcMain.handle('set-initial-data-dir', async (event, payload) => {
   }
 
   // 重启后端让新目录生效（token 由同一 SECURE_MASTER 签发，重启后仍有效）
-  await stopBackendProcess()
-  startBackend()
+  await backend.stopBackendProcess()
+  backend.startBackend()
   return { ok: true, dataDir: resolveDataDir(), thumbsDir: resolveThumbsDir(), changed: true }
 })
 
@@ -2917,7 +1123,7 @@ async function migrateDataDir(oldDir, target) {
 
   // 停止后端，确保没有任何进程再读写这些数据库文件
   emit('校验文件', 0, 0, 0, '正在停止数据读写')
-  await stopBackendProcess()
+  await backend.stopBackendProcess()
 
   const source = await buildInventory(oldDir, (doneFiles, totalFiles, doneBytes, totalBytes) => {
     emit('校验文件', doneFiles, totalFiles, totalBytes ? (doneBytes / totalBytes) * 100 : (totalFiles ? 100 : 0), '正在校验现有数据完整性')
@@ -3021,30 +1227,7 @@ async function migrateDataDir(oldDir, target) {
   return { oldDirRemoved }
 }
 
-// 停止后端子进程（不清 isQuitting 标志，便于随后重启）。
-// 返回 Promise：等进程真正退出后再 resolve。Windows 上 kill() 是异步的，若不等它
-// 退出就立刻拷贝/删除数据库文件，会因 .db/.db-wal/.db-shm 句柄尚未释放而 EBUSY/EPERM 失败。
-// 同时摘掉 exit→scheduleBackendRestart 监听：本次是「主动停止」，不应再被自动重启拉起来
-// （否则会和调用方的 startBackend() 一起 fork 出两个后端）。
-function stopBackendProcess() {
-  clearTimeout(backendRestartTimer)
-  // 主动停止后端（迁移 / 加密转换 / 重连 / 退出）时一并停掉心跳，
-  // 避免探测一个已不在的进程而被误判为「后端无响应」
-  stopHeartbeat()
-  backendReady = false
-  const proc = backendProcess
-  backendProcess = null
-  if (!proc) return Promise.resolve()
-  try { proc.removeListener('exit', scheduleBackendRestart) } catch (_) { /* 忽略 */ }
-  return new Promise((resolve) => {
-    let settled = false
-    const done = () => { if (settled) return; settled = true; resolve() }
-    proc.once('exit', done)
-    try { proc.kill() } catch (_) { done() }
-    // 兜底：进程迟迟不退出也不能无限等待
-    setTimeout(done, 3000)
-  })
-}
+// 停止后端子进程（stopBackendProcess）已迁至 backend.js：backend.stopBackendProcess
 
 // 变更「数据库目录」：关闭全部其它窗口并弹出独立的迁移进度窗口，在其中完成
 //   预检（有效班主任库/无再读写）→ 校验源文件 → 复制（字节进度）→ 复检（失败单拷 + 全局哈希）→ 写配置；
@@ -3088,13 +1271,15 @@ ipcMain.handle('set-data-dir', async (event, dir) => {
     sendMigration({ type: 'migration-done' })
     await new Promise((r) => setTimeout(r, 700))
     pendingMainNotification = { type: 'success', message: '数据库移动成功' }
-    startBackend()
+    backend.startBackend()
     reopenAfterMigration()
     return { ok: true, dataDir: target, changed: true, oldDirRemoved }
   } catch (err) {
     console.error('[main] 数据目录搬迁失败:', err?.message || err)
     // 失败：旧目录与旧配置原样保留；新目录不再自动清理，交由用户在进度窗口确认后手动清除
-    startBackend()
+    // 搬迁过程已停掉后端（migrateDataDir 内），这里必须把它重新拉起，否则用户返回主界面后
+    // 前端将一直连不上后端。后端仍存活（失败发生在停后端之前）时不重复 fork 第二个进程。
+    if (!backend.getBackendProcess()) backend.startBackend()
     // 失败提示条：用「提示」而非「错误」，语义为「搬迁未生效、数据安全」；用户关掉进度窗口后新主窗口展示
     pendingMainNotification = { type: 'info', message: '数据库移动失败，原数据库未发生改动' }
     sendMigration({ type: 'migration-error', message: err?.message || String(err), target })
@@ -3148,195 +1333,22 @@ ipcMain.handle('set-thumbs-dir', async (event, dir) => {
   fs.mkdirSync(target, { recursive: true })
   // 配置写入失败必须中止，不能继续重启后端去用一个尚未生效的目录
   saveAppConfig({ thumbsDir: target })
-  await stopBackendProcess()
-  startBackend()
+  await backend.stopBackendProcess()
+  backend.startBackend()
   return { ok: true, thumbsDir: target, changed: true, oldThumbsDir: oldDir }
 })
 
-// 选择图片文件对话框（用于背景图片）
-ipcMain.handle('select-image-file', async () => {
-  if (!mainWindow || mainWindow.isDestroyed()) return { canceled: true, filePaths: [] }
-  const result = await dialog.showOpenDialog(mainWindow, {
-    properties: ['openFile'],
-    defaultPath: lastDialogDir || undefined,
-    filters: [
-      { name: '图片文件', extensions: ['jpg', 'jpeg', 'png', 'gif', 'webp', 'bmp'] },
-      { name: '所有文件', extensions: ['*'] }
-    ]
-  })
-  if (!result.canceled && result.filePaths.length > 0) {
-    lastDialogDir = path.dirname(result.filePaths[0])
-    const filePath = result.filePaths[0]
-    // 检查文件大小（限制 50MB）
-    const fileStat = fs.statSync(filePath)
-    const maxSize = 50 * 1024 * 1024 // 50MB
-    if (fileStat.size > maxSize) {
-      return { canceled: true, error: '图片大小超过 50MB，请选择更小的图片' }
-    }
-    // 将文件复制到后端 uploads/background 目录
-    // 打包后 __dirname 位于只读 asar 内，必须写到 userData/data/uploads/background（与后端 DATA_DIR 一致）
-    const bgDir = path.join(app.getPath('userData'), 'data', 'uploads', 'background')
-    if (!fs.existsSync(bgDir)) {
-      fs.mkdirSync(bgDir, { recursive: true })
-    }
-    const fileName = `bg_${Date.now()}${path.extname(filePath)}`
-    const destPath = path.join(bgDir, fileName)
-    fs.copyFileSync(filePath, destPath)
-    // 根据环境返回不同的 URL
-    let imageUrl
-    if (isDev) {
-      // 开发模式：通过 Vite 代理访问 /api/background
-      imageUrl = `/api/background/${fileName}`
-    } else {
-      // 生产模式：直接请求后端 API
-      imageUrl = `http://localhost:3000/api/background/${fileName}`
-    }
-    return { canceled: false, filePath: destPath, fileUrl: imageUrl, originalName: path.basename(filePath) }
-  }
-  return result
-})
-
-// 保存背景图片（用于大图片，前端传入 base64）
-ipcMain.handle('save-background-image', async (event, { name, base64 }) => {
-  try {
-    const bgDir = path.join(app.getPath('userData'), 'data', 'uploads', 'background')
-    if (!fs.existsSync(bgDir)) {
-      fs.mkdirSync(bgDir, { recursive: true })
-    }
-    // 从原始文件名获取扩展名
-    const ext = name ? path.extname(name) || '.png' : '.png'
-    const fileName = `bg_${Date.now()}${ext}`
-    const destPath = path.join(bgDir, fileName)
-    // 将 base64 写入文件
-    const buffer = Buffer.from(base64, 'base64')
-    fs.writeFileSync(destPath, buffer)
-    // 根据环境返回不同的 URL
-    let imageUrl
-    if (isDev) {
-      imageUrl = `/api/background/${fileName}`
-    } else {
-      imageUrl = `http://localhost:3000/api/background/${fileName}`
-    }
-    return { success: true, url: imageUrl, fileName }
-  } catch (err) {
-    return { success: false, error: err.message }
-  }
-})
-
-// 导出文件保存对话框：用户确认保存后才写入文件并返回
-ipcMain.handle('save-file', async (event, { defaultName, data }) => {
-  if (!mainWindow || mainWindow.isDestroyed()) return { canceled: true }
-  const ext = path.extname(defaultName) || ''
-  const result = await dialog.showSaveDialog(mainWindow, {
-    title: '保存文件',
-    defaultPath: lastDialogDir ? path.join(lastDialogDir, defaultName) : defaultName,
-    filters: ext ? [{ name: '文件', extensions: [ext.replace('.', '')] }] : undefined
-  })
-  if (result.canceled || !result.filePath) return { canceled: true }
-  try {
-    const buffer = Buffer.from(data)
-    fs.writeFileSync(result.filePath, buffer)
-    lastDialogDir = path.dirname(result.filePath)
-    return { canceled: false, filePath: result.filePath }
-  } catch (err) {
-    return { canceled: true, error: err.message }
-  }
-})
-
-// 导出文件保存后：用系统默认应用打开
-ipcMain.handle('open-file', async (event, { filePath }) => {
-  if (!filePath) return { success: false, error: 'no filePath' }
-  try {
-    const error = await shell.openPath(filePath)
-    return { success: !error, error: error || null }
-  } catch (err) {
-    return { success: false, error: err.message }
-  }
-})
-
-// 一键截屏：截取整个屏幕并保存到本地
-// options.hideWidget: 是否隐藏 widget 窗口（默认 true）。截屏工具传 false 以保持 spinner 可见
-ipcMain.handle('screenshot-capture', async (event, options) => {
-  const hideWidget = options?.hideWidget !== false
-  let wasVisible = false
-  if (hideWidget && widgetWindow && !widgetWindow.isDestroyed()) {
-    wasVisible = widgetWindow.isVisible()
-    if (wasVisible) widgetWindow.setOpacity(0)
-    // 等待一帧确保窗口已隐藏
-    await new Promise(resolve => setTimeout(resolve, 150))
-  }
-
-  try {
-    const primaryDisplay = screen.getPrimaryDisplay()
-    const { width, height } = primaryDisplay.size
-    const scaleFactor = primaryDisplay.scaleFactor || 1
-
-    const sources = await desktopCapturer.getSources({
-      types: ['screen'],
-      thumbnailSize: { width: Math.round(width * scaleFactor), height: Math.round(height * scaleFactor) }
-    })
-
-    const primarySource = sources.find(s => s.display_id === String(primaryDisplay.id)) || sources[0]
-    const image = primarySource.thumbnail.toPNG()
-
-    const saveDir = options?.saveDir || path.join(app.getPath('pictures'), 'screenshots')
-    if (!fs.existsSync(saveDir)) {
-      fs.mkdirSync(saveDir, { recursive: true })
-    }
-
-    const timestamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19)
-    const filePath = path.join(saveDir, `screenshot_${timestamp}.png`)
-    fs.writeFileSync(filePath, image)
-
-    // dataUrl 仅按需生成：整屏 PNG base64 在主进程/IPC/渲染进程各持一份，
-    // 内存开销大。默认生成以兼容旧调用；调用方（Screenshot.vue）不需要时可关闭。
-    const withDataUrl = options?.withDataUrl !== false
-    const dataUrl = withDataUrl ? `data:image/png;base64,${image.toString('base64')}` : ''
-    return { success: true, filePath, dataUrl }
-  } finally {
-    // 恢复 widget 窗口透明度
-    if (wasVisible && widgetWindow && !widgetWindow.isDestroyed()) {
-      widgetWindow.setOpacity(1)
-      // 显式恢复鼠标事件和焦点，避免 setOpacity 后透明窗口丢失交互
-      widgetWindow.setIgnoreMouseEvents(false)
-      widgetWindow.focus()
-    }
-  }
-})
-
-// 保存注释后的截图
-ipcMain.handle('note-save', async (event, uint8Array, options) => {
-  const buffer = Buffer.from(uint8Array)
-  const saveDir = options?.saveDir || path.join(app.getPath('pictures'), 'screenshots')
-  if (!fs.existsSync(saveDir)) {
-    fs.mkdirSync(saveDir, { recursive: true })
-  }
-  const timestamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19)
-  const filePath = path.join(saveDir, `note_${timestamp}.png`)
-  fs.writeFileSync(filePath, buffer)
-  return { success: true, filePath }
-})
+// 图片/文件对话框、截屏、注释保存：见 dialogs.js（registerDialogsIpc）
 
 app.isQuitting = false
 
-function shutdownBackend() {
-  app.isQuitting = true
-  clearTimeout(backendRestartTimer)
-  if (backendProcess) {
-    try { backendProcess.kill() } catch (_) {}
-    backendProcess = null
-  }
-  if (backendLogStream) {
-    try { backendLogStream.end() } catch (_) {}
-    backendLogStream = null
-  }
-}
+// 应用退出收尾（shutdownBackend：置退出标志 + 杀后端 + 关闭日志流）已迁至 backend.js
 
 app.on('window-all-closed', () => {
   // 托盘图标存在（主窗口关闭后进入后台运行）：保持进程与后端存活，
   // 由用户从托盘「打开主窗口」或「完全退出」决定后续。
-  if (appTray) return
-  shutdownBackend()
+  if (tray.isTrayAlive()) return
+  backend.shutdownBackend()
   if (process.platform !== 'darwin') {
     app.quit()
   }
@@ -3344,13 +1356,15 @@ app.on('window-all-closed', () => {
 
 app.on('activate', () => {
   if (BrowserWindow.getAllWindows().length === 0) {
-    destroyTray()
+    tray.destroyTray()
     createMainWindow()
-    createWidgetWindow()
+    // 工具箱浮窗 / 桌面小组件不在此处直接创建：窗口归属 widget.js，
+    // 新主窗口的渲染层挂载后会回报 widgets-ready，由 widget.js 按「是否启用」统一按需建窗
+    // （与托盘「打开主窗口」路径一致，避免绕过会话级开关凭空拉起一个隐藏的浮窗渲染进程）。
   }
 })
 
 app.on('before-quit', () => {
-  destroyTray()
-  shutdownBackend()
+  tray.destroyTray()
+  backend.shutdownBackend()
 })

@@ -25,6 +25,8 @@ const validSendChannels = [
   'shutdown-action',
   // 启动失败兜底：用户点「退出应用」
   'quit-app',
+  // 原生右键菜单：渲染层在「未被页面自行处理」时请求主进程弹出系统菜单
+  'show-native-context-menu',
   // Win11 主题：主窗口窗外亚克力开关
   'theme-chrome',
   // 渲染层回报/切换「桌面小组件」启用状态（主进程据此按需创建/关闭桌面小组件窗口）
@@ -87,6 +89,7 @@ const validInvokeChannels = [
   'perf-snapshot',
   'perf-restart-frontend',
   'perf-restart-widget',
+  'perf-relaunch-app',
   'perf-gc',
   'perf-startup',
   // 版本更新：取当前版本号 / 主动检查更新

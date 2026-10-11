@@ -172,6 +172,28 @@ themeStore.applyTheme()
 import { initDialogOverlayPulse } from './utils/dialogOverlayPulse'
 initDialogOverlayPulse()
 
+// 原生右键菜单：页面未自行处理右键（模板里没 .prevent）时，交给主进程弹系统菜单。
+// 用 defaultPrevented 判定——表格/课堂/收费等已有自定义右键菜单的区域是 .stop.prevent，
+// 事件已被拦截或标记为已处理，这里不会再弹一次。
+window.addEventListener('contextmenu', (e) => {
+  if (e.defaultPrevented) return
+  const el = e.target
+  const tag = el && el.tagName ? el.tagName.toLowerCase() : ''
+  const isEditable = !!(el && (el.isContentEditable || tag === 'input' || tag === 'textarea'))
+  const sel = window.getSelection ? window.getSelection() : null
+  const hasSelection = !!(sel && sel.toString().trim())
+  const anchor = el && el.closest ? el.closest('a[href]') : null
+  const linkURL = anchor ? anchor.href : ''
+  if (!isEditable && !hasSelection && !linkURL) return
+  e.preventDefault()
+  window.electron?.send('show-native-context-menu', {
+    isEditable,
+    readOnly: !!(el && (el.readOnly === true || el.disabled === true)),
+    hasSelection,
+    linkURL,
+  })
+})
+
 // 弹窗懒加载预取指令（v-preload）：悬停触发按钮时提前加载对应弹窗 chunk
 import { vPreload } from './utils/dialogPrefetch'
 app.directive('preload', vPreload)
