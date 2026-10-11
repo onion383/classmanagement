@@ -375,8 +375,8 @@ const libGroups = [
     category: '桌面壳',
     items: [
       { desc: '桌面框架', name: 'Electron', url: 'https://github.com/electron/electron', license: 'MIT' },
-      { desc: '无边框亚克力', name: 'electron-acrylic-window', url: 'https://github.com/wizo06/electron-acrylic-window', license: 'MIT' },
       { desc: '应用打包', name: 'electron-builder', url: 'https://github.com/electron-userland/electron-builder', license: 'MIT' },
+      { desc: '原生 FFI', name: 'koffi', url: 'https://github.com/Koromix/koffi', license: 'MIT' },
     ],
   },
   {
@@ -388,7 +388,7 @@ const libGroups = [
       { desc: '构建工具', name: 'Vite', url: 'https://github.com/vitejs/vite', license: 'MIT' },
       { desc: 'CSS 框架', name: 'Tailwind CSS', url: 'https://github.com/tailwindlabs/tailwindcss', license: 'MIT' },
       { desc: 'HTTP 请求', name: 'Axios', url: 'https://github.com/axios/axios', license: 'MIT' },
-      { desc: '图标库', name: 'lucide', url: 'https://github.com/lucide-icons/lucide', license: 'ISC' },
+      { desc: '图标库', name: '@lucide/vue', url: 'https://github.com/lucide-icons/lucide', license: 'ISC' },
       { desc: 'XSS 过滤', name: 'DOMPurify', url: 'https://github.com/cure53/DOMPurify', license: 'Apache-2.0' },
       { desc: 'Markdown 解析', name: 'marked', url: 'https://github.com/markedjs/marked', license: 'MIT' },
     ],
@@ -398,7 +398,6 @@ const libGroups = [
     items: [
       { desc: '后端框架', name: 'Express', url: 'https://github.com/expressjs/express', license: 'MIT' },
       { desc: '加密数据库', name: 'better-sqlite3-multiple-ciphers', url: 'https://github.com/m4heshd/better-sqlite3-multiple-ciphers', license: 'MIT' },
-      { desc: '关系数据库', name: 'mysql2', url: 'https://github.com/sidorares/node-mysql2', license: 'MIT' },
       { desc: '图片处理', name: 'Sharp', url: 'https://github.com/lovell/sharp', license: 'Apache-2.0' },
       { desc: '跨域支持', name: 'cors', url: 'https://github.com/expressjs/cors', license: 'MIT' },
       { desc: '文件上传', name: 'Multer', url: 'https://github.com/expressjs/multer', license: 'MIT' },

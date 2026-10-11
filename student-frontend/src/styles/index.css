@@ -26,6 +26,13 @@ select {
 @import "./theme-win11.css";
 @import "./utilities.css";
 
+/* 系统字体：统一走系统 UI 字体栈，避免默认字体带来的「网页感」。
+   Win11 用 Segoe UI Variable Text，旧系统回退 Segoe UI；中文用雅黑 UI 变体。
+   放在 tailwind 导入之后，确保覆盖 preflight 的默认字体。 */
+html, body {
+  font-family: "Segoe UI Variable Text", "Segoe UI", "Microsoft YaHei UI", "Microsoft YaHei", system-ui, -apple-system, sans-serif;
+}
+
 /* 注册 Tailwind 主题变量，让 class 可用 */
 @theme {
   --color-primary: var(--color-primary);
