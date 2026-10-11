@@ -51,7 +51,7 @@
         <path d="M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/>
         <line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/>
       </svg>
-      <span class="logo">班级管理系统</span>
+      <span class="logo">班集</span>
       <div class="fail-box">
         <div class="fail-msg">后台启动失败，请点击下面按钮重试或退出应用重试</div>
         <div class="fail-row">
@@ -369,6 +369,14 @@ export default {
       window.electron?.send('shutdown-action', { type: 'ready' })
       this.ipcFromMain = window.electron?.on('from-main', (data) => {
         if (!data) return
+        // 版本更新：新版本下载完成后给一条常驻提示（可在「关于」页点「重启并安装」）
+        if (data.type === 'update-state') {
+          const s = data.state || {}
+          if (s.status === 'downloaded') {
+            useNotification().success(`新版本 ${s.latestVersion ? 'v' + s.latestVersion : ''} 已下载，重启应用即可完成安装`, 0)
+          }
+          return
+        }
         // 运行期后端异常状态（心跳探测 / 进程退出后主进程发起的重连）
         if (data.type === 'backend-ready') {
           this.backendEverReady = true

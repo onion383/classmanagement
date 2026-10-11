@@ -11,7 +11,7 @@
 
         <!-- 标题区 -->
         <div class="shutdown-title-wrap">
-          <h2 class="shutdown-title">关闭班级管理系统</h2>
+          <h2 class="shutdown-title">关闭班集</h2>
           <p class="shutdown-subtitle">你可以保留后台进程与组件窗口，或者直接完全退出应用。</p>
         </div>
 

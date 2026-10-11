@@ -1,9 +1,13 @@
-const { app, BrowserWindow, ipcMain, desktopCapturer, screen, dialog, shell, protocol, session, Menu, globalShortcut, Notification, safeStorage } = require('electron')
+const { app, BrowserWindow, ipcMain, desktopCapturer, screen, dialog, shell, protocol, session, Menu, Tray, nativeImage, globalShortcut, Notification, safeStorage } = require('electron')
 const path = require('path')
 const fs = require('fs')
 const crypto = require('crypto')
 const startupTimer = require('./startup-timer')
 const { getPrivateWorkingSetKB } = require('./privateWorkingSet')
+
+// 应用窗口/任务栏图标：与托盘同源，随 electron/**/* 一起打包，开发与生产均能直接读取。
+// Windows 任务栏优先取窗口图标，设置后不再显示 Electron 默认图标（打包版还会用 win.icon 作为 exe 图标）。
+const APP_ICON_PATH = path.join(__dirname, 'app-icon.png')
 
 // 性能面板：暴露 GC。
 // 必须在 app ready 之前追加开关，主进程与各渲染进程才会提供 global.gc / window.gc；
@@ -178,10 +182,14 @@ const gotSingleInstanceLock = app.requestSingleInstanceLock()
 
 // 用户又尝试启动一次（重复点击图标/快捷键）时，唤起已存在的主窗口而不是新开
 app.on('second-instance', () => {
+  // 用户又点了一次图标：有主窗口就唤起，没有（已关闭进托盘）就重建
+  destroyTray()
   if (mainWindow && !mainWindow.isDestroyed()) {
     if (mainWindow.isMinimized()) mainWindow.restore()
     mainWindow.show()
     mainWindow.focus()
+  } else {
+    createMainWindow()
   }
 })
 
@@ -236,7 +244,7 @@ function loadUrlWithRetry(win, url, retries = 150, intervalMs = 200) {
 // 这样窗口能在 < 1s 内弹出（显示 loading 动画），
 // 后台轮询 Vite 就绪后自动跳转到热更新页面。
 // 主窗口与引导窗口共用这一份模板（仅文案不同），保证 dev 下 loading 页只出现「一个画面」。
-function devLoadingHtml(title = '班级管理系统', tip = '正在启动…') {
+function devLoadingHtml(title = '班集', tip = '正在启动…') {
   return `<!DOCTYPE html>
 <html>
 <head><meta charset="UTF-8">
@@ -299,6 +307,8 @@ function pollViteAndNavigate(win, retries = 40) {
 // 主窗口统一「无边框透明 + 窗外亚克力」：所有主题一致，由渲染层自绘标题栏
 // （标题栏显示应用名），避免原生标题栏与侧边栏标题重复。边框类型不再随主题切换。
 function createMainWindow() {
+  // 主窗口（重）建时移除托盘图标：主窗口已恢复，无需再驻留托盘
+  destroyTray()
   // （新窗口）关闭菜单状态复位：allowMainClose 不会在旧窗口关闭后自动清掉，
   // 若不清零，重建后的新主窗口点关闭会被静默放行、不再弹菜单。
   allowMainClose = false
@@ -312,7 +322,8 @@ function createMainWindow() {
     height: 800,
     minWidth: 900,
     minHeight: 600,
-    title: '班级管理系统',
+    title: '班集',
+    icon: APP_ICON_PATH,
     // 全部主题统一：无边框 + 系统原生背景材质(backgroundMaterial)，用自绘标题栏。
     // 不用 transparent（透明窗口会禁用系统材质）；backgroundMaterial 绘制在窗口背景，
     // 渲染层用半透明元素 + backdrop-filter 磨砂透出。Win11 也据此自动为窗口加圆角。
@@ -418,10 +429,14 @@ function createMainWindow() {
   })
 }
 
+// 小组件窗口四周留出的阴影绘制边距（px）。
+// 渲染层用同值 padding 让「视觉内容」贴回原位置，因此窗口比内容大 2*M，且窗口位置相对视觉位置偏移 -M。
+const WIDGET_SHADOW_MARGIN = 16
+
 function createWidgetWindow() {
   widgetWindow = new BrowserWindow({
-    width: 48,
-    height: 48,
+    width: 48 + WIDGET_SHADOW_MARGIN * 2,
+    height: 48 + WIDGET_SHADOW_MARGIN * 2,
     frame: false,
     transparent: true,
     alwaysOnTop: true,
@@ -445,9 +460,9 @@ function createWidgetWindow() {
     }
   })
 
-  // 初始位置：屏幕左边缘中间
+  // 初始位置：屏幕左边缘中间（窗口相对视觉位置偏移 -M，让图标仍贴在左边缘）
   const { height: screenH } = require('electron').screen.getPrimaryDisplay().workAreaSize
-  widgetWindow.setPosition(0, Math.round(screenH / 2 - 24))
+  widgetWindow.setPosition(-WIDGET_SHADOW_MARGIN, Math.round(screenH / 2 - 24) - WIDGET_SHADOW_MARGIN)
 
   if (process.platform === 'darwin') {
     widgetWindow.setWindowButtonVisibility(false)
@@ -1087,6 +1102,16 @@ function queryBackendMemory(timeout = 1500) {
   })
 }
 
+// 串行化后端内存查询：内存历史采样与面板快照可能并发，而二者共用同一个 memWaiter，
+// 不串行会让先发起的查询被覆盖而超时。这里用一条 Promise 链排队，保证同一时刻只有一个查询在途。
+let memQueryChain = Promise.resolve()
+function queryBackendMemorySerial(timeout = 1500) {
+  const run = () => queryBackendMemory(timeout)
+  const p = memQueryChain.then(run, run)
+  memQueryChain = p.then(() => {}, () => {})
+  return p
+}
+
 function queryBackendGc(timeout = 1500) {
   return new Promise((resolve) => {
     const proc = backendProcess
@@ -1133,9 +1158,9 @@ async function collectRendererGarbage(wc) {
   }
 }
 
-// 内存快照：逐个进程列出（主进程 / 各渲染窗口 / GPU / 各服务进程 / 后端），
-// 并额外给出前端、后端、小组件三个「可重启目标」的存活状态。
-ipcMain.handle('perf-snapshot', async () => {
+// 收集逐进程内存列表（主进程 / 各渲染窗口 / GPU / 各服务进程 / 后端）。
+// 面板快照与内存历史采样共用，保证两处口径一致。
+async function collectProcList() {
   // 渲染进程按所属窗口取友好名（同一 pid 后写覆盖，主窗口优先级最高）
   const labelByPid = new Map()
   const addWin = (label, win) => {
@@ -1185,7 +1210,7 @@ ipcMain.handle('perf-snapshot', async () => {
   }
 
   // 后端：Node 子进程不在 getAppMetrics 里，由它用 process.memoryUsage() 自报（字节 → KB）
-  const mem = await queryBackendMemory()
+  const mem = await queryBackendMemorySerial()
   if (mem) {
     procs.push({
       key: 'backend',
@@ -1209,15 +1234,74 @@ ipcMain.handle('perf-snapshot', async () => {
       if (typeof kb === 'number') p.privWsKB = Math.round(kb)
     }
   }
+  return procs
+}
 
+// 单个进程在面板采用的内存口径：优先专用工作集，回退私有提交量
+function procMemKB(p) {
+  if (typeof p.privWsKB === 'number') return p.privWsKB
+  if (typeof p.privateKB === 'number') return p.privateKB
+  return 0
+}
+
+// ========== 内存历史：总计 / 平均（近一分钟）/ 最高（自启动起）==========
+// 由主进程定时采样，不依赖设置页是否打开——「最高」自程序启动即开始统计。
+const MEM_SAMPLE_INTERVAL = 5000
+const MEM_AVG_WINDOW = 60000
+let memHistory = []        // [{ t, kb }]，仅保留近一分钟的样本
+let memMaxKB = 0           // 自启动以来的最高总计
+let memSampleTimer = null
+let memSampling = false
+
+function recordMemSample(kb) {
+  if (!kb || kb <= 0) return
+  const now = Date.now()
+  memHistory.push({ t: now, kb })
+  const cutoff = now - MEM_AVG_WINDOW
+  while (memHistory.length && memHistory[0].t < cutoff) memHistory.shift()
+  if (kb > memMaxKB) memMaxKB = kb
+}
+
+function memAvgKB() {
+  if (!memHistory.length) return 0
+  let sum = 0
+  for (const h of memHistory) sum += h.kb
+  return Math.round(sum / memHistory.length)
+}
+
+async function sampleMemTotal() {
+  if (memSampling) return
+  memSampling = true
+  try {
+    const procs = await collectProcList()
+    recordMemSample(procs.reduce((s, p) => s + procMemKB(p), 0))
+  } catch (_) { /* 采样失败静默忽略 */ }
+  finally { memSampling = false }
+}
+
+function startMemSampling() {
+  if (memSampleTimer) return
+  sampleMemTotal()
+  memSampleTimer = setInterval(sampleMemTotal, MEM_SAMPLE_INTERVAL)
+}
+
+// 内存快照：逐进程列表 + 前端/后端/小组件存活状态 + 总计/平均/最高汇总
+ipcMain.handle('perf-snapshot', async () => {
+  const procs = await collectProcList()
+  const total = procs.reduce((s, p) => s + procMemKB(p), 0)
+  // 面板打开时也记一笔，让「平均/最高」与逐进程列表的当前值保持同步
+  recordMemSample(total)
+  // 按用途分组：前端（主窗口渲染进程）/ 后端 / 其他（主进程、GPU、其他渲染/服务进程）
+  const frontKB = procs.reduce((s, p) => s + (p.name === '前端窗口' ? procMemKB(p) : 0), 0)
+  const backendKB = procs.reduce((s, p) => s + (p.kind === 'backend' ? procMemKB(p) : 0), 0)
+  const otherKB = Math.max(0, total - frontKB - backendKB)
   // 存活状态按窗口/进程本身判定，不依赖指标里能否匹配到 pid
   const alive = {
     front: !!(mainWindow && !mainWindow.isDestroyed()),
     widget: !!((widgetWindow && !widgetWindow.isDestroyed()) || (desktopWidgetWindow && !desktopWidgetWindow.isDestroyed())),
-    backend: !!mem,
+    backend: procs.some((p) => p.kind === 'backend'),
   }
-
-  return { procs, alive }
+  return { procs, alive, total, avg1min: memAvgKB(), max: memMaxKB, frontKB, backendKB, otherKB }
 })
 
 // 重启前端：直接重载主窗口页面
@@ -1449,6 +1533,223 @@ function detectBackendReady(chunk) {
   console.log('[main] 后端已就绪')
 }
 
+// ========== 版本更新（自建：GitHub Releases + Inno Setup 静默升级）==========
+// 已移除 electron-updater，改为自建三段式流程：
+//   1) 检查：请求 GitHub releases/latest，比较 tag 与当前版本；
+//   2) 下载：把 release 里的 Inno 安装包资产下到 userData 临时目录（边下边报进度）；
+//   3) 安装：update-install 时用 Inno 静默参数启动安装包并退出本进程（装完自动重启）。
+// 主进程是更新状态的唯一权威来源，渲染层通过 from-main{type:'update-state'} 订阅；
+// IPC 通道名与状态字段与旧实现完全一致，前端无需任何改动。
+
+// GitHub 仓库信息（原先在 electron-builder.json 的 publish 里，现仅保留在代码常量中）
+const UPDATE_REPO = { owner: 'onion383', repo: 'classmanagement' }
+// Inno 安装包资产名匹配（如「班集-Setup-0.8.0.exe」）
+const UPDATE_ASSET_RE = /setup.*\.exe$/i
+// 检查超时沿用既有 10s 风格；下载体积较大，整体超时放宽到 5 分钟
+const UPDATE_CHECK_TIMEOUT = 10000
+const UPDATE_DOWNLOAD_TIMEOUT = 300000
+
+// 更新状态快照：主进程是唯一权威来源，渲染层通过 from-main{type:'update-state'} 订阅
+let updateState = {
+  status: 'idle', // idle | checking | available | downloading | downloaded | not-available | error
+  currentVersion: app.getVersion(),
+  latestVersion: null,
+  percent: 0,
+  error: null,
+}
+
+// 已下载到本地的安装包绝对路径（供 update-install 使用）
+let downloadedInstallerPath = null
+// 流程互斥：避免重复检查 / 并发下载
+let updateFlowRunning = false
+
+function broadcastUpdateState() {
+  const payload = { type: 'update-state', state: { ...updateState } }
+  if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send('from-main', payload)
+}
+
+function setUpdateState(patch) {
+  updateState = { ...updateState, ...patch }
+  broadcastUpdateState()
+}
+
+// 版本比较：a > b 返回 1，a < b 返回 -1，相等返回 0
+function compareVersions(a, b) {
+  const pa = String(a || '').replace(/^v/i, '').split('.').map((n) => parseInt(n, 10) || 0)
+  const pb = String(b || '').replace(/^v/i, '').split('.').map((n) => parseInt(n, 10) || 0)
+  const len = Math.max(pa.length, pb.length)
+  for (let i = 0; i < len; i++) {
+    const diff = (pa[i] || 0) - (pb[i] || 0)
+    if (diff !== 0) return diff > 0 ? 1 : -1
+  }
+  return 0
+}
+
+// 把底层报错转成对用户友好的提示
+function friendlyUpdateError(err) {
+  const msg = (err && err.message) || String(err || '')
+  console.log('[update] 检查失败：', msg)
+  if (/ENOTFOUND|EAI_AGAIN|ETIMEDOUT|ECONNREFUSED|fetch failed|network|socket hang up|aborted/i.test(msg)) {
+    return '网络连接失败，请检查网络后重试'
+  }
+  if (/404|not found|no published|cannot find/i.test(msg)) {
+    return '未找到可用更新（仓库中暂无发布版本）'
+  }
+  return msg || '未知错误'
+}
+
+// 请求 GitHub Releases 最新发布（带超时中断，失败抛错交由上层映射为友好文案）
+async function fetchLatestRelease() {
+  const controller = new AbortController()
+  const timer = setTimeout(() => controller.abort(), UPDATE_CHECK_TIMEOUT)
+  try {
+    const url = `https://api.github.com/repos/${UPDATE_REPO.owner}/${UPDATE_REPO.repo}/releases/latest`
+    const res = await fetch(url, {
+      headers: { Accept: 'application/vnd.github+json', 'User-Agent': 'campus-assistant' },
+      signal: controller.signal,
+    })
+    if (!res.ok) {
+      const err = new Error(res.status === 404 ? '仓库中暂无发布版本' : `请求失败（HTTP ${res.status}）`)
+      err.status = res.status
+      throw err
+    }
+    return await res.json()
+  } finally {
+    clearTimeout(timer)
+  }
+}
+
+// 从 release 资产中挑选 Inno 安装包（文件名形如「*-Setup-*.exe」）
+function pickSetupAsset(release) {
+  const assets = Array.isArray(release && release.assets) ? release.assets : []
+  return assets.find((a) => UPDATE_ASSET_RE.test(String((a && a.name) || ''))) || null
+}
+
+// 开发/调试路径：仅直连探测 GitHub Releases，不下载、不安装
+async function checkUpdateViaGitHub() {
+  setUpdateState({ status: 'checking', error: null, percent: 0 })
+  try {
+    const data = await fetchLatestRelease()
+    const latest = String((data && data.tag_name) || '').replace(/^v/i, '')
+    const current = app.getVersion()
+    if (latest && compareVersions(latest, current) > 0) {
+      setUpdateState({ status: 'available', latestVersion: latest, error: null })
+    } else {
+      setUpdateState({ status: 'not-available', latestVersion: latest || current, percent: 0, error: null })
+    }
+  } catch (err) {
+    setUpdateState({ status: 'error', error: friendlyUpdateError(err) })
+  }
+}
+
+// 下载安装包到 userData/update-cache 并推送 downloading 进度；失败时清理半成品并抛出
+async function downloadInstaller(asset, version) {
+  const { Readable } = require('stream')
+  const { pipeline } = require('stream/promises')
+  const dir = path.join(app.getPath('userData'), 'update-cache')
+  fs.mkdirSync(dir, { recursive: true })
+  const fileName = String((asset && asset.name) || `班集-Setup-${version}.exe`)
+  const target = path.join(dir, fileName)
+  try { fs.rmSync(target, { force: true }) } catch (_) { /* 清理旧文件失败忽略 */ }
+
+  const controller = new AbortController()
+  const timer = setTimeout(() => controller.abort(), UPDATE_DOWNLOAD_TIMEOUT)
+  try {
+    const res = await fetch(asset.browser_download_url, {
+      headers: { 'User-Agent': 'campus-assistant' },
+      signal: controller.signal,
+    })
+    if (!res.ok) throw new Error(`下载失败（HTTP ${res.status}）`)
+    const total = Number(res.headers.get('content-length')) || Number(asset.size) || 0
+    let received = 0
+    // Node fetch 返回 web ReadableStream，转成 Node 流后边写边算百分比
+    const nodeStream = Readable.fromWeb(res.body)
+    nodeStream.on('data', (chunk) => {
+      received += chunk.length
+      if (total > 0) setUpdateState({ status: 'downloading', percent: Math.round((received / total) * 100) })
+    })
+    await pipeline(nodeStream, fs.createWriteStream(target))
+    // 服务端给了 Content-Length 时校验完整性
+    if (total > 0 && fs.statSync(target).size !== total) throw new Error('下载文件不完整')
+    downloadedInstallerPath = target
+  } catch (err) {
+    try { fs.rmSync(target, { force: true }) } catch (_) { /* 忽略 */ }
+    downloadedInstallerPath = null
+    throw err
+  } finally {
+    clearTimeout(timer)
+  }
+}
+
+// 打包环境完整流程：checking → （无更新）not-available / （有更新）available → downloading → downloaded
+async function runUpdateFlow() {
+  if (!app.isPackaged || updateFlowRunning) return
+  updateFlowRunning = true
+  // 同步先推 checking（在首个 await 之前，保证 update-check 返回的快照即 checking）
+  setUpdateState({ status: 'checking', error: null, percent: 0 })
+  try {
+    const release = await fetchLatestRelease()
+    const latest = String((release && release.tag_name) || '').replace(/^v/i, '')
+    const current = app.getVersion()
+    if (!latest || compareVersions(latest, current) <= 0) {
+      setUpdateState({ status: 'not-available', latestVersion: latest || current, percent: 0, error: null })
+      return
+    }
+    setUpdateState({ status: 'available', latestVersion: latest, error: null, percent: 0 })
+    const asset = pickSetupAsset(release)
+    if (!asset) {
+      setUpdateState({ status: 'error', error: '未找到安装包（发布资产中缺少 Setup 安装程序）' })
+      return
+    }
+    await downloadInstaller(asset, latest)
+    setUpdateState({ status: 'downloaded', latestVersion: latest, percent: 100, error: null })
+  } catch (err) {
+    setUpdateState({ status: 'error', error: friendlyUpdateError(err) })
+  } finally {
+    updateFlowRunning = false
+  }
+}
+
+ipcMain.handle('get-app-version', () => app.getVersion())
+
+// 检查更新：进入「关于」页 / 手动点击触发；立即返回当前状态快照，后续变化走 from-main 广播
+ipcMain.handle('update-check', async () => {
+  if (app.isPackaged) {
+    // 打包环境：后台走完整「检查 + 下载」流程（立即返回，结果靠事件推送）
+    runUpdateFlow()
+    return { ...updateState }
+  }
+  // 未打包（开发/调试）：仅直连探测，不下载、不安装
+  await checkUpdateViaGitHub()
+  return { ...updateState }
+})
+
+// 用户确认后：以 Inno 静默参数启动已下载的安装包，随后退出本进程（安装器装完会自动重启）
+ipcMain.on('update-install', () => {
+  if (!app.isPackaged) return
+  if (!downloadedInstallerPath || !fs.existsSync(downloadedInstallerPath)) {
+    setUpdateState({ status: 'error', error: '安装包尚未下载完成' })
+    return
+  }
+  try {
+    const { spawn } = require('child_process')
+    // Inno 静默安装参数：
+    //   /SILENT             无界面安装
+    //   /CLOSEAPPLICATIONS  自动关闭占用目标文件的旧进程
+    //   /RESTARTAPPLICATIONS 安装完成后自动重启被关闭的应用
+    const child = spawn(downloadedInstallerPath, ['/SILENT', '/CLOSEAPPLICATIONS', '/RESTARTAPPLICATIONS'], {
+      detached: true,
+      stdio: 'ignore',
+    })
+    child.unref()
+    // 置退出标志（跳过「关闭确认/托盘存活」逻辑）并退出，释放单实例锁供安装器替换文件
+    app.isQuitting = true
+    setTimeout(() => app.quit(), 500)
+  } catch (err) {
+    setUpdateState({ status: 'error', error: friendlyUpdateError(err) })
+  }
+})
+
 app.whenReady().then(() => {
   startupTimer.mark('app.whenReady 就绪')
 
@@ -1472,9 +1773,10 @@ app.whenReady().then(() => {
     // 全新安装（本机无任何账号库）先弹首次引导向导，完成后再进入主界面；
     // 非首启维持原路径——主窗口立即创建，不增加任何串行等待。
     // 首次引导默认只在「本机全新安装」（firstRunAtStartup，即数据目录无 index.db）时出现；
-    // 开发模式不再默认进入，调试需要时用 FORCE_SETUP=1 强制开启。
+    // 开发模式默认进入（便于预览引导页），调试需要跳过时用 FORCE_SETUP=0 关闭。
     const forceSetup = process.env.FORCE_SETUP === '1'
-    if (forceSetup || firstRunAtStartup) {
+    const skipSetup = process.env.FORCE_SETUP === '0'
+    if (!skipSetup && (isDev || forceSetup || firstRunAtStartup)) {
       createSetupWindow()
       startupTimer.mark('createSetupWindow 完成')
     } else {
@@ -1486,6 +1788,14 @@ app.whenReady().then(() => {
 
     startBackend()
     startupTimer.mark('startBackend 完成')
+
+    // 性能面板内存历史：自启动即开始定时采样「总计」，用于「平均（近一分钟）/ 最高（自启动起）」
+    startMemSampling()
+
+    // 版本更新：启动后延迟做一次「检查 + 下载」（避开首屏关键路径，仅打包环境）
+    if (app.isPackaged) {
+      setTimeout(() => { runUpdateFlow() }, 8000)
+    }
 
     // 5s 后输出启动时间线并保存日志
     setTimeout(() => {
@@ -1643,35 +1953,25 @@ ipcMain.handle('set-usb-auto-open', (event, enabled) => {
 })
 
 // 调整小组件窗口大小（带边界保护，防止超出屏幕）
+// 入参 [width, height] 为「视觉内容」尺寸；窗口实际会比它大 2*M，四周多出的部分用于绘制阴影。
+// 窗口位置保持不变——因为渲染层内容相对窗口固定偏移 M，所以视觉内容在屏幕上的位置不会变。
 ipcMain.on('widget-resize', (event, [width, height]) => {
   if (widgetWindow && !widgetWindow.isDestroyed()) {
-    widgetWindow.setContentSize(width, height)
+    const M = WIDGET_SHADOW_MARGIN
+    widgetWindow.setContentSize(width + M * 2, height + M * 2)
     const [actualW, actualH] = widgetWindow.getContentSize()
     currentWidgetSize = [actualW, actualH]
 
-    // 边界保护：确保窗口不超出屏幕
+    // 回执：告知渲染层窗口尺寸已生效，便于其「先改尺寸、再显示内容」，避免固定延时造成的空窗
+    try { widgetWindow.webContents.send('from-main', { type: 'widget-resized', width: actualW, height: actualH }) } catch (_) { /* 忽略 */ }
+
+    // 边界保护：保证「视觉内容」（去掉阴影边距后的部分）不越出屏幕。
+    // 因视觉内容相对窗口左上角偏移 M，窗口本身允许向外溢出 M。
     const [x, y] = widgetWindow.getPosition()
     const { width: screenW, height: screenH } = require('electron').screen.getPrimaryDisplay().workAreaSize
 
-    let newX = x
-    let newY = y
-
-    // 右边界保护
-    if (newX + width > screenW) {
-      newX = screenW - width
-    }
-    // 左边界保护
-    if (newX < 0) {
-      newX = 0
-    }
-    // 下边界保护
-    if (newY + height > screenH) {
-      newY = screenH - height
-    }
-    // 上边界保护
-    if (newY < 0) {
-      newY = 0
-    }
+    let newX = Math.min(Math.max(x, -M), screenW - width - M)
+    let newY = Math.min(Math.max(y, -M), screenH - height - M)
 
     if (newX !== x || newY !== y) {
       widgetWindow.setPosition(newX, newY)
@@ -1844,8 +2144,55 @@ function closeMainWith(action) {
   // 关闭组件（桌面组件窗口或工具箱窗口）后再关主窗口；组件未开启时无副作用
   if (action === 'toolbox' && widgetWindow && !widgetWindow.isDestroyed()) widgetWindow.close()
   if (action === 'desktop' && desktopWidgetWindow && !desktopWidgetWindow.isDestroyed()) desktopWidgetWindow.close()
+  // 先创建托盘再关主窗口：即便主窗口是最后一个窗口，window-all-closed 也能据此保持后台运行
+  // （若先关窗，window-all-closed 可能已先触发 shutdownBackend 并退出应用）
+  createTray()
   allowMainClose = true
   if (mainWindow && !mainWindow.isDestroyed()) mainWindow.close() // 主窗口关闭：组件保留时后端仍存活
+}
+
+// ============ 系统托盘 ============
+// 主窗口关闭后（程序与后端仍在后台运行）显示托盘图标；左键点击重新打开主窗口，
+// 右键菜单可「恢复主窗口 / 完全退出」。托盘只在主窗口关闭时出现，主窗口恢复后销毁。
+let appTray = null
+
+function createTray() {
+  if (appTray) return
+  try {
+    // 用 fs 读取后再建图：打包后 __dirname 位于 asar 内，读文件可被 Electron 透明重定向，
+    // 比直接把 asar 内路径交给 nativeImage 更稳妥
+    const icon = nativeImage.createFromBuffer(fs.readFileSync(path.join(__dirname, 'tray-icon.png')))
+    if (icon.isEmpty()) return
+    appTray = new Tray(icon)
+  } catch (_) {
+    appTray = null
+    return
+  }
+  appTray.setToolTip('班集')
+  appTray.setContextMenu(Menu.buildFromTemplate([
+    { label: '恢复主窗口', click: () => showMainFromTray() },
+    { type: 'separator' },
+    { label: '完全退出', click: () => { app.isQuitting = true; app.quit() } },
+  ]))
+  appTray.on('click', () => showMainFromTray())
+}
+
+function destroyTray() {
+  if (!appTray) return
+  try { appTray.destroy() } catch (_) { /* 忽略 */ }
+  appTray = null
+}
+
+// 从托盘恢复主窗口：已存在则唤起，已关闭则重建，并移除托盘图标
+function showMainFromTray() {
+  destroyTray()
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    if (mainWindow.isMinimized()) mainWindow.restore()
+    mainWindow.show()
+    mainWindow.focus()
+  } else {
+    createMainWindow()
+  }
 }
 
 // 渲染层回报：就绪标记 / 用户选择（action）/ 取消
@@ -2201,9 +2548,17 @@ async function waitBackendReady(timeout = 15000) {
   }
 }
 
-// 快速首启判定：数据目录里还没有 index.db（从未初始化过任何账号库）
+// 引导未完成标记：引导窗口创建后即写下，正常走完引导（setup-complete）时删除。
+// 后端子进程一启动就会暖机生成 index.db，单靠 index.db 无法判断“用户是否走完引导”，
+// 因此用它保证「引导中途关闭/退出 → 下次启动仍重新进入引导」，而不是直接进入主窗口。
+function setupPendingMarkerPath() {
+  return path.join(app.getPath('userData'), 'setup-incomplete')
+}
+
+// 快速首启判定：存在「引导未完成」标记，或数据目录里还没有 index.db（从未初始化过任何账号库）
 function looksLikeFirstRun() {
   try {
+    if (fs.existsSync(setupPendingMarkerPath())) return true
     return !fs.existsSync(path.join(resolveDataDir(), 'index.db'))
   } catch (_) { return false }
 }
@@ -2282,6 +2637,7 @@ function createSetupWindow() {
     // prod 下静态文件加载极快，直接显示（占位页是纯内联 HTML/CSS，不依赖 JS），窗口"秒出画面"。
     show: !isDev,
     title: '首次安装引导',
+    icon: APP_ICON_PATH,
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
       contextIsolation: true,
@@ -2295,6 +2651,8 @@ function createSetupWindow() {
   })
   setupWindow = win
   setupRunning = true
+  // 记「引导未完成」：只有走完引导（setup-complete）才清除；中途关闭/退出后下次启动仍进入引导
+  try { fs.writeFileSync(setupPendingMarkerPath(), '1') } catch (_) { /* 标记失败不阻塞引导 */ }
 
   // 兜底（仅 dev：窗口初始隐藏）：渲染层异常/过慢时也先把窗口显示出来，
   // 此时 setup.html 的占位保证不是空白。正常情况下 setup-ready 会先到并取消此定时器。
@@ -2316,7 +2674,7 @@ function createSetupWindow() {
   if (isDev) {
     // 与主窗口一致：先渲染本地 inline loading 页（窗口立即出画面，不再白屏），
     // Vite 就绪后立即跳转到 setup.html；引导窗口不开 DevTools。
-    // 与主窗口共用同一份 loading 模板（标题同为「班级管理系统」），
+    // 与主窗口共用同一份 loading 模板（标题同为「班集」），
     // 灰色副标题由 boot-status 实时驱动，不出现两种不同的加载画面
     win.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(devLoadingHtml())}`)
     // 直接探测 setup.html：命中即跳转，等待期间 Vite 已顺带编译好该页面
@@ -2346,9 +2704,23 @@ ipcMain.on('setup-complete', (event) => {
   if (!setupWindow || setupWindow.isDestroyed()) return
   if (event.sender !== setupWindow.webContents) return
   setupRunning = false
+  // 引导正常完成：清除「未完成」标记，之后启动直接进主窗口
+  try { fs.rmSync(setupPendingMarkerPath(), { force: true }) } catch (_) {}
   pendingMainNotification = { type: 'success', message: '初始化完成，欢迎使用' }
   if (!mainWindow || mainWindow.isDestroyed()) createMainWindow()
   if (setupWindow && !setupWindow.isDestroyed()) setupWindow.close()
+})
+
+// 引导期关闭：用户点右上角关闭按钮（欢迎页与各步骤页均可）。完全退出应用——
+// 放行引导窗口 close 拦截后 app.quit()，由 before-quit / window-all-closed 一并停掉后端子进程；
+// 不写「引导完成」标记（标记在 createSetupWindow 时已写下），因此下次启动仍会重新进入引导，
+// 绝不直接进入主窗口。
+ipcMain.on('setup-quit', (event) => {
+  if (!setupWindow || setupWindow.isDestroyed()) return
+  if (event.sender !== setupWindow.webContents) return
+  setupRunning = false
+  app.isQuitting = true
+  app.quit()
 })
 
 // 供晚挂载的渲染层补齐预热状态
@@ -2961,6 +3333,9 @@ function shutdownBackend() {
 }
 
 app.on('window-all-closed', () => {
+  // 托盘图标存在（主窗口关闭后进入后台运行）：保持进程与后端存活，
+  // 由用户从托盘「打开主窗口」或「完全退出」决定后续。
+  if (appTray) return
   shutdownBackend()
   if (process.platform !== 'darwin') {
     app.quit()
@@ -2969,11 +3344,13 @@ app.on('window-all-closed', () => {
 
 app.on('activate', () => {
   if (BrowserWindow.getAllWindows().length === 0) {
+    destroyTray()
     createMainWindow()
     createWidgetWindow()
   }
 })
 
 app.on('before-quit', () => {
+  destroyTray()
   shutdownBackend()
 })

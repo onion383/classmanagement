@@ -10,6 +10,7 @@ const BG_MASK_KEY = 'app-bg-mask-opacity'
 const GLASS_KEY = 'app-glass-opacity'
 const ICON_STYLE_KEY = 'app-icon-style'
 const TOPBAR_COLOR_KEY = 'app-topbar-color'
+const ANIMATIONS_KEY = 'app-animations'
 
 // 毛玻璃主题的内置默认背景图：放于 public/ 下，随前端一起打包，属前端静态资源，
 // 不经 resourceUrl/鉴权直接加载。用户选择本地图片后由 backgroundImage 覆盖它；清除则回此图。
@@ -39,6 +40,8 @@ export const useThemeStore = defineStore('theme', () => {
   const iconStyle = ref(localStorage.getItem(ICON_STYLE_KEY) || 'color')
   // 标题栏/侧边栏毛玻璃配色：'blue'（深蓝，旧款）| 'light'（白色调，新款默认）
   const topbarColor = ref(localStorage.getItem(TOPBAR_COLOR_KEY) || 'light')
+  // 动画效果总开关：关闭后全局禁用过渡与动画（含窗口淡入淡出、弹窗/列表动效等）
+  const animationsEnabled = ref(localStorage.getItem(ANIMATIONS_KEY) !== '0')
 
   const allThemes = computed(() => [
     ...PRESETS,
@@ -53,6 +56,8 @@ export const useThemeStore = defineStore('theme', () => {
     document.documentElement.dataset.theme = currentTheme.value
     // 标题栏/侧边栏毛玻璃配色：写 data-topbar-color，CSS 据此切深蓝/白色调
     document.documentElement.dataset.topbarColor = topbarColor.value
+    // 动画总开关：关闭时给根元素打 no-animations，配合全局 CSS 瞬时化所有动效
+    document.documentElement.classList.toggle('no-animations', !animationsEnabled.value)
     Object.entries(customColors.value).forEach(([key, value]) => {
       document.documentElement.style.setProperty(`--${key}`, value)
     })
@@ -158,6 +163,13 @@ export const useThemeStore = defineStore('theme', () => {
     document.documentElement.dataset.topbarColor = value
   }
 
+  // 动画总开关：立即生效（写 localStorage + 重应用主题类）
+  const setAnimationsEnabled = (value) => {
+    animationsEnabled.value = !!value
+    localStorage.setItem(ANIMATIONS_KEY, value ? '1' : '0')
+    applyTheme()
+  }
+
   watch(currentTheme, applyTheme)
   watch(backgroundImage, (val) => {
     localStorage.setItem(BG_IMAGE_KEY, val)
@@ -172,6 +184,7 @@ export const useThemeStore = defineStore('theme', () => {
     glassOpacity,
     iconStyle,
     topbarColor,
+    animationsEnabled,
     allThemes,
     currentThemeMeta,
     isPreset,
@@ -187,5 +200,6 @@ export const useThemeStore = defineStore('theme', () => {
     setGlassOpacity,
     setIconStyle,
     setTopbarColor,
+    setAnimationsEnabled,
   }
 })

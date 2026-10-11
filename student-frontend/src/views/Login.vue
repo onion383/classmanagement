@@ -2,7 +2,7 @@
   <div class="flex justify-center items-center h-screen login-bg">
     <!-- 登录表单 -->
     <form v-if="mode === 'login'" @submit.prevent="login" class="bg-surface p-8 rounded-3xl shadow-card w-80 login-glow">
-      <h2 class="text-xl font-bold mb-4">班级管理系统登录</h2>
+      <h2 class="text-xl font-bold mb-4">班集登录</h2>
       <p v-if="loginError" class="text-danger text-[15px] font-medium mb-2">{{ loginError }}</p>
       <!-- 角色选择：仅班主任可用，暂不可选 -->
       <AppSelect
@@ -252,7 +252,7 @@ export default {
       }
     },
     async downloadTxt() {
-      const content = `班级管理系统 - 恢复密钥\n账号：${this.restoredUsername}\n\n请妥善保存以下 12 个恢复词，忘记密码时可用来找回：\n\n${this.recoveryPhrase}\n`;
+      const content = `班集 - 恢复密钥\n账号：${this.restoredUsername}\n\n请妥善保存以下 12 个恢复词，忘记密码时可用来找回：\n\n${this.recoveryPhrase}\n`;
       const fileName = `恢复密钥-${this.restoredUsername || 'account'}.txt`;
       try {
         // 走 Electron 原生保存对话框，写盘成功才返回成功；用户取消则保持锁定

@@ -1,6 +1,6 @@
 {
   "appId": "com.example.campus-assistant",
-  "productName": "班级管理系统",
+  "productName": "班集",
   "electronLanguages": ["zh-CN", "en-US"],
   "directories": {
     "output": "release4"
@@ -61,16 +61,11 @@
   "afterPack": "electron/afterPack.js",
   "npmRebuild": false,
   "win": {
-    "target": "nsis"
+    "target": "dir",
+    "icon": "student-frontend/public/logo-icon.png"
   },
   "mac": {
     "target": "dmg",
-    "icon": "student-frontend/public/favicon.svg"
-  },
-  "nsis": {
-    "oneClick": false,
-    "allowToChangeInstallationDirectory": true,
-    "createDesktopShortcut": true,
-    "createStartMenuShortcut": true
+    "icon": "student-frontend/public/logo-icon.png"
   }
 }

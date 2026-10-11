@@ -34,9 +34,12 @@ const validSendChannels = [
   // 数据库迁移进度窗口：渲染层挂载完成回报 / 失败后点击「返回主界面」
   'migration-ready',
   'migration-dismiss',
-  // 首次安装引导向导：渲染层挂载完成回报 / 完成引导回报
+  // 首次安装引导向导：渲染层挂载完成回报 / 完成引导回报 / 关闭按钮完全退出回报
   'setup-ready',
   'setup-complete',
+  'setup-quit',
+  // 版本更新：用户确认后重启并安装已下载的新版本
+  'update-install',
 ]
 
 // 白名单：仅允许以下请求-响应式动请求通道（对应 ipcMain.handle）
@@ -86,6 +89,9 @@ const validInvokeChannels = [
   'perf-restart-widget',
   'perf-gc',
   'perf-startup',
+  // 版本更新：取当前版本号 / 主动检查更新
+  'get-app-version',
+  'update-check',
 ]
 
 // 白名单：仅允许以下主进程 -> 渲染进程推送通道
