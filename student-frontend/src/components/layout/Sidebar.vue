@@ -1,9 +1,8 @@
 <template>
   <div class="w-60 bg-sidebar text-text-inverse h-screen p-4 flex flex-col">
     <h2 class="app-name text-lg font-bold mb-6 flex items-center gap-2">
-      <component v-if="iconStyle === 'color'" :is="logoIcon" :size="20" class="shrink-0" stroke-width="2" :style="{ color: 'inherit' }" />
-      <span v-else class="nav-emoji">{{ logoEmoji }}</span>
-      <span class="truncate">班级管理系统</span>
+      <img src="/logo.png" alt="logo" class="w-7 h-7 object-contain shrink-0" />
+      <span class="truncate">班集</span>
     </h2>
     <nav class="space-y-1 flex-1 min-h-0 overflow-y-auto sidebar-scroll" @pointerover="onNavOver">
       <template v-for="group in navGroups" :key="group.title">
@@ -38,7 +37,7 @@ import { useRouter, useRoute } from 'vue-router'
 import { storeToRefs } from 'pinia'
 import {
   Users, Network, CalendarDays, Coins, Armchair, Broom, BedDouble, Medal,
-  Images, PartyPopper, Bot, Settings, Info, GraduationCap, Home,
+  Images, PartyPopper, Bot, Settings, Info, Home,
 } from '@lucide/vue'
 import { useThemeStore } from '../../stores/theme'
 import { prefetchRoute } from '../../utils/routePrefetch.js'
@@ -62,8 +61,6 @@ function isSelected(to) {
 
 // 图标样式跟随主题设置：'lucide' 线性图标 | 'emoji' 表情
 const { iconStyle } = storeToRefs(useThemeStore())
-const logoIcon = GraduationCap
-const logoEmoji = '🏫'
 
 const navGroups = [
   {

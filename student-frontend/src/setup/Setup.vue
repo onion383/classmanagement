@@ -1,10 +1,40 @@
 <template>
   <div class="setup-wrap">
-    <div class="setup-card bg-surface">
-      <!-- 顶部标题（可拖拽移动窗口；引导期间不可关闭） -->
+    <!-- 欢迎页 → 步骤页：只让内容淡出/淡入，整窗卡片的背景与模糊保持不动 -->
+    <Transition name="wfade" mode="out-in">
+    <!-- 欢迎页：引导前的独立一屏，点击「开始」再进入下面的引导流程 -->
+    <div v-if="!started" class="setup-card bg-surface welcome">
+      <button
+        type="button"
+        class="welcome-x absolute! top-3 right-3 w-7 h-7 flex items-center justify-center rounded-full text-text-muted hover:text-text hover:bg-black/5 transition-colors text-xl leading-none"
+        title="关闭"
+        @click="quitSetup"
+      >&times;</button>
+      <div class="welcome-inner">
+        <img src="/logo.png" alt="logo" class="welcome-logo" />
+        <div class="welcome-title">
+          <span class="welcome-name">班集</span>
+          <span class="inline-flex items-center rounded-md px-2 py-0.5 text-xs font-semibold text-white bg-blue-500 leading-none">预览版</span>
+        </div>
+        <p class="welcome-hi">欢迎使用~</p>
+        <p class="welcome-tip">首次使用前，我们需要进行一些初始化设置</p>
+        <button type="button" class="btn-primary welcome-btn" @click="started = true">开始</button>
+      </div>
+    </div>
+
+    <div v-else class="setup-card bg-surface">
+      <!-- 顶部标题（可拖拽移动窗口） -->
       <div class="setup-head">
         <h1 class="setup-title">首次安装引导</h1>
         <p class="setup-desc">完成以下设置即可开始使用</p>
+        <!-- 右上角关闭：作为可拖拽标题栏的子元素（与欢迎页 × 同结构），
+             no-drag 才会真正生效、点击才可响应；点击完全退出软件（前后端） -->
+        <button
+          type="button"
+          class="setup-x absolute! top-3 right-3 w-7 h-7 flex items-center justify-center rounded-full text-text-muted hover:text-text hover:bg-black/5 transition-colors text-xl leading-none"
+          title="关闭"
+          @click="quitSetup"
+        >&times;</button>
       </div>
 
       <div class="setup-body">
@@ -25,8 +55,28 @@
         <section class="setup-main glass-panel">
           <Transition :name="transitionName" mode="out-in">
           <div :key="paneKey" class="pane-wrap">
+          <!-- ===== 用户须知 ===== -->
+          <template v-if="current === 'notice'">
+            <div class="pane">
+              <div class="notice-list">
+                <div class="notice-item">
+                  <div class="notice-title">非商业使用</div>
+                  <p class="notice-desc">本软件依据 PolyForm Noncommercial License 1.0.0（PFNC）协议发布，仅供个人非商业用途使用；未经作者书面授权，不得将本软件用于任何商业用途。</p>
+                </div>
+                <div class="notice-item">
+                  <div class="notice-title">本地优先，数据安全</div>
+                  <p class="notice-desc">所有数据均保存在您的本地设备中，遵循「本地优先」原则；本软件不会采集、上传或分析您的任何数据，仅在检查与下载更新时才会使用网络。</p>
+                </div>
+                <div class="notice-item">
+                  <div class="notice-title">密码提醒</div>
+                  <p class="notice-desc">如果您设置了账户的密码，请牢牢记住账户的密码和恢复密钥，一旦丢失将无法恢复（开发者也没有办法哦）。如果您担心忘记密码，可以设置无密码账户。</p>
+                </div>
+              </div>
+            </div>
+          </template>
+
           <!-- ===== 账户设置 ===== -->
-          <template v-if="current === 'account'">
+          <template v-else-if="current === 'account'">
             <!-- 已完成：只读摘要，避免重复建号 -->
             <div v-if="registered" class="done-box">
               <div class="done-title">账户已创建</div>
@@ -158,6 +208,13 @@
                   <span class="theme-name">{{ t.name }}</span>
                 </button>
               </div>
+              <label class="anim-toggle">
+                <input type="checkbox" :checked="themeStore.animationsEnabled" @change="onAnimationsChange" />
+                <span class="anim-toggle-text">
+                  <span class="anim-toggle-label">启用动画效果</span>
+                  <span class="anim-toggle-desc">关闭后禁用全部过渡与动画（含窗口淡入淡出、弹窗与列表动效）</span>
+                </span>
+              </label>
               <p class="f-hint">默认使用毛玻璃主题，点击即可实时预览效果。</p>
             </div>
           </template>
@@ -227,6 +284,7 @@
         </button>
       </div>
     </div>
+    </Transition>
   </div>
 </template>
 
@@ -245,6 +303,7 @@ const PREVIEW = {
 }
 
 const STEPS = [
+  { key: 'notice', label: '用户须知' },
   { key: 'account', label: '账户设置' },
   { key: 'class', label: '班级设置' },
   { key: 'theme', label: '主题选择' },
@@ -256,6 +315,7 @@ export default {
   name: 'Setup',
   data() {
     return {
+      started: false, // 欢迎页是否已点「开始」，false 时先展示欢迎页
       step: 0,
       sub: 0,
       dir: 1, // 1=下一步（新卡片从右进）| -1=上一步（新卡片从左进）
@@ -288,7 +348,8 @@ export default {
     totalSteps() { return STEPS.length },
     current() { return STEPS[this.step].key },
     activeNo() { return this.step + 1 },
-    canPrev() { return this.step > 0 || this.sub > 0 },
+    // 总能「上一步」：即使在第一步，也会回到最前面的欢迎页
+    canPrev() { return true },
     // 切换动画的 key：步骤或子步骤变化都会重新触发过渡
     paneKey() { return `${this.current}-${this.subKey}` },
     transitionName() { return this.dir < 0 ? 'slide-prev' : 'slide-next' },
@@ -352,6 +413,10 @@ export default {
     },
     pickTheme(id) {
       this.themeStore.setTheme(id)
+    },
+    // 动画效果总开关：立即生效
+    onAnimationsChange(e) {
+      this.themeStore.setAnimationsEnabled(e.target.checked)
     },
     // ---------- 预热进度 ----------
     applyWarmup(w) {
@@ -425,30 +490,30 @@ export default {
     next() {
       this.errorMsg = ''
       this.dir = 1
+      if (this.current === 'notice') { this.step += 1; return }
       if (this.current === 'account') return this.nextAccount()
       if (this.current === 'class') {
         if (!this.classInfo.name) { this.errorMsg = '请填写班级名称'; return }
-        this.step = 2
+        this.step += 1
         return
       }
-      if (this.current === 'theme') { this.step = 3; return }
-      if (this.current === 'storage') { this.step = 4; return }
+      if (this.current === 'theme') { this.step += 1; return }
+      if (this.current === 'storage') { this.step += 1; return }
       return this.finish()
     },
     prev() {
       this.errorMsg = ''
       this.storageHint = ''
       this.dir = -1
-      if (this.current === 'account') {
-        if (this.sub > 0) { this.sub -= 1; return }
-        return
-      }
+      if (this.current === 'account' && this.sub > 0) { this.sub -= 1; return }
+      // 已在第一步：返回欢迎页（整个引导的最前面）
+      if (this.step === 0 && this.sub === 0) { this.started = false; return }
       this.step -= 1
       if (this.current === 'account') this.sub = this.subSteps.length - 1
     },
     // ---------- 账户设置 ----------
     async nextAccount() {
-      if (this.registered) { this.step = 1; this.sub = 0; return }
+      if (this.registered) { this.step += 1; this.sub = 0; return }
       const key = this.subKey
       if (key === 'mode') { this.sub = 1; return }
       if (key === 'info') return this.submitAccountInfo()
@@ -509,7 +574,7 @@ export default {
       if (data && data.user) localStorage.setItem('currentUser', JSON.stringify(data.user))
       this.registered = true
       this.sub = 0
-      this.step = 1
+      this.step += 1
     },
     // 前端比对前 3 词：兼容序号、空格、连写（与登录页一致）
     checkCopyWords() {
@@ -536,6 +601,12 @@ export default {
       } catch (_) {
         this.errorMsg = '复制失败，请手动选择文本复制'
       }
+    },
+    // ---------- 关闭引导 ----------
+    // 关闭按钮（欢迎页与各步骤页）：通知主进程完全退出软件（前端窗口 + 后端子进程），
+    // 且不写「引导完成」标记——下次启动仍会重新进入引导，不会直接进入主窗口。
+    quitSetup() {
+      window.electron?.send('setup-quit')
     },
     // ---------- 完成 ----------
     async finish() {
@@ -581,6 +652,7 @@ export default {
 }
 /* 第一层毛玻璃：整窗卡片（窗外为系统亚克力） */
 .setup-card {
+  position: relative;
   width: 100%;
   height: 100%;
   box-sizing: border-box;
@@ -591,6 +663,67 @@ export default {
   border-radius: 0 !important;
   overflow: hidden;
 }
+/* 欢迎页：整窗居中一屏，可拖拽移动窗口 */
+.welcome {
+  position: relative;
+  align-items: center;
+  justify-content: center;
+  -webkit-app-region: drag;
+}
+/* 右上角关闭按钮：与弹窗 × 同款，不可拖拽 */
+.welcome-x {
+  -webkit-app-region: no-drag;
+}
+/* 步骤页右上角关闭按钮：定位/尺寸等复用与欢迎页 × 相同的 Tailwind 工具类
+   （必须用 absolute! 覆盖 theme-glass.css 里 `:root[data-theme] button { position: relative }`），
+   这里仅补一条不可拖拽声明 */
+.setup-x {
+  -webkit-app-region: no-drag;
+}
+.welcome-inner {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  padding: 0 24px;
+  /* 整体略向下偏移：正中最容易显得上方空旷 */
+  transform: translateY(24px);
+}
+.welcome-logo {
+  width: 96px;
+  height: 96px;
+  object-fit: contain;
+}
+.welcome-title {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  margin-top: 18px;
+}
+.welcome-name {
+  margin: 0;
+  font-size: 26px;
+  font-weight: 700;
+  color: var(--color-text);
+}
+.welcome-hi {
+  margin: 8px 0 0;
+  font-size: 16px;
+  color: var(--color-text-secondary);
+}
+.welcome-tip {
+  margin: 6px 0 0;
+  font-size: 14px;
+  color: var(--color-text-muted);
+}
+.welcome-btn {
+  margin-top: 28px;
+  padding: 10px 44px;
+  font-size: 15px;
+  -webkit-app-region: no-drag;
+}
+
 /* 第二层毛玻璃：左右两栏各自一块半透明玻璃面板，叠加出层次 */
 .glass-panel {
   background: rgba(255, 255, 255, var(--glass-opacity, 0.4));
@@ -697,12 +830,39 @@ export default {
 .slide-next-leave-active,
 .slide-prev-enter-active,
 .slide-prev-leave-active {
-  transition: opacity 0.18s ease, transform 0.18s ease;
+  transition: opacity 0.11s ease, transform 0.11s ease;
 }
 .slide-next-enter-from { opacity: 0; transform: translateX(26px); }
 .slide-next-leave-to { opacity: 0; transform: translateX(-26px); }
 .slide-prev-enter-from { opacity: 0; transform: translateX(-26px); }
 .slide-prev-leave-to { opacity: 0; transform: translateX(26px); }
+
+/* 欢迎页 → 步骤页过渡：只让正文内容淡出/淡入。
+   - 卡片自身只提供过渡时长给 Vue 计时、不改变任何视觉属性 → 背景与模糊始终不淡出；
+   - 右上角关闭按钮（.welcome-x / .setup-x）排除在外，全程保持常显；
+   - 步骤页的 × 嵌在 .setup-head 内，故此处用 :not(.setup-x) 只淡出标题/说明。 */
+.wfade-leave-active,
+.wfade-enter-active {
+  transition-duration: 0.08s;
+}
+.wfade-leave-active .welcome-inner,
+.wfade-enter-active .welcome-inner,
+.wfade-leave-active .setup-head > :not(.setup-x),
+.wfade-enter-active .setup-head > :not(.setup-x),
+.wfade-leave-active .setup-body,
+.wfade-enter-active .setup-body,
+.wfade-leave-active .setup-foot,
+.wfade-enter-active .setup-foot {
+  transition: opacity 0.08s ease;
+}
+.wfade-leave-to .welcome-inner,
+.wfade-leave-to .setup-head > :not(.setup-x),
+.wfade-leave-to .setup-body,
+.wfade-leave-to .setup-foot { opacity: 0; }
+.wfade-enter-from .welcome-inner,
+.wfade-enter-from .setup-head > :not(.setup-x),
+.wfade-enter-from .setup-body,
+.wfade-enter-from .setup-foot { opacity: 0; }
 
 /* 表单 */
 .f-row {
@@ -798,6 +958,31 @@ export default {
   color: var(--color-text-muted);
 }
 
+/* 用户须知 */
+.notice-list {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+.notice-item {
+  padding: 12px 14px;
+  border: 1px solid var(--color-border);
+  border-radius: 10px;
+  background: var(--color-bg);
+}
+.notice-title {
+  margin-bottom: 5px;
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--color-text);
+}
+.notice-desc {
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.6;
+  color: var(--color-text-secondary);
+}
+
 /* 恢复密钥 */
 .phrase-box {
   padding: 11px 13px;
@@ -886,6 +1071,33 @@ export default {
 .theme-card.is-active .theme-name {
   color: var(--color-primary);
   font-weight: 600;
+}
+
+/* 动画效果开关 */
+.anim-toggle {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 12px;
+  border: 1px solid var(--color-border);
+  border-radius: 10px;
+  background: var(--color-bg);
+  cursor: pointer;
+}
+.anim-toggle-text {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.anim-toggle-label {
+  font-size: 14px;
+  font-weight: 500;
+  color: var(--color-text);
+}
+.anim-toggle-desc {
+  font-size: 12px;
+  color: var(--color-text-secondary);
+  line-height: 1.5;
 }
 
 /* 完成态摘要 */

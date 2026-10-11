@@ -771,11 +771,12 @@ export default {
 
       let fontLoaded = false;
       try {
-        // 字体以 gzip 形式随包分发（原始 12.75MB → 7.63MB），运行时用 DecompressionStream 解压。
+        // 字体以 zstd 形式随包分发（原始 12.75MB → 6.74MB，比 gzip 的 7.63MB 更小），
+        // 运行时用 DecompressionStream('zstd') 解压（Chromium 原生支持，无需额外依赖）。
         // 解压后仍是完整未子集化的 TTF，笔画与字形不受影响，无乱码风险。
-        const response = await fetch('/NotoSansSC-6.ttf.gz');
+        const response = await fetch('/NotoSansSC-6.ttf.zst');
         if (!response.ok) throw new Error('字体文件加载失败');
-        const decompressed = response.body.pipeThrough(new DecompressionStream('gzip'));
+        const decompressed = response.body.pipeThrough(new DecompressionStream('zstd'));
         const blob = await new Response(decompressed).blob();
         const fontBase64 = await new Promise((resolve, reject) => {
           const reader = new FileReader();

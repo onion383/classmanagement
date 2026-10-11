@@ -1,0 +1,30 @@
+﻿「班集」最终用户许可协议
+================================
+
+授权许可：PolyForm Noncommercial License 1.0.0（非商业使用许可，PFNC）
+发布者：无聊的小洋葱
+版本：0.8.0（预览版）
+
+一、中文说明
+1. 许可范围
+   本软件以 PolyForm Noncommercial License 1.0.0 发布，仅限个人、教育及
+   其他非商业目的使用。任何以商业盈利为目的的使用（包括但不限于销售、
+   随商业产品分发、面向客户提供付费服务）均不在授权范围内。
+2. 数据与隐私
+   本软件是一款本地化的班级管理工具，所有班级数据、文件与记录全部保存在
+   您自己的电脑上，不会上传至任何服务器，也不采集任何个人信息。
+3. 无担保
+   本软件按「现状」提供，不附带任何明示或默示的担保。使用本软件所产生的
+   风险由使用者自行承担。
+4. 协议全文
+   完整条款以 PolyForm Noncommercial License 1.0.0 英文原文为准，可在
+   https://polyformproject.org/licenses/noncommercial/1.0.0/ 查阅。
+
+二、English Summary
+Licensed under the PolyForm Noncommercial License 1.0.0.
+Noncommercial use only. All data is stored locally on your device;
+no personal data is collected or transmitted. The software is provided
+"AS IS", without warranty of any kind. See the full license text at
+https://polyformproject.org/licenses/noncommercial/1.0.0/
+
+点击「我接受」表示您已阅读并同意以上条款。

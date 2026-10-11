@@ -8,14 +8,19 @@
       <!-- 应用信息 -->
       <div class="bg-surface shadow-md rounded-xl border border-border p-6 md:col-span-2">
         <div class="flex items-center gap-4 mb-4">
-          <div class="w-14 h-14 rounded-xl bg-primary/10 flex items-center justify-center text-3xl">🏫</div>
+          <div class="w-14 h-14 rounded-xl bg-primary/10 flex items-center justify-center overflow-hidden">
+            <img src="/logo.png" alt="logo" class="w-full h-full object-contain" />
+          </div>
           <div>
-            <div class="text-xl font-bold text-text">班级管理系统</div>
+            <div class="flex items-center gap-2">
+              <span class="text-xl font-bold text-text">班集</span>
+              <span class="inline-flex items-center rounded-md px-2 py-0.5 text-xs font-semibold text-white bg-blue-500 leading-none">预览版</span>
+            </div>
             <div class="text-sm text-text-muted">班级管理一站式桌面应用</div>
           </div>
         </div>
         <p class="text-text-secondary text-sm leading-relaxed">
-          班级管理系统是一个面向班级日常管理的轻量化桌面应用，整合了班级管理、班费、课程表、座位安排、
+          班集是一个面向班级日常管理的轻量化桌面应用，整合了班级管理、班费、课程表、座位安排、
           请假考勤、班级相册等常用功能，帮助班主任与班委高效完成日常事务。
         </p>
 
@@ -108,18 +113,44 @@
     <Teleport to="body">
       <Transition name="dialog">
         <div v-if="dialogVersion" class="fixed inset-0 z-[9999] flex items-center justify-center bg-black/40" @click.self="dialogVersion = false">
-          <div class="dialog-card bg-surface rounded-xl shadow-2xl border border-border w-full max-w-sm mx-4" @click.stop>
-          <div class="flex items-center justify-between px-6 py-4 border-b border-border">
-            <h2 class="text-lg font-semibold text-text">版本更新</h2>
-            <button @click="dialogVersion = false" class="text-text-muted hover:text-text text-xl leading-none">&times;</button>
+          <div class="dialog-card bg-surface rounded-xl shadow-2xl border border-border w-full max-w-md mx-4 relative flex flex-col max-h-[85vh]" @click.stop>
+          <button @click="dialogVersion = false" class="absolute! top-3 right-3 w-7 h-7 flex items-center justify-center rounded-full text-text-muted hover:text-text hover:bg-black/5 transition-colors text-xl leading-none">&times;</button>
+
+          <!-- 上半部分：居中信息 -->
+          <div class="px-6 pt-8 pb-4 text-center shrink-0">
+            <img src="/logo.png" alt="logo" class="w-16 h-16 mx-auto object-contain" />
+            <div class="mt-4 flex items-center justify-center gap-2">
+              <span class="text-base font-semibold text-text">v{{ currentVersion || '0.8.0' }}</span>
+              <span class="inline-flex items-center rounded-md px-2 py-0.5 text-xs font-semibold text-white bg-blue-500 leading-none">预览版</span>
+              <button @click="checkUpdate" :disabled="updateBusy" class="px-3 py-1 rounded-full bg-primary/10 text-primary text-xs hover:bg-primary/20 transition-colors disabled:opacity-50 disabled:cursor-not-allowed">检查更新</button>
+            </div>
+            <div class="mt-3 text-xs text-text-muted">仅非商业使用，商业使用需本人授权</div>
+            <div class="mt-1 text-xs text-text-muted">Copyright &copy; 无聊的小洋葱 2026</div>
+
+            <!-- 更新状态与下载进度 -->
+            <div class="mt-3 text-xs font-medium" :class="statusClass">{{ statusText }}</div>
+            <div v-if="updateStatus === 'downloading'" class="mt-2">
+              <div class="h-1.5 rounded-full bg-bg border border-border overflow-hidden">
+                <div class="h-full rounded-full bg-primary transition-[width] duration-300" :style="{ width: updatePercent + '%' }"></div>
+              </div>
+            </div>
+            <button v-if="updateStatus === 'downloaded'" @click="installUpdate" class="mt-3 px-4 py-2 rounded-lg bg-primary text-text-inverse text-sm">重启并安装</button>
           </div>
-          <div class="px-6 py-4 text-sm text-text-secondary space-y-2">
-            <div class="flex justify-between"><span>当前版本</span><span class="text-text font-medium">v1.0.0</span></div>
-            <div class="flex justify-between"><span>最新版本</span><span class="text-text font-medium">v1.0.0</span></div>
-            <div class="flex justify-between"><span>更新状态</span><span class="text-emerald-500 font-medium">已是最新版本</span></div>
-          </div>
-          <div class="px-6 py-4 border-t border-border flex justify-end">
-            <button @click="dialogVersion = false" class="px-4 py-2 rounded-lg bg-primary text-text-inverse text-sm">关闭</button>
+
+          <!-- 下半部分：更新历史（可滚动文本框） -->
+          <div class="px-6 pb-6 flex-1 min-h-0 flex flex-col">
+            <div class="text-sm font-semibold text-text mb-2">更新历史</div>
+            <div class="flex-1 min-h-0 overflow-y-auto rounded-lg border border-border bg-bg p-3 space-y-3 text-sm">
+              <div v-for="c in changelog" :key="c.version">
+                <div class="flex items-baseline gap-2">
+                  <span class="text-text font-medium">v{{ c.version }}</span>
+                  <span class="text-xs text-text-muted">{{ c.date }}</span>
+                </div>
+                <ul class="mt-1 pl-5 list-disc space-y-0.5 text-text-secondary">
+                  <li v-for="(n, i) in c.notes" :key="i">{{ n }}</li>
+                </ul>
+              </div>
+            </div>
           </div>
         </div>
         </div>
@@ -140,15 +171,11 @@
             <div class="grid grid-cols-2 gap-4">
               <div class="space-y-2">
                 <div class="text-text font-medium">微信</div>
-                <div class="w-full aspect-square bg-black/5 dark:bg-white/5 rounded-lg flex items-center justify-center text-text-muted text-xs">
-                  微信收款码
-                </div>
+                <img src="/wechatpay.png" alt="微信收款码" class="w-full h-auto rounded-lg border border-border" />
               </div>
               <div class="space-y-2">
                 <div class="text-text font-medium">支付宝</div>
-                <div class="w-full aspect-square bg-black/5 dark:bg-white/5 rounded-lg flex items-center justify-center text-text-muted text-xs">
-                  支付宝收款码
-                </div>
+                <img src="/alipay.jpg" alt="支付宝收款码" class="w-full h-auto rounded-lg border border-border" />
               </div>
             </div>
           </div>
@@ -163,7 +190,7 @@
 </template>
 
 <script setup>
-import { ref } from 'vue'
+import { ref, computed, watch, onMounted, onUnmounted } from 'vue'
 import '../styles/dialog-transition.css'
 
 // Electron 内用系统浏览器打开外链，非 Electron 环境让浏览器默认行为处理
@@ -179,6 +206,94 @@ function openExternal(event, url) {
 const dialogProtocol = ref(false)
 const dialogVersion = ref(false)
 const dialogDonate = ref(false)
+
+// ---- 版本更新 ----
+// 状态由主进程作为唯一权威来源，通过 from-main{type:'update-state'} 广播；
+// 这里只做展示：打开弹窗时主动查一次，并订阅后续变化（下载进度等）。
+const currentVersion = ref('')
+const latestVersion = ref('')
+const updateStatus = ref('idle') // idle | checking | available | downloading | downloaded | not-available | error
+const updatePercent = ref(0)
+const updateError = ref('')
+let updateListener = null
+
+const statusText = computed(() => {
+  switch (updateStatus.value) {
+    case 'checking': return '正在检查…'
+    case 'available': return latestVersion.value ? `发现新版本 v${latestVersion.value}，正在下载…` : '发现新版本，正在下载…'
+    case 'downloading': return `正在下载 ${updatePercent.value}%`
+    case 'downloaded': return '新版本已下载，重启即可安装'
+    case 'not-available': return '已经是最新版本'
+    case 'error': return updateError.value ? `更新失败：${updateError.value}` : '更新失败'
+    default: return '等待检查'
+  }
+})
+const statusClass = computed(() => {
+  if (updateStatus.value === 'downloaded' || updateStatus.value === 'not-available') return 'text-emerald-500'
+  if (updateStatus.value === 'error') return 'text-red-500'
+  return 'text-primary'
+})
+// 检查/下载进行中：禁用「检查更新」按钮，避免重复触发
+const updateBusy = computed(() => ['checking', 'available', 'downloading'].includes(updateStatus.value))
+
+// 更新历史（手动维护，发版时在最上方追加一条）
+const changelog = [
+  {
+    version: '0.8.0',
+    date: '2026-10-10',
+    notes: [
+      '预览版',
+      '班级管理、班费、课程表、座位安排、请假考勤、班级相册等功能',
+      '桌面工具箱浮窗：计时器、点名器、截图、注释',
+    ],
+  },
+]
+
+function applyUpdateState(s) {
+  if (!s) return
+  updateStatus.value = s.status || 'idle'
+  if (s.currentVersion) currentVersion.value = s.currentVersion
+  if (s.latestVersion) latestVersion.value = s.latestVersion
+  updatePercent.value = typeof s.percent === 'number' ? s.percent : 0
+  updateError.value = s.error || ''
+}
+
+async function fetchAppVersion() {
+  try {
+    const v = await window.electron?.invoke('get-app-version')
+    if (v) currentVersion.value = v
+  } catch (_) { /* 非 Electron 环境忽略 */ }
+}
+
+async function checkUpdate() {
+  try {
+    const s = await window.electron?.invoke('update-check')
+    applyUpdateState(s)
+  } catch (_) { /* 忽略 */ }
+}
+
+function installUpdate() {
+  window.electron?.send('update-install')
+}
+
+onMounted(() => {
+  fetchAppVersion()
+  updateListener = window.electron?.on('from-main', (data) => {
+    if (data && data.type === 'update-state') applyUpdateState(data.state)
+  })
+})
+
+onUnmounted(() => {
+  if (updateListener) window.electron?.off('from-main', updateListener)
+})
+
+// 打开弹窗时刷新一次版本号并触发检查
+watch(dialogVersion, (open) => {
+  if (open) {
+    fetchAppVersion()
+    checkUpdate()
+  }
+})
 
 // 协议全文
 const licenseText = `# PolyForm Noncommercial License 1.0.0

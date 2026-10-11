@@ -98,8 +98,11 @@ app.use(express.static(path.join(__dirname, '../dist')));
 // ===================== 启动服务器 =====================
 // 端口冲突时自动重试（应用退出后旧进程可能未完全释放端口）
 function startServer(port) {
-  const server = app.listen(port, () => {
-    console.log(`✅ 服务器已启动：http://localhost:${port}`);
+  // 只监听本机回环地址（127.0.0.1）：若像原先那样不指定 host，Node 会监听 0.0.0.0/::，
+  // 首次启动即触发 Windows 防火墙“允许访问”弹窗。本服务只供本机前端/主进程访问，
+  // 绑定回环即可满足需求，且不会触发防火墙提示（检查更新是出站请求，本就不会弹窗）。
+  const server = app.listen(port, '127.0.0.1', () => {
+    console.log(`✅ 服务器已启动：http://127.0.0.1:${port}`);
 
     // 就绪上报：通过 fork 的 IPC 通道告知主进程「端口已监听」，由主进程转发给各渲染窗口。
     // 前端据此在就绪瞬间发起首个请求，不再靠固定退避重试去「撞」端口。

@@ -130,6 +130,16 @@
             <span class="text-xs text-text-muted">相同类型的重复提示合并为一条并计数，避免遮挡页面</span>
           </div>
 
+          <!-- 动画效果总开关 -->
+          <div class="flex items-center gap-4 mb-6">
+            <label class="text-sm font-medium text-text w-16 flex-shrink-0">动画效果</label>
+            <label class="inline-flex items-center cursor-pointer">
+              <input type="checkbox" :checked="animationsEnabled" @change="onAnimationsChange" class="w-4 h-4 rounded border-border text-primary focus:ring-primary cursor-pointer" />
+              <span class="ml-2 text-sm text-text-secondary">{{ animationsEnabled ? '已启用' : '已关闭' }}</span>
+            </label>
+            <span class="text-xs text-text-muted">关闭后禁用全部过渡与动画（含窗口淡入淡出、弹窗与列表动效）</span>
+          </div>
+
           <!-- 背景图片（毛玻璃系主题：glass / glass2） -->
           <div v-if="isGlassTheme" class="border-t border-border pt-6 mt-6">
             <h3 class="text-lg font-semibold text-text mb-4 flex items-center gap-2"><IconGlyph name="image" :size="18" /> 背景图片</h3>
@@ -246,19 +256,32 @@
           </div>
         </div>
 
-        <!-- 内存占用：逐进程一条，条形宽度带过渡；「回收」按钮宽度固定，切换文案时不跳动 -->
+        <!-- 内存占用：顶部为总计/平均/最高汇总，下方逐进程一条，条形宽度带过渡 -->
         <div class="border-t border-border pt-6 mt-6">
-          <div class="flex items-center justify-between mb-4">
+          <div class="flex items-center justify-between mb-3">
             <span class="text-sm font-medium text-text">内存占用</span>
             <button @click="recycleAll" :disabled="busyGc" class="w-24 text-center bg-primary hover:bg-primary-hover text-text-inverse px-4 py-1.5 rounded text-sm transition-theme disabled:opacity-50">{{ busyGc ? '回收中…' : '回收' }}</button>
           </div>
+          <div class="flex items-center justify-between gap-x-2 mb-4 text-sm text-text text-center" style="font-variant-numeric: tabular-nums;">
+            <span>总计 {{ fmtMem(perfTotal) }}</span>
+            <span class="text-text-muted">|</span>
+            <span>平均 {{ fmtMem(perfAvg) }}</span>
+            <span class="text-text-muted">|</span>
+            <span>最高 {{ fmtMem(perfMax) }}</span>
+            <span class="text-text-muted">|</span>
+            <span>前端 {{ fmtMem(perfFront) }}</span>
+            <span class="text-text-muted">|</span>
+            <span>后端 {{ fmtMem(perfBackend) }}</span>
+            <span class="text-text-muted">|</span>
+            <span>其他 {{ fmtMem(perfOther) }}</span>
+          </div>
           <div class="space-y-3">
             <div v-for="row in perfRows" :key="row.key" class="flex items-center gap-3">
-              <span class="w-32 flex-shrink-0 truncate text-sm" :class="row.isTotal ? 'text-text font-medium' : 'text-text-secondary'" :title="row.name">{{ row.name }}</span>
+              <span class="w-32 flex-shrink-0 truncate text-sm text-text-secondary" :title="row.name">{{ row.name }}</span>
               <div class="flex-1 h-2.5 rounded-full bg-bg border border-border overflow-hidden">
                 <div class="h-full rounded-full bg-primary" :style="{ width: barPct(row.memKB) + '%', transition: 'width 480ms cubic-bezier(0.4, 0, 0.2, 1), background-color 250ms' }"></div>
               </div>
-              <span class="w-20 flex-shrink-0 text-right text-sm text-text" :class="row.isTotal ? 'font-medium' : ''" style="font-variant-numeric: tabular-nums;">{{ fmtMem(row.memKB) }}</span>
+              <span class="w-20 flex-shrink-0 text-right text-sm text-text" style="font-variant-numeric: tabular-nums;">{{ fmtMem(row.memKB) }}</span>
             </div>
           </div>
         </div>
@@ -464,7 +487,7 @@ export default {
   },
   data() {
     const themeStore = useThemeStore()
-    const { currentTheme, bgMaskOpacity, glassOpacity, iconStyle, topbarColor } = storeToRefs(themeStore)
+    const { currentTheme, bgMaskOpacity, glassOpacity, iconStyle, topbarColor, animationsEnabled } = storeToRefs(themeStore)
 
     return {
       themeStore,
@@ -536,7 +559,18 @@ export default {
       bgImageFileName: '',
       // 性能面板：逐进程内存列表 + 三个重启目标的存活状态
       perfProcs: [],
+      // 首位进程条形的目标占比（0.85~0.95）：让最高占用不固定满格，每次采样小幅跳动更自然
+      perfTopRatio: 0.9,
       perfAlive: { front: false, backend: false, widget: false },
+      // 性能面板：内存总计 / 近一分钟平均 / 自启动最高（均来自主进程采样，单位 KB）
+      // null 表示尚无数据，展示为占位符，避免出现误导性的 0 MB
+      perfTotal: null,
+      perfAvg: null,
+      perfMax: null,
+      // 按用途分组：前端（主窗口渲染进程）/ 后端 / 其他
+      perfFront: null,
+      perfBackend: null,
+      perfOther: null,
       perfStartupTotal: 0,
       busyGc: false,
       busyRestartBackend: false,
@@ -572,7 +606,7 @@ export default {
     _undoKeyLabels() {
       return { students: '学生表', fee_records: '收费记录', leave_records: '请假记录', score_records: '成绩记录', group_manage: '分组管理', album: '班级相册' }
     },
-    // 性能面板：逐进程内存行，按占用从高到低排序，「总计」固定插在最上方
+    // 性能面板：逐进程内存行，按占用从高到低排序
     // 占用优先取 privWsKB（专用工作集，与任务管理器「进程」页口径一致）；
     // 取不到（非 Windows / 计数器不可用）时回退到 privateKB（私有提交量）
     perfRows() {
@@ -583,14 +617,15 @@ export default {
           ? p.privWsKB
           : (typeof p.privateKB === 'number' ? p.privateKB : null),
       }))
-      const total = rows.reduce((sum, r) => sum + (r.memKB || 0), 0)
       rows.sort((a, b) => (b.memKB || 0) - (a.memKB || 0))
-      return [{ key: '__total__', name: '总计', memKB: total, isTotal: true }, ...rows]
+      return rows
     },
-    // 条形相对比例的分母：以总计为 100%，各进程的条即「占总量比例」
+    // 条形相对比例的分母：让占用最高的进程对应 perfTopRatio（85%~95%）而非满格，
+    // 其余进程按同比例缩放；分母取 top/ratio 保证首位不恒定 100%
     perfMaxKB() {
-      const totalRow = this.perfRows.find(r => r.isTotal)
-      return Math.max(1, (totalRow && totalRow.memKB) || 0)
+      const top = this.perfRows[0]
+      const topKB = Math.max(1, (top && top.memKB) || 0)
+      return topKB / (this.perfTopRatio || 0.9)
     },
   },
   mounted() {
@@ -844,6 +879,10 @@ export default {
     onTopbarColorChange() {
       this.themeStore.setTopbarColor(this.topbarColor)
     },
+    // 动画效果总开关：立即生效，无需保存
+    onAnimationsChange(e) {
+      this.themeStore.setAnimationsEnabled(e.target.checked)
+    },
     // Background image
     async onBgImageFileChange(e) {
       const file = e.target.files[0]
@@ -1074,7 +1113,7 @@ export default {
       this._perfTimer = setInterval(() => {
         if (document.visibilityState !== 'visible') return
         this.loadPerf()
-      }, 1800)
+      }, 1000)
     },
     _stopPerfPolling() {
       if (!this._perfTimer) return
@@ -1094,6 +1133,14 @@ export default {
         const snap = await window.electron?.invoke('perf-snapshot')
         if (snap) {
           this.perfProcs = Array.isArray(snap.procs) ? snap.procs : []
+          // 首位条形目标占比每次采样在 85%~95% 间跳动，避免最高占用恒为满格
+          this.perfTopRatio = 0.85 + Math.random() * 0.1
+          this.perfTotal = snap.total ?? null
+          this.perfAvg = snap.avg1min ?? null
+          this.perfMax = snap.max ?? null
+          this.perfFront = snap.frontKB ?? null
+          this.perfBackend = snap.backendKB ?? null
+          this.perfOther = snap.otherKB ?? null
           this.perfAlive = {
             front: !!(snap.alive && snap.alive.front),
             backend: !!(snap.alive && snap.alive.backend),
