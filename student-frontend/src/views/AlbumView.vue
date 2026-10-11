@@ -271,6 +271,7 @@ import { useUndoShortcut } from '../composables/useUndo.js'
 import VideoThumb from '../components/import-export/VideoThumb.vue'
 import AppSelect from '../components/base/AppSelect.vue'
 import { resourceUrl } from '../utils/apiUrl'
+import { pad2 } from '../utils/dateTime.js'
 import '../styles/dialog-transition.css'
 
 const albums = ref([])
@@ -340,7 +341,7 @@ function fmtTime(t) {
   if (!isFinite(t) || t < 0) return '0:00'
   const m = Math.floor(t / 60)
   const s = Math.floor(t % 60)
-  return `${m}:${String(s).padStart(2, '0')}`
+  return `${m}:${pad2(s)}`
 }
 
 const activeAlbum = computed(() => albums.value.find(a => a.id === activeAlbumId.value))

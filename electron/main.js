@@ -9,6 +9,7 @@ const startupTimer = require('./main/startup-timer')
 const { resolveCompileCacheDir, getMasterKey, saveAppConfig, resolveDataDir, resolveThumbsDir } = require('./main/config')
 const { setupRendererCodeCache, setupAppProtocol } = require('./main/protocol')
 const { applyBackgroundMaterial } = require('./main/window-material')
+const { buildWebPreferences } = require('./main/web-prefs')
 const usb = require('./main/usb')
 const updater = require('./main/updater')
 const dialogs = require('./main/dialogs')
@@ -295,26 +296,9 @@ function createMainWindow() {
     // 二者都是不透明画面，因此窗口出现的那一刻就是「毛玻璃 + 内容」，与引导窗口同一套做法。
     show: false,
     backgroundColor: '#f0f4f8',
-    webPreferences: {
-      preload: path.join(__dirname, 'preload.js'),
-      contextIsolation: true,
-      nodeIntegration: false,
-      // 标记渲染进程启用安全通道（preload 据此暴露 window.__SECURE_CHANNEL__，
-      // 前端只在置位后才对业务 JSON API 启用加密传输）
-      additionalArguments: ['--secure-channel'],
-      // 开启 OS 级沙箱：即使注入成功也跑不出渲染进程安全边界。
-      // 若 Electron 版本回退出现沙箱启动崩溃（binding.startupData 为 null），
-      // 再回退为 false：contextIsolation + nodeIntegration:false 仍是软件层兜底。
-      sandbox: true,
-      // webSecurity 仅开发模式关闭（用于加载自签名 https 的 Vite 服务）；
-      // 生产环境必须保持开启，禁止在打包后关闭网页安全策略。
-      webSecurity: !isDev,
-      // 后台节流：采用默认节流，窗口失焦/最小化/被遮挡时暂停后台重绘，降低后台 GPU/CPU 占用。
-      // 代价是切到其它应用时亚克力/毛玻璃可能退回纯灰，点回窗口即恢复。
-      spellcheck: false,
-      // 支持开发者工具（生产模式亦可手动打开，用于调试）
-      devTools: true,
-    }
+    // 渲染进程安全配置见 web-prefs.js（各窗口统一）。后台节流保持默认：
+    // 窗口失焦/最小化/被遮挡时暂停后台重绘，降低后台 GPU/CPU 占用。
+    webPreferences: buildWebPreferences({ devTools: true }),
   })
 
   // 立即绑定全局（供 theme-chrome 重建等判断）；内部事件全部用局部 win 引用，
@@ -625,16 +609,8 @@ function createMigrationWindow() {
     fullscreenable: false,
     center: true,
     title: '迁移数据库',
-    webPreferences: {
-      preload: path.join(__dirname, 'preload.js'),
-      contextIsolation: true,
-      nodeIntegration: false,
-      sandbox: true,
-      additionalArguments: ['--secure-channel'],
-      webSecurity: !isDev,
-      spellcheck: false,
-      devTools: isDev,
-    },
+    // 渲染进程安全配置见 web-prefs.js（各窗口统一）
+    webPreferences: buildWebPreferences(),
   })
   migrationWindow = win
 
@@ -841,16 +817,8 @@ function createSetupWindow() {
     show: !isDev,
     title: '首次安装引导',
     icon: APP_ICON_PATH,
-    webPreferences: {
-      preload: path.join(__dirname, 'preload.js'),
-      contextIsolation: true,
-      nodeIntegration: false,
-      sandbox: true,
-      additionalArguments: ['--secure-channel'],
-      webSecurity: !isDev,
-      spellcheck: false,
-      devTools: isDev,
-    },
+    // 渲染进程安全配置见 web-prefs.js（各窗口统一）
+    webPreferences: buildWebPreferences(),
   })
   setupWindow = win
   setupRunning = true

@@ -5,7 +5,7 @@ Git 代码统计（原始行 / 有效代码行 / 字符数）
 2. 逐个统计每个文件：原始行数、代码行（已排除注释与空行）、字符数
 3. 文件明细按代码行降序
 4. 汇总维度：按后缀、按目录/模块
-5. 报告导出为 Markdown：统计报告.md
+5. 报告导出为 Markdown：doc/仓库代码数量统计.md
 6. 仅统计纯手写代码（源码/样式/标记/脚本/配置 白名单；锁文件、文档、资源等一律排除）
 
 说明：不依赖 ThreadJob 等第三方模块，兼容 Windows PowerShell 5.1 与 PowerShell 7+。
@@ -25,7 +25,8 @@ Write-Host ""
 # ---- 取 git 跟踪文件 ----
 $fileList = @()
 try {
-    $fileList = @(git ls-files 2>$null)
+    # core.quotepath=false：避免中文文件名被转义成带引号的八进制串，导致 Path.GetFileName 抛「非法字符」
+    $fileList = @(git -c core.quotepath=false ls-files 2>$null)
 } catch {
     $fileList = @()
 }
@@ -248,8 +249,9 @@ foreach ($item in $sorted) {
 }
 $md.Add('')
 
-($md -join "`r`n") | Out-File -Encoding utf8 "统计报告.md"
-Write-Host "`n✅ 报告已保存到：统计报告.md"
+$reportPath = 'doc\仓库代码数量统计.md'
+($md -join "`r`n") | Out-File -Encoding utf8 $reportPath
+Write-Host "`n✅ 报告已保存到：$reportPath"
 
 # 仅在交互式终端等待回车；被管道/自动化调用时直接结束（避免 NonInteractive 报错）
 try { Read-Host "`n统计完成，按回车退出" } catch { }

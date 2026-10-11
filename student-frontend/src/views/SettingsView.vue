@@ -233,6 +233,21 @@
       </div>
     </div>
 
+    <!-- ========== 桌面小组件设置 ========== -->
+    <div class="mb-6">
+      <h2 class="text-xl font-semibold text-text mb-4 flex items-center gap-2"><IconGlyph name="monitor" :size="20" /> 桌面小组件设置</h2>
+      <div class="bg-surface rounded-lg border border-border p-6">
+        <div class="flex items-center gap-4">
+          <label class="text-sm font-medium text-text w-40 flex-shrink-0">启用桌面小组件</label>
+          <label class="inline-flex items-center cursor-pointer">
+            <input type="checkbox" :checked="desktopWidgetEnabled" @change="onDesktopWidgetChange" class="w-4 h-4 rounded border-border text-primary focus:ring-primary cursor-pointer" />
+            <span class="ml-2 text-sm text-text-secondary">{{ desktopWidgetEnabled ? '已启用' : '已禁用' }}</span>
+          </label>
+        </div>
+        <p class="text-xs text-text-muted mt-2 ml-40">关闭后启动不创建桌面小组件窗口（更省资源），并可立即关闭当前窗口；开启立即显示</p>
+      </div>
+    </div>
+
     <!-- ========== 性能 ========== -->
     <div class="mb-6">
       <h2 class="text-xl font-semibold text-text mb-4 flex items-center gap-2"><IconGlyph name="sliders" :size="20" /> 性能</h2>
@@ -478,6 +493,7 @@ import AppSelect from '../components/base/AppSelect.vue'
 import { useThemeStore } from '../stores/theme'
 import { storeToRefs } from 'pinia'
 import { resourceUrl } from '../utils/apiUrl'
+import { pad2 } from '../utils/dateTime.js'
 import '../styles/dialog-transition.css'
 import { useNotification } from '../composables/useNotification'
 
@@ -541,6 +557,8 @@ export default {
       screenshotSavePath: '',
       screenshotDir: '',
       usbAutoOpen: false,
+      // 桌面小组件启用状态：localStorage 持久化，默认启用（主进程据此按需创建桌面小组件窗口）
+      desktopWidgetEnabled: (localStorage.getItem('desktopWidgetEnabled') ?? '1') !== '0',
       loaded: false,
       _fromMainHandler: null,
       // 数据目录 / 缓存目录
@@ -726,8 +744,7 @@ export default {
     fmtTs(ts) {
       if (!ts) return ''
       const d = new Date(ts)
-      const p = n => String(n).padStart(2, '0')
-      return `${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`
+      return `${pad2(d.getMonth() + 1)}-${pad2(d.getDate())} ${pad2(d.getHours())}:${pad2(d.getMinutes())}`
     },
     // Account
     openModal(type) {
@@ -1001,6 +1018,12 @@ export default {
         const res = await window.electron?.invoke('get-usb-auto-open')
         this.usbAutoOpen = !!res?.enabled
       } catch (_) {}
+    },
+    // 切换「启用桌面小组件」：持久化到 localStorage，并即时通知主进程创建/关闭桌面小组件窗口
+    onDesktopWidgetChange(e) {
+      this.desktopWidgetEnabled = e.target.checked
+      try { localStorage.setItem('desktopWidgetEnabled', this.desktopWidgetEnabled ? '1' : '0') } catch (_) {}
+      window.electron?.send('desktop-widget-enabled', this.desktopWidgetEnabled)
     },
     async onUsbAutoOpenChange(e) {
       this.usbAutoOpen = e.target.checked

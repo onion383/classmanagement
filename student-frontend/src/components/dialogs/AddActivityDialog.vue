@@ -49,11 +49,7 @@
 <script>
 import '../../styles/dialog-transition.css'
 import { useNotification } from '../../composables/useNotification.js'
-
-function fmtDateTime(dt) {
-  const p = n => String(n).padStart(2, '0')
-  return `${dt.getFullYear()}-${p(dt.getMonth() + 1)}-${p(dt.getDate())}T${p(dt.getHours())}:${p(dt.getMinutes())}`
-}
+import { formatDateTimeLocal } from '../../utils/dateTime.js'
 
 export default {
   name: 'AddActivityDialog',
@@ -63,7 +59,7 @@ export default {
   },
   data() {
     return {
-      form: { time: fmtDateTime(new Date()), theme: '', location: '', participants: '', summary: '' }
+      form: { time: formatDateTimeLocal(new Date()), theme: '', location: '', participants: '', summary: '' }
     }
   },
   computed: {
@@ -80,13 +76,13 @@ export default {
   },
   methods: {
     reset() {
-      this.form = { time: fmtDateTime(new Date()), theme: '', location: '', participants: '', summary: '' }
+      this.form = { time: formatDateTimeLocal(new Date()), theme: '', location: '', participants: '', summary: '' }
     },
     presetFromRecord(r) {
       let time = ''
       if (r.时间) {
         const d = r.时间.includes('T') ? new Date(r.时间) : new Date(r.时间.replace(' ', 'T'))
-        if (!isNaN(d.getTime())) time = fmtDateTime(d)
+        if (!isNaN(d.getTime())) time = formatDateTimeLocal(d)
       }
       this.form = {
         time,

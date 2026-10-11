@@ -150,6 +150,8 @@ import axios from 'axios'
 import AppSelect from '../base/AppSelect.vue'
 import '../../styles/dialog-transition.css'
 import { useNotification } from '../../composables/useNotification.js'
+import { formatDateTimeLocal } from '../../utils/dateTime.js'
+
 export default {
   name: 'AddScoreDialog',
   components: { AppSelect },
@@ -162,8 +164,6 @@ export default {
     editingRecord: { type: Object, default: null }
   },
   data() {
-    const now = new Date();
-    const p = n => String(n).padStart(2, '0');
     return {
       keyword: '',
       listVisible: false,
@@ -180,7 +180,7 @@ export default {
         project: '',
         score: 1,
         reason: '',
-        time: `${now.getFullYear()}-${p(now.getMonth() + 1)}-${p(now.getDate())}T${p(now.getHours())}:${p(now.getMinutes())}`
+        time: formatDateTimeLocal(new Date())
       }
     };
   },
@@ -236,14 +236,12 @@ export default {
       this.selectedGroupId = 0;
       this.activeDimGroups = [];
       this.loadDims();
-      const now = new Date();
-      const p = n => String(n).padStart(2, '0');
       this.form = {
         type: '加分',
         project: '',
         score: 1,
         reason: '',
-        time: `${now.getFullYear()}-${p(now.getMonth() + 1)}-${p(now.getDate())}T${p(now.getHours())}:${p(now.getMinutes())}`
+        time: formatDateTimeLocal(new Date())
       };
     },
     // 加载分组维度列表
@@ -279,7 +277,7 @@ export default {
         project: r.项目 || '',
         score: r.分值 || 0,
         reason: r.原因 || '',
-        time: isNaN(d.getTime()) ? '' : `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}T${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`
+        time: isNaN(d.getTime()) ? '' : formatDateTimeLocal(d)
       };
     },
     selectStudent(s) {

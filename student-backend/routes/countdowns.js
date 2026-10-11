@@ -1,17 +1,10 @@
 const express = require('express');
 const router = express.Router();
 const { db, renumber } = require('../db');
+const { cleanUp, maxPosition, buildInsert, buildUpdate } = require('../utils/sql');
 
 // 允许前端更新的字段白名单
 const EDITABLE = ['名称', '截止日', '包含这一天'];
-
-function cleanUp(data) {
-  const row = {};
-  EDITABLE.forEach(k => {
-    if (data[k] !== undefined) row[k] = (data[k] === '' || data[k] === null) ? null : data[k];
-  });
-  return row;
-}
 
 // GET /api/countdowns 全量列表
 router.get('/', (req, res) => {
@@ -25,13 +18,9 @@ router.get('/', (req, res) => {
 // POST /api/countdowns 新增
 router.post('/', (req, res) => {
   try {
-    const data = cleanUp(req.body || {});
-    const maxPos = db.prepare('SELECT MAX(position) AS maxPos FROM countdowns').get().maxPos || 0;
-    data.position = maxPos + 1;
-
-    const cols = Object.keys(data).map(c => `"${c}"`).join(',');
-    const ph = Object.keys(data).map(() => '?').join(',');
-    const result = db.prepare(`INSERT INTO countdowns (${cols}) VALUES (${ph})`).run(...Object.values(data));
+    const data = cleanUp(req.body || {}, EDITABLE);
+    data.position = maxPosition('countdowns') + 1;
+    const result = buildInsert('countdowns', data);
     renumber('countdowns');
     res.json({ id: result.lastInsertRowid, message: '添加倒计时成功' });
   } catch (err) {
@@ -42,10 +31,9 @@ router.post('/', (req, res) => {
 // PUT /api/countdowns/:id 编辑
 router.put('/:id', (req, res) => {
   try {
-    const row = cleanUp(req.body || {});
+    const row = cleanUp(req.body || {}, EDITABLE);
     if (Object.keys(row).length === 0) return res.status(400).json({ error: '没有可更新的字段' });
-    const setClause = Object.keys(row).map(k => `"${k}" = ?`).join(', ');
-    db.prepare(`UPDATE countdowns SET ${setClause} WHERE id = ?`).run(...Object.values(row), Number(req.params.id));
+    buildUpdate('countdowns', row, req.params.id);
     res.json({ message: '修改成功' });
   } catch (err) {
     res.status(500).json({ error: err.message });

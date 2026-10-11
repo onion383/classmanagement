@@ -218,6 +218,7 @@ import DynamicTable from '../components/tables/DynamicTable.vue'
 import LeaveTimeline from '../components/base/LeaveTimeline.vue'
 import { useNotification } from '../composables/useNotification.js'
 import { recordCellUndo, useUndoShortcut } from '../composables/useUndo.js'
+import { formatDate, formatDateTime } from '../utils/dateTime.js'
 
 // 弹窗类组件懒加载：打开时才加载对应 chunk
 const loadAddLeaveDialog = () => import('../components/dialogs/AddLeaveDialog.vue')
@@ -307,9 +308,7 @@ export default {
       return this.leaves.filter(l => l.状态 === '请假中')
     },
     todayReturned() {
-      const today = new Date()
-      const p = n => String(n).padStart(2, '0')
-      const todayStr = `${today.getFullYear()}-${p(today.getMonth() + 1)}-${p(today.getDate())}`
+      const todayStr = formatDate(new Date())
       return this.leaves.filter(l => l.状态 === '已返校' && l.返校时间 && l.返校时间.startsWith(todayStr))
     },
     inSchool() {
@@ -409,9 +408,7 @@ export default {
     },
     // 当前时间字符串，格式与结束时间保持一致（YYYY-MM-DD HH:mm）
     nowStr() {
-      const d = new Date()
-      const p = (n) => String(n).padStart(2, '0')
-      return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`
+      return formatDateTime(new Date())
     },
     // 检测「假期已结束但尚未销假」的记录并弹出提示
     checkOverdue() {
