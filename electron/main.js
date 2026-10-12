@@ -2,6 +2,7 @@
 // （Menu/Tray/nativeImage/globalShortcut/Notification → tray.js 等，screen → widget.js）
 const { app, BrowserWindow, ipcMain, shell, protocol, Menu, clipboard } = require('electron')
 const path = require('path')
+const os = require('os')
 const fs = require('fs')
 const crypto = require('crypto')
 const startupTimer = require('./main/startup-timer')
@@ -59,6 +60,15 @@ let mainWindowChrome = 'native'
 // 与系统托盘已迁至 tray.js（见 tray.js：handleMainClose / resetShutdownState / registerTrayIpc）
 
 const isDev = !app.isPackaged
+
+// 低版本系统提示调试开关：改为 1 时无条件显示提示画面（忽略真实系统版本与「不再提示」标记），
+// 便于本地反复预览；改为 0 恢复按真实系统版本判定。也可用环境变量 OS_WARN_FORCE=1 临时覆盖。
+const FORCE_OS_WARN = 1
+
+// 首屏占位共享来源：index.html / setup.html 由 Vite 注入同一份（splash/），
+// dev 下主进程先加载的 inline loading 页也复用这两份文件，避免同款加载画面维护多份。
+const SPLASH_CSS_PATH = path.join(__dirname, '..', 'student-frontend', 'splash', 'splash.css')
+const SPLASH_HTML_PATH = path.join(__dirname, '..', 'student-frontend', 'splash', 'splash.html')
 
 // ============ 启动耗时锚点：「后端就绪」+「首屏渲染完成」============
 // 「上次启动耗时」的口径：主进程启动 → 后端就绪与首屏渲染完成两者都满足的那一刻。
@@ -208,28 +218,27 @@ function loadUrlWithRetry(win, url, retries = 150, intervalMs = 200) {
 // 开发模式：先加载本地 inline loading 页面，不等 Vite 就绪。
 // 这样窗口能在 < 1s 内弹出（显示 loading 动画），
 // 后台轮询 Vite 就绪后自动跳转到热更新页面。
-// 主窗口与引导窗口共用这一份模板（仅文案不同），保证 dev 下 loading 页只出现「一个画面」。
-function devLoadingHtml(title = '班集', tip = '正在启动…') {
+// 样式与结构直接读取 splash/ 下的共享文件（与 index.html / setup.html 注入的是同一份），
+// 保证 dev 下 loading 页与正式首屏占位只出现「一个画面」。
+function devLoadingHtml() {
+  let css = ''
+  let body = ''
+  try {
+    css = fs.readFileSync(SPLASH_CSS_PATH, 'utf8')
+    body = fs.readFileSync(SPLASH_HTML_PATH, 'utf8')
+  } catch (_) { /* 读不到共享文件时退化为最小占位，至少不出白屏 */ }
+  if (!body) {
+    body = '<div class="app-splash"><span class="logo">班集</span><span class="tip" id="boot-tip">加载中，请稍候…</span></div>'
+  }
   return `<!DOCTYPE html>
 <html>
 <head><meta charset="UTF-8">
 <style>
 html,body{margin:0;height:100%}
 body{background:linear-gradient(160deg,#eef2ff 0%,#e2e8ff 100%)}
-.s{position:fixed;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:18px;font-family:-apple-system,"Segoe UI","Microsoft YaHei",sans-serif}
-.spin{animation:r 1.4s linear infinite;transform-origin:center}
-.l{font-size:22px;font-weight:600;color:#1e40af;letter-spacing:1px}
-.t{font-size:13px;color:#6b7280}
-@keyframes r{to{transform:rotate(360deg)}}
+${css}
 </style></head>
-<body><div class="s">
-<svg width="34" height="34" viewBox="0 0 22 22">
-<circle cx="11" cy="11" r="8" fill="none" stroke="rgba(30,64,175,.25)" stroke-width="3"/>
-<circle class="spin" cx="11" cy="11" r="8" fill="none" stroke="#1e40af" stroke-width="3" stroke-dasharray="42" stroke-dashoffset="12" stroke-linecap="round"/>
-</svg>
-<span class="l">${title}</span>
-<span class="t" id="boot-tip">${tip}</span>
-</div>
+<body>${body}
 <script>
 (function(){
   var el=document.getElementById('boot-tip');
@@ -461,21 +470,34 @@ app.whenReady().then(() => {
     // 开发模式不再默认进入；需要预览引导页时用 FORCE_SETUP=1，跳过时用 FORCE_SETUP=0。
     const forceSetup = process.env.FORCE_SETUP === '1'
     const skipSetup = process.env.FORCE_SETUP === '0'
-    if (!skipSetup && (forceSetup || firstRunAtStartup)) {
-      createSetupWindow()
-      startupTimer.mark('createSetupWindow 完成')
-    } else {
-      // 主窗口立即创建：它加载的静态前端（app://local/index.html 或 dev 的 Vite）不依赖后端，
-      // 登录页/首页骨架无需后端即可渲染，前端通过 axios 响应重试兜底「后端未就绪」的短暂窗口。
-      createMainWindow()
-      startupTimer.mark('createMainWindow 完成')
+
+    // 进入正式启动：建窗（启动窗口或主窗口）→ 起后端 → 内存采样。
+    // 「启动窗口」= 引导窗口；它同时承担低版本系统提示（plan.warn 为首屏提示画面）。
+    const proceedStartup = () => {
+      const needWarn = shouldWarnOsVersion()
+      const needSetup = !skipSetup && (forceSetup || firstRunAtStartup)
+      if (needWarn || needSetup) {
+        launchPlan = { warn: needWarn, setup: needSetup }
+        if (needWarn) startupTimer.mark('命中低版本系统，先显示提示画面')
+        createSetupWindow(launchPlan)
+        startupTimer.mark('createSetupWindow 完成')
+      } else {
+        // 主窗口立即创建：它加载的静态前端（app://local/index.html 或 dev 的 Vite）不依赖后端，
+        // 登录页/首页骨架无需后端即可渲染，前端通过 axios 响应重试兜底「后端未就绪」的短暂窗口。
+        createMainWindow()
+        startupTimer.mark('createMainWindow 完成')
+      }
+
+      backend.startBackend()
+      startupTimer.mark('startBackend 完成')
+
+      // 性能面板内存历史：自启动即开始定时采样「总计」，用于「平均（近一分钟）/ 最高（自启动起）」
+      perf.startMemSampling()
     }
 
-    backend.startBackend()
-    startupTimer.mark('startBackend 完成')
-
-    // 性能面板内存历史：自启动即开始定时采样「总计」，用于「平均（近一分钟）/ 最高（自启动起）」
-    perf.startMemSampling()
+    // 低版本提示与首次引导合并到同一个启动窗口：命中任一项即在窗口内按「提示 → 引导」顺序展示，
+    // 不再单开提示窗口；都未命中时走原路径——主窗口立即创建，不增加任何串行等待。
+    proceedStartup()
 
     // 版本更新：启动后延迟做一次「检查 + 下载」（避开首屏关键路径，仅打包环境）
     if (app.isPackaged) {
@@ -698,12 +720,49 @@ function reopenAfterMigration() {
   if (migrationWindow && !migrationWindow.isDestroyed()) migrationWindow.close()
 }
 
+// ========== 低版本系统提示（启动前检测）==========
+// Windows 10 1709（build 16299）以下：软件依赖的新版 Chromium 特性可能缺失，运行中易异常/崩溃。
+// 命中且用户未勾选「不再提示」时，在启动窗口内先显示一屏与安装器同款的提示画面：
+// 点「退出程序」直接退出应用，点「忽略」继续（进入引导或主界面），
+// 点「获取最新的 Windows」用默认浏览器打开系统下载页并退出。
+// 「不再提示」写入 userData 标记文件（安装器侧写注册表）。
+// 注意：Electron 本身在 Win7/8.1 上无法启动，故应用内检测实际只覆盖「能启动但版本偏低」的 Win10。
+// 「获取最新的 Windows」指向的系统下载页（用默认浏览器打开）
+const WIN_DOWNLOAD_URL = 'https://www.microsoft.com/zh-cn/software-download/windows11'
+
+function osWarningSkipPath() {
+  return path.join(app.getPath('userData'), 'os-version-warning-skipped')
+}
+
+// 解析系统版本：os.release() 形如 "10.0.19045"（Win10）/ "6.1.7601"（Win7）
+function getWindowsBuild() {
+  const m = /^(\d+)\.(\d+)\.(\d+)/.exec(os.release() || '')
+  if (!m) return null
+  return { major: parseInt(m[1], 10), build: parseInt(m[3], 10) }
+}
+
+// 是否需要提示：非 Windows 不提示；Win10 且 build >= 16299（1709）视为达标；
+// 低于 Win10 或 Win10 但 build 偏低时提示。「不再提示」标记存在时直接跳过。
+function shouldWarnOsVersion() {
+  if (FORCE_OS_WARN === 1 || process.env.OS_WARN_FORCE === '1') return true
+  if (process.platform !== 'win32') return false
+  try { if (fs.existsSync(osWarningSkipPath())) return false } catch (_) {}
+  const v = getWindowsBuild()
+  if (!v) return false
+  if (v.major > 10) return false
+  if (v.major === 10 && v.build >= 16299) return false
+  return true
+}
+
 // ========== 首次安装引导向导 ==========
 // 全新安装（本机无任何有效账号）时先弹出独立的引导窗口，用户完成初始化后才进入正式使用。
 // 复用 preload.js 与「无边框 + 系统亚克力」窗口方案，固定尺寸、不可缩放。
 let setupWindow = null
 let setupRunning = false
 let setupUiReady = false
+// 本次启动窗口要展示的画面计划：warn=先显示低版本提示，setup=提示后继续走首次引导。
+// 窗口创建前由 proceedStartup 写入，渲染层通过 launch-plan invoke 取用决定首屏画面。
+let launchPlan = { warn: false, setup: false }
 // 预热进度：引导界面完全加载完成后才后台推进，渲染层可在任意时刻通过 get-setup-warmup 补齐状态
 let setupWarmup = { phase: '', detail: '', percent: 0, done: false }
 let setupWarmupStarted = false
@@ -792,12 +851,15 @@ function revealWindow(win) {
   win.show()
 }
 
-// 创建引导窗口：固定尺寸、无边框、系统亚克力，引导期间禁止关闭
-function createSetupWindow() {
+// 创建引导窗口：固定尺寸、无边框、系统亚克力，引导期间禁止关闭。
+// 该窗口同时承担「低版本系统提示」：plan.warn 为真时首屏显示提示画面，用户点「忽略」后
+// 再切到欢迎/引导（plan.setup）或直接进主窗口。单一窗口、单一页面，复用同一套卡片样式。
+function createSetupWindow(plan = launchPlan) {
   if (setupWindow && !setupWindow.isDestroyed()) {
     setupWindow.focus()
     return setupWindow
   }
+  launchPlan = { warn: !!plan.warn, setup: !!plan.setup }
   setupUiReady = false
   const win = new BrowserWindow({
     width: 800,
@@ -815,15 +877,18 @@ function createSetupWindow() {
     // 首屏显示时机：dev 下先隐藏，等渲染层挂载完成（setup-ready）后再显示，避免先露出空的亚克力底；
     // prod 下静态文件加载极快，直接显示（占位页是纯内联 HTML/CSS，不依赖 JS），窗口"秒出画面"。
     show: !isDev,
-    title: '首次安装引导',
+    title: '班集',
     icon: APP_ICON_PATH,
     // 渲染进程安全配置见 web-prefs.js（各窗口统一）
     webPreferences: buildWebPreferences(),
   })
   setupWindow = win
   setupRunning = true
-  // 记「引导未完成」：只有走完引导（setup-complete）才清除；中途关闭/退出后下次启动仍进入引导
-  try { fs.writeFileSync(setupPendingMarkerPath(), '1') } catch (_) { /* 标记失败不阻塞引导 */ }
+  // 记「引导未完成」：仅当本次确有引导流程（plan.setup）时写下，走完引导（setup-complete）才清除；
+  // 中途关闭/退出后下次启动仍进入引导。纯低版本提示（warn-only）不写标记，避免把自己变成「需引导」。
+  if (launchPlan.setup) {
+    try { fs.writeFileSync(setupPendingMarkerPath(), '1') } catch (_) { /* 标记失败不阻塞引导 */ }
+  }
 
   // 兜底（仅 dev：窗口初始隐藏）：渲染层异常/过慢时也先把窗口显示出来，
   // 此时 setup.html 的占位保证不是空白。正常情况下 setup-ready 会先到并取消此定时器。
@@ -869,8 +934,43 @@ ipcMain.on('setup-ready', (event) => {
   // 引导界面即本场景的「首屏」：视为首屏渲染完成，配合后端就绪定锚点（引导页停留不计入启动耗时）。
   firstScreenRendered = true
   tryEndStartup()
-  // 界面完全加载完成后，再让出一次事件循环，随后才在后台开始预热（不与首帧显示抢资源）
-  setTimeout(() => { runSetupWarmup() }, 0)
+  // 界面完全加载完成后，再让出一次事件循环，随后才在后台开始预热（不与首帧显示抢资源）。
+  // 纯低版本提示（plan.setup 为假）没有引导流程，无需预热。
+  if (launchPlan.setup) setTimeout(() => { runSetupWarmup() }, 0)
+})
+
+// 渲染层首屏画面：读取本次启动计划（是否先显示低版本提示 / 是否走引导）
+ipcMain.handle('launch-plan', (event) => {
+  if (setupWindow && !setupWindow.isDestroyed() && event.sender !== setupWindow.webContents) {
+    return { warn: false, setup: false }
+  }
+  return launchPlan
+})
+
+// 低版本提示「忽略」：按勾选记录「不再提示」。
+// 若本次还需走引导（plan.setup），主进程不动窗口，由渲染层自行从提示画面切到欢迎画面；
+// 若只是提示（warn-only），提示画面即最后一屏——直接进主窗口并关闭启动窗口。
+ipcMain.on('launch-skip-warn', (event, payload) => {
+  if (!setupWindow || setupWindow.isDestroyed()) return
+  if (event.sender !== setupWindow.webContents) return
+  if (payload && payload.remember) {
+    try { fs.writeFileSync(osWarningSkipPath(), '1') } catch (_) { /* 标记失败不影响启动 */ }
+  }
+  if (!launchPlan.setup) {
+    setupRunning = false
+    try { fs.rmSync(setupPendingMarkerPath(), { force: true }) } catch (_) {}
+    if (!mainWindow || mainWindow.isDestroyed()) createMainWindow()
+    if (setupWindow && !setupWindow.isDestroyed()) setupWindow.close()
+  }
+})
+
+// 低版本提示「获取最新的 Windows」：用默认浏览器打开系统下载页，随后退出班集
+ipcMain.on('launch-open-download', (event) => {
+  if (!setupWindow || setupWindow.isDestroyed()) return
+  if (event.sender !== setupWindow.webContents) return
+  shell.openExternal(WIN_DOWNLOAD_URL).catch(() => { /* 打不开浏览器时静默忽略，不影响退出 */ })
+  app.isQuitting = true
+  app.quit()
 })
 
 // 引导完成：关闭引导窗口并创建主窗口（token 已写入同源 localStorage，主窗口据此直达首页）

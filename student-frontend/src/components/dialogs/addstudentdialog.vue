@@ -2,10 +2,11 @@
   <Teleport to="body">
   <Transition name="dialog">
   <div v-if="visible" class="fixed inset-0 bg-black/50 flex items-center justify-center z-[10001] pointer-events-auto" @click.self="$emit('cancel')">
-    <div class="bg-surface p-5 rounded-xl w-[560px] max-w-full shadow-lg dialog-card">
+    <div class="bg-surface p-5 rounded-xl w-[600px] max-w-full shadow-lg dialog-card">
       <h3 class="text-lg font-bold mb-4 text-text">{{ title }}</h3>
 
-      <div class="grid grid-cols-2 gap-3 max-h-[60vh] overflow-y-auto pr-1">
+      <!-- p-1：聚焦时输入框有 3px 外发光（box-shadow），滚动容器 overflow 会裁掉四边，留出内边距避免蓝色边（尤其最下面一排的底边）被挡住 -->
+      <div class="grid grid-cols-2 gap-3 max-h-[60vh] overflow-y-auto p-1">
         <div v-for="f in fields" :key="f.name">
           <label class="block text-sm text-text-secondary mb-1">
             {{ f.name }}<span v-if="requiredField === f.name" class="text-danger"> *</span>

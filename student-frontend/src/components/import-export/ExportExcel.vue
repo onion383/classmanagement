@@ -38,7 +38,7 @@
 
       <div class="mb-4">
         <p class="font-semibold mb-2">导出格式：</p>
-        <AppSelect v-model="exportFormat" class="w-full" :options="[{value:'html',label:'HTML 表格 (.html)'},{value:'xlsx',label:'Excel (.xlsx) - 带边框'},{value:'csv',label:'CSV (.csv) - 无样式'},{value:'image',label:'图片 (.png)'},{value:'pdf',label:'PDF (.pdf)'}]" />
+        <AppSelect v-model="exportFormat" class="w-full" :options="[{value:'html',label:'HTML 表格 (.html)'},{value:'xlsx',label:'Excel (.xlsx) - 带边框'},{value:'csv',label:'CSV (.csv) - 无样式'},{value:'md',label:'Markdown 文档 (.md)'},{value:'image',label:'图片 (.png)'},{value:'pdf',label:'PDF (.pdf)'}]" />
       </div>
 
       <div class="mb-4">
@@ -67,6 +67,7 @@ const FORMAT_LABELS = {
   csv: '表格 (.csv)',
   html: 'HTML 表格 (.html)',
   xlsx: 'Excel 表格 (.xlsx)',
+  md: 'Markdown 文档 (.md)',
   image: 'PNG 图片 (.png)',
   pdf: 'PDF 文档 (.pdf)'
 };
@@ -144,6 +145,7 @@ export default {
           switch (this.exportFormat) {
             case 'csv': saved = await this.exportGroupCSV(this.selectedGroups, finalFilename); break;
             case 'html': saved = await this.exportGroupHTML(this.selectedGroups, finalFilename); break;
+            case 'md': saved = await this.exportGroupMD(this.selectedGroups, finalFilename); break;
             case 'image': saved = await this.exportGroupImage(this.selectedGroups, finalFilename); break;
             case 'pdf': saved = await this.exportGroupPDF(this.selectedGroups, finalFilename); break;
             case 'xlsx': saved = await this.exportGroupXLSX(this.selectedGroups, finalFilename); break;
@@ -180,6 +182,7 @@ export default {
           case 'csv': saved = await this.exportCSV(exportRows, selectedFields, finalFilename); break;
           case 'html': saved = await this.exportHTMLTable(exportRows, selectedFields, finalFilename); break;
           case 'xlsx': saved = await this.exportXLSX(exportRows, selectedFields, finalFilename); break;
+          case 'md': saved = await this.exportMD(exportRows, selectedFields, finalFilename); break;
           case 'image': saved = await this.exportImage(exportRows, selectedFields, finalFilename); break;
           case 'pdf': saved = await this.exportPDF(exportRows, selectedFields, finalFilename); break;
           default: saved = await this.exportHTMLTable(exportRows, selectedFields, finalFilename);
@@ -304,6 +307,12 @@ export default {
       const html = `<!DOCTYPE html><html><head><meta charset="UTF-8"><title>${this.escapeHtml(filename)}</title></head><body>${this.groupTableHTML(idxList, filename)}</body></html>`;
       const blob = new Blob([html], { type: 'text/html' });
       return await this.saveFileWithDialog(`${filename}.html`, blob);
+    },
+    async exportGroupMD(idxList, filename) {
+      const rows = this.groupFlatRows(idxList);
+      const md = this.buildMarkdown(rows[0], rows.slice(1), filename);
+      const blob = new Blob([md], { type: 'text/markdown;charset=utf-8;' });
+      return await this.saveFileWithDialog(`${filename}.md`, blob);
     },
     async exportGroupImage(idxList, filename) {
       const { default: html2canvas } = await import('html2canvas');
@@ -673,6 +682,64 @@ export default {
       return await this.saveFileWithDialog(`${filename}.csv`, blob);
     },
 
+    // ==================== Markdown ====================
+    // 单元格转义：管道符会破坏表格结构，反斜杠先转义，换行转为 <br>
+    mdEscape(v) {
+      const s = v == null ? '' : String(v);
+      return s.replace(/\\/g, '\\\\').replace(/\|/g, '\\|').replace(/\r?\n/g, '<br>');
+    },
+    buildMarkdown(headers, bodyRows, filename) {
+      const rowLine = cells => `| ${cells.map(c => this.mdEscape(c)).join(' | ')} |`;
+      const lines = [
+        `# ${this.mdEscape(filename)}`,
+        '',
+        rowLine(headers),
+        `| ${headers.map(() => '---').join(' | ')} |`,
+        ...bodyRows.map(rowLine)
+      ];
+      return lines.join('\n') + '\n';
+    },
+    async exportMD(rows, fields, filename) {
+      const headers = fields.map(f => f.name);
+      const isSchedule = this.isScheduleData(rows);
+      const bodyRows = [];
+      for (const row of rows) {
+        // ---------- 讲台行 ----------
+        if (row._isPodium) {
+          const isRowNumTable = this.isPodiumRowWithRowNum(row, headers);
+          const arr = new Array(headers.length).fill('');
+          if (isRowNumTable && headers.length > 1) {
+            arr[0] = '讲台';
+            arr[1] = '讲  台';
+          } else {
+            arr[0] = '讲  台';
+          }
+          bodyRows.push(arr);
+          continue;
+        }
+        // ---------- 全局 / 内部休息行 ----------
+        if (row.type === 'globalRest' || row.type === 'innerRest') {
+          const displayText = row.label ? `${row.label} ${row.time}` : '';
+          const arr = new Array(headers.length).fill('');
+          arr[0] = displayText;
+          bodyRows.push(arr);
+          continue;
+        }
+        // ---------- 普通行 ----------
+        const arr = headers.map(h => {
+          if (isSchedule && h === '时段') {
+            if (row._rowSpan > 1 && row._isFirstInBlock) return SECTION_NAMES[row.section] || '';
+            if (row._rowSpan === 0) return '';
+          }
+          return row[h] !== undefined ? row[h] : '';
+        });
+        bodyRows.push(arr);
+      }
+      const md = this.buildMarkdown(headers, bodyRows, filename);
+      const blob = new Blob([md], { type: 'text/markdown;charset=utf-8;' });
+      return await this.saveFileWithDialog(`${filename}.md`, blob);
+    },
+
     // ==================== 图片 ====================
     async exportImage(rows, fields, filename) {
       const { default: html2canvas } = await import('html2canvas');
@@ -771,18 +838,24 @@ export default {
 
       let fontLoaded = false;
       try {
-        // 字体以 zstd 形式随包分发（原始 12.75MB → 6.74MB，比 gzip 的 7.63MB 更小），
-        // 运行时用 DecompressionStream('zstd') 解压（Chromium 原生支持，无需额外依赖）。
-        // 解压后仍是完整未子集化的 TTF，笔画与字形不受影响，无乱码风险。
-        const response = await fetch('/NotoSansSC-6.ttf.zst');
+        // 字体以 gzip 形式随包分发（原始 12.75MB → 8MB），运行时解压得到完整未子集化的 TTF。
+        // 关键坑：服务器是否已自动解压并不一致——
+        //   · 打包版 app:// 协议原样返回 gzip 字节，需自行解压；
+        //   · Vite dev 会把 .gz 当预压缩资源，带 Content-Encoding: gzip，浏览器已透明解压（拿到的是原始 TTF）。
+        // 因此不能无条件 pipeThrough(DecompressionStream)，必须先按 gzip 魔数 1F 8B 判断，两种情形都能用。
+        // （另：Chromium 的 DecompressionStream 只支持 gzip/deflate，不支持 'zstd'，别改回 zstd，否则字体加载失败、中文退化乱码。）
+        const response = await fetch('/NotoSansSC-6.ttf.gz');
         if (!response.ok) throw new Error('字体文件加载失败');
-        const decompressed = response.body.pipeThrough(new DecompressionStream('zstd'));
-        const blob = await new Response(decompressed).blob();
+        let bytes = new Uint8Array(await response.arrayBuffer());
+        if (bytes[0] === 0x1f && bytes[1] === 0x8b) {
+          const stream = new Blob([bytes]).stream().pipeThrough(new DecompressionStream('gzip'));
+          bytes = new Uint8Array(await new Response(stream).arrayBuffer());
+        }
         const fontBase64 = await new Promise((resolve, reject) => {
           const reader = new FileReader();
           reader.onloadend = () => resolve(reader.result.split(',')[1]);
           reader.onerror = reject;
-          reader.readAsDataURL(blob);
+          reader.readAsDataURL(new Blob([bytes]));
         });
         doc.addFileToVFS('NotoSansSC.ttf', fontBase64);
         doc.addFont('NotoSansSC.ttf', 'NotoSansSC', 'normal');

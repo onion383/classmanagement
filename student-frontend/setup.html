@@ -4,6 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>首次安装引导</title>
+  <!--splash-css-->
   <style>
     * { user-select: none; -webkit-user-select: none; }
     /* 与主窗口同构：不强制屏蔽主题背景图，让毛玻璃主题的全局背景（--bg-image + 遮罩）正常绘制，
@@ -12,31 +13,11 @@
     /* 挂载根节点必须撑满：否则 .setup-wrap 的 height:100% 失去参照退化为内容高度，
        卡片下方会露出窗口背景。这里定死满高，卡片随之铺满整窗。 */
     #setup-app { width: 100%; height: 100%; }
-    /* 首屏占位：与主进程 devLoadingHtml() 同款（同渐变底、同配色、同尺寸），
-       dev 下从 inline loading 页切到本页时画面无缝，只保留「一个加载画面」。 */
-    .setup-splash {
-      position: fixed; inset: 0;
-      display: flex; flex-direction: column; align-items: center; justify-content: center;
-      gap: 18px; font-family: -apple-system, "Segoe UI", "Microsoft YaHei", sans-serif;
-      background: linear-gradient(160deg, #eef2ff 0%, #e2e8ff 100%);
-    }
-    .setup-splash .spin { animation: setupRotate 1.4s linear infinite; transform-origin: center; }
-    .setup-splash .logo { font-size: 22px; font-weight: 600; color: #1e40af; letter-spacing: 1px; }
-    .setup-splash .tip { font-size: 13px; color: #6b7280; }
-    @keyframes setupRotate { to { transform: rotate(360deg); } }
   </style>
 </head>
 <body>
   <div id="setup-app">
-    <div class="setup-splash">
-      <svg class="ring" width="34" height="34" viewBox="0 0 22 22">
-        <circle cx="11" cy="11" r="8" fill="none" stroke="rgba(30,64,175,.25)" stroke-width="3"/>
-        <circle class="spin" cx="11" cy="11" r="8" fill="none" stroke="#1e40af" stroke-width="3"
-                stroke-dasharray="42" stroke-dashoffset="12" stroke-linecap="round"/>
-      </svg>
-      <span class="logo">班集</span>
-      <span class="tip" id="boot-tip">正在启动…</span>
-    </div>
+    <!--splash-html-->
   </div>
   <script type="module" src="/src/setup/main.js"></script>
   <script>

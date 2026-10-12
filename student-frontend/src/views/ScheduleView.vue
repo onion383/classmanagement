@@ -16,7 +16,7 @@
             <div class="mb-4 flex items-center gap-3 opbar">
               <button @click="activeSettingsVisible = true" v-preload="loadSettingsDialog" class="bg-primary text-text-inverse px-4 py-2 rounded flex items-center gap-1.5"><IconGlyph name="settings" :size="14" tint="current" /> 设置</button>
               <button @click="refreshActive" class="bg-text-muted text-text-inverse px-4 py-2 rounded flex items-center gap-1.5 btn-refresh"><IconGlyph name="refresh" :size="14" tint="current" /> 刷新</button>
-              <button @click="applyMasterToActive" class="bg-primary text-text-inverse px-4 py-2 rounded flex items-center gap-1.5"><IconGlyph name="upload" :size="14" tint="current" /> 从模板导入</button>
+              <button @click="applyMasterVisible = true" class="bg-primary text-text-inverse px-4 py-2 rounded flex items-center gap-1.5"><IconGlyph name="upload" :size="14" tint="current" /> 从模板导入</button>
               <button @click="activeExportVisible = true" class="bg-warning text-text-inverse px-4 py-2 rounded">📥 导出 Excel</button>
             </div>
 
@@ -162,6 +162,19 @@
       @confirm="confirmDeleteHistorySnapshot"
       @cancel="deleteSnapshotVisible = false"
     />
+
+    <!-- 从模板导入确认弹窗 -->
+    <ConfirmDialog
+      v-if="applyMasterMounted"
+      :visible="applyMasterVisible"
+      title="从模板导入"
+      message="确定将一般课表覆盖到实行课表吗？"
+      type="confirm"
+      :showCancel="true"
+      confirmText="确定导入"
+      @confirm="applyMasterToActive"
+      @cancel="applyMasterVisible = false"
+    />
   </div>
 </template>
 
@@ -283,6 +296,8 @@ export default {
       slideDir: 'next',
       deleteSnapshotVisible: false,
       deleteSnapshotMounted: false,
+      applyMasterVisible: false,
+      applyMasterMounted: false,
       courseCandidates: COURSE_CANDIDATES,
     };
   },
@@ -307,7 +322,8 @@ export default {
     masterExportVisible(n) { if (n) this.masterExportMounted = true },
     activeSettingsVisible(n) { if (n) this.activeSettingsMounted = true },
     activeExportVisible(n) { if (n) this.activeExportMounted = true },
-    deleteSnapshotVisible(n) { if (n) this.deleteSnapshotMounted = true }
+    deleteSnapshotVisible(n) { if (n) this.deleteSnapshotMounted = true },
+    applyMasterVisible(n) { if (n) this.applyMasterMounted = true }
   },
   computed: {
     // ---- 一般课表显示行 ----
@@ -699,15 +715,15 @@ export default {
       await this.saveMaster();
     },
     async applyMasterToActive() {
-      if (!confirm('确定将一般课表覆盖到实行课表吗？')) return;
       try {
         const before = JSON.parse(JSON.stringify(this.activeCells));
         await axios.post(`${API_BASE}/schedule/apply-master`);
-        alert('已应用');
+        this.applyMasterVisible = false;
+        this.notifySuccess('已应用');
         await this.loadActive();
         recordGridSnapshotUndo('课程表', 'schedule', before, JSON.parse(JSON.stringify(this.activeCells)), '从模板导入');
       } catch (e) {
-        alert('应用失败');
+        this.notifyError('应用失败');
       }
     },
 

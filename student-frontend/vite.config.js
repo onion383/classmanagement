@@ -30,8 +30,26 @@ function nonBlockingCss(entries = ['index.html', 'setup.html']) {
   }
 }
 
+// 首屏占位单一来源：index.html / setup.html 里只写 <!--splash-css--> 与 <!--splash-html--> 占位，
+// 由本插件在 dev 与 build 两处都注入 splash/ 下的同一份样式与结构，避免同款加载画面维护多份。
+// 用内联 <style> + 内联 DOM，保证首帧不等任何外部 JS/CSS 下载即可绘制。
+function injectSplash() {
+  const cssFile = path.resolve(__dirname, 'splash/splash.css')
+  const htmlFile = path.resolve(__dirname, 'splash/splash.html')
+  return {
+    name: 'inject-splash',
+    transformIndexHtml(html) {
+      const css = fs.readFileSync(cssFile, 'utf8')
+      const body = fs.readFileSync(htmlFile, 'utf8')
+      return html
+        .replace('<!--splash-css-->', `<style>\n${css}\n</style>`)
+        .replace('<!--splash-html-->', body)
+    },
+  }
+}
+
 export default defineConfig({
-  plugins: [vue(), tailwindcss(), nonBlockingCss()],
+  plugins: [vue(), tailwindcss(), injectSplash(), nonBlockingCss()],
   server: {
     // 预热首屏模块图：服务器启动时即预编译入口及关键依赖，
     // 避免第一个请求才逐文件编译导致窗口白屏过长。
