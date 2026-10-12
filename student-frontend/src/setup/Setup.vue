@@ -1,9 +1,31 @@
 <template>
   <div class="setup-wrap">
-    <!-- 欢迎页 → 步骤页：只让内容淡出/淡入，整窗卡片的背景与模糊保持不动 -->
+    <!-- 画面切换（提示 / 欢迎 / 步骤）：只让内容淡出/淡入，整窗卡片的背景与模糊保持不动 -->
     <Transition name="wfade" mode="out-in">
+    <!-- 低版本系统提示：与安装器同款一屏，复用欢迎页的卡片与居中布局，仅内容区不同 -->
+    <div v-if="screen === 'warning'" class="setup-card bg-surface welcome">
+      <div class="welcome-inner">
+        <img src="/logo.png" alt="logo" class="welcome-logo" />
+        <div class="welcome-title">
+          <span class="welcome-name">班集</span>
+        </div>
+        <p class="ow-msg">检测到您正在运行的系统版本过低，可能导致软件异常或崩溃，建议将系统升级到 Windows 10 1709 或更高版本</p>
+        <div class="ow-btns">
+          <div class="ow-actions">
+            <button type="button" class="ow-btn ow-ghost" @click="quitSetup">退出程序</button>
+            <button type="button" class="ow-btn ow-primary" @click="ignoreWarn">忽略</button>
+          </div>
+          <button type="button" class="ow-btn ow-ghost ow-download" @click="openDownload">获取最新的 Windows</button>
+        </div>
+        <label class="ow-remember">
+          <input type="checkbox" v-model="warnRemember" />
+          <span>不再提示</span>
+        </label>
+      </div>
+    </div>
+
     <!-- 欢迎页：引导前的独立一屏，点击「开始」再进入下面的引导流程 -->
-    <div v-if="!started" class="setup-card bg-surface welcome">
+    <div v-else-if="screen === 'welcome'" class="setup-card bg-surface welcome">
       <button
         type="button"
         class="welcome-x absolute! top-3 right-3 w-7 h-7 flex items-center justify-center rounded-full text-text-muted hover:text-text hover:bg-black/5 transition-colors text-xl leading-none"
@@ -18,7 +40,7 @@
         </div>
         <p class="welcome-hi">欢迎使用~</p>
         <p class="welcome-tip">首次使用前，我们需要进行一些初始化设置</p>
-        <button type="button" class="btn-primary welcome-btn" @click="started = true">开始</button>
+        <button type="button" class="btn-primary welcome-btn" @click="screen = 'wizard'">开始</button>
       </div>
     </div>
 
@@ -313,9 +335,17 @@ const STEPS = [
 
 export default {
   name: 'Setup',
+  props: {
+    // 首屏画面，由 src/setup/main.js 依据主进程 launch-plan / URL 参数解析后传入
+    initialScreen: { type: String, default: 'welcome' },
+    // 本次启动计划：warn=提示画面，setup=是否还需走首次引导（决定「忽略」后去哪）
+    plan: { type: Object, default: () => ({ warn: false, setup: true }) },
+  },
   data() {
     return {
-      started: false, // 欢迎页是否已点「开始」，false 时先展示欢迎页
+      // 当前画面：'warning'（低版本提示）| 'welcome'（欢迎）| 'wizard'（引导步骤）
+      screen: this.initialScreen, // 首屏由主进程计划决定
+      warnRemember: false, // 低版本提示页「不再提示」勾选
       step: 0,
       sub: 0,
       dir: 1, // 1=下一步（新卡片从右进）| -1=上一步（新卡片从左进）
@@ -507,7 +537,7 @@ export default {
       this.dir = -1
       if (this.current === 'account' && this.sub > 0) { this.sub -= 1; return }
       // 已在第一步：返回欢迎页（整个引导的最前面）
-      if (this.step === 0 && this.sub === 0) { this.started = false; return }
+      if (this.step === 0 && this.sub === 0) { this.screen = 'welcome'; return }
       this.step -= 1
       if (this.current === 'account') this.sub = this.subSteps.length - 1
     },
@@ -607,6 +637,17 @@ export default {
     // 且不写「引导完成」标记——下次启动仍会重新进入引导，不会直接进入主窗口。
     quitSetup() {
       window.electron?.send('setup-quit')
+    },
+    // ---------- 低版本系统提示 ----------
+    // 忽略：记录「不再提示」（如勾选），随即从提示画面进入下一屏。
+    // 还需引导时本页自行切到欢迎画面；纯提示时主进程会直接开主窗口并关闭本窗口。
+    ignoreWarn() {
+      window.electron?.send('launch-skip-warn', { remember: this.warnRemember })
+      if (!this.plan || this.plan.setup) this.screen = 'welcome'
+    },
+    // 获取最新的 Windows：默认浏览器打开系统下载页，随后主进程退出班集
+    openDownload() {
+      window.electron?.send('launch-open-download')
     },
     // ---------- 完成 ----------
     async finish() {
@@ -723,6 +764,66 @@ export default {
   font-size: 15px;
   -webkit-app-region: no-drag;
 }
+
+/* 低版本系统提示画面：复用欢迎页的卡片/居中布局，仅内容区样式不同（红字文案 + 两个按钮 + 下载链接 + 勾选框） */
+.ow-msg {
+  margin: 16px 0 0;
+  max-width: 420px;
+  font-size: 14px;
+  line-height: 1.6;
+  color: #b91c1c;
+}
+/* 按钮区：两行等宽对齐——下载按钮宽度 = 上排两按钮 + 间距 的总宽（132*2 + 14 = 278） */
+.ow-btns {
+  width: 278px;
+  margin-top: 24px;
+}
+.ow-actions {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+}
+/* 上排两按钮等分整行，保证与下方下载按钮左右对齐 */
+.ow-actions .ow-btn { flex: 1; }
+/* 三个按钮统一尺寸：定高 + 定最小宽度，保证「退出程序 / 忽略」完全等大，下载按钮同高 */
+.ow-btn {
+  box-sizing: border-box;
+  height: 40px;
+  min-width: 132px;
+  padding: 0 22px;
+  font-size: 14px;
+  border-radius: 8px;
+  cursor: pointer;
+  transition: background-color .12s ease, border-color .12s ease;
+  -webkit-app-region: no-drag;
+}
+/* 忽略：与欢迎页「开始」按钮同色（主题主色填充） */
+.ow-primary {
+  border: 1px solid var(--color-primary);
+  background: var(--color-primary);
+  color: var(--color-text-inverse);
+}
+.ow-primary:hover { background: var(--color-primary-hover); border-color: var(--color-primary-hover); }
+/* 次要按钮（退出程序 / 获取最新的 Windows）：主色描边、浅底 */
+.ow-ghost {
+  border: 1px solid rgba(30, 64, 175, .35);
+  background: #fff;
+  color: #1e40af;
+}
+.ow-ghost:hover { background: rgba(30, 64, 175, .06); }
+/* 获取最新的 Windows：独立一行，宽度铺满与上排两按钮总宽一致 */
+.ow-download { width: 100%; margin-top: 12px; }
+.ow-remember {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 16px;
+  font-size: 13px;
+  color: var(--color-text-muted);
+  cursor: pointer;
+  -webkit-app-region: no-drag;
+}
+.ow-remember input { cursor: pointer; }
 
 /* 第二层毛玻璃：左右两栏各自一块半透明玻璃面板，叠加出层次 */
 .glass-panel {

@@ -1,0 +1,29 @@
+/* 首屏载入占位（共享单一来源）：index.html 与 setup.html 都注入这一份样式，
+   避免同款加载画面维护两份。Vue 挂载后由各页面逻辑移除占位。
+   注意：html/body 基础规则不放在这里——setup.html 需要 body 透明（透出亚克力底），
+   index.html 需要 body 底色兜底，差异由各自页面内联维护。 */
+.app-splash {
+  position: fixed; inset: 0;
+  display: flex; flex-direction: column;
+  align-items: center; justify-content: center;
+  gap: 18px; font-family: -apple-system, "Segoe UI", "Microsoft YaHei", sans-serif;
+  background: linear-gradient(160deg, #eef2ff 0%, #e2e8ff 100%);
+}
+.app-splash .ring .spin { animation: rotate 1.4s linear infinite; transform-origin: center; }
+/* 失败态：转圈换成蓝色感叹号三角，与运行期异常页保持一致 */
+.app-splash .warn-icon { display: none; }
+.app-splash.is-failed .ring { display: none; }
+.app-splash.is-failed .warn-icon { display: block; }
+.app-splash .logo { font-size: 22px; font-weight: 600; color: #1e40af; letter-spacing: 1px; }
+.app-splash .tip { font-size: 13px; color: #6b7280; }
+/* 启动失败兜底：后端一直起不来时，占位页给出文案与「重启后端 / 退出应用」 */
+.app-splash .fail-box { display: flex; flex-direction: column; align-items: center; gap: 12px; }
+.app-splash .fail-msg { font-size: 13px; color: #b91c1c; }
+.app-splash .fail-row { display: flex; gap: 10px; }
+.app-splash .fail-btn {
+  font-size: 13px; padding: 6px 16px; border-radius: 6px; cursor: pointer;
+  border: 1px solid rgba(30, 64, 175, .35); background: #fff; color: #1e40af;
+}
+.app-splash .fail-btn.primary { background: #1e40af; border-color: #1e40af; color: #fff; }
+.app-splash .fail-btn:disabled { opacity: .5; cursor: default; }
+@keyframes rotate { to { transform: rotate(360deg); } }

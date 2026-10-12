@@ -44,6 +44,9 @@ Thumbs.db
 # 本地测试脚本（不入库）
 testjs/
 
+# 问题/优化管理文档（仅本地，不入库）
+doc/problem.md
+
 # 缓存
 .vite/
 .perf-data/

@@ -40,6 +40,10 @@ const validSendChannels = [
   'setup-ready',
   'setup-complete',
   'setup-quit',
+  // 启动窗口内的低版本系统提示画面：用户点「忽略」（可带「不再提示」勾选）后继续启动 /
+  // 用户点「获取最新的 Windows」（默认浏览器打开下载页并退出班集）
+  'launch-skip-warn',
+  'launch-open-download',
   // 版本更新：用户确认后重启并安装已下载的新版本
   'update-install',
 ]
@@ -74,6 +78,8 @@ const validInvokeChannels = [
   'set-initial-data-dir',
   // 首次安装引导向导：读取当前预热进度/完成态（供晚挂载的渲染层补齐）
   'get-setup-warmup',
+  // 启动窗口首屏：读取本次启动计划（是否先显示低版本提示 / 是否走引导）
+  'launch-plan',
   // 主窗口加载后取走主进程暂存的待展示提示（如「数据库移动成功」）
   'get-pending-notification',
   // 后端就绪状态查询（兜住「先就绪、后注册监听」的竞态）
