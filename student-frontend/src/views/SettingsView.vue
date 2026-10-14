@@ -26,6 +26,66 @@
       </div>
     </div>
 
+    <!-- ========== 学期设置 ========== -->
+    <div class="mb-6">
+      <div class="flex items-center justify-between mb-4">
+        <h2 class="text-xl font-semibold text-text flex items-center gap-2"><IconGlyph name="calendar" :size="20" /> 学期设置</h2>
+        <button
+          @click="addSemester"
+          :disabled="busySemester"
+          class="bg-primary hover:bg-primary-hover text-text-inverse px-4 py-2 rounded transition-theme disabled:opacity-40 disabled:cursor-not-allowed"
+        >增加学期</button>
+      </div>
+
+      <div class="bg-surface rounded-lg border border-border p-6">
+        <div class="flex items-center gap-4 mb-6">
+          <label class="text-sm font-medium text-text w-40 flex-shrink-0">选择学期</label>
+          <div class="w-64">
+            <AppSelect :model-value="semesterId" :options="semesterOptions" placeholder="选择学期" @change="onSelectSemester" />
+          </div>
+          <button
+            @click="openRenameSemester"
+            :disabled="!semesterId"
+            class="bg-surface-hover text-text border border-border px-4 py-2 rounded transition-theme disabled:opacity-40 disabled:cursor-not-allowed"
+          >修改学期名</button>
+        </div>
+        <div class="flex items-center gap-4 mb-6">
+          <label class="text-sm font-medium text-text w-40 flex-shrink-0">学期开始时间</label>
+          <input type="date" v-model="semesterStart" @change="saveSemesterSettings" class="border border-border bg-bg text-text px-3 py-2 rounded-lg" />
+        </div>
+        <div class="flex items-center gap-4 mb-6">
+          <label class="text-sm font-medium text-text w-40 flex-shrink-0">学期结束时间</label>
+          <input type="date" v-model="semesterEnd" @change="saveSemesterSettings" class="border border-border bg-bg text-text px-3 py-2 rounded-lg" />
+        </div>
+        <div class="flex items-center gap-4">
+          <label class="text-sm font-medium text-text w-40 flex-shrink-0">本学期时长</label>
+          <span class="text-sm text-text-secondary">{{ semesterWeeks ? `共 ${semesterWeeks} 周` : '—' }}</span>
+        </div>
+        <p class="text-xs text-text-muted mt-4">座位快照按天补存与座位指数结算均以当前学期范围为准</p>
+      </div>
+    </div>
+
+    <!-- 修改学期名（小弹窗：输入新名字，确定后即时保存） -->
+    <Teleport to="body">
+      <Transition name="dialog">
+        <div v-if="showRenameSemester" class="fixed inset-0 bg-black/40 flex items-center justify-center z-[10003]" @click.self="showRenameSemester = false">
+          <div class="bg-surface p-6 rounded-xl w-[26rem] shadow-card dialog-card border border-border">
+            <h3 class="text-lg font-bold text-text mb-4">修改学期名</h3>
+            <input
+              v-model="semesterNameDraft"
+              placeholder="如：2026秋季学期"
+              class="border border-border bg-surface text-text px-3 py-2 rounded w-full mb-4"
+              @keydown.enter="saveSemesterName"
+            />
+            <div class="flex justify-end gap-2">
+              <button @click="showRenameSemester = false" class="bg-surface-hover text-text border border-border px-4 py-2 rounded transition-theme cursor-pointer">取消</button>
+              <button @click="saveSemesterName" class="bg-primary text-text-inverse px-4 py-2 rounded transition-theme cursor-pointer">确定</button>
+            </div>
+          </div>
+        </div>
+      </Transition>
+    </Teleport>
+
     <!-- ========== 撤销记录 ========== -->
     <div class="mb-6">
       <div class="flex items-center justify-between mb-4">
@@ -538,6 +598,14 @@ export default {
       exportEncrypt: true,
       exportDbPwd: '',
       busyExport: false,
+      // 学期设置（多学期列表 + 当前学期；起止日期供座位快照按天结算）
+      semesters: [],
+      semesterId: null,
+      semesterNameDraft: '',
+      showRenameSemester: false,
+      busySemester: false,
+      semesterStart: '',
+      semesterEnd: '',
       // Dialog
       dialog: {
         visible: false,
@@ -620,6 +688,20 @@ export default {
     isGlassTheme() {
       return this.currentTheme === 'glass' || this.currentTheme === 'glass2'
     },
+    // 学期下拉：值为学期 id，标签为学期名
+    semesterOptions() {
+      return this.semesters.map(s => ({ value: s.id, label: s.name || '未命名学期' }))
+    },
+    // 当前选中的学期对象（未选中时取列表第一条）
+    activeSemester() {
+      return this.semesters.find(s => s.id === this.semesterId) || this.semesters[0] || null
+    },
+    // 本学期时长（按天数折算周数，只读展示）
+    semesterWeeks() {
+      if (!this.semesterStart || !this.semesterEnd) return 0
+      const days = Math.round((new Date(this.semesterEnd) - new Date(this.semesterStart)) / 86400000) + 1
+      return days > 0 ? Math.round(days / 7) : 0
+    },
     // 预览图走 resourceUrl：补完整后端地址并追加 ?token=，保证打包版 file:// 下能通过鉴权
     bgImagePreviewUrl() {
       return this.bgImageUrl ? resourceUrl(this.bgImageUrl) : ''
@@ -662,6 +744,7 @@ export default {
     this.bgImageUrl = this.themeStore.backgroundImage
     this.mergeNotifications = (localStorage.getItem('mergeNotifications') ?? '1') === '1'
     this.loadUndo()
+    this.loadSemesterSettings()
     this.loadWidgetSettings()
     this.loadSession()
     this.loadUsbAutoOpen()
@@ -690,6 +773,76 @@ export default {
     }
   },
   methods: {
+    // ==================== 学期设置 ====================
+    // 载入学期列表：默认选中当前学期（播种/新增学期时后端会把最新学期标为当前）
+    async loadSemesterSettings() {
+      try {
+        const { data } = await axios.get('/api/schedule/semesters')
+        this.semesters = data.semesters || []
+        const cur = data.current || this.semesters[0] || null
+        this.semesterId = cur ? cur.id : null
+        this.semesterStart = cur ? (cur.start_date || '') : ''
+        this.semesterEnd = cur ? (cur.end_date || '') : ''
+      } catch (_) { /* 后端未就绪时静默忽略 */ }
+    },
+    // 选择学期：同时切换为当前学期（课程表、座位补存范围、座位指数结算都按它走）
+    async onSelectSemester(id) {
+      const target = this.semesters.find(s => s.id === id)
+      if (!target) return
+      this.semesterId = id
+      this.semesterStart = target.start_date || ''
+      this.semesterEnd = target.end_date || ''
+      try {
+        await axios.put('/api/schedule/semesters/current', { id })
+      } catch (err) {
+        this.notifyError(err.response?.data?.error || '切换学期失败')
+      }
+    },
+    // 增加学期：名字与起止日期留空时由后端按当前月份推算默认值
+    async addSemester() {
+      if (this.busySemester) return
+      this.busySemester = true
+      try {
+        const res = await axios.post('/api/schedule/semesters', {})
+        await this.loadSemesterSettings()
+        this.notifySuccess(`已增加学期：${res.data.name}`)
+      } catch (err) {
+        this.notifyError(err.response?.data?.error || '增加学期失败')
+      } finally {
+        this.busySemester = false
+      }
+    },
+    openRenameSemester() {
+      const cur = this.activeSemester
+      if (!cur) return
+      this.semesterNameDraft = cur.name || ''
+      this.showRenameSemester = true
+    },
+    async saveSemesterName() {
+      const id = this.semesterId
+      const name = (this.semesterNameDraft || '').trim()
+      if (!id || !name) return
+      try {
+        await axios.put(`/api/schedule/semesters/${id}`, { name })
+        this.showRenameSemester = false
+        await this.loadSemesterSettings()
+        this.notifySuccess('学期名已修改')
+      } catch (err) {
+        this.notifyError(err.response?.data?.error || '修改学期名失败')
+      }
+    },
+    // 改动即时保存（无需保存按钮）：写入所选学期的起止日期
+    async saveSemesterSettings() {
+      if (!this.semesterId) return
+      try {
+        await axios.put(`/api/schedule/semesters/${this.semesterId}`, {
+          start_date: this.semesterStart,
+          end_date: this.semesterEnd,
+        })
+      } catch (err) {
+        this.showAlert(err.response?.data?.error || '学期设置保存失败')
+      }
+    },
     // ==================== 撤销记录 ====================
     async loadUndo() {
       try {

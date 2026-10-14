@@ -131,12 +131,19 @@
 
     <!-- 请假记录 -->
     <div v-if="activeTab === 'records'">
+      <!-- 子标题 -->
+      <h3 class="text-xl font-semibold text-text mb-4 flex items-center gap-2 min-h-7"><IconGlyph name="clipboard" :size="20" /> 请假记录</h3>
+
+      <!-- 工具栏 -->
       <div class="mb-4 flex items-center gap-3 opbar">
         <button v-preload="loadAddLeaveDialog" @click="openAddLeave" class="bg-primary hover:bg-primary-hover text-text-inverse px-5 py-2 rounded">
           ＋ 添加请假
         </button>
         <button @click="refresh" class="bg-text-muted hover:bg-text-secondary text-text-inverse px-4 py-2 rounded flex items-center gap-1.5 btn-refresh">
           <IconGlyph name="refresh" :size="14" tint="current" /> 刷新
+        </button>
+        <button v-preload="loadExportExcel" @click="openRecordsExport" class="bg-warning hover:bg-warning-hover text-text-inverse px-4 py-2 rounded flex items-center gap-1.5">
+          <IconGlyph name="download" :size="14" tint="current" /> 导出 Excel
         </button>
       </div>
 
@@ -145,6 +152,7 @@
           ref="dynamicTable"
           :fields="leaveFields"
           :rows="displayLeaves"
+          :newRow="newRow"
           :editingCell="editingCell"
           :hideMoveButtons="true"
           :hideSelectAll="true"
@@ -152,14 +160,20 @@
           @startEdit="startEdit"
           @saveCell="saveCell"
           @deleteRow="deleteLeave"
-          @addNewRowAtBottom="() => {}"
+          @addNewRowAtBottom="addNewRowAtBottom"
+          @updateNewRow="onUpdateNewRow"
+          @saveNewRow="saveNewRow"
+          @cancelNewRow="cancelNewRow"
           @contextmenu.prevent="() => {}"
           @selectionChange="() => {}"
         />
       </div>
 
+      <!-- 子标题 -->
+      <h3 class="text-xl font-semibold text-text mb-4 flex items-center gap-2 min-h-7"><IconGlyph name="calendar" :size="20" /> 请假时间轴</h3>
+
       <!-- 时间轴 -->
-      <LeaveTimeline :nodes="timelineNodes" :type-options="leaveTypeOptions" />
+      <LeaveTimeline :nodes="timelineNodes" :type-options="leaveTypeOptions" title="" />
     </div>
 
     <!-- 添加请假弹窗 -->
@@ -180,10 +194,10 @@
     <ExportExcel
       v-if="exportMounted"
       :is-visible="exportVisible"
-      :rows="todayExportRows"
-      :fields="todayExportFields"
+      :rows="exportRows"
+      :fields="exportFields"
       :tableElement="todayTableEl"
-      defaultFilename="今日请假表"
+      :defaultFilename="exportFilename"
       @export-finish="() => {}"
       @update:is-visible="exportVisible = $event"
     />
@@ -263,6 +277,7 @@ export default {
       addDialogMounted: false,
       editingLeave: null,
       editingCell: null,
+      newRow: null,
       exportVisible: false,
       exportMounted: false,
       confirm: { visible: false, message: '', ok: null },
@@ -315,7 +330,9 @@ export default {
       return this.totalStudents - this.activeLeaves.length
     },
     displayLeaves() {
-      return this.leaves.map((r, i) => ({ ...r, _rowKey: r.id, _displayIndex: i + 1, position: i + 1 }))
+      const list = this.leaves.map((r, i) => ({ ...r, _isNew: false, _rowKey: r.id, _displayIndex: i + 1, position: i + 1 }))
+      if (this.newRow) list.push(this.newRow)
+      return list
     },
     todayExportRows() {
       const all = [...this.activeLeaves, ...this.todayReturned]
@@ -332,6 +349,17 @@ export default {
     },
     todayTableEl() {
       return null
+    },
+    // 导出内容随当前 tab 切换：今日到班导出今日表，请假记录导出记录表（排除未保存的新增行）
+    exportRows() {
+      if (this.activeTab === 'today') return this.todayExportRows
+      return this.displayLeaves.filter(r => !r._isNew)
+    },
+    exportFields() {
+      return this.activeTab === 'today' ? this.todayExportFields : this.leaveFields
+    },
+    exportFilename() {
+      return this.activeTab === 'today' ? '今日请假表' : '请假记录'
     },
     timelineNodes() {
       const arr = []
@@ -544,6 +572,37 @@ export default {
       this.editingCell = null
       await this.loadAll()
     },
+    // ---------- 行内新增一行 ----------
+    addNewRowAtBottom() {
+      if (this.newRow) return
+      const empty = {}
+      this.leaveFields.forEach(f => {
+        if (f.name !== 'id' && f.name !== 'position') empty[f.name] = ''
+      })
+      this.newRow = { ...empty, _isNew: true, _rowKey: 'new' }
+    },
+    onUpdateNewRow(fieldName, value) {
+      if (this.newRow) this.newRow[fieldName] = value
+    },
+    cancelNewRow() {
+      this.newRow = null
+    },
+    async saveNewRow() {
+      if (!this.newRow) return
+      const data = {}
+      for (const f of this.leaveFields) {
+        if (f.name === 'id' || f.name === 'position') continue
+        data[f.name] = this.newRow[f.name] || ''
+      }
+      try {
+        await axios.post(`${API}/leaves`, data)
+        this.newRow = null
+        useNotification().success('已添加请假记录')
+        await this.loadAll()
+      } catch (err) {
+        useNotification().error(err.response?.data?.error || '添加失败')
+      }
+    },
     deleteLeave(id) {
       this.confirm = {
         visible: true,
@@ -561,7 +620,14 @@ export default {
         }
       }
     },
+    // 导出今日请假表：无数据时直接提示，不弹导出选项弹窗
     openExportToday() {
+      if (this.todayExportRows.length === 0) return useNotification().info('暂无请假数据可导出')
+      this.exportVisible = true
+    },
+    // 导出请假记录：无数据时直接提示，不弹导出选项弹窗
+    openRecordsExport() {
+      if (this.leaves.length === 0) return useNotification().info('暂无请假记录可导出')
       this.exportVisible = true
     }
   }

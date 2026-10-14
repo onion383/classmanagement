@@ -38,7 +38,7 @@
 
       <div class="mb-4">
         <p class="font-semibold mb-2">导出格式：</p>
-        <AppSelect v-model="exportFormat" class="w-full" :options="[{value:'html',label:'HTML 表格 (.html)'},{value:'xlsx',label:'Excel (.xlsx) - 带边框'},{value:'csv',label:'CSV (.csv) - 无样式'},{value:'md',label:'Markdown 文档 (.md)'},{value:'image',label:'图片 (.png)'},{value:'pdf',label:'PDF (.pdf)'}]" />
+        <AppSelect v-model="exportFormat" class="w-full" :options="[{value:'html',label:'HTML 表格 (.html)'},{value:'xlsx',label:'Excel (.xlsx) - 带边框'},{value:'csv',label:'CSV (.csv) - 无样式'},{value:'md',label:'Markdown 文档 (.md)'},{value:'txt',label:'纯文本 (.txt)'},{value:'json',label:'JSON 数据 (.json)'},{value:'image',label:'图片 (.png)'},{value:'pdf',label:'PDF (.pdf)'}]" />
       </div>
 
       <div class="mb-4">
@@ -68,6 +68,8 @@ const FORMAT_LABELS = {
   html: 'HTML 表格 (.html)',
   xlsx: 'Excel 表格 (.xlsx)',
   md: 'Markdown 文档 (.md)',
+  txt: '纯文本 (.txt)',
+  json: 'JSON 数据 (.json)',
   image: 'PNG 图片 (.png)',
   pdf: 'PDF 文档 (.pdf)'
 };
@@ -88,8 +90,8 @@ export default {
   },
   emits: ['export-start', 'export-finish', 'export-error', 'update:isVisible'],
   setup() {
-    const { success, error } = useNotification()
-    return { notifySuccess: success, notifyError: error }
+    const { success, error, info } = useNotification()
+    return { notifySuccess: success, notifyError: error, notifyInfo: info }
   },
   data() {
     return {
@@ -137,7 +139,7 @@ export default {
     async doExport() {
       // ---------- 分组导出模式 ----------
       if (this.isGroupMode) {
-        if (this.selectedGroups.length === 0) { this.notifyError('请至少选择一个小组'); return; }
+        if (this.selectedGroups.length === 0) { this.notifyInfo('请至少选择一个小组'); return; }
         const dateStr = new Date().toISOString().slice(0, 10);
         const finalFilename = `${this.filename}_${dateStr}`;
         try {
@@ -146,6 +148,8 @@ export default {
             case 'csv': saved = await this.exportGroupCSV(this.selectedGroups, finalFilename); break;
             case 'html': saved = await this.exportGroupHTML(this.selectedGroups, finalFilename); break;
             case 'md': saved = await this.exportGroupMD(this.selectedGroups, finalFilename); break;
+            case 'txt': saved = await this.exportGroupTXT(this.selectedGroups, finalFilename); break;
+            case 'json': saved = await this.exportGroupJSON(this.selectedGroups, finalFilename); break;
             case 'image': saved = await this.exportGroupImage(this.selectedGroups, finalFilename); break;
             case 'pdf': saved = await this.exportGroupPDF(this.selectedGroups, finalFilename); break;
             case 'xlsx': saved = await this.exportGroupXLSX(this.selectedGroups, finalFilename); break;
@@ -170,7 +174,7 @@ export default {
       if (this.rowMode === 'selected') {
         exportRows = exportRows.filter(r => this.selectedRowKeys.includes(r.id) || this.selectedRowKeys.includes(r._rowKey));
       }
-      if (!exportRows.length) { alert('没有数据可以导出'); this.close(); return; }
+      if (!exportRows.length) { this.notifyInfo('没有数据可以导出'); this.close(); return; }
 
       const selectedFields = this.fields.filter(f => this.selectedColumns.includes(f.name));
       const dateStr = new Date().toISOString().slice(0, 10);
@@ -183,6 +187,8 @@ export default {
           case 'html': saved = await this.exportHTMLTable(exportRows, selectedFields, finalFilename); break;
           case 'xlsx': saved = await this.exportXLSX(exportRows, selectedFields, finalFilename); break;
           case 'md': saved = await this.exportMD(exportRows, selectedFields, finalFilename); break;
+          case 'txt': saved = await this.exportTXT(exportRows, selectedFields, finalFilename); break;
+          case 'json': saved = await this.exportJSON(exportRows, selectedFields, finalFilename); break;
           case 'image': saved = await this.exportImage(exportRows, selectedFields, finalFilename); break;
           case 'pdf': saved = await this.exportPDF(exportRows, selectedFields, finalFilename); break;
           default: saved = await this.exportHTMLTable(exportRows, selectedFields, finalFilename);
@@ -313,6 +319,18 @@ export default {
       const md = this.buildMarkdown(rows[0], rows.slice(1), filename);
       const blob = new Blob([md], { type: 'text/markdown;charset=utf-8;' });
       return await this.saveFileWithDialog(`${filename}.md`, blob);
+    },
+    async exportGroupTXT(idxList, filename) {
+      const rows = this.groupFlatRows(idxList);
+      const txt = this.buildTxt(rows[0], rows.slice(1));
+      const blob = new Blob([txt], { type: 'text/plain;charset=utf-8;' });
+      return await this.saveFileWithDialog(`${filename}.txt`, blob);
+    },
+    async exportGroupJSON(idxList, filename) {
+      const rows = this.groupFlatRows(idxList);
+      const json = this.buildJson(rows[0], rows.slice(1));
+      const blob = new Blob([json], { type: 'application/json;charset=utf-8;' });
+      return await this.saveFileWithDialog(`${filename}.json`, blob);
     },
     async exportGroupImage(idxList, filename) {
       const { default: html2canvas } = await import('html2canvas');
@@ -699,7 +717,8 @@ export default {
       ];
       return lines.join('\n') + '\n';
     },
-    async exportMD(rows, fields, filename) {
+    // 将 rows+fields 规整为 { headers, bodyRows }（bodyRows 为「数组的数组」），供 md/txt/json 复用
+    buildTableArrays(rows, fields) {
       const headers = fields.map(f => f.name);
       const isSchedule = this.isScheduleData(rows);
       const bodyRows = [];
@@ -735,9 +754,43 @@ export default {
         });
         bodyRows.push(arr);
       }
+      return { headers, bodyRows };
+    },
+    async exportMD(rows, fields, filename) {
+      const { headers, bodyRows } = this.buildTableArrays(rows, fields);
       const md = this.buildMarkdown(headers, bodyRows, filename);
       const blob = new Blob([md], { type: 'text/markdown;charset=utf-8;' });
       return await this.saveFileWithDialog(`${filename}.md`, blob);
+    },
+
+    // ==================== 纯文本 (TXT) ====================
+    // Tab 分隔，去掉单元格内的 Tab/换行以免破坏列对齐
+    buildTxt(headers, bodyRows) {
+      const line = cells => cells.map(c => String(c == null ? '' : c).replace(/\t/g, ' ').replace(/\r?\n/g, ' ')).join('\t');
+      return [line(headers), ...bodyRows.map(line)].join('\r\n') + '\r\n';
+    },
+    async exportTXT(rows, fields, filename) {
+      const { headers, bodyRows } = this.buildTableArrays(rows, fields);
+      const txt = this.buildTxt(headers, bodyRows);
+      const blob = new Blob([txt], { type: 'text/plain;charset=utf-8;' });
+      return await this.saveFileWithDialog(`${filename}.txt`, blob);
+    },
+
+    // ==================== JSON ====================
+    // 以表头为键的对象数组，便于程序化处理/再导入
+    buildJson(headers, bodyRows) {
+      const data = bodyRows.map(arr => {
+        const obj = {};
+        headers.forEach((h, i) => { obj[h] = arr[i] === undefined || arr[i] === null ? '' : arr[i]; });
+        return obj;
+      });
+      return JSON.stringify(data, null, 2) + '\n';
+    },
+    async exportJSON(rows, fields, filename) {
+      const { headers, bodyRows } = this.buildTableArrays(rows, fields);
+      const json = this.buildJson(headers, bodyRows);
+      const blob = new Blob([json], { type: 'application/json;charset=utf-8;' });
+      return await this.saveFileWithDialog(`${filename}.json`, blob);
     },
 
     // ==================== 图片 ====================

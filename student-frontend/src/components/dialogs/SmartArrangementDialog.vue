@@ -2,171 +2,90 @@
   <Teleport to="body">
   <Transition name="dialog">
   <div v-if="visible" class="fixed inset-0 bg-black/30 z-50 flex items-center justify-center">
-    <div class="bg-surface rounded-lg p-5 shadow-card dialog-card flex flex-col overflow-hidden" style="width: 960px; height: 700px; max-width: 90vw;">
+    <div class="bg-surface rounded-lg p-5 shadow-card dialog-card flex flex-col overflow-hidden" style="width: 960px; height: 800px; max-width: 90vw; max-height: 90vh;">
       <h3 class="text-lg font-bold mb-4">🧠 智能排表</h3>
 
       <!-- 新同学确认：座位表里有班级学生信息表不存在的名字时提示 -->
       <NewComerConfirm :visible="showNewPrompt" :names="strangers" action="排表" @participate="onParticipate" @not="onNot" />
 
-      <!-- 拒绝提示 -->
-      <Transition name="dialog">
-      <div v-if="rejectText" class="mb-3 px-3 py-2 rounded bg-warning/15 border border-warning/40 text-warning text-sm">
-        {{ rejectText }}
-      </div>
-      </Transition>
+      <!-- 草稿确认：本次结果来自草稿（恢复或刚保存）时，应用前确认一次，正式应用会清空草稿 -->
+      <ConfirmDialog
+        :visible="draftConfirmVisible"
+        title="确认应用草稿"
+        message="检测到你使用了草稿，是否确认应用？<br>点击「确认」正式应用到座位表后，草稿将会被清空。"
+        confirm-text="确认"
+        cancel-text="取消"
+        :show-cancel="true"
+        @confirm="applyConfirm"
+        @cancel="draftConfirmVisible = false"
+      />
 
-      <!-- 排表条件（树状：缩进项为父项的附加条件） -->
+      <!-- 排表条件：标题与「开始排表」按钮独立在毛玻璃外；条件行 + 底部拖放位同处一块毛玻璃 -->
       <div class="mb-3">
         <div class="flex items-center justify-between mb-2">
-        <label class="text-sm font-medium block">排表条件</label>
-        <button @click="startArrange" class="bg-primary text-text-inverse px-3 py-1.5 rounded border-none cursor-pointer text-sm">{{ arranged ? '🔀 换一换' : '▶ 开始排表' }}</button>
-      </div>
+          <label class="text-sm font-medium block">排表条件</label>
+          <button @click="startArrange" class="bg-primary text-text-inverse px-3 py-1.5 rounded border-none cursor-pointer text-sm">{{ arranged ? '🔀 换一换' : '▶ 开始排表' }}</button>
+        </div>
         <div
-          class="border border-dashed border-border rounded p-2 bg-surface-hover min-h-[44px]"
+          class="border border-dashed border-border rounded-lg p-2 bg-surface/55 backdrop-blur-md"
           @dragover.prevent
-          @drop="onDropTop"
+          @drop="onDropZone"
         >
-          <div v-if="tree.length === 0" class="text-sm text-text-muted py-1">拖入下方选项作为排表方式</div>
-          <div v-for="(node, ni) in tree" :key="node.key" class="mb-1">
-            <!-- 父级：排表方式（配置内联在同一行） -->
+          <div class="max-h-[260px] overflow-auto">
+            <div v-if="conditions.length === 0" class="text-sm text-text-muted py-1">把下方的条件选项拖到这里添加</div>
             <div
-              class="flex flex-wrap items-center gap-2 px-3 py-1.5 rounded bg-primary text-text-inverse text-sm cursor-default"
+              v-for="(node, ni) in conditions"
+              :key="node.uid"
+              class="mb-1 last:mb-0"
               @dragover.prevent
-              @drop.stop="onDropChild($event, node)"
+              @drop.stop="onDropOnRow($event, ni)"
             >
-              <button
-                @click="toggleCollapse(node)"
-                :disabled="node.children.length === 0"
-                class="w-4 text-center leading-none text-xs cursor-pointer disabled:cursor-default disabled:opacity-30 text-text-inverse/80 hover:text-text-inverse"
-                title="折叠/展开"
-              >{{ isCollapsed(node) ? '▸' : '▾' }}</button>
-              <span class="cursor-grab select-none text-text-inverse/70" draggable="true" @dragstart="onNodeDragStart($event, node)">⠿</span>
-              <span>{{ node.label }}</span>
-              <!-- 普通下拉配置（锁定同桌/性别选择等作一级条件时也支持） -->
-              <span v-if="node.key === 'random'" class="text-text-inverse/80">随机单位</span>
-              <AppSelect
-                v-if="optionDef(node.key)"
-                v-model="node.option"
-                :options="optionDef(node.key).options"
-                class="w-32"
-              />
-              <!-- 特殊关系条件配置 -->
-              <template v-if="node.key === 'relation'">
-                <AppSelect v-model="node.pair.a" :options="studentOptions" placeholder="选择学生" class="w-24" />
-                <span class="text-text-inverse/80">和</span>
-                <AppSelect v-model="node.pair.b" :options="studentOptions" placeholder="选择学生" class="w-24" />
-                <AppSelect v-model="node.relationType" :options="relationOptionDef().relationOptions" class="w-28" />
-              </template>
-              <!-- 组内排表条件配置 -->
-              <template v-if="node.key === 'group'">
-                <AppSelect v-model="node.groupBy" :options="groupOptions()" class="w-24" />
-                <AppSelect v-model="node.swapType" :options="swapTypeOptions(node.groupBy)" class="w-28" />
-              </template>
-              <span v-if="satisfactionOf(node) !== null" class="ml-auto text-xs px-1.5 py-0.5 rounded bg-white/20 text-text-inverse border border-white/30">满足 {{ satisfactionOf(node) }}%</span>
-              <button @click="removeNode(ni)" class="cursor-pointer text-text-inverse/80 hover:text-text-inverse font-bold leading-none text-base">×</button>
-            </div>
-            <!-- 附加条件区：虚线边框，作为缩进子级的拖放目标 -->
-            <div
-              v-show="!isCollapsed(node)"
-              class="ml-10 mt-1 border border-dashed border-info/50 rounded p-1 min-h-[34px]"
-              @dragover.prevent
-              @drop.stop="onDropChild($event, node)"
-            >
-              <div v-for="(child, ci) in node.children" :key="child.key" class="mb-1 last:mb-0">
-                <div class="flex flex-wrap items-center gap-2 px-3 py-1.5 rounded bg-surface border border-border text-text text-sm">
-                  <button
-                    @click="toggleCollapse(child)"
-                    :disabled="!(child.key === 'group' && child.children.length > 0)"
-                    class="w-4 text-center leading-none text-xs cursor-pointer disabled:cursor-default disabled:opacity-30 text-text-muted hover:text-text"
-                    title="折叠/展开"
-                  >{{ isCollapsed(child) ? '▸' : '▾' }}</button>
-                  <span class="cursor-grab select-none" draggable="true" @dragstart="onNodeDragStart($event, child)">⠿</span>
-                  <span>{{ child.label }}</span>
-                  <span v-if="child.key === 'random'" class="text-text-muted">随机单位</span>
+              <div class="flex flex-wrap items-center gap-2 px-3 py-1.5 rounded bg-primary text-text-inverse text-sm">
+                <span class="cursor-grab select-none text-text-inverse/70" draggable="true" @dragstart="onRowDragStart($event, ni)">⠿</span>
+                <!-- 条件名字：语义句前先亮明是哪个条件 -->
+                <span class="font-semibold whitespace-nowrap">{{ node.label }}</span>
+                <!-- 语义句：文案段 + 下拉位，由条件注册表驱动 -->
+                <template v-for="s in segmentsOf(node)" :key="s.idx">
+                  <span v-if="s.t === 'text'" class="text-text-inverse/90">{{ s.v }}</span>
                   <AppSelect
-                    v-if="optionDef(child.key)"
-                    v-model="child.option"
-                    :options="optionDef(child.key).options"
-                    class="w-32"
+                    v-else
+                    :model-value="getField(node, s.path)"
+                    :options="s.options"
+                    :placeholder="s.placeholder"
+                    :class="s.width"
+                    @update:model-value="v => setField(node, s.path, v)"
                   />
-                  <!-- 特殊关系条件配置（内联在同一行） -->
-                  <template v-if="child.key === 'relation'">
-                    <AppSelect v-model="child.pair.a" :options="studentOptions" placeholder="选择学生" class="w-24" />
-                    <span class="text-text-muted">和</span>
-                    <AppSelect v-model="child.pair.b" :options="studentOptions" placeholder="选择学生" class="w-24" />
-                    <AppSelect v-model="child.relationType" :options="relationOptionDef().relationOptions" class="w-28" />
-                  </template>
-                  <!-- 组内排表条件配置 -->
-                  <template v-if="child.key === 'group'">
-                    <AppSelect v-model="child.groupBy" :options="groupOptions()" class="w-24" />
-                    <AppSelect v-model="child.swapType" :options="swapTypeOptions(child.groupBy)" class="w-28" />
-                  </template>
-                  <span v-if="satisfactionOf(child) !== null" class="ml-auto text-xs px-1.5 py-0.5 rounded bg-info/15 text-info border border-info/30">满足 {{ satisfactionOf(child) }}%</span>
-                  <button @click="removeChild(ni, ci)" class="cursor-pointer text-text-muted hover:text-text font-bold leading-none text-base">×</button>
-                </div>
-                <!-- 组内排表作为子级时：可再拖入其附加条件（孙子级） -->
-                <div
-                  v-if="child.key === 'group'"
-                  v-show="!isCollapsed(child)"
-                  class="ml-10 mt-1 border border-dashed border-info/40 rounded p-1 min-h-[30px]"
-                  @dragover.prevent
-                  @drop.stop="onDropGrandChild($event, ni, ci)"
-                >
-                  <div v-for="(gc, gi) in child.children" :key="'gc'+gc.key" class="mb-1 last:mb-0">
-                    <div class="flex flex-wrap items-center gap-2 px-3 py-1.5 rounded bg-surface-hover border border-border text-text text-xs">
-                      <span class="cursor-grab select-none" draggable="true" @dragstart="onNodeDragStart($event, gc)">⠿</span>
-                      <span>{{ gc.label }}</span>
-                      <AppSelect v-if="optionDef(gc.key)" v-model="gc.option" :options="optionDef(gc.key).options" class="w-32" />
-                      <template v-if="gc.key === 'relation'">
-                        <AppSelect v-model="gc.pair.a" :options="studentOptions" placeholder="选择学生" class="w-24" />
-                        <span class="text-text-muted">和</span>
-                        <AppSelect v-model="gc.pair.b" :options="studentOptions" placeholder="选择学生" class="w-24" />
-                        <AppSelect v-model="gc.relationType" :options="relationOptionDef().relationOptions" class="w-28" />
-                      </template>
-                      <span v-if="satisfactionOf(gc) !== null" class="ml-auto text-xs px-1.5 py-0.5 rounded bg-info/15 text-info border border-info/30">满足 {{ satisfactionOf(gc) }}%</span>
-                      <button @click="removeGrandChild(ni, ci, gi)" class="cursor-pointer text-text-muted hover:text-text font-bold leading-none text-base">×</button>
-                    </div>
-                  </div>
-                  <div v-if="!child.children || child.children.length === 0" class="text-xs text-text-muted px-2 py-1">拖入附加条件</div>
-                </div>
+                </template>
+                <span v-if="satisfactionOf(node) !== null" class="ml-auto text-xs px-1.5 py-0.5 rounded bg-white/20 text-text-inverse border border-white/30">满足 {{ satisfactionOf(node) }}%</span>
+                <button @click="removeCondition(ni)" class="cursor-pointer text-text-inverse/80 hover:text-text-inverse font-bold leading-none text-base">×</button>
               </div>
-              <div v-if="node.children.length === 0" class="text-xs text-text-muted px-2 py-1">拖入附加条件</div>
             </div>
           </div>
+          <!-- 新增条件行：常驻在条件列表下方（条件多时列表内部滚动，此行不随之滚走），
+               把上方条件选项拖到这里即追加到末尾。样式对齐值日表智能排表的投放虚线框 -->
+          <div
+            class="mt-1 text-xs text-text-muted px-2 py-1 rounded border border-dashed border-info/40 flex items-center select-none"
+            @dragover.prevent
+            @drop.stop="onDropZone"
+          >拖动到这里新增条件</div>
         </div>
       </div>
 
       <!-- 优先级提示（满足率已内联显示在每行条件右侧） -->
       <div class="mb-3 text-xs text-text-muted">条件按顺序依次生效，越靠后的条件越重要，可部分覆盖前面的结果。</div>
 
-      <!-- 可选条件（可拖拽，可复用）：排表方式可作一级；限制条件默认作子级附加，特殊关系也可作一级 -->
-      <div class="mb-4 flex gap-4">
-        <div class="flex-1">
-          <label class="text-sm font-medium mb-2 block">排表方式（拖到上方作为一级条件）</label>
-          <div class="flex flex-wrap gap-2">
-            <div
-              v-for="opt in methodOptions"
-              :key="opt.key"
-              draggable="true"
-              @dragstart="onOptionDragStart($event, opt)"
-              class="px-3 py-2 rounded border border-border bg-primary text-text-inverse cursor-grab select-none text-sm shadow-sm hover:border-info"
-            >
-              {{ opt.label }}
-            </div>
-          </div>
-        </div>
-        <div class="flex-1">
-          <label class="text-sm font-medium mb-2 block">限制条件（拖到某方式下方作附加条件，特殊关系也可拖到上方作一级条件）</label>
-          <div class="flex flex-wrap gap-2">
-            <div
-              v-for="opt in constraintOptions"
-              :key="opt.key"
-              draggable="true"
-              @dragstart="onOptionDragStart($event, opt)"
-              class="px-3 py-2 rounded border border-border bg-surface cursor-grab select-none text-sm shadow-sm hover:border-info"
-            >
-              {{ opt.label }}
-            </div>
+      <!-- 条件选项：6 个按钮，拖到上方即可添加（可重复添加，不限数量） -->
+      <div class="mb-4">
+        <label class="text-sm font-medium mb-2 block">条件选项（拖到上方添加，可重复添加）</label>
+        <div class="flex flex-wrap gap-2">
+          <div
+            v-for="opt in conditionButtons"
+            :key="opt.key"
+            draggable="true"
+            @dragstart="onOptionDragStart($event, opt.key)"
+            class="px-3 py-2 rounded border border-border bg-primary text-text-inverse cursor-grab select-none text-sm shadow-sm hover:border-info"
+          >
+            {{ opt.label }}
           </div>
         </div>
       </div>
@@ -184,7 +103,13 @@
         />
       </div>
 
-      <div class="flex justify-end gap-2">
+      <div class="flex items-center justify-end gap-2">
+        <!-- 保存草稿：把当前预览结果 + 条件存到后端，下次启动据此提示「已恢复上一次的草稿表」 -->
+        <button
+          @click="saveDraft"
+          :disabled="!arranged || savingDraft"
+          class="bg-surface-hover px-4 py-2 rounded text-text border border-border mr-auto disabled:opacity-40 disabled:cursor-not-allowed"
+        >{{ savingDraft ? '保存中…' : '保存草稿' }}</button>
         <button @click="cancel" class="bg-surface-hover px-4 py-2 rounded text-text border border-border">取消</button>
         <button @click="confirm" class="bg-info text-text-inverse px-4 py-2 rounded border-none">确定</button>
       </div>
@@ -197,7 +122,10 @@
 <script>
 import GridView from '../tables/GridView.vue';
 import NewComerConfirm from './NewComerConfirm.vue';
+import ConfirmDialog from '../base/ConfirmDialog.vue';
 import AppSelect from '../base/AppSelect.vue';
+import { useSeatDraft } from '../../composables/useSeatDraft.js'
+import { useNotification } from '../../composables/useNotification.js'
 import '../../styles/dialog-transition.css'
 
 // Fisher-Yates 洗牌
@@ -210,61 +138,92 @@ function shuffle(arr) {
   return a
 }
 
-// 排表条件选项：type 区分排表方式（method，可作一级）与限制条件（constraint，只能作子级附加）
-const OPTIONS = [
-  {
-    key: 'random',
-    label: '随机排表',
-    type: 'method',
-    // 随机单位：打乱的最小不可分割单位（默认"按最后分割组"）
-    options: [
-      { value: 'last', label: '按最后分割组' },
-      { value: 'student', label: '同学' },
-      { value: 'deskmate', label: '同桌' },
-      { value: 'six', label: '相邻六位' },
-      { value: 'four', label: '相邻四位' },
-      { value: 'whole', label: '一大组' },
-      { value: 'column', label: '一列' }
+// 条件注册表：每类条件在此登记 —— 执行函数名(apply) + 语义句段(segments) + 初始参数(defaults)。
+// 模板里的条件行 UI 与流水线的条件分发都由本表驱动：
+//   新增一类条件，只需在此加一条 + 一个 apply 方法，无需再改动模板或 if/else。
+// segments 每段：{ t:'text', v } 为纯文案段；{ t:'select', path, options, width, placeholder } 为下拉位。
+// options 取值：groups(分组单位) | students(可选学生) | relation(关系类型) | swapTypes(分组方式)
+//              | lockModes(同桌内部) | genders(性别) | innerOrder(组内排序)
+// 六句语义文案逐字保留（位置公平用「中」，其余用「内」）：
+//   特殊选项：在[范围]内 尽量满足[学生A]和[学生B]同学 [作为同桌/不作为同桌/坐在附近/不坐在附近]
+//   分组选项：在[范围]内 按照[单位]为一组 [Z字形/上下交换形/随机性分组]
+//   随机选项：在[范围]内 按照[单位]为操作单元 随机排布
+//   同桌关系：在[范围]内 同桌不变为一组 随机排布 并且 内部 同桌 [交换位置/不交换位置/不变]
+//   性别选项：在[范围]内 按照同桌为一组 [相同性别/不同性别] 坐在一起
+//   位置公平选项：在[范围]中 按照[单位]为一组 整体调整使得位置更加公平 并且 [可以/不可以] 调整组内排序 使得位置更加公平
+const CONDITION_REGISTRY = {
+  relation: {
+    label: '特殊选项',
+    apply: 'applyRelation',
+    defaults: () => ({ scope: 'whole', pair: { a: '', b: '' }, relationType: 'deskmate' }),
+    segments: [
+      { t: 'text', v: '在' }, { t: 'select', path: 'scope', options: 'groups', width: 'w-24' },
+      { t: 'text', v: '内 尽量满足' }, { t: 'select', path: 'pair.a', options: 'students', width: 'w-24', placeholder: '选择学生' },
+      { t: 'text', v: '和' }, { t: 'select', path: 'pair.b', options: 'students', width: 'w-24', placeholder: '选择学生' },
+      { t: 'text', v: '同学' }, { t: 'select', path: 'relationType', options: 'relation', width: 'w-28' }
     ]
   },
-  { key: 'group', label: '组内排表', type: 'method' },
-  {
-    key: 'lock-deskmate',
-    label: '锁定同桌',
-    type: 'constraint',
-    options: [
-      { value: 'swap', label: '调换同桌位置' },
-      { value: 'no-swap', label: '不调换同桌位置' },
-      { value: 'random-swap', label: '随机调换同桌位置' }
+  group: {
+    label: '分组选项',
+    apply: 'applyGroupAction',
+    defaults: () => ({ scope: 'whole', unit: 'six', swapType: 'random' }),
+    segments: [
+      { t: 'text', v: '在' }, { t: 'select', path: 'scope', options: 'groups', width: 'w-24' },
+      { t: 'text', v: '内 按照' }, { t: 'select', path: 'unit', options: 'groups', width: 'w-24' },
+      { t: 'text', v: '为一组' }, { t: 'select', path: 'swapType', options: 'swapTypes', width: 'w-32' }
     ]
   },
-  {
-    key: 'gender',
-    label: '性别选择',
-    type: 'constraint',
-    options: [
-      { value: 'mixed', label: '不同性别坐一起' },
-      { value: 'same', label: '相同性别坐一起' }
+  random: {
+    label: '随机选项',
+    apply: 'applyRandom',
+    defaults: () => ({ scope: 'whole', unit: 'six' }),
+    segments: [
+      { t: 'text', v: '在' }, { t: 'select', path: 'scope', options: 'groups', width: 'w-24' },
+      { t: 'text', v: '内 按照' }, { t: 'select', path: 'unit', options: 'groups', width: 'w-24' },
+      { t: 'text', v: '为操作单元 随机排布' }
     ]
   },
-  {
-    key: 'relation',
-    label: '特殊关系',
-    type: 'constraint',
-    // 特殊关系允许作为一级条件（全局作用域），其余限制条件仍只能作子级附加
-    canTop: true,
-    relationOptions: [
-      { value: 'deskmate', label: '作为同桌' },
-      { value: 'not-deskmate', label: '不作为同桌' },
-      { value: 'nearby', label: '坐在周围' },
-      { value: 'not-nearby', label: '不坐在周围' }
+  'lock-deskmate': {
+    label: '同桌关系',
+    apply: 'applyLockDeskmate',
+    defaults: () => ({ scope: 'whole', lockMode: 'no-swap' }),
+    segments: [
+      { t: 'text', v: '在' }, { t: 'select', path: 'scope', options: 'groups', width: 'w-24' },
+      { t: 'text', v: '内 同桌不变为一组 随机排布 并且 内部 同桌' },
+      { t: 'select', path: 'lockMode', options: 'lockModes', width: 'w-32' }
+    ]
+  },
+  gender: {
+    label: '性别选项',
+    apply: 'applyGender',
+    defaults: () => ({ scope: 'whole', genderMode: 'same' }),
+    segments: [
+      { t: 'text', v: '在' }, { t: 'select', path: 'scope', options: 'groups', width: 'w-24' },
+      { t: 'text', v: '内 按照同桌为一组' },
+      { t: 'select', path: 'genderMode', options: 'genders', width: 'w-28' },
+      { t: 'text', v: '坐在一起' }
+    ]
+  },
+  fair: {
+    label: '位置公平选项',
+    apply: 'applyFair',
+    defaults: () => ({ scope: 'whole', unit: 'six', innerOrder: 'no' }),
+    segments: [
+      { t: 'text', v: '在' }, { t: 'select', path: 'scope', options: 'groups', width: 'w-24' },
+      { t: 'text', v: '中 按照' }, { t: 'select', path: 'unit', options: 'groups', width: 'w-24' },
+      { t: 'text', v: '为一组 整体调整使得位置更加公平 并且' },
+      { t: 'select', path: 'innerOrder', options: 'innerOrder', width: 'w-32' },
+      { t: 'text', v: '调整组内排序 使得位置更加公平' }
     ]
   }
-]
+}
+
+// 底部按钮顺序（与六句语义条件一一对应）
+const CONDITION_ORDER = ['relation', 'group', 'random', 'lock-deskmate', 'gender', 'fair']
 
 export default {
   name: 'SmartArrangementDialog',
-  components: { GridView, NewComerConfirm, AppSelect },
+  components: { GridView, NewComerConfirm, ConfirmDialog, AppSelect },
   props: {
     visible: Boolean,
     rows: { type: Number, default: 6 },
@@ -273,36 +232,50 @@ export default {
     showAisle: { type: Boolean, default: true },
     students: { type: Array, default: () => [] },
     // 当前未改动的座位表（二维数组，元素为学生 id 或 null），用于初始/条件变更时预览
-    initialSeats: { type: Array, default: () => [] }
+    initialSeats: { type: Array, default: () => [] },
+    // 位置权重矩阵（rows×cols）与「座位指数账本」（学生 id → 截至今日之前累计的座位权重），供「位置公平」使用
+    weights: { type: Array, default: () => [] },
+    ledger: { type: Object, default: () => ({}) }
   },
   emits: ['cancel', 'confirm'],
   data() {
     return {
-      // 排表方式树：父级为方式，缩进 children 为其附加条件（可多级嵌套）
-      tree: [{ key: 'random', label: '随机排表', children: [], option: 'last' }],
+      // 排表条件：一层平铺，一行一条件（可拖拽排序、可重复添加、不限数量）
+      conditions: [{ uid: 0, key: 'random', label: '随机选项', scope: 'whole', unit: 'six' }],
+      nextUid: 1,
       previewSeats: [],
       previewVersion: 0,
-      rejectText: '',
       // 是否已排表：false 显示"开始排表"，true 显示"换一换"
       arranged: false,
-      // 每个条件的满足率统计：key -> { done, total }
+      // 每个条件的满足率统计：uid -> { done, total }
       satisfaction: {},
-      // 记录各区域最近一次分组（组内排表）产生的组块结构，供外层随机排表整块打乱
-      blockMap: {},
-      // 条件树的折叠状态（独立于条件树存储：折叠是纯 UI 操作，不应触发条件变更监听而重置排表状态）
-      collapsedMap: new Map(),
       // 新同学校验：座位表里有名字不在班级学生信息表中，参与排表前弹窗确认
       showNewPrompt: false,
-      excludeNew: false
+      excludeNew: false,
+      // 恢复的草稿座位（二维数组，学生 id / 新同学名字 / null）；为空表示没有草稿，
+      // 预览与后续排表都以它优先于 props.initialSeats 作为基准
+      draftSeats: null,
+      // 保存草稿中：按钮置灰防重复点击
+      savingDraft: false,
+      // 本次结果是否来自草稿（打开时恢复了草稿，或刚点过保存草稿）：为真时「确定」前先弹确认框
+      draftInUse: false,
+      // 草稿确认弹窗：标题「确认应用草稿」，取消则留在弹窗内继续调整
+      draftConfirmVisible: false,
+      // 恢复草稿的过程中暂缓条件变更监听，避免恢复动作本身把 arranged 重置掉
+      restoring: false
     }
   },
   computed: {
+    // 排表基准座位：有草稿用草稿，否则用父组件传入的当前座位表
+    baseSeats() {
+      return this.draftSeats || this.initialSeats
+    },
     // 座位表里有名字但班级学生信息表里不存在的名字集合
     // 座位表数据：班级学生存 id(数字)，未被识别的自由文本名字(新同学)以字符串形式存储
     strangerNames() {
       const known = new Set(this.students.map(s => String(s.姓名 || '').trim()).filter(Boolean))
       const out = new Set()
-      for (const row of this.initialSeats || [])
+      for (const row of this.baseSeats || [])
         for (const val of row || []) {
           let n = ''
           if (typeof val === 'string') n = val.trim()
@@ -315,8 +288,8 @@ export default {
       return [...this.strangerNames]
     },
     previewKey() {
-      const flat = this.tree.flatMap(n => [n.key, ...n.children.map(c => c.key)]).join('-') || 'empty'
-      return this.visible ? `arrange-${this.rows}-${this.cols}-${flat}-${this.previewVersion}` : 'closed'
+      const sig = this.conditions.map(c => c.key + ':' + c.uid).join('-') || 'empty'
+      return this.visible ? `arrange-${this.rows}-${this.cols}-${sig}-${this.previewVersion}` : 'closed'
     },
     previewColHeaders() {
       return this.generateColHeaders(this.cols, this.mode, this.showAisle)
@@ -324,14 +297,9 @@ export default {
     previewRows() {
       return this.buildPreviewRows(this.previewSeats)
     },
-    // 可选条件可复用：始终显示全部（拖到树中即生效，不因被选中而消失）
-    // 排表方式（可作一级条件）
-    methodOptions() {
-      return OPTIONS.filter(o => o.type === 'method')
-    },
-    // 限制条件（只能作子级附加条件）
-    constraintOptions() {
-      return OPTIONS.filter(o => o.type === 'constraint')
+    // 底部条件按钮（六类条件，拖到上方即添加，可重复添加）
+    conditionButtons() {
+      return CONDITION_ORDER.map(k => ({ key: k, label: CONDITION_REGISTRY[k].label }))
     },
     // 特殊关系可选学生（转为 { value: id, label: 姓名 }）
     studentOptions() {
@@ -339,20 +307,36 @@ export default {
     }
   },
   watch: {
-    visible(v) {
-      // 打开时：预览默认显示未改动的座位表，并重置为"开始排表"状态，不自动排表
-      if (v) {
-        this.arranged = false
-        this.previewSeats = this.buildInitialSeats()
-        this.previewVersion++
-        this.showNewPrompt = false
-        this.excludeNew = false
+    async visible(v) {
+      if (!v) return
+      this.showNewPrompt = false
+      this.excludeNew = false
+      this.arranged = false
+      this.draftConfirmVisible = false
+      // 有草稿则恢复上次草稿（座位结果 + 排表条件）；没有则显示未改动的当前座位表，不自动排表
+      const { draft, fetchDraft } = useSeatDraft()
+      if (!draft.loaded) await fetchDraft()
+      if (draft.exists) {
+        // restoring 期间暂缓 conditions 监听，避免恢复条件本身把 arranged 重置为未排表
+        this.restoring = true
+        this.draftSeats = draft.seats
+        this.draftInUse = true
+        this.restoreConditions(draft.conditions)
+        await this.$nextTick()
+        this.restoring = false
+        this.arranged = true
+      } else {
+        this.draftSeats = null
+        this.draftInUse = false
       }
+      this.previewSeats = this.buildInitialSeats()
+      this.previewVersion++
     },
-    // 任一条件（含下拉选项）变更：重置为"开始排表"
-    tree: {
+    // 任一条件（含下拉选项、顺序）变更：重置为"开始排表"
+    conditions: {
       deep: true,
       handler() {
+        if (this.restoring) return
         this.arranged = false
       }
     }
@@ -380,26 +364,29 @@ export default {
       if (mode === 'single') return displayIdx % 2 === 1
       else return displayIdx >= 2 && (displayIdx - 2) % 3 === 0 && displayIdx < totalDisplay
     },
-    // 读取组内排表的配置 { groupBy, swapType }（一级或子级均可）
-    groupConfig() {
-      for (const n of this.tree) {
-        if (n.key === 'group') return { groupBy: n.groupBy, swapType: n.swapType }
-        const c = n.children.find(x => x.key === 'group')
-        if (c) return { groupBy: c.groupBy, swapType: c.swapType }
-      }
-      return null
-    },
 
-    // ==================== 统一条件流水线（核心重写） ====================
-    // 依据当前条件树构建一张新的座位网格。
-    // 处理顺序 = 树的先序（父先子后）。每个条件作用于一个"区域"（全局或某个组块），
-    // 后处理的条件可部分覆盖先处理的结果（越靠后越重要），并各自统计满足率。
+    // ==================== 统一条件流水线（一层平铺，线性执行） ====================
+    // 依据当前条件列表构建一张新的座位网格。
+    // 每条条件都自带「作用域 scope」：先把区域按 scope 切成若干作用块，条件在每个块内生效；
+    // 列表按顺序依次执行，越靠后的条件越晚执行、可部分覆盖前面的结果（越靠后越重要）。
     buildSeats() {
       this.satisfaction = {}
-      this.blockMap = {}
       const grid = this.initGrid()
-      this.processRegion(grid, this.allCells(), this.tree)
+      const all = this.allCells()
+      for (const node of this.conditions) {
+        // 作用域切块后取各块的格子列表，作为「区域」交给条件（条件内部再按 unit 切块）
+        const regions = this.splitRegion(all, node.scope).map(b => b.pos)
+        this.applyCondition(grid, regions, node)
+      }
       return grid
+    },
+
+    // 应用单条条件（按条件类注册表查表分发）
+    applyCondition(grid, regions, node) {
+      if (!node) return
+      const reg = CONDITION_REGISTRY[node.key]
+      const fn = reg && reg.apply
+      if (fn) this[fn](grid, regions, node)
     },
 
     // 初始化网格：从原座位表填满学生，未出现的学生补到空位
@@ -415,7 +402,7 @@ export default {
       }
       for (let r = 0; r < this.rows; r++) {
         for (let c = 0; c < this.cols; c++) {
-          const val = this.initialSeats?.[r]?.[c]
+          const val = this.baseSeats?.[r]?.[c]
           let s = null
           if (typeof val === 'number') {
             s = this.students.find(x => x.id === val)
@@ -447,42 +434,38 @@ export default {
       return cells
     },
 
-    // 递归处理一个节点列表到指定区域（全局 or 组块）
-    processRegion(grid, region, nodes) {
-      for (const node of nodes) {
-        if (node && node.key === 'group') {
-          // 组内排表：先分好组、排好整块顺序，再在每个组块内部满足子条件（组外成员不跨组）
-          const whole = region.length === this.rows * this.cols
-          const blocks = whole ? this.buildGroupBlocks().blocks : [{ pos: region }]
-          if (whole) this.applyGroupSwap(grid)
-          // 记录本区域的组块结构：供外层随机排表把组块作为最小不可分割单位整块打乱（成员不跨组）
-          if (whole) this.blockMap[this.regionKey(region)] = blocks
-          for (const child of node.children || []) {
-            if (child.key === 'relation') {
-              // 特殊关系：整张网格统一评估一次（内部按组块限定作用域、跨组不移动），
-              // 避免逐块重复调用导致满足率分母虚增
-              this.processRegion(grid, region, [child])
-            } else {
-              for (const block of blocks) this.processRegion(grid, block.pos, [child])
-            }
-          }
-          const total = region.filter(p => grid[p.r][p.c]).length
-          this.trackSatisfaction('group', total, total)
-        } else {
-          // 先满足附加条件（如性别限制先配对成同桌），再由父排表方式处理（如随机打乱这些同桌）
-          this.processRegion(grid, region, node.children || [])
-          this.applyCondition(grid, region, node)
-        }
-      }
+    // 几何切块规则：column 一列（每列一块）| whole 一大组（整块）| six 相邻六位(3行×2列) | four 相邻四位(2行×2列)
+    //             | student 同学（一人一格一块）| deskmate 同桌（同行左右相邻两人一块）
+    shapeSpans(shape) {
+      if (shape === 'column') return { rSpan: this.rows, cSpan: 1 }
+      if (shape === 'whole') return { rSpan: this.rows, cSpan: this.cols }
+      if (shape === 'six') return { rSpan: 3, cSpan: 2 }
+      if (shape === 'student') return { rSpan: 1, cSpan: 1 }
+      return { rSpan: 2, cSpan: 2 }
     },
-
-    // 应用单个条件到区域
-    applyCondition(grid, region, node) {
-      if (!node) return
-      if (node.key === 'random') this.applyRandom(grid, region, node)
-      else if (node.key === 'gender') this.applyGender(grid, region, node)
-      else if (node.key === 'lock-deskmate') this.applyLockDeskmate(grid, region, node)
-      else if (node.key === 'relation') this.applyRelationCondition(grid, region, node)
+    // 把区域按几何方式切成若干子块（scope 与 unit 共用此规则）
+    splitRegion(region, shape) {
+      // 同桌：不按矩形切，改按「同行相邻两列」成对（与人数桌模式无关，单/双人桌都适用）
+      if (shape === 'deskmate') {
+        const map = new Map()
+        for (const p of region) {
+          const k = p.r + ',' + Math.floor(p.c / 2)
+          let b = map.get(k)
+          if (!b) { b = { br: p.r, bc: Math.floor(p.c / 2), pos: [] }; map.set(k, b) }
+          b.pos.push(p)
+        }
+        return [...map.values()]
+      }
+      const { rSpan, cSpan } = this.shapeSpans(shape)
+      const map = new Map()
+      for (const p of region) {
+        const br = Math.floor(p.r / rSpan), bc = Math.floor(p.c / cSpan)
+        const k = br + ',' + bc
+        let b = map.get(k)
+        if (!b) { b = { br, bc, pos: [] }; map.set(k, b) }
+        b.pos.push(p)
+      }
+      return [...map.values()]
     },
 
     // 区域内单元格的"同桌槽位"：桌据模式（double）下偶数列相邻两格为一桌，其余为单格
@@ -548,165 +531,191 @@ export default {
       return placedPairs
     },
 
-    // 随机排表：按「随机单位」把区域内容打乱，单位即最小不可分割部分。
-    //  - last（默认）按最后一次分割的最小单位：组块 > 同桌对/单座
-    //  - student 同学（1 人）/ deskmate 同桌（2 人）/ six 相邻六位 / four 相邻四位
-    //  - whole 一大组 / column 一列
-    applyRandom(grid, region, node) {
-      const students = region.map(p => grid[p.r][p.c]).filter(s => s)
-      const unit = (node && node.option) || 'last'
-      if (unit === 'last') {
-        const blocks = this.blockMap[this.regionKey(region)]
-        if (blocks && blocks.length) this.permuteBlocks(grid, blocks)
-        else this.shufflePairs(grid, region)
-      } else if (unit === 'student') {
-        // 每个学生为最小单位，打散（不拼同桌）
-        const units = students.map(s => ({ cells: [s], indivisible: false }))
-        this.fillSlots(grid, region, this.regionSlots(region), shuffle(units))
-      } else if (unit === 'deskmate') {
-        this.shufflePairs(grid, region)
-      } else {
-        // 几何块单位：仅对整个区域有意义；子区域（如组块内）退化为按同桌/单座打乱
-        const whole = region.length === this.rows * this.cols
-        if (whole) this.permuteBlocks(grid, this.buildBlocksBy(unit))
-        else this.shufflePairs(grid, region)
+    // 随机排表：在「作用域」内，按「操作单元」把内容整块打乱（单元即最小不可分割单位，成员不跨块）
+    applyRandom(grid, regions, node) {
+      const unit = node.unit || 'six'
+      let total = 0
+      for (const region of regions) {
+        const blocks = this.splitRegion(region, unit)
+        if (blocks.length >= 2) {
+          this.applyPerm(grid, blocks, this.permWithinSizes(blocks))
+        } else {
+          // 只有一块时退化为「逐个学生」打乱，保证"换一换"仍能换出不同布局
+          this.shuffleSingles(grid, region)
+        }
+        total += region.filter(p => grid[p.r][p.c]).length
       }
-      this.trackSatisfaction('random', students.length, students.length)
+      this.trackSatisfaction(node.uid, total, total)
     },
 
-    // 把组块内容整块打乱（块为最小不可分割单位，成员不跨块）
-    permuteBlocks(grid, blocks) {
-      const contents = blocks.map(b => b.pos.map(p => grid[p.r][p.c]))
-      const n = blocks.length
-      const perm = Array.from({ length: n }, (_, i) => i)
-      for (let i = n - 1; i > 0; i--) {
-        const j = Math.floor(Math.random() * (i + 1))
-        ;[perm[i], perm[j]] = [perm[j], perm[i]]
-      }
-      const newGrid = grid.map(row => row.map(() => null))
-      blocks.forEach((b, i) => {
-        const src = contents[perm[i]]
-        b.pos.forEach((p, k) => { newGrid[p.r][p.c] = src[k] ?? null })
-      })
-      for (let r = 0; r < grid.length; r++) {
-        for (let c = 0; c < grid[r].length; c++) grid[r][c] = newGrid[r][c]
-      }
-    },
-    // 以当前已成对的同桌/单座为单元打乱（对内左右随机）
-    shufflePairs(grid, region) {
+    // 以「个人」为最小单位打乱（每个学生独立，不保留同桌对）
+    shuffleSingles(grid, region) {
       const students = region.map(p => grid[p.r][p.c]).filter(s => s)
-      const regionIds = new Set(students.map(s => s.id))
-      const { pairs } = this.extractGridPairs(grid, region)
-      const units = []
-      const used = new Set()
-      for (const [a, b] of pairs) {
-        if (regionIds.has(a.id) && regionIds.has(b.id)) {
-          units.push({ cells: Math.random() < 0.5 ? [a, b] : [b, a], indivisible: true })
-          used.add(a.id); used.add(b.id)
-        }
-      }
-      for (const s of students) {
-        if (!used.has(s.id)) { units.push({ cells: [s], indivisible: false }); used.add(s.id) }
-      }
+      const units = students.map(s => ({ cells: [s], indivisible: false }))
       this.fillSlots(grid, region, this.regionSlots(region), shuffle(units))
     },
 
-    // 区域唯一标识（用于记录该区域的分组块结构）
-    regionKey(region) {
-      return region.map(p => p.r + ',' + p.c).sort().join('|')
+    // ==================== 组块置换工具 ====================
+    // 按置换把组块内容整块搬到目标位置（块内成员不拆分；只写回这些区块，区域外不受影响）
+    applyPerm(grid, blocks, perm) {
+      const contents = blocks.map(b => b.pos.map(p => grid[p.r][p.c]))
+      const writes = []
+      blocks.forEach((b, i) => {
+        const src = contents[perm[i]] || []
+        b.pos.forEach((p, k) => { writes.push([p, src[k] ?? null]) })
+      })
+      for (const [p, v] of writes) grid[p.r][p.c] = v
     },
-
-    // 从当前网格区域内提取已相邻的同桌对（与 regionSlots 同规则）与单座
-    extractGridPairs(grid, region) {
-      const pairs = []
-      const singles = []
-      const used = new Set()
-      for (const slot of this.regionSlots(region)) {
-        if (slot.length === 2) {
-          const a = grid[slot[0].r][slot[0].c]
-          const b = grid[slot[1].r][slot[1].c]
-          if (a && b) { pairs.push([a, b]); used.add(a.id); used.add(b.id) }
-          else if (a) { singles.push(a); used.add(a.id) }
-          else if (b) { singles.push(b); used.add(b.id) }
-        } else {
-          const s = grid[slot[0].r][slot[0].c]
-          if (s) { singles.push(s); used.add(s.id) }
-        }
+    // 同大小组块之间随机置换（避免大小不同的区块互相搬运导致学生丢失）
+    permWithinSizes(blocks) {
+      const sizes = blocks.map(b => b.pos.length)
+      const bySize = new Map()
+      blocks.forEach((b, i) => {
+        const k = sizes[i]
+        if (!bySize.has(k)) bySize.set(k, [])
+        bySize.get(k).push(i)
+      })
+      const perm = new Array(blocks.length)
+      for (const [, idxs] of bySize) {
+        const sh = shuffle(idxs)
+        idxs.forEach((orig, k) => { perm[orig] = sh[k] })
       }
-      return { pairs, singles }
+      return perm
     },
-
-    // 性别选择：按性别把区域内学生配成同桌（same=同性别，mixed=异性别），单座保持单座
-    applyGender(grid, region, node) {
-      const genderMode = node.option // 'same' | 'mixed'
-      const students = region.map(p => grid[p.r][p.c]).filter(s => s)
-      const boys = students.filter(s => s.性别 === '男')
-      const girls = students.filter(s => s.性别 === '女')
-      const others = students.filter(s => s.性别 !== '男' && s.性别 !== '女')
-      const pairTwo = arr => { const out = []; for (let i = 0; i < arr.length; i += 2) out.push(arr.slice(i, i + 2)); return out }
-      const units = []
-      if (genderMode === 'same') {
-        for (const g of [pairTwo(boys), pairTwo(girls), pairTwo(others)]) {
-          for (const p of g) {
-            units.push(p.length === 2 ? { cells: [p[0], p[1]], indivisible: true } : { cells: [p[0]], indivisible: false })
+    // 分组方式置换：随机 → 同大小随机；Z字形 / 上下交换形 → 在块阵列内按路径置换
+    buildGroupPerm(blocks, swapType) {
+      const n = blocks.length
+      if (swapType !== 'updown' && swapType !== 'z') return this.permWithinSizes(blocks)
+      const brs = blocks.map(b => b.br), bcs = blocks.map(b => b.bc)
+      const minBr = Math.min(...brs), minBc = Math.min(...bcs)
+      const rows = Math.max(...brs) - minBr + 1
+      const cols = Math.max(...bcs) - minBc + 1
+      const indexOf = new Array(rows * cols).fill(-1)
+      blocks.forEach((b, i) => { indexOf[(b.br - minBr) * cols + (b.bc - minBc)] = i })
+      const perm = new Array(n).fill(-1)
+      if (swapType === 'updown') {
+        blocks.forEach((b, i) => {
+          const lr = rows - 1 - (b.br - minBr)
+          const lc = b.bc - minBc
+          const j = indexOf[lr * cols + lc]
+          perm[i] = j >= 0 ? j : i
+        })
+      } else {
+        // Z字形路径：逐列蛇形（偶数列自上而下，奇数列自下而上），沿路径整体前移一位
+        const path = []
+        for (let lc = 0; lc < cols; lc++) {
+          for (let lb = 0; lb < rows; lb++) {
+            const lr = lc % 2 === 0 ? lb : rows - 1 - lb
+            const j = indexOf[lr * cols + lc]
+            if (j >= 0) path.push(j)
           }
         }
-      } else {
-        const max = Math.max(boys.length, girls.length)
-        for (let i = 0; i < max; i++) {
-          const b = boys[i], g = girls[i]
-          if (b && g) units.push({ cells: [b, g], indivisible: true })
-          else if (b) units.push({ cells: [b], indivisible: false })
-          else if (g) units.push({ cells: [g], indivisible: false })
-        }
-        for (const o of others) units.push({ cells: [o], indivisible: false })
+        for (let i = 0; i < path.length; i++) perm[path[i]] = path[(i - 1 + path.length) % path.length]
       }
-      this.fillSlots(grid, region, this.regionSlots(region), units)
-      // 满足率：同桌对符合性别规则 + 单座视为满足
-      let satisfied = 0
-      for (const u of units) {
-        if (u.indivisible) {
-          const [x, y] = u.cells
-          if (genderMode === 'same' && x.性别 === y.性别) satisfied += 2
-          else if (genderMode === 'mixed' && x.性别 !== y.性别) satisfied += 2
+      for (let i = 0; i < n; i++) if (perm[i] < 0) perm[i] = i
+      return perm
+    },
+    // 分组选项：在「作用域」内按「单位」切块，再按「分组方式」整块换位（成员不跨块、不丢学生）
+    applyGroupAction(grid, regions, node) {
+      const swapType = node.swapType || 'random'
+      const unit = node.unit || 'six'
+      let total = 0
+      for (const region of regions) {
+        const blocks = this.splitRegion(region, unit)
+        if (blocks.length >= 2) {
+          const sizes = blocks.map(b => b.pos.length)
+          const allSame = sizes.every(s => s === sizes[0])
+          // Z字形 / 上下交换形要求各块大小一致，否则退化为同大小随机
+          const perm = allSame ? this.buildGroupPerm(blocks, swapType) : this.permWithinSizes(blocks)
+          this.applyPerm(grid, blocks, perm)
+        }
+        total += region.filter(p => grid[p.r][p.c]).length
+      }
+      this.trackSatisfaction(node.uid, total, total)
+    },
+
+    // 性别选择：在「作用域」内，按性别把学生配成同桌（same=同性别，mixed=异性别），单座保持单座
+    applyGender(grid, regions, node) {
+      const genderMode = node.genderMode
+      let satisfied = 0, total = 0
+      for (const region of regions) {
+        const students = region.map(p => grid[p.r][p.c]).filter(s => s)
+        total += students.length
+        const boys = students.filter(s => s.性别 === '男')
+        const girls = students.filter(s => s.性别 === '女')
+        const others = students.filter(s => s.性别 !== '男' && s.性别 !== '女')
+        const pairTwo = arr => { const out = []; for (let i = 0; i < arr.length; i += 2) out.push(arr.slice(i, i + 2)); return out }
+        const units = []
+        if (genderMode === 'same') {
+          for (const g of [pairTwo(boys), pairTwo(girls), pairTwo(others)]) {
+            for (const p of g) {
+              units.push(p.length === 2 ? { cells: [p[0], p[1]], indivisible: true } : { cells: [p[0]], indivisible: false })
+            }
+          }
         } else {
-          satisfied += 1
+          const max = Math.max(boys.length, girls.length)
+          for (let i = 0; i < max; i++) {
+            const b = boys[i], g = girls[i]
+            if (b && g) units.push({ cells: [b, g], indivisible: true })
+            else if (b) units.push({ cells: [b], indivisible: false })
+            else if (g) units.push({ cells: [g], indivisible: false })
+          }
+          for (const o of others) units.push({ cells: [o], indivisible: false })
+        }
+        this.fillSlots(grid, region, this.regionSlots(region), units)
+        // 满足率：同桌对符合性别规则 + 单座视为满足
+        for (const u of units) {
+          if (u.indivisible) {
+            const [x, y] = u.cells
+            if (genderMode === 'same' && x.性别 === y.性别) satisfied += 2
+            else if (genderMode === 'mixed' && x.性别 !== y.性别) satisfied += 2
+          } else {
+            satisfied += 1
+          }
         }
       }
-      this.trackSatisfaction('gender', satisfied, students.length)
+      this.trackSatisfaction(node.uid, satisfied, total)
     },
 
-    // 锁定同桌：保留区域内原座位表已达成的同桌对（对内坐序按 lockMode 控制），单座保持单座
-    applyLockDeskmate(grid, region, node) {
-      const lockMode = node.option || 'no-swap'
-      const students = region.map(p => grid[p.r][p.c]).filter(s => s)
-      const regionIds = new Set(students.map(s => s.id))
+    // 同桌关系：在「作用域」内，保留原座位表达成的同桌对（内部坐序按 lockMode 控制），单座保持单座
+    applyLockDeskmate(grid, regions, node) {
+      const lockMode = node.lockMode || 'no-swap'
       const orig = this.extractOriginalPairs()
-      const units = []
-      const used = new Set()
-      let pairsInRegion = 0
-      for (const [a, b] of orig.pairs) {
-        if (regionIds.has(a.id) && regionIds.has(b.id)) {
-          pairsInRegion++
-          let cells = [a, b]
-          if (lockMode === 'swap') cells = [b, a]
-          else if (lockMode === 'random-swap' && Math.random() < 0.5) cells = [b, a]
-          units.push({ cells, indivisible: true })
-          used.add(a.id); used.add(b.id)
+      let placedTotal = 0, pairsTotal = 0
+      for (const region of regions) {
+        const students = region.map(p => grid[p.r][p.c]).filter(s => s)
+        const regionIds = new Set(students.map(s => s.id))
+        let localPairs = 0
+        const units = []
+        const used = new Set()
+        for (const [a, b] of orig.pairs) {
+          if (regionIds.has(a.id) && regionIds.has(b.id)) {
+            localPairs++
+            units.push({ cells: [a, b], indivisible: true })
+            used.add(a.id); used.add(b.id)
+          }
         }
+        for (const s of students) {
+          if (!used.has(s.id)) { units.push({ cells: [s], indivisible: false }); used.add(s.id) }
+        }
+        pairsTotal += localPairs
+        if (lockMode === 'none') {
+          // 不变：座位原样保留，仅统计满足情况
+          placedTotal += localPairs
+          continue
+        }
+        if (lockMode === 'swap') {
+          units.forEach(u => { if (u.indivisible) u.cells = [u.cells[1], u.cells[0]] })
+        }
+        placedTotal += this.fillSlots(grid, region, this.regionSlots(region), units)
       }
-      for (const s of students) {
-        if (!used.has(s.id)) { units.push({ cells: [s], indivisible: false }); used.add(s.id) }
-      }
-      const placedPairs = this.fillSlots(grid, region, this.regionSlots(region), units)
-      this.trackSatisfaction('lock-deskmate', placedPairs, pairsInRegion)
+      this.trackSatisfaction(node.uid, placedTotal, pairsTotal)
     },
 
-    // 特殊关系：作用域内修复。
-    //  - 无组内排表：以传入区域（全局）为作用域，A、B 须都在区域内；
-    //  - 存在组内排表：A、B 必须在同一组块内才可能"靠近"满足（作为同桌/坐在周围）。
-    //    跨组的关系不可能满足（统计 0%），且绝不跨组移动学生，避免破坏组结构。
-    applyRelationCondition(grid, region, node) {
+    // 特殊关系：在「作用域」内修复两人关系。
+    //  - 两人同处一个作用块 → 在该块内移动（靠拢型/分离型）；
+    //  - 两人分处不同作用块 → 靠拢型不可能满足（统计 0%），分离型按实际距离判定，且绝不跨块移动学生。
+    applyRelation(grid, regions, node) {
       const pair = node.pair || {}
       const a = pair.a, b = pair.b
       const type = node.relationType || 'deskmate'
@@ -715,28 +724,17 @@ export default {
       const pb = this.findPos(grid, b)
       if (!pa || !pb) return
 
-      let effRegion = region
-      const groupCfg = this.groupConfig()
-      if (groupCfg) {
-        const blocks = this.buildBlocksBy(groupCfg.groupBy).blocks
-        const blockOf = (r, c) => blocks.findIndex(b => b.pos.some(p => p.r === r && p.c === c))
-        const bi = blockOf(pa[0], pa[1])
-        const bj = blockOf(pb[0], pb[1])
-        const needSameBlock = type === 'deskmate' || type === 'nearby'
-        if (bi < 0 || bi !== bj) {
-          if (needSameBlock) {
-            // 跨组：作为同桌 / 坐在周围 不可能满足，不做跨组移动
-            this.trackSatisfaction('relation:' + a + '-' + b, 0, 1)
-            return
-          }
-          // 跨组分离型：不同组即已分离（不作为同桌天然满足；不坐在周围按实际距离判定）
-          const ok = type === 'not-deskmate' ? !this.isTwoAdjacent(pa, pb) : !this.isTwoNearby(pa, pb)
-          this.trackSatisfaction('relation:' + a + '-' + b, ok ? 1 : 0, 1)
-          return
-        }
-        // A、B 在同一组块内：只在该组块内移动，绝不越界到其他组
-        effRegion = blocks[bi].pos
+      const contains = (region, pos) => region.some(p => p.r === pos[0] && p.c === pos[1])
+      const regionA = regions.find(r => contains(r, pa))
+      const regionB = regions.find(r => contains(r, pb))
+      const needSame = type === 'deskmate' || type === 'nearby'
+      if (!regionA || !regionB || regionA !== regionB) {
+        const ok = type === 'not-deskmate' ? !this.isTwoAdjacent(pa, pb) : !this.isTwoNearby(pa, pb)
+        this.trackSatisfaction(node.uid, needSame ? 0 : (ok ? 1 : 0), 1)
+        return
       }
+
+      const effRegion = regionA
       const regionSet = new Set(effRegion.map(p => p.r + ',' + p.c))
       const inRegion = pos => regionSet.has(pos[0] + ',' + pos[1])
       let ok = false
@@ -753,10 +751,10 @@ export default {
         ok = !this.isTwoNearby(pa, pb)
         if (!ok) ok = this.trySeparateInRegion(grid, pa, pb, inRegion, type)
       }
-      this.trackSatisfaction('relation:' + a + '-' + b, ok ? 1 : 0, 1)
+      this.trackSatisfaction(node.uid, ok ? 1 : 0, 1)
     },
 
-    // 特殊关系：作为同桌 → 把 b 移到 a 的相邻空位（区域内，且不隔走廊）
+    // 特殊关系：作为同桌 → 把 b 移到 a 的相邻空位（作用域内，且不隔走廊）
     tryTogetherInRegion(grid, pa, pb, inRegion) {
       const movedStudent = grid[pb[0]][pb[1]]
       if (!movedStudent) return false
@@ -773,7 +771,7 @@ export default {
       }
       return false
     },
-    // 特殊关系：坐在周围 → 把 b 移到 a 的相邻一格（含对角，区域内）
+    // 特殊关系：坐在附近 → 把 b 移到 a 的相邻一格（含对角，作用域内）
     tryNearbyInRegion(grid, pa, pb, inRegion) {
       const movedStudent = grid[pb[0]][pb[1]]
       if (!movedStudent) return false
@@ -795,7 +793,7 @@ export default {
       }
       return false
     },
-    // 特殊关系：不作为同桌 / 不坐在周围 → 把其中一人移到远处（区域内空位优先，否则与远处学生最小交换）
+    // 特殊关系：不作为同桌 / 不坐在附近 → 把其中一人移到远处（作用域内空位优先，否则与远处学生最小交换）
     trySeparateInRegion(grid, pa, pb, inRegion, type) {
       const moved = Math.random() < 0.5 ? pa : pb
       const other = moved === pa ? pb : pa
@@ -833,22 +831,116 @@ export default {
       return false
     },
 
+    // ==================== 位置公平（公平排表算法） ====================
+    // 与「公平权重算法」解耦：权重矩阵 + 座位指数账本由外部传入，这里只负责排表。
+    // 目标：最小化 Σ(账本_学生 × 权重_新位置)。该式与「最小化各人公平指数(账本+权重)的方差」等价，
+    // 即让累计坐过好位置的同学，接下来坐相对靠后/边缘的位置，使整体更公平。
+    // 步骤：① 按「按照 X 为一组」切块，整体调整组块顺序；
+    //       ② 若允许，则再「组不动、只换人」调整组内排序。
+    applyFair(grid, regions, node) {
+      const weights = this.weights || []
+      const ledger = this.ledger || {}
+      const unit = node.unit || 'six'
+      const allowInner = node.innerOrder === 'yes'
+      const wOf = (r, c) => (typeof weights[r]?.[c] === 'number' ? weights[r][c] : 0)
+      const lOf = s => (s && s.id != null && typeof ledger[s.id] === 'number') ? ledger[s.id] : 0
+
+      let doneTotal = 0, allTotal = 0
+      for (const region of regions) {
+        const students = region.map(p => grid[p.r][p.c]).filter(Boolean)
+        allTotal += students.length
+        // 作用域内的组块
+        const blocks = this.splitRegion(region, unit)
+        const active = blocks.map(b => ({ pos: b.pos })).filter(b => b.pos.length > 0)
+        if (active.length < 2 || students.length < 2) { doneTotal += students.length; continue }
+
+        // 每组块：当前学生（按位置原序）与该块各位置的权重
+        const groups = active.map(b => ({
+          studs: b.pos.map(p => grid[p.r][p.c]).filter(Boolean),
+          posW: b.pos.map(p => wOf(p.r, p.c))
+        }))
+
+        // 把「学生组 i」放到「位置块 j」的代价（可调整组内排序时按 账本降序×权重升序 的最优配对计）
+        const costOf = (i, j) => {
+          let ls = groups[i].studs.map(lOf)
+          let ws = groups[j].posW
+          if (allowInner) {
+            ls = [...ls].sort((a, b) => b - a)
+            ws = [...ws].sort((a, b) => a - b)
+          }
+          let sum = 0
+          const m = Math.min(ls.length, ws.length)
+          for (let k = 0; k < m; k++) sum += ls[k] * ws[k]
+          return sum
+        }
+
+        // 求组→块的最优一一对应：组数少时暴力枚举全排列，多时用贪心
+        const n = groups.length
+        let best = null
+        if (n <= 7) {
+          const arr = Array.from({ length: n }, (_, i) => i)
+          let bestCost = Infinity
+          const permute = (a, k) => {
+            if (k === a.length) {
+              let c = 0
+              for (let i = 0; i < n; i++) c += costOf(i, a[i])
+              if (c < bestCost - 1e-9) { bestCost = c; best = [...a] }
+              return
+            }
+            for (let i = k; i < n; i++) {
+              ;[a[k], a[i]] = [a[i], a[k]]
+              permute(a, k + 1)
+              ;[a[k], a[i]] = [a[i], a[k]]
+            }
+          }
+          permute(arr, 0)
+        } else {
+          const sumLedger = i => groups[i].studs.reduce((t, s) => t + lOf(s), 0)
+          const order = Array.from({ length: n }, (_, i) => i).sort((a, b) => sumLedger(b) - sumLedger(a))
+          best = new Array(n).fill(-1)
+          const used = new Set()
+          for (const i of order) {
+            let pick = -1, pc = Infinity
+            for (let j = 0; j < n; j++) {
+              if (used.has(j)) continue
+              const c = costOf(i, j)
+              if (c < pc - 1e-9) { pc = c; pick = j }
+            }
+            best[i] = pick
+            used.add(pick)
+          }
+        }
+
+        // 落盘：组块整体移位；允许时组内再按 账本降序→低权重位置 落座
+        const writes = []
+        for (let i = 0; i < n; i++) {
+          const target = active[best[i]].pos
+          const studs = [...groups[i].studs]
+          if (allowInner) {
+            studs.sort((a, b) => lOf(b) - lOf(a))
+            const posSorted = [...target].sort((a, b) => wOf(a.r, a.c) - wOf(b.r, b.c))
+            posSorted.forEach((p, k) => writes.push([p, studs[k] || null]))
+          } else {
+            target.forEach((p, k) => writes.push([p, studs[k] || null]))
+          }
+        }
+        for (const [p, v] of writes) grid[p.r][p.c] = v
+        doneTotal += students.length
+      }
+      this.trackSatisfaction(node.uid, doneTotal, allTotal)
+    },
+
     // 记录满足率
     trackSatisfaction(key, done, total) {
       if (!this.satisfaction[key]) this.satisfaction[key] = { done: 0, total: 0 }
       this.satisfaction[key].done += done
       this.satisfaction[key].total += total
     },
-    satisfactionKey(node) {
-      if (node.key === 'relation') return 'relation:' + node.pair.a + '-' + node.pair.b
-      return node.key
-    },
     // 某条件的满足率（未排表或无统计时返回 null）：内联显示在每行条件右侧
     satisfactionOf(node) {
-      const key = this.satisfactionKey(node)
-      if (!key || !this.satisfaction[key]) return null
-      const { done, total } = this.satisfaction[key]
-      return total ? Math.round((done / total) * 100) : 0
+      const st = this.satisfaction[node.uid]
+      if (!st) return null
+      return st.total ? Math.round((st.done / st.total) * 100) : 0
     },
 
     // 生成排表结果：保证每次"开始排表/换一换"布局与当前预览不同
@@ -878,110 +970,6 @@ export default {
       return true
     },
 
-    // ==================== 组内排表整块工具 ====================
-    // 按分组方式把座位网格划分成组块，返回 { blockRows, blockCols, blocks: [{ br, bc, pos: [{r,c}] }] }
-    buildGroupBlocks() {
-      const cfg = this.groupConfig()
-      const groupBy = cfg?.groupBy || 'six'
-      const { blockRows, blockCols, blocks } = this.buildBlocksBy(groupBy)
-      return { blockRows, blockCols, blocks }
-    },
-    // 按几何方式（six/four/whole/column）把整张网格切成块（随机排表的"随机单位"复用此几何规则）
-    // 相邻六位 = 2列×3行（国内常见 6 人组排布，与双人桌 2 列一桌的边界对齐，保证同桌不跨组）
-    buildBlocksBy(groupBy) {
-      let rSpan, cSpan
-      if (groupBy === 'column') { rSpan = this.rows; cSpan = 1 }
-      else if (groupBy === 'whole') { rSpan = this.rows; cSpan = this.cols }
-      else if (groupBy === 'six') { rSpan = 3; cSpan = 2 }
-      else { rSpan = 2; cSpan = 2 } // 'four'：2列×2行
-      const blockRows = Math.ceil(this.rows / rSpan)
-      const blockCols = Math.ceil(this.cols / cSpan)
-      const blocks = []
-      for (let br = 0; br < blockRows; br++) {
-        for (let bc = 0; bc < blockCols; bc++) {
-          const pos = []
-          const rStart = br * rSpan
-          const rEnd = Math.min(rStart + rSpan - 1, this.rows - 1)
-          const cStart = bc * cSpan
-          const cEnd = Math.min(cStart + cSpan - 1, this.cols - 1)
-          for (let r = rStart; r <= rEnd; r++) {
-            for (let c = cStart; c <= cEnd; c++) pos.push({ r, c })
-          }
-          blocks.push({ br, bc, pos })
-        }
-      }
-      return { blockRows, blockCols, blocks }
-    },
-    // 取每个组块当前位置上的学生内容（按自然顺序排列成数组）
-    extractGroupContents(grid, blocks) {
-      return blocks.map(b => b.pos.map(p => grid[p.r][p.c]))
-    },
-    // 生成组块内容的置换顺序（新块 i 放置旧块 perm[i] 的内容）
-    buildGroupPerm(blocks, blockRows, blockCols) {
-      const cfg = this.groupConfig()
-      const swapType = cfg?.swapType || 'random'
-      const n = blocks.length
-      const idx = b => b.br * blockCols + b.bc
-      if (swapType === 'random') {
-        const perm = blocks.map((_, i) => i)
-        for (let i = perm.length - 1; i > 0; i--) {
-          const j = Math.floor(Math.random() * (i + 1))
-          ;[perm[i], perm[j]] = [perm[j], perm[i]]
-        }
-        return perm
-      }
-      if (swapType === 'updown') {
-        const perm = new Array(n)
-        blocks.forEach(b => { perm[idx(b)] = idx({ br: blockRows - 1 - b.br, bc: b.bc }) })
-        return perm
-      }
-      const path = []
-      for (let bc = 0; bc < blockCols; bc++) {
-        for (let bb = 0; bb < blockRows; bb++) {
-          const br = bc % 2 === 0 ? bb : blockRows - 1 - bb
-          path.push(idx({ br, bc }))
-        }
-      }
-      const perm = new Array(n)
-      for (let i = 0; i < path.length; i++) {
-        perm[path[i]] = path[(i - 1 + path.length) % path.length]
-      }
-      return perm
-    },
-    // 应用组内排表：整块移动（成员不跨组、不丢学生）
-    applyGroupSwap(grid) {
-      const { blockRows, blockCols, blocks } = this.buildGroupBlocks()
-      const contents = this.extractGroupContents(grid, blocks)
-      const sizes = blocks.map(b => b.pos.length)
-      const n = blocks.length
-      const perm = new Array(n)
-      const allSame = sizes.every(s => s === sizes[0])
-      if (allSame) {
-        const p = this.buildGroupPerm(blocks, blockRows, blockCols)
-        p.forEach((v, i) => { perm[i] = v })
-      } else {
-        const bySize = {}
-        blocks.forEach((b, i) => { (bySize[sizes[i]] = bySize[sizes[i]] || []).push(i) })
-        for (const sz in bySize) {
-          const idxs = bySize[sz]
-          const p = idxs.map((_, i) => i)
-          for (let i = p.length - 1; i > 0; i--) {
-            const j = Math.floor(Math.random() * (i + 1))
-            ;[p[i], p[j]] = [p[j], p[i]]
-          }
-          idxs.forEach((orig, k) => { perm[orig] = idxs[p[k]] })
-        }
-      }
-      const newGrid = grid.map(row => row.map(() => null))
-      blocks.forEach((b, i) => {
-        const src = contents[perm[i]]
-        b.pos.forEach((p, k) => { newGrid[p.r][p.c] = src[k] ?? null })
-      })
-      for (let r = 0; r < grid.length; r++) {
-        for (let c = 0; c < grid[r].length; c++) grid[r][c] = newGrid[r][c]
-      }
-    },
-
     // ==================== 位置工具 ====================
     // 返回学生 id 在座位网格中的位置 [r, c]
     findPos(seats, id) {
@@ -1001,20 +989,152 @@ export default {
       }
       return true
     },
-    // 是否在周围（前后左右 + 斜对角，即切比雪夫距离 <= 1）
+    // 是否在附近（前后左右 + 斜对角，即切比雪夫距离 <= 1）
     isTwoNearby(pa, pb) {
       return Math.max(Math.abs(pa[0] - pb[0]), Math.abs(pa[1] - pb[1])) <= 1
     },
 
-    // ==================== 条件树拖拽交互 ====================
-    onOptionDragStart(e, opt) {
-      e.dataTransfer.setData('text/plain', opt.key)
+    // ==================== 条件行交互（拖拽添加 / 拖拽排序） ====================
+    onOptionDragStart(e, key) {
+      e.dataTransfer.setData('text/plain', key)
+      e.dataTransfer.setData('text/drag-kind', 'option')
       e.dataTransfer.effectAllowed = 'copy'
     },
-    onNodeDragStart(e, node) {
-      e.dataTransfer.setData('text/plain', node.key)
-      e.dataTransfer.effectAllowed = 'copy'
+    onRowDragStart(e, index) {
+      e.dataTransfer.setData('text/row', String(index))
+      e.dataTransfer.setData('text/drag-kind', 'row')
+      e.dataTransfer.effectAllowed = 'move'
     },
+    // 拖到空白区：追加到末尾
+    onDropZone(e) {
+      this.handleDrop(e, this.conditions.length)
+    },
+    // 拖到某行上：插入到该行之前
+    onDropOnRow(e, index) {
+      this.handleDrop(e, index)
+    },
+    handleDrop(e, index) {
+      const kind = e.dataTransfer.getData('text/drag-kind')
+      if (kind === 'row') {
+        const from = Number(e.dataTransfer.getData('text/row'))
+        this.moveCondition(from, index)
+      } else {
+        const key = e.dataTransfer.getData('text/plain')
+        if (key) this.addCondition(key, index)
+      }
+    },
+    // 添加条件（可重复添加，不限数量）
+    addCondition(key, index) {
+      const reg = CONDITION_REGISTRY[key]
+      if (!reg) return
+      const node = { uid: this.nextUid++, key, label: reg.label, ...(reg.defaults ? reg.defaults() : {}) }
+      const at = Math.max(0, Math.min(index, this.conditions.length))
+      this.conditions.splice(at, 0, node)
+      this.resetArranged()
+    },
+    // 拖拽排序：把 from 行移动到 to 行之前
+    moveCondition(from, to) {
+      if (from < 0 || from >= this.conditions.length || from === to) return
+      const node = this.conditions[from]
+      this.conditions.splice(from, 1)
+      const at = from < to ? to - 1 : to
+      this.conditions.splice(Math.max(0, Math.min(at, this.conditions.length)), 0, node)
+      this.resetArranged()
+    },
+    removeCondition(index) {
+      this.conditions.splice(index, 1)
+      this.resetArranged()
+    },
+    // 取某条件的语义句段（纯文案 + 下拉位），供通用渲染器产出 UI
+    segmentsOf(node) {
+      const reg = CONDITION_REGISTRY[node.key]
+      if (!reg || !reg.segments) return []
+      return reg.segments.map((s, idx) => s.t === 'text'
+        ? { ...s, idx }
+        : { ...s, idx, options: this.resolveOptions(s.options, node) })
+    },
+    // 把注册表里的选项标识解析成实际选项数组
+    resolveOptions(kind, node) {
+      switch (kind) {
+        case 'groups': return this.groupOptions()
+        case 'students': return this.studentOptions
+        case 'relation': return this.relationOptions()
+        case 'swapTypes': return this.swapTypeOptions(node.unit)
+        case 'lockModes': return this.lockModeOptions()
+        case 'genders': return this.genderOptions()
+        case 'innerOrder': return this.innerOrderOptions()
+        default: return []
+      }
+    },
+    // 读取/写入节点上的字段（支持 'pair.a' 这类嵌套路径）
+    getField(node, path) {
+      return path.split('.').reduce((o, k) => (o == null ? undefined : o[k]), node)
+    },
+    setField(node, path, value) {
+      const ks = path.split('.')
+      let o = node
+      for (let i = 0; i < ks.length - 1; i++) {
+        if (o[ks[i]] == null) o[ks[i]] = {}
+        o = o[ks[i]]
+      }
+      o[ks[ks.length - 1]] = value
+    },
+
+    // ==================== 选项列表（范围 / 单位 / 关系 / 方式等） ====================
+    // 范围与单位同源：原分组选项 + 同学 / 同桌
+    groupOptions() {
+      return [
+        { value: 'student', label: '同学' },
+        { value: 'deskmate', label: '同桌' },
+        { value: 'column', label: '一列' },
+        { value: 'whole', label: '一大组' },
+        { value: 'four', label: '相邻四位' },
+        { value: 'six', label: '相邻六位' }
+      ]
+    },
+    // 分组方式（仅相邻六位支持 Z字形 / 上下交换形）
+    swapTypeOptions(unit) {
+      if (unit === 'six') {
+        return [
+          { value: 'z', label: 'Z字形' },
+          { value: 'updown', label: '上下交换形' },
+          { value: 'random', label: '随机性分组' }
+        ]
+      }
+      return [{ value: 'random', label: '随机性分组' }]
+    },
+    // 特殊关系类型
+    relationOptions() {
+      return [
+        { value: 'deskmate', label: '作为同桌' },
+        { value: 'not-deskmate', label: '不作为同桌' },
+        { value: 'nearby', label: '坐在附近' },
+        { value: 'not-nearby', label: '不坐在附近' }
+      ]
+    },
+    // 同桌内部坐序
+    lockModeOptions() {
+      return [
+        { value: 'swap', label: '交换位置' },
+        { value: 'no-swap', label: '不交换位置' },
+        { value: 'none', label: '不变' }
+      ]
+    },
+    // 性别
+    genderOptions() {
+      return [
+        { value: 'same', label: '相同性别' },
+        { value: 'mixed', label: '不同性别' }
+      ]
+    },
+    // 位置公平：是否允许在「组不动」的前提下再调整组内排序
+    innerOrderOptions() {
+      return [
+        { value: 'no', label: '不可以' },
+        { value: 'yes', label: '可以' }
+      ]
+    },
+
     // 开始排表 / 换一换
     startArrange() {
       // 首次排表且座位表里有新同学时，先弹窗确认是否参与
@@ -1043,7 +1163,7 @@ export default {
     // 将当前座位表（id/字符串网格）映射为预览用的学生对象网格
     buildInitialSeats() {
       const grid = []
-      const src = this.initialSeats
+      const src = this.baseSeats
       let pseudoId = -1
       const pseudoCache = {}
       for (let r = 0; r < this.rows; r++) {
@@ -1069,7 +1189,7 @@ export default {
       const pairs = []
       const singles = []
       const used = new Set()
-      const src = this.initialSeats
+      const src = this.baseSeats
       for (let r = 0; r < this.rows; r++) {
         const row = src?.[r] || []
         for (let c = 0; c < this.cols; c += 2) {
@@ -1092,128 +1212,6 @@ export default {
       }
       const orphans = this.students.filter(s => !used.has(s.id))
       return { pairs, singles, orphans }
-    },
-    // 拖到空白区：作为新的顶级排表方式（特殊关系可作一级，其余限制条件仍拒绝）
-    onDropTop(e) {
-      const opt = this.findOption(e)
-      if (!opt) return
-      // 限制条件默认不能作为一级条件，拒绝拖拽（特殊关系除外）
-      if (opt.type === 'constraint' && !opt.canTop) {
-        this.rejectText = `"${opt.label}" 是限制条件，只能拖到某排表方式下方作为附加条件`
-        this.showReject()
-        return
-      }
-      if (!this.tree.some(n => n.key === opt.key)) {
-        this.tree.push({
-          key: opt.key, label: opt.label, children: [],
-          option: opt.options ? opt.options[0].value : undefined,
-          ...this.initExtra(opt)
-        })
-        this.resetArranged()
-      }
-    },
-    // 拒绝提示
-    showReject() {
-      clearTimeout(this._rejectTimer)
-      this._rejectTimer = setTimeout(() => { this.rejectText = '' }, 2500)
-    },
-    // 取某条件的可配置参数定义（无下拉则返回 null）
-    optionDef(key) {
-      const opt = OPTIONS.find(o => o.key === key)
-      return opt && opt.options ? opt : null
-    },
-    // 特殊关系条件的可选关系类型定义
-    relationOptionDef() {
-      return OPTIONS.find(o => o.key === 'relation')
-    },
-    // 拖入节点时补充特殊关系所需字段
-    initExtra(opt) {
-      if (opt.key === 'relation') {
-        return { pair: { a: '', b: '' }, relationType: 'deskmate' }
-      }
-      if (opt.key === 'group') {
-        return { groupBy: 'six', swapType: 'random' }
-      }
-      return {}
-    },
-    // 组内排表：分组方式选项
-    groupOptions() {
-      return [
-        { value: 'column', label: '一列' },
-        { value: 'whole', label: '一大组' },
-        { value: 'six', label: '相邻六位' },
-        { value: 'four', label: '相邻四位' }
-      ]
-    },
-    // 组内排表：交换方式选项（仅相邻六位支持 Z字形 / 上下交换型）
-    swapTypeOptions(groupBy) {
-      const base = [{ value: 'random', label: '随机型' }]
-      if (groupBy === 'six') {
-        return [
-          { value: 'z', label: 'Z字形' },
-          { value: 'updown', label: '上下交换型' },
-          ...base
-        ]
-      }
-      return base
-    },
-    // 拖到某个父级方式下：作为其附加条件（缩进）
-    onDropChild(e, node) {
-      const opt = this.findOption(e)
-      if (!opt) return
-      if (opt.key === node.key) return
-      if (!node.children.some(c => c.key === opt.key)) {
-        node.children.push({
-          key: opt.key,
-          label: opt.label,
-          children: [],
-          option: opt.options ? opt.options[0].value : undefined,
-          ...this.initExtra(opt)
-        })
-        this.resetArranged()
-      }
-    },
-    // 拖到某个"组内排表"子级下方：作为其附加条件（孙子级）
-    onDropGrandChild(e, ni, ci) {
-      const opt = this.findOption(e)
-      if (!opt) return
-      const child = this.tree[ni]?.children?.[ci]
-      if (!child) return
-      if (opt.key === child.key) return
-      if (!child.children) child.children = []
-      if (!child.children.some(c => c.key === opt.key)) {
-        child.children.push({
-          key: opt.key,
-          label: opt.label,
-          children: [],
-          option: opt.options ? opt.options[0].value : undefined,
-          ...this.initExtra(opt)
-        })
-        this.resetArranged()
-      }
-    },
-    findOption(e) {
-      const key = e.dataTransfer.getData('text/plain')
-      return OPTIONS.find(o => o.key === key)
-    },
-    removeNode(ni) {
-      this.tree.splice(ni, 1)
-      this.resetArranged()
-    },
-    removeChild(ni, ci) {
-      this.tree[ni]?.children.splice(ci, 1)
-      this.resetArranged()
-    },
-    removeGrandChild(ni, ci, gi) {
-      this.tree[ni]?.children?.[ci]?.children?.splice(gi, 1)
-      this.resetArranged()
-    },
-    // 折叠/展开条件节点（纯 UI 操作：状态独立存储，不触发条件变更监听）
-    toggleCollapse(node) {
-      this.collapsedMap.set(node, !this.collapsedMap.get(node))
-    },
-    isCollapsed(node) {
-      return !!this.collapsedMap.get(node)
     },
 
     // 构建 GridView 预览用的显示行
@@ -1239,16 +1237,91 @@ export default {
       return result
     },
 
-    cancel() { this.$emit('cancel') },
-    confirm() {
-      // 输出为座位表数据：二维数组，元素为班级学生 id、新同学名字(字符串)或 null
-      const seatsOut = this.previewSeats.map(row => row.map(s => {
+    // 预览学生对象网格 → 座位表数据：元素为班级学生 id、新同学名字(字符串)或 null
+    buildSeatsOut() {
+      return this.previewSeats.map(row => row.map(s => {
         if (!s) return null
         // 真实 id(>=0)的班级学生存 id；新同学(伪对象，负 id 或无 id 对象)存原名
         return (s.id != null && s.id >= 0) ? s.id : (s.姓名 || null)
       }))
-      this.$emit('confirm', { seats: seatsOut })
+    },
+
+    // 把草稿里的条件还原成界面条件：重新分配 uid、补默认字段、忽略已不存在的条件类型
+    restoreConditions(list) {
+      const arr = (list || []).filter(c => c && CONDITION_REGISTRY[c.key])
+      // 草稿里没有可用条件时保留当前条件列表，避免恢复后条件区变成空的
+      if (arr.length === 0) return
+      this.conditions = arr.map(c => {
+        const reg = CONDITION_REGISTRY[c.key]
+        // 深拷贝：避免多条条件共享 defaults 里的同一对象（如特殊关系的学生对）
+        const merged = JSON.parse(JSON.stringify({ ...reg.defaults(), ...c }))
+        merged.uid = this.nextUid++
+        merged.label = reg.label
+        return merged
+      })
+    },
+
+    // 保存草稿：存当前预览结果 + 本次排表条件（uid/label 属界面字段，不入库）
+    async saveDraft() {
+      if (!this.arranged || this.savingDraft) return
+      this.savingDraft = true
+      try {
+        const { saveDraft } = useSeatDraft()
+        await saveDraft({
+          seats: this.buildSeatsOut(),
+          conditions: this.conditions.map(c => {
+            const copy = { ...c }
+            delete copy.uid
+            delete copy.label
+            return copy
+          }),
+          rows: this.rows,
+          cols: this.cols,
+          mode: this.mode,
+          showAisle: this.showAisle
+        })
+        // 刚保存的这份就是当前预览结果：后续「确定」需先确认会清空草稿
+        this.draftInUse = true
+        useNotification().success('草稿已保存')
+      } catch (err) {
+        const msg = err?.response?.data?.error || '草稿保存失败'
+        useNotification().error(msg)
+      } finally {
+        this.savingDraft = false
+      }
+    },
+
+    cancel() { this.$emit('cancel') },
+
+    // 「确定」：本次结果来自草稿时先弹确认框（正式应用会清空草稿），确认后才真正应用
+    confirm() {
+      if (this.draftInUse) {
+        this.draftConfirmVisible = true
+        return
+      }
+      this.emitConfirm()
+    },
+
+    // 确认框点「确认」：清掉草稿再应用（草稿已被采用，避免下次启动重复提示已恢复草稿）
+    applyConfirm() {
+      this.draftConfirmVisible = false
+      const { clearDraft } = useSeatDraft()
+      clearDraft()
+      this.draftInUse = false
+      this.draftSeats = null
+      this.emitConfirm()
+    },
+
+    emitConfirm() {
+      this.$emit('confirm', { seats: this.buildSeatsOut() })
     }
   }
 }
 </script>
+
+<style scoped>
+/* 智能排表条件行内的下拉框：压低触发框高度，让条件行更紧凑 */
+:deep(.av-select__trigger) {
+  padding: 4px 8px;
+}
+</style>

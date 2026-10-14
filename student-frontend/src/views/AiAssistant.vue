@@ -1,4 +1,4 @@
-﻿<template>
+<template>
   <div class="h-full flex flex-col" :class="floating ? 'rounded-xl overflow-hidden' : ''">
     <!-- 顶部（页面模式显示标题） -->
     <div v-if="!floating" class="w-full bg-surface shadow-md rounded-xl mb-4 px-5 py-3 border border-border min-h-[4.5rem] flex items-center justify-between">

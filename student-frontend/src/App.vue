@@ -73,6 +73,15 @@
     @cancel="onShutdownCancel"
   />
 
+  <!-- 启动提示：存在智能排表草稿时弹一次，告知已恢复上次草稿（内容在打开智能排表时恢复） -->
+  <ConfirmDialog
+    :visible="seatDraftPromptVisible"
+    title="草稿已恢复"
+    message="已恢复上一次的草稿表"
+    confirm-text="知道了"
+    @confirm="seatDraftPromptVisible = false"
+  />
+
   <!-- AI 助手：悬浮呼出按钮与浮窗（登录页不显示） -->
   <template v-if="$route.path !== '/login'">
     <Teleport to="body">
@@ -124,8 +133,10 @@
 import Sidebar from './components/layout/Sidebar.vue'
 import NotificationToast from './components/base/NotificationToast.vue'
 import ShutdownMenuDialog from './components/base/ShutdownMenuDialog.vue'
+import ConfirmDialog from './components/base/ConfirmDialog.vue'
 import { useThemeStore } from './stores/theme'
 import { useNotification } from './composables/useNotification'
+import { useSeatDraft } from './composables/useSeatDraft'
 import { defineAsyncComponent, h } from 'vue'
 import { prefetchRoutes } from './router'
 import { Minus, Square, X } from '@lucide/vue'
@@ -143,7 +154,7 @@ const AiAssistant = defineAsyncComponent({
 })
 
 export default {
-  components: { Sidebar, NotificationToast, ShutdownMenuDialog, Minus, Square, X, AiAssistant },
+  components: { Sidebar, NotificationToast, ShutdownMenuDialog, ConfirmDialog, Minus, Square, X, AiAssistant },
   data() {
     return {
       themeStore: null,
@@ -165,6 +176,9 @@ export default {
       // 启动阶段的失败提示归首屏占位页负责，避免两层全屏遮罩叠在一起
       backendEverReady: false,
       reconnectRetrying: false,
+      // 智能排表草稿：启动查到草稿时弹一次提示；draftChecked 保证只查一次（避免后端就绪事件重复触发）
+      seatDraftPromptVisible: false,
+      seatDraftChecked: false,
     }
   },
   computed: {
@@ -218,8 +232,9 @@ export default {
     this.themeStore = useThemeStore()
     this.setupShutdownIpc()
     this.fetchPendingNotification()
-    // 兜住「就绪广播早于本组件创建」的竞态：查一次当前状态，确保之后运行期异常能接管提示
-    window.electron?.invoke('backend-status').then((ok) => { if (ok) this.backendEverReady = true }).catch(() => {})
+    // 兜住「就绪广播早于本组件创建」的竞态：查一次当前状态，确保之后运行期异常能接管提示。
+    // 后端确认就绪后顺带查一次智能排表草稿（此时接口才可用，避免启动瞬间静默失败）。
+    window.electron?.invoke('backend-status').then((ok) => { if (ok) { this.backendEverReady = true; this.checkSeatDraft() } }).catch(() => {})
   },
   beforeUnmount() {
     window.removeEventListener('resize', this.onWindowResize)
@@ -363,6 +378,16 @@ export default {
       } catch (_) {}
     },
 
+    // ---- 智能排表草稿：启动查到草稿就弹一次模态提示（内容待打开智能排表时恢复） ----
+    async checkSeatDraft() {
+      // 未登录（登录页）没有 token，接口会 401，直接跳过；查过就不再重复查（就绪事件可能多次到达）
+      if (this.seatDraftChecked || !localStorage.getItem('token')) return
+      this.seatDraftChecked = true
+      const { draft, fetchDraft } = useSeatDraft()
+      await fetchDraft()
+      if (draft.exists) this.seatDraftPromptVisible = true
+    },
+
     // ---- 关闭选择弹窗（复用现有弹窗动画，替代主进程原生菜单） ----
     setupShutdownIpc() {
       // 告知主进程：渲染层已就绪，可接管关闭菜单（弹窗生命周期内有 IPC 时此标记生效）
@@ -382,6 +407,7 @@ export default {
           this.backendEverReady = true
           this.backendDead = false
           this.reconnectRetrying = false
+          this.checkSeatDraft()
           return
         }
         if (data.type === 'backend-failed') {

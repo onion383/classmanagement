@@ -13,6 +13,7 @@ const ALLOWED_TABLES = ['students', 'fee_records', 'leave_records', 'score_recor
 const GRID_SOURCES = {
   seat_layout: 'seats',
   seat_template: 'seats',
+  seat_weight: 'weights',
   schedule: 'cells',
   master_schedule: 'cells',
   duty_layout: 'cells',

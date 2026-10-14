@@ -17,7 +17,7 @@
               <button @click="activeSettingsVisible = true" v-preload="loadSettingsDialog" class="bg-primary text-text-inverse px-4 py-2 rounded flex items-center gap-1.5"><IconGlyph name="settings" :size="14" tint="current" /> 设置</button>
               <button @click="refreshActive" class="bg-text-muted text-text-inverse px-4 py-2 rounded flex items-center gap-1.5 btn-refresh"><IconGlyph name="refresh" :size="14" tint="current" /> 刷新</button>
               <button @click="applyMasterVisible = true" class="bg-primary text-text-inverse px-4 py-2 rounded flex items-center gap-1.5"><IconGlyph name="upload" :size="14" tint="current" /> 从模板导入</button>
-              <button @click="activeExportVisible = true" class="bg-warning text-text-inverse px-4 py-2 rounded">📥 导出 Excel</button>
+              <button @click="openActiveExport" class="bg-warning text-text-inverse px-4 py-2 rounded">📥 导出 Excel</button>
             </div>
 
             <GridView
@@ -67,7 +67,8 @@
             <div class="mb-4 flex items-center gap-3 opbar">
               <button @click="masterSettingsVisible = true" v-preload="loadSettingsDialog" class="bg-primary text-text-inverse px-4 py-2 rounded flex items-center gap-1.5"><IconGlyph name="settings" :size="14" tint="current" /> 设置</button>
               <button @click="refreshMaster" class="bg-text-muted text-text-inverse px-4 py-2 rounded flex items-center gap-1.5 btn-refresh"><IconGlyph name="refresh" :size="14" tint="current" /> 刷新</button>
-              <button @click="masterExportVisible = true" class="bg-warning text-text-inverse px-4 py-2 rounded flex items-center gap-1.5"><IconGlyph name="download" :size="14" tint="current" /> 导出 Excel</button>
+              <button @click="applyActiveVisible = true" class="bg-primary text-text-inverse px-4 py-2 rounded flex items-center gap-1.5"><IconGlyph name="upload" :size="14" tint="current" /> 从实行导入</button>
+              <button @click="openMasterExport" class="bg-warning text-text-inverse px-4 py-2 rounded flex items-center gap-1.5"><IconGlyph name="download" :size="14" tint="current" /> 导出 Excel</button>
             </div>
 
             <GridView
@@ -174,6 +175,19 @@
       confirmText="确定导入"
       @confirm="applyMasterToActive"
       @cancel="applyMasterVisible = false"
+    />
+
+    <!-- 从实行导入确认弹窗 -->
+    <ConfirmDialog
+      v-if="applyActiveMounted"
+      :visible="applyActiveVisible"
+      title="从实行导入"
+      message="确定将实行课表覆盖到一般课表吗？"
+      type="confirm"
+      :showCancel="true"
+      confirmText="确定导入"
+      @confirm="applyActiveToMaster"
+      @cancel="applyActiveVisible = false"
     />
   </div>
 </template>
@@ -298,6 +312,8 @@ export default {
       deleteSnapshotMounted: false,
       applyMasterVisible: false,
       applyMasterMounted: false,
+      applyActiveVisible: false,
+      applyActiveMounted: false,
       courseCandidates: COURSE_CANDIDATES,
     };
   },
@@ -323,7 +339,8 @@ export default {
     activeSettingsVisible(n) { if (n) this.activeSettingsMounted = true },
     activeExportVisible(n) { if (n) this.activeExportMounted = true },
     deleteSnapshotVisible(n) { if (n) this.deleteSnapshotMounted = true },
-    applyMasterVisible(n) { if (n) this.applyMasterMounted = true }
+    applyMasterVisible(n) { if (n) this.applyMasterMounted = true },
+    applyActiveVisible(n) { if (n) this.applyActiveMounted = true }
   },
   computed: {
     // ---- 一般课表显示行 ----
@@ -583,6 +600,22 @@ export default {
       return cells;
     },
 
+    // 课表单元格里是否有实际课程内容（行结构始终存在，不能用行数判空）
+    hasScheduleData(cells) {
+      return (cells || []).some(row => Array.isArray(row) && row.some(c => {
+        const v = typeof c === 'string' ? c : (c && c.course)
+        return String(v || '').trim() !== ''
+      }))
+    },
+    // 导出课表：无数据时直接提示，不弹导出选项弹窗
+    openActiveExport() {
+      if (!this.hasScheduleData(this.activeCells)) return useNotification().info('暂无课表数据可导出')
+      this.activeExportVisible = true
+    },
+    openMasterExport() {
+      if (!this.hasScheduleData(this.masterCells)) return useNotification().info('课表模板为空，无法导出')
+      this.masterExportVisible = true
+    },
     // ============= 一般课表操作 =============
     async refreshMaster() {
       try {
@@ -724,6 +757,21 @@ export default {
         recordGridSnapshotUndo('课程表', 'schedule', before, JSON.parse(JSON.stringify(this.activeCells)), '从模板导入');
       } catch (e) {
         this.notifyError('应用失败');
+      }
+    },
+    // 反向：把实行课表整块导入到一般课表（纯前端复制，无后端接口）
+    async applyActiveToMaster() {
+      try {
+        const before = JSON.parse(JSON.stringify(this.masterCells));
+        this.masterCells = JSON.parse(JSON.stringify(this.activeCells));
+        this.masterSettings = JSON.parse(JSON.stringify(this.activeSettings));
+        this.masterColHeaders = [...this.activeColHeaders];
+        this.applyActiveVisible = false;
+        await this.saveMaster();
+        recordGridSnapshotUndo('课程表', 'master_schedule', before, JSON.parse(JSON.stringify(this.masterCells)), '从实行导入');
+        this.notifySuccess('已从实行课表导入');
+      } catch (e) {
+        this.notifyError('导入失败');
       }
     },
 

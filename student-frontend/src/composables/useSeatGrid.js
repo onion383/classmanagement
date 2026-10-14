@@ -2,6 +2,58 @@ import { ref, computed } from 'vue'
 import axios from 'axios'
 import { recordGridCellUndo, recordGridSnapshotUndo } from './useUndo.js'
 
+// ==================== 座位网格几何辅助（纯函数，座位表与权重表共用） ====================
+export function generateColHeaders(cols, mode, showAisle) {
+  const headers = []
+  if (!showAisle) { for (let i = 0; i < cols; i++) headers.push(`列${i + 1}`); return headers }
+  if (mode === 'single') {
+    for (let i = 0; i < cols; i++) { headers.push(`列${i + 1}`); if (i < cols - 1) headers.push('走廊') }
+  } else {
+    for (let i = 0; i < cols; i++) { headers.push(`列${i + 1}`); if ((i + 1) % 2 === 0 && i < cols - 1) headers.push('走廊') }
+  }
+  return headers
+}
+
+export function getDisplayColCount(cols, mode, showAisle) {
+  if (!showAisle) return cols
+  if (mode === 'single') return cols + (cols - 1)
+  else return cols + Math.floor((cols - 1) / 2)
+}
+
+export function isAisleCol(displayIdx, cols, mode, showAisle) {
+  if (!showAisle) return false
+  const totalDisplay = getDisplayColCount(cols, mode, showAisle)
+  if (mode === 'single') return displayIdx % 2 === 1
+  else return displayIdx >= 2 && (displayIdx - 2) % 3 === 0 && displayIdx < totalDisplay
+}
+
+// 构造与座位表同构的显示行（讲台行 + 走廊列 + 数据格）。
+// valueAt(rowIdx, realCol) 返回 { course, extra? }；extra 会并入数据格属性（如 _studentId）。
+export function buildSeatLikeRows(rows, cols, mode, showAisle, valueAt) {
+  const displayCols = getDisplayColCount(cols, mode, showAisle)
+  const result = []
+  result.push({ _rowKey: 'podium', label: '讲  台', _isPodium: true, _isSeparator: false, _mergeCells: false, _isReadonly: true, cells: [] })
+  for (let r = 0; r < rows; r++) {
+    const rowCells = []
+    let realCol = 0
+    for (let d = 0; d < displayCols; d++) {
+      if (isAisleCol(d, cols, mode, showAisle)) {
+        if (r === 0) {
+          rowCells.push({ course: '走廊', _isAisle: true, _aisleRowSpan: rows, _isAisleHidden: false })
+        } else {
+          rowCells.push({ course: '', _isAisle: false, _isAisleHidden: true })
+        }
+      } else {
+        const v = valueAt(r, realCol) || {}
+        rowCells.push({ course: v.course, _isAisle: false, _isAisleHidden: false, ...(v.extra || {}) })
+        realCol++
+      }
+    }
+    result.push({ _rowKey: `row_${r}`, label: `第${r + 1}行`, cells: rowCells, _isReadonly: false, _lessonIdx: r, _periodRowSpan: 0, periodLabel: '' })
+  }
+  return result
+}
+
 export function useSeatGrid(apiBase, options = {}) {
   // undo.{key, table}：开启撤销记录；cellBase 为单格更新接口（如 /api/seats/master/cell）
   const { getStudentName = () => '', getStudentId = () => null, undo = null, cellBase = null } = options
@@ -16,66 +68,21 @@ export function useSeatGrid(apiBase, options = {}) {
   const settingsVisible = ref(false)
   const currentEditExcludeIds = ref([])
 
-  // ==================== 工具函数 ====================
-  function generateColHeaders(cols, mode, showAisle) {
-    const headers = []
-    if (!showAisle) { for (let i = 0; i < cols; i++) headers.push(`列${i + 1}`); return headers }
-    if (mode === 'single') {
-      for (let i = 0; i < cols; i++) { headers.push(`列${i + 1}`); if (i < cols - 1) headers.push('走廊') }
-    } else {
-      for (let i = 0; i < cols; i++) { headers.push(`列${i + 1}`); if ((i + 1) % 2 === 0 && i < cols - 1) headers.push('走廊') }
-    }
-    return headers
-  }
-
-  function getDisplayColCount(cols, mode, showAisle) {
-    if (!showAisle) return cols
-    if (mode === 'single') return cols + (cols - 1)
-    else return cols + Math.floor((cols - 1) / 2)
-  }
-
-  function isAisleCol(displayIdx, cols, mode, showAisle) {
-    if (!showAisle) return false
-    const totalDisplay = getDisplayColCount(cols, mode, showAisle)
-    if (mode === 'single') return displayIdx % 2 === 1
-    else return displayIdx >= 2 && (displayIdx - 2) % 3 === 0 && displayIdx < totalDisplay
-  }
-
   // ==================== Computed ====================
   const colHeaders = computed(() => generateColHeaders(cols.value, mode.value, showAisle.value))
 
-  const displayRows = computed(() => {
-    const displayCols = getDisplayColCount(cols.value, mode.value, showAisle.value)
-    const result = []
-    result.push({ _rowKey: 'podium', label: '讲  台', _isPodium: true, _isSeparator: false, _mergeCells: false, _isReadonly: true, cells: [] })
-    for (let r = 0; r < rows.value; r++) {
-      const rowCells = []
-      let realCol = 0
-      for (let d = 0; d < displayCols; d++) {
-        if (isAisleCol(d, cols.value, mode.value, showAisle.value)) {
-          if (r === 0) {
-            rowCells.push({ course: '走廊', _isAisle: true, _aisleRowSpan: rows.value, _isAisleHidden: false })
-          } else {
-            rowCells.push({ course: '', _isAisle: false, _isAisleHidden: true })
-          }
-        } else {
-          const seatVal = seats.value[r]?.[realCol]
-          let displayName = ''
-          if (seatVal === null || seatVal === undefined) {
-            displayName = ''
-          } else if (typeof seatVal === 'number') {
-            displayName = getStudentName(seatVal) || ''
-          } else {
-            displayName = seatVal
-          }
-          rowCells.push({ course: displayName, _isAisle: false, _isAisleHidden: false, _studentId: seatVal })
-          realCol++
-        }
-      }
-      result.push({ _rowKey: `row_${r}`, label: `第${r + 1}行`, cells: rowCells, _isReadonly: false, _lessonIdx: r, _periodRowSpan: 0, periodLabel: '' })
+  const displayRows = computed(() => buildSeatLikeRows(rows.value, cols.value, mode.value, showAisle.value, (r, c) => {
+    const seatVal = seats.value[r]?.[c]
+    let displayName = ''
+    if (seatVal === null || seatVal === undefined) {
+      displayName = ''
+    } else if (typeof seatVal === 'number') {
+      displayName = getStudentName(seatVal) || ''
+    } else {
+      displayName = seatVal
     }
-    return result
-  })
+    return { course: displayName, extra: { _studentId: seatVal } }
+  }))
 
   const exportFields = computed(() => {
     const fields = [{ name: '行号' }]

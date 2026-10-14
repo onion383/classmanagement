@@ -760,6 +760,19 @@
   border-left: none !important;
   border-top: none !important;
 }
+/* 热力图单元格（如座位位置权重表）：保留单元格自身的底色与字色，
+   不被上面通用 td 的 !important 底色/字色覆盖（否则热力色会被冲掉）。 */
+:root:is([data-theme="glass"], [data-theme="win11"]) .grid-view-container table tbody tr td.cell-heat,
+:root:is([data-theme="glass"], [data-theme="win11"]) .grid-view-container table td.cell-heat {
+  background-color: var(--cell-heat-bg) !important;
+  color: var(--cell-heat-fg, inherit) !important;
+  backdrop-filter: none;
+}
+/* 正在编辑的单元格：字色统一为黑色（盖过热力图的字色，编辑时更易读） */
+:root:is([data-theme="glass"], [data-theme="win11"]) .grid-view-container table tbody tr td.cell-editing,
+:root:is([data-theme="glass"], [data-theme="win11"]) .grid-view-container table td.cell-editing {
+  color: #000 !important;
+}
 /* 彻底清除所有border类带来的边框（排除表格单元格，保证网格线可见） */
 :root:is([data-theme="glass"], [data-theme="win11"]) .grid-view-container .border:not(th):not(td),
 :root:is([data-theme="glass"], [data-theme="win11"]) .grid-view-container .border-border:not(th):not(td),
@@ -768,6 +781,7 @@
   border-width: 0 !important;
   border-style: none !important;
   box-shadow: none !important;
+
 }
 :root:is([data-theme="glass"], [data-theme="win11"]) .grid-view-container table .bg-warning\/30,
 :root:is([data-theme="glass"], [data-theme="win11"]) .grid-view-container table .bg-warning\/20,

@@ -1,7 +1,7 @@
 <template>
   <div class="leave-timeline bg-surface border border-border rounded-xl p-5">
-    <!-- 标题 -->
-    <div class="flex items-center justify-between mb-4">
+    <!-- 标题（title 为空时不渲染，供页面把标题外置为子标题） -->
+    <div v-if="title" class="flex items-center justify-between mb-4">
       <h3 class="text-base font-bold text-text">{{ title }}</h3>
     </div>
 
