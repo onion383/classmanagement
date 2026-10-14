@@ -535,6 +535,18 @@
 :root[data-theme="glass2"] table tbody tr.bg-surface-hover td {
   background-color: rgba(255, 255, 255, calc(var(--g2-a) + 0.42)) !important;
 }
+/* 热力图单元格（如座位位置权重表）：保留单元格自身的底色与字色，
+   不被上面通用 td 的 !important 底色/字色覆盖（否则热力色会被冲掉）。 */
+:root[data-theme="glass2"] .grid-view-container table tbody tr td.cell-heat,
+:root[data-theme="glass2"] .grid-view-container table td.cell-heat {
+  background-color: var(--cell-heat-bg) !important;
+  color: var(--cell-heat-fg, inherit) !important;
+}
+/* 正在编辑的单元格：字色统一为黑色（盖过热力图的字色，编辑时更易读） */
+:root[data-theme="glass2"] .grid-view-container table tbody tr td.cell-editing,
+:root[data-theme="glass2"] .grid-view-container table td.cell-editing {
+  color: #000 !important;
+}
 /* 格内编辑：输入框透明，只留单元格自身的单层玻璃 */
 :root[data-theme="glass2"] table input[type="text"],
 :root[data-theme="glass2"] table input[type="number"],

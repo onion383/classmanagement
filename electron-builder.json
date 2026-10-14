@@ -8,6 +8,7 @@
   "files": [
     "electron/**/*",
     "!electron/afterPack.js",
+    "!**/.gitignore",
     "student-frontend/dist/**/*",
     "student-backend/**/*",
     "!student-backend/data/**",

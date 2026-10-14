@@ -14,7 +14,7 @@
 ;       2) 标题「班集」（居中）
 ;       3) 红色提示文案（居中，自动换行）
 ;       4) 「获取最新的 Windows」链接（居中，点开默认浏览器访问系统下载页并退出安装程序）
-;       5) 「不再提示」勾选框，勾选即在 %ProgramData%\班集\ 写机器级标记文件
+;       5) 「不再提示」勾选框，勾选即在 %LocalAppData%\班集\ 写当前用户标记文件
 ;          （SkipOsVersionWarning.flag）
 ;     底部按钮复用向导按钮：「退出程序」（左，高亮）与「忽略」（右）。
 ;   - 一个自绘的安装页，全部元素水平/垂直居中：
@@ -50,11 +50,11 @@ AppUpdatesURL=https://github.com/onion383/classmanagement/releases
 VersionInfoVersion={#MyAppVersion}
 
 ; 安装到系统 Program Files（需管理员权限）。{autopf} 在 64 位安装模式下解析为
-; C:\Program Files；注意这会让安装/升级都弹出 UAC（用户已明确要求）。
+; C:\Program Files，安装时会请求 UAC。
 DefaultDirName={autopf}\班集
 DefaultGroupName=班集
 DisableProgramGroupPage=yes
-; 请求管理员权限：点击安装包即弹 UAC
+; 默认权限模式：请求管理员权限（会弹 UAC）
 PrivilegesRequired=admin
 ArchitecturesInstallIn64BitMode=x64compatible
 
@@ -64,7 +64,7 @@ OutputBaseFilename=班集-Setup-{#MyAppVersion}
 Compression=lzma2/max
 SolidCompression=yes
 SetupLogging=yes
-; 安装期间若已安装同名版本，直接覆盖升级（无需先卸载）
+; 沿用上次的安装目录（机器级 Program Files\班集），同一 AppId 下可直接覆盖升级。
 UsePreviousAppDir=yes
 
 ; ---- 图标 -------------------------------------------------------------------
@@ -107,7 +107,8 @@ Source: "..\app-icon.png"; DestDir: "{tmp}"; Flags: dontcopy nocompression
 Source: "..\installer-assets\field-bg.png"; DestDir: "{tmp}"; Flags: dontcopy nocompression
 Source: "..\installer-assets\license.txt"; DestDir: "{tmp}"; Flags: dontcopy nocompression
 ; 整目录拷贝 electron-builder 的未打包产物（release4\win-unpacked）
-Source: "..\..\release4\win-unpacked\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
+; Excludes：不把 .gitignore 装进安装目录
+Source: "..\..\release4\win-unpacked\*"; DestDir: "{app}"; Excludes: ".gitignore"; Flags: ignoreversion recursesubdirs createallsubdirs
 
 [Icons]
 Name: "{group}\班集"; Filename: "{app}\{#MyAppExeName}"
@@ -117,9 +118,6 @@ Name: "{autodesktop}\班集"; Filename: "{app}\{#MyAppExeName}"; Tasks: desktopi
 [UninstallDelete]
 ; 低版本系统提示页的「不再提示」开关：由 [Code] 在 %ProgramData%\班集\ 下写一个
 ; 机器级标记文件（SkipOsVersionWarning.flag），卸载时在此清理。
-; 不用注册表：本安装包是管理员模式、装到 Program Files，属机器级安装，用 ProgramData
-; 与安装范围一致；若用 HKCU，在“标准用户借用管理员凭据提权”时会落到管理员账户下，
-; 「不再提示」会记错账户，故用机器级。
 Type: files; Name: "{commonappdata}\班集\SkipOsVersionWarning.flag"
 
 [Run]
@@ -221,7 +219,7 @@ begin
 end;
 
 { 「不再提示」勾选框：勾选即写标记文件，取消勾选即删除，下次运行安装包据此跳过提示页。
-  写到 ProgramData（机器级）：与安装范围一致，也避免提权身份与登录用户不一致时记错账户。 }
+  写到 ProgramData（机器级）。 }
 procedure OsWarnRememberClick(Sender: TObject);
 var
   Dir, FlagPath: String;
@@ -238,8 +236,8 @@ begin
 end;
 
 { 点「获取最新的 Windows」：用默认浏览器打开系统下载页，随后直接退出安装程序。
-  用 ShellExecAsOriginalUser：安装包是提权运行的，直接 ShellExec 会把浏览器也以管理员
-  身份拉起；官方示例同样用 AsOriginalUser，让浏览器回到普通用户身份。 }
+  用 ShellExecAsOriginalUser：安装包已改为免提权运行，该函数此时等价于 ShellExec，
+  保留它没有副作用（万一以后又改回管理员模式也不用再动这里）。 }
 procedure OsWarnGetWinClick(Sender: TObject; const Link: string; LinkType: TSysLinkType);
 var
   ErrorCode: Integer;
@@ -689,7 +687,10 @@ begin
   Result := True;
   if CurPageID = CustomPage.ID then
   begin
-    if not LicenseCheck.Checked then
+    { 静默安装（/SILENT、/VERYSILENT，自动更新走的就是这条）下无人勾选协议，
+      若仍按未勾选处理会直接 Result:=False，导致整个安装中止（日志：
+      Failed to proceed to next wizard page; aborting），故静默时跳过校验。 }
+    if (not WizardSilent) and (not LicenseCheck.Checked) then
     begin
       Result := False;
       Exit;

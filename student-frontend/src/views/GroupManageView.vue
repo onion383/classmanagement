@@ -1060,7 +1060,7 @@ const groupExportSource = computed(() => {
   };
 });
 async function openExport() {
-  if (!active.value || active.value.groups.length === 0) return error('暂无小组可导出');
+  if (!active.value || active.value.groups.length === 0) return useNotification().info('暂无小组可导出');
   exportMounted.value = true;
   exportVisible.value = true;
 }

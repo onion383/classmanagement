@@ -47,7 +47,11 @@
 
                 <td v-if="!hideMetaColumns" class="bg-primary text-text-inverse border border-border px-2 py-1 text-center font-bold" style="width: 100px;">
                   <div class="flex items-center justify-center gap-1">
-                    <span v-if="canDragRow(row)" class="drag-handle cursor-grab select-none text-text-inverse/70 hover:text-text-inverse" title="按住拖动行" @mousedown.prevent.stop="onRowHandleDown($event, rowIdx)" @contextmenu.stop.prevent>⠿</span>
+                    <span v-if="canDragRow(row)" class="drag-handle select-none text-text-inverse/70"
+                    :class="rowDragLocked ? 'cursor-not-allowed' : 'cursor-grab hover:text-text-inverse'"
+                    :style="rowDragLocked ? 'opacity: 0.3;' : ''"
+                    :title="rowDragLocked ? '编辑中，暂不可拖动' : '按住拖动行'"
+                    @mousedown.prevent.stop="onRowHandleDown($event, rowIdx)" @contextmenu.stop.prevent>⠿</span>
                     <span @dblclick.stop="startEditMeta(rowIdx, 'label')">
                       <input v-if="editingMeta && editingMeta.row === rowIdx && editingMeta.field === 'label'" v-model="editingMetaValue" class="w-20 border border-border p-0 text-sm text-text" @keyup.enter="saveEditMeta(rowIdx)" @blur="saveEditMeta(rowIdx)" @mousedown.stop />
                       <span v-else>{{ row.label }}</span>
@@ -62,7 +66,11 @@
                 <!-- 行号列（绿色背景；首子行跨行合并居中显示分组名，可拖拽排序） -->
                 <td v-if="hideMetaColumns && showRowNumber && row._rowHeaderRowSpan !== 0" class="bg-primary text-text-inverse border border-border text-center text-sm font-bold align-middle" style="width: 110px; vertical-align: middle;" :rowspan="row._rowHeaderRowSpan > 0 ? row._rowHeaderRowSpan : undefined">
                   <div class="flex items-center justify-center gap-1">
-                    <span v-if="!disableRowDrag && row._rowHeaderRowSpan !== 0 && canDragRow(row)" class="drag-handle cursor-grab select-none text-text-inverse/70 hover:text-text-inverse" title="按住拖动行" @mousedown.prevent.stop="onRowHandleDown($event, rowIdx)" @contextmenu.stop.prevent>⠿</span>
+                    <span v-if="!disableRowDrag && row._rowHeaderRowSpan !== 0 && canDragRow(row)" class="drag-handle select-none text-text-inverse/70"
+                    :class="rowDragLocked ? 'cursor-not-allowed' : 'cursor-grab hover:text-text-inverse'"
+                    :style="rowDragLocked ? 'opacity: 0.3;' : ''"
+                    :title="rowDragLocked ? '编辑中，暂不可拖动' : '按住拖动行'"
+                    @mousedown.prevent.stop="onRowHandleDown($event, rowIdx)" @contextmenu.stop.prevent>⠿</span>
                     <span>{{ row.label }}</span>
                   </div>
                 </td>
@@ -76,8 +84,14 @@
                   <td
                     v-else
                     :ref="el => setCellRef(rowIdx, colIdx, el)"
-                    :class="['border border-border px-2 py-2 text-center transition-colors relative', isDragTarget(rowIdx, colIdx) ? 'bg-info/10 outline outline-2 outline-info' : '', isCellSelected(rowIdx, colIdx) && !isEditing(rowIdx, colIdx) ? 'bg-info/10 outline outline-2 outline-info' : '', isEditing(rowIdx, colIdx) ? 'ring-2 ring-info ring-inset' : '', row._isReadonly ? '' : 'cursor-pointer']"
-                    :style="{ backgroundColor: isEditing(rowIdx, colIdx) ? '' : getCellColor(cell), height: '40px', minHeight: '40px' }"
+                    :class="['border border-border px-2 py-2 text-center transition-colors relative', isDragTarget(rowIdx, colIdx) ? 'bg-info/10 outline outline-2 outline-info' : '', isCellSelected(rowIdx, colIdx) && !isEditing(rowIdx, colIdx) ? 'bg-info/10 outline outline-2 outline-info' : '', isEditing(rowIdx, colIdx) ? 'ring-2 ring-info ring-inset' : '', row._isReadonly ? '' : 'cursor-pointer', cell._bg != null ? 'cell-heat' : '', isEditing(rowIdx, colIdx) ? 'cell-editing' : '']"
+                    :style="{
+                      '--cell-heat-bg': cell._bg != null ? cell._bg : undefined,
+                      '--cell-heat-fg': cell._fg != null ? cell._fg : undefined,
+                      backgroundColor: isEditing(rowIdx, colIdx) ? '' : getCellColor(cell),
+                      color: isEditing(rowIdx, colIdx) ? '#000' : getCellTextColor(cell),
+                      height: '40px', minHeight: '40px'
+                    }"
                     @mousedown="onCellMouseDown($event, rowIdx, colIdx)"
                     @mouseenter="onCellMouseEnter(rowIdx, colIdx)"
                     @dblclick="onCellDoubleClick($event, rowIdx, colIdx)"
@@ -223,11 +237,14 @@ export default {
       }
       return set;
     },
+    // 单元格编辑中：行拖动手柄保留展示但锁定（不再随编辑消失）
+    rowDragLocked() { return !!this.editingCell },
   },
   methods: {
     setCellRef(rowIdx, colIdx, el) { if (el) { if (!this.cellRefs[rowIdx]) this.cellRefs[rowIdx] = {}; this.cellRefs[rowIdx][colIdx] = el; } },
+    // 行是否可拖（只看行本身类型；编辑中与否由 rowDragLocked 决定「锁定」而非「隐藏」）
     canDragRow(row) {
-      return !row._isSeparator && !row._mergeCells && !row._isReadonly && !row._isPodium && !this.editingCell;
+      return !row._isSeparator && !row._mergeCells && !row._isReadonly && !row._isPodium;
     },
     onCellMouseDown(event, rowIdx, colIdx) {
       if (event.button !== 0) return;
@@ -784,7 +801,10 @@ export default {
         this.animateColSwap(from, to);
       });
     },
-    getCellColor(cell) { if (cell._isAisle) return '#d1d5db'; return COURSE_COLORS[cell.course] || '#FFFFFF'; },
+    // 单元格底色：走廊固定灰；若调用方在 cell 上给了 _bg（热力图等）则优先；否则按课程名配色
+    getCellColor(cell) { if (cell._isAisle) return '#d1d5db'; if (cell._bg != null) return cell._bg; return COURSE_COLORS[cell.course] || '#FFFFFF'; },
+    // 单元格文字色：调用方在 cell 上给了 _fg（深底白字）才覆盖，否则继承主题文字色
+    getCellTextColor(cell) { return cell._fg || ''; },
   },
   mounted() {
     document.addEventListener('mouseup', this.handleGlobalMouseUp);

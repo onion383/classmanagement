@@ -42,7 +42,7 @@
         <IconGlyph name="download" :size="14" tint="current" /> 从 Excel 导入
       </button>
       <button
-        @click="exportDialogVisible = true"
+        @click="openExport"
         v-preload="loadExportExcel"
         class="bg-warning hover:bg-warning-hover text-text-inverse px-4 py-2 rounded flex items-center gap-1.5"
       >
@@ -424,6 +424,12 @@ function deleteRecord(id) {
 
 function onExportFinish() {
   // 保持与原有事件兼容
+}
+
+// 导出班费记录：无数据时直接提示，不弹导出选项弹窗
+function openExport() {
+  if (feeRecords.value.length === 0) return useNotification().info('暂无班费记录可导出')
+  exportDialogVisible.value = true
 }
 
 // ==================== 收据管理 ====================

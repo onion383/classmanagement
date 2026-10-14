@@ -44,13 +44,6 @@
 
     <!-- ==================== 倒计时 ==================== -->
     <div v-if="activeTab === 'countdown'">
-      <!-- 工具栏 -->
-      <div class="mb-4 flex items-center gap-3 opbar">
-        <button v-preload="loadAddCountdownDialog" @click="openAddCountdown" class="bg-primary hover:bg-primary-hover text-text-inverse px-5 py-2 rounded">＋ 添加倒计时</button>
-        <button @click="refreshCountdowns" class="bg-text-muted hover:bg-text-secondary text-text-inverse px-4 py-2 rounded flex items-center gap-1 btn-refresh">🔄 刷新</button>
-        <button v-preload="loadExportExcel" @click="openCountdownExport" class="bg-warning hover:bg-warning-hover text-text-inverse px-4 py-2 rounded flex items-center gap-1"><IconGlyph name="download" :size="14" tint="current" /> 导出 EXCEL 表格</button>
-      </div>
-
       <!-- 数据看板（最近 3 个） -->
       <div v-if="topCountdowns.length" class="grid grid-cols-3 gap-4 mb-6">
         <div v-for="cd in topCountdowns" :key="cd.id" class="bg-surface shadow-md rounded-xl border border-border p-4 text-center" :class="{ 'opacity-70': cd.days < 0 }">
@@ -61,6 +54,13 @@
         </div>
       </div>
       <div v-else class="bg-surface border border-border rounded-xl py-8 text-center text-text-muted text-sm mb-6">暂无倒计时，点击「添加倒计时」开始</div>
+
+      <!-- 工具栏 -->
+      <div class="mb-4 flex items-center gap-3 opbar">
+        <button v-preload="loadAddCountdownDialog" @click="openAddCountdown" class="bg-primary hover:bg-primary-hover text-text-inverse px-5 py-2 rounded">＋ 添加倒计时</button>
+        <button @click="refreshCountdowns" class="bg-text-muted hover:bg-text-secondary text-text-inverse px-4 py-2 rounded flex items-center gap-1 btn-refresh">🔄 刷新</button>
+        <button v-preload="loadExportExcel" @click="openCountdownExport" class="bg-warning hover:bg-warning-hover text-text-inverse px-4 py-2 rounded flex items-center gap-1"><IconGlyph name="download" :size="14" tint="current" /> 导出 EXCEL 表格</button>
+      </div>
 
       <!-- 倒计时时间轴 -->
       <LeaveTimeline
@@ -446,8 +446,15 @@ export default {
       } catch (err) { useNotification().error(err.response?.data?.error || '删除失败') }
     },
     // ---------- 导出 ----------
-    openActivityExport() { this.actExportVisible = true },
-    openCountdownExport() { this.cntExportVisible = true },
+    // 导出活动/倒计时：无数据时直接提示，不弹导出选项弹窗
+    openActivityExport() {
+      if (this.activityExportRows.length === 0) return useNotification().info('暂无活动可导出')
+      this.actExportVisible = true
+    },
+    openCountdownExport() {
+      if (this.countdownExportRows.length === 0) return useNotification().info('暂无倒计时可导出')
+      this.cntExportVisible = true
+    },
     // ---------- 跳转 ----------
     goAlbum() {
       // 活动相册未独立设计前，跳转到学生相册页

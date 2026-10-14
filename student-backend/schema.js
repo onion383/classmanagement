@@ -75,9 +75,22 @@ function initSchema(conn) {
     CREATE TABLE IF NOT EXISTS schedule_settings (
       id INTEGER PRIMARY KEY CHECK (id = 1),
       semester_start TEXT NOT NULL DEFAULT '',
+      semester_end TEXT NOT NULL DEFAULT '',
       auto_apply INTEGER DEFAULT 1
     );
     INSERT OR IGNORE INTO schedule_settings (id, semester_start) VALUES (1, '');
+
+    -- 学期表：支持「多学期列表 + 当前学期」（设置页可增加学期、选择学期、修改学期名）。
+    -- is_current = 1 的那条是当前学期；schedule_settings.semester_start/end 保留为它的镜像，
+    -- 供座位补存范围、座位指数结算等既有逻辑继续读取。
+    CREATE TABLE IF NOT EXISTS semesters (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      name TEXT NOT NULL DEFAULT '',
+      start_date TEXT NOT NULL DEFAULT '',
+      end_date TEXT NOT NULL DEFAULT '',
+      is_current INTEGER NOT NULL DEFAULT 0,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    );
 
     CREATE TABLE IF NOT EXISTS master_schedule (
       id INTEGER PRIMARY KEY CHECK (id = 1),
@@ -295,6 +308,48 @@ function initSchema(conn) {
       conn.exec(`ALTER TABLE groups ADD COLUMN gender INTEGER DEFAULT 0`);
     }
   }
+  // 存量库迁移：为学期设置补充 semester_end（学期结束日期，用于座位指数按天结算的范围判定）
+  {
+    const schCols = conn.prepare('PRAGMA table_info(schedule_settings)').all().map(c => c.name);
+    if (!schCols.includes('semester_end')) {
+      conn.exec(`ALTER TABLE schedule_settings ADD COLUMN semester_end TEXT NOT NULL DEFAULT ''`);
+    }
+  }
+  // 学期表播种：列表为空时建一条「当前学期」。
+  // 有旧的单条学期（schedule_settings）就用它的起止日期，否则按当前月份推算默认学期：
+  //   7 月 ~ 次年 1 月 → 本年 9/1 ~ 次年 1/31，名字「XXXX秋季学期」
+  //   1 月            → 去年 9/1 ~ 本年 1/31，名字「XXXX秋季学期」
+  //   2 月 ~ 6 月      → 本年 2/1 ~ 6/30，名字「XXXX夏季学期」
+  function autoSemesterName(startDate) {
+    const year = Number(String(startDate).slice(0, 4)) || new Date().getFullYear();
+    const month = Number(String(startDate).slice(5, 7)) || 1;
+    return month >= 7 ? `${year}秋季学期` : `${year}夏季学期`;
+  }
+  function autoSemesterRange() {
+    const y = new Date().getFullYear();
+    const m = new Date().getMonth() + 1;
+    if (m >= 7) return { start: `${y}-09-01`, end: `${y + 1}-01-31` };
+    if (m === 1) return { start: `${y - 1}-09-01`, end: `${y}-01-31` };
+    return { start: `${y}-02-01`, end: `${y}-06-30` };
+  }
+  {
+    const count = conn.prepare('SELECT COUNT(*) AS c FROM semesters').get().c;
+    if (!count) {
+      const legacy = conn.prepare('SELECT semester_start, semester_end FROM schedule_settings WHERE id = 1').get() || {};
+      const range = autoSemesterRange();
+      const start = legacy.semester_start || range.start;
+      const end = legacy.semester_end || range.end;
+      conn.prepare('INSERT INTO semesters (name, start_date, end_date, is_current) VALUES (?,?,?,1)')
+        .run(autoSemesterName(start), start, end);
+    }
+    // 同步一次镜像：schedule_settings 为空时用当前学期补上（座位补存/座位指数依赖它）
+    const cur = conn.prepare('SELECT start_date, end_date FROM semesters WHERE is_current = 1 ORDER BY id DESC LIMIT 1').get();
+    const sch = conn.prepare('SELECT semester_start FROM schedule_settings WHERE id = 1').get() || {};
+    if (cur && !sch.semester_start) {
+      conn.prepare('UPDATE schedule_settings SET semester_start = ?, semester_end = ? WHERE id = 1')
+        .run(cur.start_date || '', cur.end_date || '');
+    }
+  }
   // 优化：相册照片按 (album_id, mtime) 排序展示，建索引避免大相册全表扫+排序（幂等）
   conn.exec(`CREATE INDEX IF NOT EXISTS idx_album_photos_album_mtime ON album_photos (album_id, mtime DESC);`);
   // 优化：请假按学生+状态过滤（看板统计/时段冲突校验）
@@ -411,10 +466,50 @@ function initSchema(conn) {
     INSERT INTO seat_template (id) VALUES (1);
   `, seatMigrations);
 
+  // 草稿表：智能排表弹窗「保存草稿」的落库目标（单独一张表，不影响正式座位表/模板表）。
+  // 除与座位表一致的字段外，多存 conditions（本次排表的条件列表）与 saved_at（保存时间）。
+  // 没有草稿时 saved_at 为空串，接口据此判断是否存在草稿。
+  ensureTableWithMigration('seat_draft', `
+    CREATE TABLE seat_draft (
+      id INTEGER PRIMARY KEY CHECK (id = 1),
+      mode TEXT NOT NULL DEFAULT 'single',
+      rows INTEGER NOT NULL DEFAULT 6,
+      cols INTEGER NOT NULL DEFAULT 7,
+      seats TEXT NOT NULL DEFAULT '[]',
+      aisle_cols TEXT NOT NULL DEFAULT '[]',
+      groups_config TEXT NOT NULL DEFAULT '[]',
+      settings TEXT NOT NULL DEFAULT '{}',
+      conditions TEXT NOT NULL DEFAULT '[]',
+      saved_at TEXT NOT NULL DEFAULT ''
+    );
+    INSERT INTO seat_draft (id) VALUES (1);
+  `, []);
+
+  // 座位位置权重表：与座位布局共用几何（rows/cols/mode/showAisle），单独存数字矩阵 weights
+  ensureTableWithMigration('seat_weight', `
+    CREATE TABLE seat_weight (
+      id INTEGER PRIMARY KEY CHECK (id = 1),
+      mode TEXT NOT NULL DEFAULT 'single',
+      rows INTEGER NOT NULL DEFAULT 6,
+      cols INTEGER NOT NULL DEFAULT 7,
+      weights TEXT NOT NULL DEFAULT '[]',
+      settings TEXT NOT NULL DEFAULT '{}'
+    );
+    INSERT INTO seat_weight (id) VALUES (1);
+  `, []);
+
+  // 座位历史快照：按天保存（snap_date），week_start 为由当天推导的周一，供历史下拉按周聚合。
+  // 迁移数组独立于 seat_layout/seat_template，避免 snap_date 被带到另两张表。
+  const seatHistoryMigrations = [
+    ...seatMigrations,
+    { column: 'snap_date', sql: "snap_date TEXT NOT NULL DEFAULT ''" }
+  ];
+
   ensureTableWithMigration('seat_history', `
     CREATE TABLE seat_history (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       week_start TEXT NOT NULL,
+      snap_date TEXT NOT NULL DEFAULT '',
       mode TEXT NOT NULL DEFAULT 'single',
       rows INTEGER NOT NULL,
       cols INTEGER NOT NULL,
@@ -424,7 +519,10 @@ function initSchema(conn) {
       settings TEXT NOT NULL DEFAULT '{}',
       created_at DATETIME DEFAULT CURRENT_TIMESTAMP
     );
-  `, seatMigrations);
+  `, seatHistoryMigrations);
+
+  // 存量快照回填：旧数据只有 week_start，没有 snap_date，用 week_start 兜底，保证按天查询可用
+  conn.exec(`UPDATE seat_history SET snap_date = week_start WHERE snap_date = ''`);
 
   // ======================== 加分记录表迁移（存量库补表） ========================
   ensureTableWithMigration('score_records', `

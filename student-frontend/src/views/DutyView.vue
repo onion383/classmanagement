@@ -10,65 +10,70 @@
     <Tabs :tabs="tabItems" v-model="activeTab">
       <template #default="{ activeTab }">
         <div v-if="activeTab === 'manage'">
-          <section class="mb-8">
-            <h2 class="text-xl font-semibold mb-4 flex items-center gap-2"><IconGlyph name="clipboard" :size="20" /> 当前值日表</h2>
+          <section class="mb-4">
+            <!-- 子标题 + 视图切换：当前值日 / 值日模板 -->
+            <div class="mb-4 flex items-center gap-3">
+              <h2 class="text-xl font-semibold text-text flex items-center gap-2 min-h-7"><IconGlyph name="clipboard" :size="20" /> 值日表</h2>
+              <ViewSwitch v-model="dutyView" :options="dutyViewOptions" />
+            </div>
+
+            <!-- 工具栏：随切换段变化。「设置」是天数/劳动项目的全局设置，两段都保留；
+                 智能排表/导入 两段均可用，顺序与当前值日一致 -->
             <div class="mb-4 flex flex-wrap items-center gap-3 opbar">
               <button @click="settingsVisible = true" v-preload="loadSettingsDialog" class="bg-primary text-text-inverse px-4 py-2 rounded flex items-center gap-1.5"><IconGlyph name="settings" :size="14" tint="current" /> 设置</button>
-              <button @click="arrangeVisible = true" v-preload="loadArrangementDialog" class="bg-primary text-text-inverse px-4 py-2 rounded">🧠 智能排表</button>
-              <button @click="refreshActive" class="bg-text-muted text-text-inverse px-4 py-2 rounded flex items-center gap-1.5 btn-refresh"><IconGlyph name="refresh" :size="14" tint="current" /> 刷新</button>
-              <button @click="applyMasterToActive" class="bg-primary text-text-inverse px-4 py-2 rounded flex items-center gap-1.5"><IconGlyph name="download" :size="14" tint="current" /> 从模板导入</button>
-              <button @click="activeExportVisible = true" class="bg-warning text-text-inverse px-4 py-2 rounded flex items-center gap-1.5"><IconGlyph name="download" :size="14" tint="current" /> 导出值日表</button>
+              <button @click="openArrange(dutyView)" v-preload="loadArrangementDialog" class="bg-primary text-text-inverse px-4 py-2 rounded">🧠 智能排表</button>
+              <button @click="dutyView === 'active' ? refreshActive() : refreshMaster()" class="bg-text-muted text-text-inverse px-4 py-2 rounded flex items-center gap-1.5 btn-refresh"><IconGlyph name="refresh" :size="14" tint="current" /> 刷新</button>
+              <button @click="openImport(dutyView)" class="bg-primary text-text-inverse px-4 py-2 rounded flex items-center gap-1.5"><IconGlyph name="download" :size="14" tint="current" /> {{ dutyView === 'active' ? '从模板导入' : '从实行导入' }}</button>
+              <button @click="dutyView === 'active' ? openActiveExport() : openMasterExport()" class="bg-warning text-text-inverse px-4 py-2 rounded flex items-center gap-1.5"><IconGlyph name="download" :size="14" tint="current" /> 导出值日表</button>
             </div>
 
-            <div v-if="!activeLoaded" class="skeleton-block"></div>
-            <GridView
-              v-else
-              :col-headers="settingsDays"
-              :rows="dutyActiveRows"
-              :hide-meta-columns="true"
-              :show-row-number="true"
-              :disable-row-drag="true"
-              row-header-label="劳动项目"
-              :enable-candidate="true"
-              :candidate-items="allStudents"
-              :candidate-exclude-ids="[]"
-              candidate-label-field="姓名"
-              candidate-placeholder="输入姓名"
-              :min-table-height="200"
-              @update:cells="onActiveCellsUpdate"
-              @swap-rows="swapItems"
-              @swap-columns="swapDays"
-            />
-            <ExportExcel v-if="activeExportMounted" :is-visible="activeExportVisible" :rows="activeExportRows" :fields="exportFields" defaultFilename="当前值日表" @update:is-visible="activeExportVisible = $event" />
-          </section>
+            <!-- 当前值日 -->
+            <template v-if="dutyView === 'active'">
+              <div v-if="!activeLoaded" class="skeleton-block"></div>
+              <GridView
+                v-else
+                :col-headers="settingsDays"
+                :rows="dutyActiveRows"
+                :hide-meta-columns="true"
+                :show-row-number="true"
+                :disable-row-drag="true"
+                row-header-label="劳动项目"
+                :enable-candidate="true"
+                :candidate-items="allStudents"
+                :candidate-exclude-ids="[]"
+                candidate-label-field="姓名"
+                candidate-placeholder="输入姓名"
+                :min-table-height="200"
+                @update:cells="onActiveCellsUpdate"
+                @swap-rows="swapItems"
+                @swap-columns="swapDays"
+              />
+              <ExportExcel v-if="activeExportMounted" :is-visible="activeExportVisible" :rows="activeExportRows" :fields="exportFields" defaultFilename="当前值日表" @update:is-visible="activeExportVisible = $event" />
+            </template>
 
-          <section>
-            <h2 class="text-xl font-semibold mb-4 flex items-center gap-2"><IconGlyph name="box" :size="20" /> 值日模板</h2>
-            <div class="mb-4 flex flex-wrap items-center gap-3 opbar">
-              <button @click="refreshMaster" class="bg-text-muted text-text-inverse px-4 py-2 rounded flex items-center gap-1.5 btn-refresh"><IconGlyph name="refresh" :size="14" tint="current" /> 刷新</button>
-              <button @click="masterExportVisible = true" class="bg-warning text-text-inverse px-4 py-2 rounded flex items-center gap-1.5"><IconGlyph name="download" :size="14" tint="current" /> 导出值日表</button>
-            </div>
-
-            <div v-if="!masterLoaded" class="skeleton-block"></div>
-            <GridView
-              v-else
-              :col-headers="settingsDays"
-              :rows="dutyMasterRows"
-              :hide-meta-columns="true"
-              :show-row-number="true"
-              :disable-row-drag="true"
-              row-header-label="劳动项目"
-              :enable-candidate="true"
-              :candidate-items="allStudents"
-              :candidate-exclude-ids="[]"
-              candidate-label-field="姓名"
-              candidate-placeholder="输入姓名"
-              :min-table-height="200"
-              @update:cells="onMasterCellsUpdate"
-              @swap-rows="swapItems"
-              @swap-columns="swapDays"
-            />
-            <ExportExcel v-if="masterExportMounted" :is-visible="masterExportVisible" :rows="masterExportRows" :fields="exportFields" defaultFilename="值日模板" @update:is-visible="masterExportVisible = $event" />
+            <!-- 值日模板 -->
+            <template v-else>
+              <div v-if="!masterLoaded" class="skeleton-block"></div>
+              <GridView
+                v-else
+                :col-headers="settingsDays"
+                :rows="dutyMasterRows"
+                :hide-meta-columns="true"
+                :show-row-number="true"
+                :disable-row-drag="true"
+                row-header-label="劳动项目"
+                :enable-candidate="true"
+                :candidate-items="allStudents"
+                :candidate-exclude-ids="[]"
+                candidate-label-field="姓名"
+                candidate-placeholder="输入姓名"
+                :min-table-height="200"
+                @update:cells="onMasterCellsUpdate"
+                @swap-rows="swapItems"
+                @swap-columns="swapDays"
+              />
+              <ExportExcel v-if="masterExportMounted" :is-visible="masterExportVisible" :rows="masterExportRows" :fields="exportFields" defaultFilename="值日模板" @update:is-visible="masterExportVisible = $event" />
+            </template>
           </section>
         </div>
 
@@ -116,6 +121,19 @@
       @cancel="deleteSnapshotVisible = false"
     />
 
+    <!-- 导入确认弹窗（从模板导入 / 从实行导入，内置样式） -->
+    <ConfirmDialog
+      v-if="importConfirmMounted"
+      :visible="importConfirmVisible"
+      :title="importConfirmTitle"
+      :message="importConfirmMessage"
+      type="confirm"
+      :showCancel="true"
+      confirmText="确定导入"
+      @confirm="confirmImport"
+      @cancel="importConfirmVisible = false"
+    />
+
     <!-- 值日设置弹窗 -->
     <DutySettingsDialog
       v-if="settingsMounted"
@@ -143,6 +161,7 @@
 import { ref, computed, watch, onMounted, defineAsyncComponent } from 'vue'
 import axios from 'axios'
 import Tabs from '../components/base/Tabs.vue'
+import ViewSwitch from '../components/base/ViewSwitch.vue'
 import EmptySnapshot from '../components/base/EmptySnapshot.vue'
 import GridView from '../components/tables/GridView.vue'
 import WeekSwitcher from '../components/base/WeekSwitcher.vue'
@@ -166,6 +185,12 @@ const { success: notifySuccess, error: notifyError } = useNotification()
 const activeTab = ref('manage')
 const settingsVisible = ref(false)
 const arrangeVisible = ref(false)
+// 智能排表目标：'active' 当前值日 / 'master' 值日模板
+const arrangeTarget = ref('active')
+function openArrange(target) {
+  arrangeTarget.value = target
+  arrangeVisible.value = true
+}
 
 // 导出弹窗可见状态（受控模式配合 v-if 实现懒加载）
 const activeExportVisible = ref(false)
@@ -186,6 +211,13 @@ watch(() => deleteSnapshotVisible.value, v => { if (v) deleteSnapshotMounted.val
 const tabItems = [
   { label: '值日管理', value: 'manage' },
   { label: '历史记录', value: 'history' }
+]
+
+// 值日管理内部的视图切换：当前值日 / 值日模板
+const dutyView = ref('active')
+const dutyViewOptions = [
+  { value: 'active', label: '当前值日' },
+  { value: 'master', label: '值日模板' }
 ]
 
 // ==================== 全局设置（时间 + 劳动项目） ====================
@@ -362,11 +394,17 @@ async function persistActive() {
   catch (e) { notifyError('保存失败'); console.error(e) }
 }
 
-// 智能排表确认：写回当前值日表（当前模式）
+// 智能排表确认：按目标写回当前值日表或值日模板（当前模式）
 function onArrangeConfirm({ cells }) {
   if (!cells || !Object.keys(cells).length) { notifyError('请先点击「开始排表」生成结果'); return }
-  activeCells.value = cells
-  persistActive()
+  const toMaster = arrangeTarget.value === 'master'
+  const target = toMaster ? masterCells : activeCells
+  const table = toMaster ? 'duty_template' : 'duty_layout'
+  const before = JSON.parse(JSON.stringify(target.value))
+  const next = JSON.parse(JSON.stringify(cells))
+  target.value = next
+  recordGridSnapshotUndo('值日表', table, before, next, '智能排表')
+  if (toMaster) persistMaster(); else persistActive()
   arrangeVisible.value = false
   notifySuccess('已应用智能排表')
 }
@@ -433,8 +471,26 @@ function pruneCells(cells) {
 async function refreshActive() { await loadActive(true); notifySuccess('已刷新值日表') }
 async function refreshMaster() { await loadMaster(true); notifySuccess('已刷新值日表模板') }
 
-async function applyMasterToActive() {
-  if (!confirm('确定用模板覆盖当前值日表吗？')) return
+// 导入确认弹窗（从模板导入 / 从实行导入 共用内置样式）
+const importConfirmVisible = ref(false)
+const importConfirmMounted = ref(false)
+const importConfirmAction = ref('active')
+watch(() => importConfirmVisible.value, v => { if (v) importConfirmMounted.value = true })
+const importConfirmTitle = computed(() => (importConfirmAction.value === 'master' ? '从实行导入' : '从模板导入'))
+const importConfirmMessage = computed(() => (importConfirmAction.value === 'master'
+  ? '确定用当前值日表覆盖值日模板吗？覆盖后可用 Ctrl+Z 撤销。'
+  : '确定用值日模板覆盖当前值日表吗？覆盖后可用 Ctrl+Z 撤销。'))
+function openImport(target) {
+  importConfirmAction.value = target
+  importConfirmVisible.value = true
+}
+function confirmImport() {
+  importConfirmVisible.value = false
+  if (importConfirmAction.value === 'master') doApplyActiveToMaster()
+  else doApplyMasterToActive()
+}
+
+async function doApplyMasterToActive() {
   try {
     const before = JSON.parse(JSON.stringify(activeCells.value))
     await axios.post(`${API_BASE}/duty/apply-master?mode=${dutyMode.value}`)
@@ -442,6 +498,18 @@ async function applyMasterToActive() {
     recordGridSnapshotUndo('值日表', 'duty_layout', before, JSON.parse(JSON.stringify(activeCells.value)), '从模板导入')
     notifySuccess('已应用模板')
   } catch (e) { notifyError('应用失败'); console.error(e) }
+}
+
+// 反向：把当前值日表整块导入到值日模板（纯前端复制，无后端接口）
+async function doApplyActiveToMaster() {
+  try {
+    const before = JSON.parse(JSON.stringify(masterCells.value))
+    const next = JSON.parse(JSON.stringify(activeCells.value))
+    masterCells.value = next
+    recordGridSnapshotUndo('值日表', 'duty_template', before, next, '从实行导入')
+    await persistMaster()
+    notifySuccess('已从当前值日表导入')
+  } catch (e) { notifyError('导入失败'); console.error(e) }
 }
 
 // ==================== 导出（列为劳动项目 + 各星期） ====================
@@ -462,6 +530,22 @@ function buildExportRows(cells) {
 }
 const activeExportRows = computed(() => buildExportRows(activeCells.value))
 const masterExportRows = computed(() => buildExportRows(masterCells.value))
+
+// 值日单元格里是否有实际安排（项目行始终存在，不能用行数判空）
+function hasDutyData(cells) {
+  return Object.values(cells || {}).some(byDay =>
+    byDay && Object.values(byDay).some(v =>
+      Array.isArray(v) ? v.some(Boolean) : String(v ?? '').trim() !== ''))
+}
+// 导出值日表：无数据时直接提示，不弹导出选项弹窗
+function openActiveExport() {
+  if (!hasDutyData(activeCells.value)) return useNotification().info('暂无值日数据可导出')
+  activeExportVisible.value = true
+}
+function openMasterExport() {
+  if (!hasDutyData(masterCells.value)) return useNotification().info('值日模板为空，无法导出')
+  masterExportVisible.value = true
+}
 
 // ==================== 历史记录 ====================
 const historyWeeks = ref([])
