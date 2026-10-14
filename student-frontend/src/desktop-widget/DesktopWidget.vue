@@ -1,6 +1,6 @@
 <template>
   <div class="desktop-widget">
-    <!-- 时钟区域（拖动手柄） -->
+    <!-- 时钟区域（拖动手柄，用 Electron 原生窗口拖动） -->
     <div class="clock-area glass-panel drag-handle">
       <AnimatedClock date-format="{Y}-{M}-{D}  星期{W}" />
     </div>
@@ -456,7 +456,7 @@ onUnmounted(() => {
   color: #1f2937;
 }
 
-/* 拖动手柄 */
+/* 拖动手柄：交给 Electron 原生窗口拖动（app-region） */
 .drag-handle {
   -webkit-app-region: drag;
   cursor: move;
@@ -594,7 +594,8 @@ onUnmounted(() => {
 }
 
 .table-row.row-empty {
-  opacity: 0.3;
+  /* 空行（没课的节次、没排人的值日）只压暗一点做区分，不要压得太狠导致看不清 */
+  opacity: 0.7;
 }
 
 /* 当前正在上的课：蓝色底 + 白字。
@@ -855,5 +856,111 @@ onUnmounted(() => {
   font-size: 12px;
   color: #9ca3af;
   padding: 10px 0;
+}
+
+/* Windows 深色主题（prefers-color-scheme 跟随系统主题）：文字转白，
+   同时把毛玻璃面板/描边/悬浮底色一并转为深色半透明，否则白字落在浅色面板上看不清。 */
+@media (prefers-color-scheme: dark) {
+  .desktop-widget {
+    /* 时钟（AnimatedClock 组件）通过这两个变量取色 */
+    --ac-time-color: #f8fafc;
+    --ac-date-color: #cbd5e1;
+    color: #f8fafc;
+    border-color: rgba(255, 255, 255, 0.14);
+    box-shadow:
+      0 4px 24px rgba(0, 0, 0, 0.35),
+      inset 0 1px 0 rgba(255, 255, 255, 0.12);
+  }
+
+  .glass-panel {
+    background: rgba(255, 255, 255, 0.08);
+    border-color: rgba(255, 255, 255, 0.14);
+    box-shadow:
+      inset 0 1px 0 rgba(255, 255, 255, 0.12),
+      0 2px 10px rgba(0, 0, 0, 0.25);
+  }
+
+  .countdown-item {
+    color: #f8fafc;
+  }
+
+  .next-class {
+    color: #93c5fd;
+  }
+
+  .panel-title {
+    color: #cbd5e1;
+    border-bottom-color: rgba(255, 255, 255, 0.14);
+  }
+
+  .panel-section {
+    color: #cbd5e1;
+    border-top-color: rgba(255, 255, 255, 0.12);
+  }
+
+  .col-full {
+    color: #f8fafc;
+  }
+
+  /* 节次号（课程面板左列的数字）与值日条目再亮一点 */
+  .row-num {
+    color: #ffffff;
+    font-weight: 500;
+  }
+
+  .col-duty-panel .duty-task {
+    color: #ffffff;
+  }
+
+  .col-duty-panel .duty-names {
+    color: #ffffff;
+  }
+
+  .panel-btn {
+    background: rgba(255, 255, 255, 0.12);
+    border-color: rgba(255, 255, 255, 0.2);
+    color: #e2e8f0;
+  }
+
+  .panel-btn:hover {
+    background: rgba(255, 255, 255, 0.22);
+  }
+
+  .app-item:hover {
+    background-color: rgba(255, 255, 255, 0.12);
+  }
+
+  .app-icon-fallback {
+    color: #e2e8f0;
+    background: rgba(255, 255, 255, 0.14);
+  }
+
+  .app-icon-add {
+    color: #94a3b8;
+    background: rgba(255, 255, 255, 0.08);
+    border-color: rgba(255, 255, 255, 0.2);
+  }
+
+  .app-add:hover .app-icon-add {
+    color: #93c5fd;
+    border-color: #93c5fd;
+  }
+
+  .app-name {
+    color: #e2e8f0;
+  }
+
+  .app-grip {
+    color: #94a3b8;
+  }
+
+  .app-grip:hover {
+    background: rgba(255, 255, 255, 0.12);
+    color: #93c5fd;
+  }
+
+  .apps-empty {
+    color: #94a3b8;
+  }
 }
 </style>

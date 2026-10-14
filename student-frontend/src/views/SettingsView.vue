@@ -31,7 +31,7 @@
       <div class="flex items-center justify-between mb-4">
         <h2 class="text-xl font-semibold text-text flex items-center gap-2"><IconGlyph name="calendar" :size="20" /> 学期设置</h2>
         <button
-          @click="addSemester"
+          @click="openAddSemester"
           :disabled="busySemester"
           class="bg-primary hover:bg-primary-hover text-text-inverse px-4 py-2 rounded transition-theme disabled:opacity-40 disabled:cursor-not-allowed"
         >增加学期</button>
@@ -48,6 +48,11 @@
             :disabled="!semesterId"
             class="bg-surface-hover text-text border border-border px-4 py-2 rounded transition-theme disabled:opacity-40 disabled:cursor-not-allowed"
           >修改学期名</button>
+          <button
+            @click="requestDeleteSemester"
+            :disabled="!semesterId || busySemester"
+            class="bg-danger text-text-inverse px-4 py-2 rounded transition-theme disabled:opacity-40 disabled:cursor-not-allowed"
+          >删除学期</button>
         </div>
         <div class="flex items-center gap-4 mb-6">
           <label class="text-sm font-medium text-text w-40 flex-shrink-0">学期开始时间</label>
@@ -64,6 +69,27 @@
         <p class="text-xs text-text-muted mt-4">座位快照按天补存与座位指数结算均以当前学期范围为准</p>
       </div>
     </div>
+
+    <!-- 增加学期（小弹窗：输入学期名；起止日期由后端按当前月份推算，之后可在上面调整） -->
+    <Teleport to="body">
+      <Transition name="dialog">
+        <div v-if="showAddSemester" class="fixed inset-0 bg-black/40 flex items-center justify-center z-[10003]" @click.self="showAddSemester = false">
+          <div class="bg-surface p-6 rounded-xl w-[26rem] shadow-card dialog-card border border-border">
+            <h3 class="text-lg font-bold text-text mb-4">增加学期</h3>
+            <input
+              v-model="newSemesterName"
+              placeholder="请输入学期名，如：2026秋季学期"
+              class="border border-border bg-surface text-text px-3 py-2 rounded w-full mb-4"
+              @keydown.enter="confirmAddSemester"
+            />
+            <div class="flex justify-end gap-2">
+              <button @click="showAddSemester = false" class="bg-surface-hover text-text border border-border px-4 py-2 rounded transition-theme cursor-pointer">取消</button>
+              <button @click="confirmAddSemester" class="bg-primary text-text-inverse px-4 py-2 rounded transition-theme cursor-pointer">确定</button>
+            </div>
+          </div>
+        </div>
+      </Transition>
+    </Teleport>
 
     <!-- 修改学期名（小弹窗：输入新名字，确定后即时保存） -->
     <Teleport to="body">
@@ -85,6 +111,18 @@
         </div>
       </Transition>
     </Teleport>
+
+    <!-- 删除学期确认 -->
+    <ConfirmDialog
+      :visible="showDeleteSemester"
+      title="删除学期"
+      :message="deleteSemesterMessage"
+      confirm-text="删除"
+      cancel-text="取消"
+      :show-cancel="true"
+      @confirm="confirmDeleteSemester"
+      @cancel="showDeleteSemester = false"
+    />
 
     <!-- ========== 撤销记录 ========== -->
     <div class="mb-6">
@@ -603,6 +641,9 @@ export default {
       semesterId: null,
       semesterNameDraft: '',
       showRenameSemester: false,
+      newSemesterName: '',
+      showAddSemester: false,
+      showDeleteSemester: false,
       busySemester: false,
       semesterStart: '',
       semesterEnd: '',
@@ -695,6 +736,16 @@ export default {
     // 当前选中的学期对象（未选中时取列表第一条）
     activeSemester() {
       return this.semesters.find(s => s.id === this.semesterId) || this.semesters[0] || null
+    },
+    // 删除学期确认文案：点明删的是哪个学期，删的是当前学期时额外提示会自动切到其它学期
+    deleteSemesterMessage() {
+      const cur = this.activeSemester
+      if (!cur) return ''
+      const name = cur.name || '未命名学期'
+      const tail = cur.is_current && this.semesters.length > 1
+        ? '<br>它是当前学期，删除后会自动切换到其它学期。'
+        : ''
+      return `确定删除学期「<b>${name}</b>」吗？删除后不可恢复。${tail}`
     },
     // 本学期时长（按天数折算周数，只读展示）
     semesterWeeks() {
@@ -798,12 +849,22 @@ export default {
         this.notifyError(err.response?.data?.error || '切换学期失败')
       }
     },
-    // 增加学期：名字与起止日期留空时由后端按当前月份推算默认值
-    async addSemester() {
+    // 增加学期：先弹小窗输入学期名（必填），起止日期留空由后端按当前月份推算默认值
+    openAddSemester() {
+      this.newSemesterName = ''
+      this.showAddSemester = true
+    },
+    async confirmAddSemester() {
+      const name = (this.newSemesterName || '').trim()
+      if (!name) {
+        this.notifyError('请输入学期名')
+        return
+      }
       if (this.busySemester) return
       this.busySemester = true
       try {
-        const res = await axios.post('/api/schedule/semesters', {})
+        const res = await axios.post('/api/schedule/semesters', { name })
+        this.showAddSemester = false
         await this.loadSemesterSettings()
         this.notifySuccess(`已增加学期：${res.data.name}`)
       } catch (err) {
@@ -841,6 +902,26 @@ export default {
         })
       } catch (err) {
         this.showAlert(err.response?.data?.error || '学期设置保存失败')
+      }
+    },
+    // 删除学期：先弹确认框，确认后调 DELETE；删的是当前学期时后端会自动把剩下的设为当前
+    requestDeleteSemester() {
+      if (!this.semesterId) return
+      this.showDeleteSemester = true
+    },
+    async confirmDeleteSemester() {
+      const id = this.semesterId
+      this.showDeleteSemester = false
+      if (!id || this.busySemester) return
+      this.busySemester = true
+      try {
+        await axios.delete(`/api/schedule/semesters/${id}`)
+        await this.loadSemesterSettings()
+        this.notifySuccess('学期已删除')
+      } catch (err) {
+        this.notifyError(err.response?.data?.error || '删除学期失败')
+      } finally {
+        this.busySemester = false
       }
     },
     // ==================== 撤销记录 ====================

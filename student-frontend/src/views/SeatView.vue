@@ -101,6 +101,26 @@
         </div>
 
         <div v-else-if="activeTab === 'history'" class="relative">
+          <!-- 座位指数（公平账本）：每人一根长条，按所坐位置权重逐天累加，截至所选周 -->
+          <div v-if="historySnapshot" class="mb-8">
+            <div class="flex flex-wrap items-center justify-between gap-3 mb-4">
+              <h2 class="text-xl font-semibold text-text flex items-center gap-2"><IconGlyph name="chart" :size="20" /> 座位指数</h2>
+              <span class="text-xs text-text-muted">按每人所坐位置的权重逐天累加 · 截至 {{ historySnapDate || '—' }}</span>
+            </div>
+            <div class="bg-surface rounded-lg border border-border p-6">
+              <div v-if="seatIndexRows.length" class="space-y-2.5">
+                <div v-for="(row, idx) in seatIndexRows" :key="row.name" class="flex items-center gap-3">
+                  <span class="w-20 text-sm text-text truncate text-right shrink-0">{{ row.name }}</span>
+                  <div class="flex-1 h-5 bg-surface-hover rounded overflow-hidden">
+                    <div class="h-full rounded bar-grow bg-primary" :style="{ width: seatIndexBarWidth(row) + '%', animationDelay: (idx * 90) + 'ms' }"></div>
+                  </div>
+                  <span class="w-14 text-sm font-bold text-right shrink-0 text-text">{{ row.value.toFixed(2) }}</span>
+                </div>
+              </div>
+              <div v-else class="text-center text-text-muted py-8 text-sm">暂无座位指数数据</div>
+            </div>
+          </div>
+
           <!-- 座位记录：标题 + 菜单栏（设置 / 刷新 / 导出 Excel / 补录记录） -->
           <h2 class="text-xl font-semibold text-text flex items-center gap-2 min-h-7 mb-3"><IconGlyph name="calendar" :size="20" /> 座位记录</h2>
           <div class="mb-4 flex flex-wrap items-center gap-3 opbar">
@@ -140,26 +160,6 @@
               >🗑 删除本周快照</button>
             </template>
           </WeekSwitcher>
-
-          <!-- 座位指数（公平账本）：每人一根长条，按所坐位置权重逐天累加，截至所选周 -->
-          <div v-if="historySnapshot" class="mt-8">
-            <div class="flex flex-wrap items-center justify-between gap-3 mb-4">
-              <h2 class="text-xl font-semibold text-text flex items-center gap-2"><IconGlyph name="chart" :size="20" /> 座位指数</h2>
-              <span class="text-xs text-text-muted">按每人所坐位置的权重逐天累加 · 截至 {{ historySnapDate || '—' }}</span>
-            </div>
-            <div class="bg-surface rounded-lg border border-border p-6">
-              <div v-if="seatIndexRows.length" class="space-y-2.5">
-                <div v-for="(row, idx) in seatIndexRows" :key="row.name" class="flex items-center gap-3">
-                  <span class="w-20 text-sm text-text truncate text-right shrink-0">{{ row.name }}</span>
-                  <div class="flex-1 h-5 bg-surface-hover rounded overflow-hidden">
-                    <div class="h-full rounded bar-grow bg-primary" :style="{ width: seatIndexBarWidth(row) + '%', animationDelay: (idx * 90) + 'ms' }"></div>
-                  </div>
-                  <span class="w-14 text-sm font-bold text-right shrink-0 text-text">{{ row.value.toFixed(2) }}</span>
-                </div>
-              </div>
-              <div v-else class="text-center text-text-muted py-8 text-sm">暂无座位指数数据</div>
-            </div>
-          </div>
         </div>
       </template>
     </Tabs>

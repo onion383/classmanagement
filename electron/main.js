@@ -63,7 +63,7 @@ const isDev = !app.isPackaged
 
 // 低版本系统提示调试开关：改为 1 时无条件显示提示画面（忽略真实系统版本与「不再提示」标记），
 // 便于本地反复预览；改为 0 恢复按真实系统版本判定。也可用环境变量 OS_WARN_FORCE=1 临时覆盖。
-const FORCE_OS_WARN = 1
+const FORCE_OS_WARN = 0
 
 // 首屏占位共享来源：index.html / setup.html 由 Vite 注入同一份（splash/），
 // dev 下主进程先加载的 inline loading 页也复用这两份文件，避免同款加载画面维护多份。
