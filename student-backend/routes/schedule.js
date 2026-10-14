@@ -99,11 +99,11 @@ function currentSemester() {
 }
 
 // 把当前学期的起止日期同步到 schedule_settings（镜像，供座位补存/座位指数读取）
+// 没有任何学期时清空镜像，避免沿用已被删除学期的旧日期
 function syncSemesterToSettings() {
   const cur = currentSemester();
-  if (!cur) return;
   db.prepare('UPDATE schedule_settings SET semester_start = ?, semester_end = ? WHERE id = 1')
-    .run(cur.start_date || '', cur.end_date || '');
+    .run(cur ? (cur.start_date || '') : '', cur ? (cur.end_date || '') : '');
 }
 
 // 学期列表（按开始日期倒序，未填日期的排最后）+ 当前学期
@@ -167,6 +167,24 @@ router.put('/semesters/:id', (req, res) => {
       .run(name, start_date, end_date, id);
     if (row.is_current) syncSemesterToSettings();
     res.json({ message: '学期已保存' });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// 删除学期：删的若是当前学期，自动把剩下的最新一条设为当前；一条不剩则清空镜像
+router.delete('/semesters/:id', (req, res) => {
+  try {
+    const id = Number(req.params.id);
+    const row = db.prepare('SELECT id, is_current FROM semesters WHERE id = ?').get(id);
+    if (!row) return res.status(404).json({ error: '学期不存在' });
+    db.prepare('DELETE FROM semesters WHERE id = ?').run(id);
+    if (row.is_current) {
+      const next = db.prepare('SELECT id FROM semesters ORDER BY start_date DESC, id DESC LIMIT 1').get();
+      if (next) db.prepare('UPDATE semesters SET is_current = 1 WHERE id = ?').run(next.id);
+    }
+    syncSemesterToSettings();
+    res.json({ message: '学期已删除' });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }

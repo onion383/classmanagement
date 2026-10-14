@@ -138,7 +138,21 @@ function showWidgetWindow() {
   if (widgetWindow && !widgetWindow.isDestroyed()) widgetWindow.show()
 }
 
-// 创建桌面小组件：常驻桌面、鼠标穿透、不挡应用
+// ===== 桌面小组件「常驻桌面最底层」：暂时搁置 =====
+// 目标（未达成）：小组件始终在所有应用窗口之下，点击它也不会被抬到最前面，同时仍可点击、可拖动。
+// 已实测的两条死路，别再重复踩：
+//   1) focusable:false —— Electron 会加 WS_EX_NOACTIVATE，该状态下窗口收不到鼠标输入，
+//      图标/按钮/拖动全部失效；
+//   2) SetWindowPos 到 HWND_BOTTOM —— 窗口被压到桌面 shell 窗口之下（桌面 shell 盖满全屏、
+//      对鼠标输入不透明）：窗口还看得见（shell 客户区透明），但点击全被 shell 吃掉，
+//      图标/按钮/拖动一并失效。
+// 待验证的第三条路（Rainmeter 等桌面挂件的做法，改日再试）：把窗口 SetParent 到桌面窗口
+// （Progman）使其成为「桌面层」子窗口——理论上天然位于所有应用窗口之下、点击不被抬到前台且
+// 仍可交互；挂载后需 SetWindowPos(HWND_TOP) 提到桌面层内部 z 序顶端（否则会落在桌面图标层
+// SHELLDLL_DefView/SysListView32 之下、点不动），并用 WindowFromPoint 沿父链校验，失败则
+// SetParent(hwnd, 0) 解挂退回普通窗口。当前按普通窗口显示（可点击、可拖动，但会盖住别的窗口）。
+
+// 创建桌面小组件：常驻桌面、不挡应用
 function createDesktopWidgetWindow() {
   if (desktopWidgetWindow && !desktopWidgetWindow.isDestroyed()) return
   desktopWidgetWindow = new BrowserWindow({
@@ -158,6 +172,9 @@ function createDesktopWidgetWindow() {
     minimizable: false,
     fullscreenable: false,
     show: true,
+    // 注意：这里不能用 focusable:false。Windows 下它会加 WS_EX_NOACTIVATE，实测该状态下窗口
+    // 收不到任何鼠标输入（软件图标、按钮全点不动，拖动也失效）。当前小组件按普通窗口显示，
+    // 保证可点击、可拖动（「常驻最底层」的尝试见上方注释，暂时搁置）。
     // 渲染进程安全配置见 web-prefs.js。桌面组件常驻需持续重绘，关闭后台节流
     webPreferences: buildWebPreferences({ devTools: true, backgroundThrottling: false })
   })
