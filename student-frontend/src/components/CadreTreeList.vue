@@ -165,10 +165,17 @@ export default {
     candidates() {
       const kw = String(this.addKeyword || '').toLowerCase().trim()
       const existing = new Set((this.node.members || []).map(m => String(m.student_name || '').trim()))
+      const lower = this.studentNameLower
       return this.allStudents.filter(s => {
         const name = String(s.姓名 ?? '')
-        return !existing.has(name.trim()) && (!kw || name.toLowerCase().includes(kw))
+        return !existing.has(name.trim()) && (!kw || (lower.get(s) || '').includes(kw))
       })
+    },
+    // 学生姓名小写缓存：只在名单变更时重建一次，编辑框每次按键不必逐项构造小写字符串
+    studentNameLower() {
+      const map = new Map()
+      for (const s of this.allStudents) map.set(s, String(s.姓名 ?? '').toLowerCase())
+      return map
     }
   },
   methods: {

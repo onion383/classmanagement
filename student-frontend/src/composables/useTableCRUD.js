@@ -55,7 +55,11 @@ export function useTableCRUD(apiBase, defaultFields, options = {}) {
     try { performance.measure(name, startMark) } catch (_) { /* 忽略 */ }
   }
 
-  const displayRows = computed(() => {
+  // 展示列表：过滤 + 排序 +（可选）插入新增行。
+  // 关键：**复用行对象引用**，不再逐行 {...} 拷贝。原来每次派生都为每行造新对象，
+  // 任何数据变化都会让所有行的 vnode 属性全变，触发整表重画（实测 ~29ms）；
+  // 复用引用后键控 diff 只更新真正变化的那一行。
+  const displayList = computed(() => {
     perfMark('perf:displayRows:start')
     let filtered = rows.value
     if (searchField.value && searchKeywordDebounced.value) {
@@ -77,29 +81,32 @@ export function useTableCRUD(apiBase, defaultFields, options = {}) {
         return String(va).localeCompare(String(vb), 'zh') * (sortOrder.value === 'asc' ? 1 : -1)
       })
     }
-    const list = filtered.map((s, idx) => ({
-      ...s,
-      _isNew: false,
-      _rowKey: s.id,
-      _displayIndex: idx + 1,
-    }))
-    const finish = (result) => {
+    // 序号列沿用旧口径：按「插入新增行之前」的顺序赋 1..n（新增行本身显示 '-'，占位 0）
+    const indexes = filtered.map((_, idx) => idx + 1)
+    const finish = (rowsOut, idxOut) => {
       perfMark('perf:displayRows:end')
       perfMeasure('displayRows', 'perf:displayRows:start', 'perf:displayRows:end')
-      return result
+      return { rows: rowsOut, indexes: idxOut }
     }
-    if (!newRow.value) return finish(list)
+    if (!newRow.value) return finish(filtered, indexes)
     const insertAt = newRow.value.atPosition
     let insertIdx
     if (insertAt === null || insertAt === undefined) {
-      insertIdx = list.length
+      insertIdx = filtered.length
     } else {
-      insertIdx = list.findIndex(s => s.position >= insertAt)
-      if (insertIdx === -1) insertIdx = list.length
+      insertIdx = filtered.findIndex(s => s.position >= insertAt)
+      if (insertIdx === -1) insertIdx = filtered.length
     }
-    list.splice(insertIdx, 0, newRow.value)
-    return finish(list)
+    const rowsOut = filtered.slice()
+    rowsOut.splice(insertIdx, 0, newRow.value)
+    const idxOut = indexes.slice()
+    idxOut.splice(insertIdx, 0, 0)
+    return finish(rowsOut, idxOut)
   })
+
+  const displayRows = computed(() => displayList.value.rows)
+  // 与 displayRows 对齐的序号数组：DynamicTable 用它渲染 position 列，避免把序号写回行对象
+  const displayIndexes = computed(() => displayList.value.indexes)
 
   const visibleFields = computed(() => {
     return fields.value.filter(f => f.name !== 'id' && f.name !== 'position')
@@ -139,7 +146,9 @@ export function useTableCRUD(apiBase, defaultFields, options = {}) {
       const res = await axios.get(`${apiBase}?_t=${Date.now()}`)
       const result = res.data
       if (Array.isArray(result.data)) {
-        rows.value = result.data
+        // 行对象自带展示字段（_rowKey/_isNew）：字段随行对象长期存在，
+        // 使派生列表可以复用行对象引用，单行变化时只重渲染那一行。
+        rows.value = result.data.map(r => ({ ...r, _rowKey: r.id, _isNew: false }))
         // 撤销用快照：独立浅拷贝，避免被后续 v-model 编辑污染
         rowsSnapshot.value = result.data.map(r => ({ ...r }))
         if (result.fields && result.fields.length > 0) {
@@ -156,6 +165,39 @@ export function useTableCRUD(apiBase, defaultFields, options = {}) {
       console.error(err)
       if (!rows.value.length) showAlert('无法加载数据')
     }
+  }
+
+  // 撤销/重做后按后端返回的结构化变更做本地增量应用，避免整表重拉与重建。
+  // 返回 true 表示已本地应用；返回 false 表示无法本地处理，调用方应回退全量 fetchRows()。
+  function applyUndoChange(change) {
+    if (!undoTableKey || !change || change.table !== undoTableKey) return false
+    const list = rows.value
+    const snap = rowsSnapshot.value
+    if (change.type === 'cell_update') {
+      const row = list.find(r => r.id === change.rowId)
+      if (!row) return false
+      row[change.field] = change.value
+      const s = snap.find(r => r.id === change.rowId)
+      if (s) s[change.field] = change.value
+      return true
+    }
+    if (change.type === 'row_upsert') {
+      const idx = list.findIndex(r => r.id === change.row.id)
+      if (idx === -1) list.push({ ...change.row })
+      else list[idx] = { ...change.row }
+      const sidx = snap.findIndex(r => r.id === change.row.id)
+      if (sidx === -1) snap.push({ ...change.row })
+      else snap[sidx] = { ...change.row }
+      return true
+    }
+    if (change.type === 'row_remove') {
+      const idx = list.findIndex(r => r.id === change.rowId)
+      if (idx === -1) return false
+      list.splice(idx, 1)
+      rowsSnapshot.value = snap.filter(r => r.id !== change.rowId)
+      return true
+    }
+    return false
   }
 
   function startEditCell(row, field) {
@@ -626,8 +668,8 @@ export function useTableCRUD(apiBase, defaultFields, options = {}) {
     sortField, sortOrder, searchField, searchKeyword, searchKeywordDebounced,
     dialogCallback, selectedCount, clipboard, selectedRowKeys,
     importDialogVisible, dedupeDialogVisible,
-    displayRows, visibleFields, allBusinessFields,
-    fetchRows, showAlert, showConfirm, onDialogConfirm, onDialogCancel,
+    displayRows, displayIndexes, visibleFields, allBusinessFields,
+    fetchRows, applyUndoChange, showAlert, showConfirm, onDialogConfirm, onDialogCancel,
     startEditCell, saveCell, validateValue,
     addNewRowAtBottom, insertRowAbove, insertRowBelow, createNewRow, cancelNewRow, saveNewRow,
     moveRow, deleteColumn, startAddColumn, confirmAddColumn,

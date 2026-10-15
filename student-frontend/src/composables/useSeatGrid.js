@@ -1,6 +1,7 @@
 import { ref, computed } from 'vue'
 import axios from 'axios'
 import { recordGridCellUndo, recordGridSnapshotUndo } from './useUndo.js'
+import { createRowReuseCache } from '../utils/rowReuse.js'
 
 // ==================== 座位网格几何辅助（纯函数，座位表与权重表共用） ====================
 export function generateColHeaders(cols, mode, showAisle) {
@@ -67,11 +68,13 @@ export function useSeatGrid(apiBase, options = {}) {
   const settings = ref({})
   const settingsVisible = ref(false)
   const currentEditExcludeIds = ref([])
+  // 行对象复用缓存：编辑一格时只重建真正变化的那一行，避免整表重画
+  const reuseRows = createRowReuseCache()
 
   // ==================== Computed ====================
   const colHeaders = computed(() => generateColHeaders(cols.value, mode.value, showAisle.value))
 
-  const displayRows = computed(() => buildSeatLikeRows(rows.value, cols.value, mode.value, showAisle.value, (r, c) => {
+  const displayRows = computed(() => reuseRows(buildSeatLikeRows(rows.value, cols.value, mode.value, showAisle.value, (r, c) => {
     const seatVal = seats.value[r]?.[c]
     let displayName = ''
     if (seatVal === null || seatVal === undefined) {
@@ -82,7 +85,7 @@ export function useSeatGrid(apiBase, options = {}) {
       displayName = seatVal
     }
     return { course: displayName, extra: { _studentId: seatVal } }
-  }))
+  })))
 
   const exportFields = computed(() => {
     const fields = [{ name: '行号' }]

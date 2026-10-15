@@ -21,9 +21,12 @@ const path = require('path')
 const fs = require('fs')
 const startupTimer = require('./startup-timer')
 const perf = require('./perf')
-const { resolveCompileCacheDir, getMasterKey, resolveDataDir, resolveThumbsDir, getDbMasterKey } = require('./config')
+const { getMasterKey, resolveDataDir, resolveThumbsDir, getDbMasterKey } = require('./config')
 
 const isDev = !app.isPackaged
+
+// 【启动剖析打点·仅开发模式】只在 dev 生效，打包版是空操作（不写控制台也不写时间线）
+const _profMark = (name) => { if (isDev) startupTimer.mark(name) }
 
 // 窗口引用出口：由 registerBackendIpc 注入（均为 getter，调用时取当前值）
 let getMainWindow = () => null
@@ -130,11 +133,13 @@ function getBackendPaths() {
 // 以 Electron 内置 Node 的纯 Node 模式运行后端，目标机无需安装 Node.js，
 // 实现免依赖分发（原生模块已通过 @electron/rebuild 针对 Electron ABI 重编译）。
 function compileBackendProcess() {
+  _profMark('【prof】compileBackendProcess 进入')
   const { backendDir, backendPath } = getBackendPaths()
   const dataDir = resolveDataDir()
   const thumbsDir = resolveThumbsDir()
   fs.mkdirSync(dataDir, { recursive: true })
   fs.mkdirSync(thumbsDir, { recursive: true })
+  _profMark('【prof】后端路径/目录准备完成')
 
   // 统一的输出/退出处理
   const onData = (chunk) => {
@@ -173,6 +178,7 @@ function compileBackendProcess() {
     // 让后端 fork 与 createMainWindow 的初始化真正并行推进。
     const { fork, execFile } = require('child_process')
     const spawnDev = (execPath) => {
+      _profMark('【prof】fork(dev) 调用前')
       const child = fork(backendPath, [], {
         cwd: backendDir,
         execPath,
@@ -185,8 +191,6 @@ function compileBackendProcess() {
           ALBUM_THUMBS_DIR: thumbsDir,
           SECURE_MASTER: getMasterKey(),
           DB_MASTER_KEY: getDbMasterKey(),
-          // 后端模块编译缓存：让后续启动跳过 require 模块的解析 + 编译
-          NODE_COMPILE_CACHE: resolveCompileCacheDir(),
         },
       })
       backendProcess = child
@@ -197,6 +201,7 @@ function compileBackendProcess() {
       child.on('exit', scheduleBackendRestart)
       child.on('disconnect', onDisconnect)
       child.on('message', onBackendMessage)
+      _profMark('【prof】fork(dev) 返回')
     }
     if (process.env.NODE_EXEC_PATH) {
       spawnDev(process.env.NODE_EXEC_PATH)
@@ -242,8 +247,6 @@ function compileBackendProcess() {
       ELECTRON_RUN_AS_NODE: '1',
       SECURE_MASTER: getMasterKey(),
       DB_MASTER_KEY: getDbMasterKey(),
-      // 后端模块编译缓存：让后续启动跳过 require 模块的解析 + 编译
-      NODE_COMPILE_CACHE: resolveCompileCacheDir(),
     },
   })
 

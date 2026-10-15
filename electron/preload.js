@@ -46,6 +46,8 @@ const validSendChannels = [
   'launch-open-download',
   // 版本更新：用户确认后重启并安装已下载的新版本
   'update-install',
+  // INP 归因落盘（仅开发模式）：渲染层探针把交互耗时汇总发主进程，追加写入数据目录 inp.log
+  'inp-report',
 ]
 
 // 白名单：仅允许以下请求-响应式动请求通道（对应 ipcMain.handle）

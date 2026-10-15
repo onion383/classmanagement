@@ -1,13 +1,57 @@
 <template>
   <div class="h-full">
     <!-- 顶部标题栏 -->
-    <div class="w-full bg-surface shadow-md rounded-xl mb-6 px-5 py-3 border border-border min-h-[4.5rem] flex items-center">
+    <div class="w-full bg-surface shadow-md rounded-xl mb-6 px-5 py-3 border border-border min-h-[4.5rem] flex items-center justify-between gap-4">
       <h1 class="text-2xl font-bold text-text flex items-center gap-2"><IconGlyph name="settings" /> 系统设置</h1>
+
+      <!-- 设置项搜索：输入即匹配，结果以悬浮弹窗形式出现在搜索框下方 -->
+      <div class="relative flex-shrink-0">
+        <input
+          ref="settingsSearchInput"
+          v-model="settingsSearch"
+          type="text"
+          @focus="onSettingsSearchFocus"
+          @blur="onSettingsSearchBlur"
+          @keydown.down.prevent="moveSearchActive(1)"
+          @keydown.up.prevent="moveSearchActive(-1)"
+          @keydown.enter.prevent="confirmSearchActive"
+          class="block h-9 w-64 pl-[60px] pr-9 border border-border rounded-lg bg-bg text-sm text-text focus:outline-none focus:border-primary"
+        />
+        <span class="absolute left-3 top-1/2 -translate-y-1/2 text-sm text-text-muted pointer-events-none">搜索</span>
+        <span class="absolute left-12 top-1/2 -translate-y-1/2 w-px h-4 bg-border pointer-events-none"></span>
+        <span class="absolute right-3 top-1/2 -translate-y-1/2 flex items-center text-text-muted pointer-events-none"><IconGlyph name="search" :size="16" tint="current" /></span>
+      </div>
+
+      <!-- 结果悬浮弹窗：与对话框窗口（删除确认 / 数据迁移等）同一套毛玻璃材质，即 .bg-surface 玻璃卡片。
+           Teleport 到 body 且行内强制 position: fixed：毛玻璃主题下 .bg-surface 会把 position 设为
+           relative 并附加 contain: paint，留在原位置会被裁切、退化为普通流内元素，无法悬浮。 -->
+      <Teleport to="body">
+        <div
+          v-if="settingsSearchOpen"
+          ref="settingsSearchPopup"
+          class="settings-search-popup fixed z-[10002] bg-surface rounded-lg shadow-card"
+          :style="{ position: 'fixed', left: searchPopup.left + 'px', top: searchPopup.top + 'px', width: searchPopup.width + 'px', height: '320px', overflow: 'auto' }"
+        >
+          <template v-if="settingsSearchResults.length">
+            <div
+              v-for="(item, idx) in settingsSearchResults"
+              :key="settingsSearch + '#' + item.id"
+              @mousedown.prevent="goToSettingsSection(item)"
+              @mouseenter="searchActiveIndex = idx"
+              class="settings-search-row px-3 py-2 text-sm text-text cursor-pointer truncate"
+              :class="idx === searchActiveIndex ? 'bg-info/20' : 'hover:bg-info/10'"
+              :style="{ animationDelay: Math.min(idx, 10) * 30 + 'ms' }"
+            >{{ item.label }}</div>
+          </template>
+          <!-- 无匹配时同样保留弹窗（只是内容为空提示），沿用同一套浮入动画 -->
+          <div v-else class="settings-search-row px-3 py-2 text-sm text-text-muted">无匹配的设置项</div>
+        </div>
+      </Teleport>
     </div>
 
     <!-- ========== 账号管理 ========== -->
     <div class="mb-6">
-      <h2 class="text-xl font-semibold text-text mb-4 flex items-center gap-2"><IconGlyph name="user" :size="20" /> 账号管理</h2>
+      <h2 id="settings-section-account" class="text-xl font-semibold text-text mb-4 flex items-center gap-2"><IconGlyph name="user" :size="20" /> 账号管理</h2>
 
       <div class="bg-surface rounded-lg border border-border p-6">
         <h3 class="text-lg font-semibold text-text mb-4">账号信息</h3>
@@ -29,7 +73,7 @@
     <!-- ========== 学期设置 ========== -->
     <div class="mb-6">
       <div class="flex items-center justify-between mb-4">
-        <h2 class="text-xl font-semibold text-text flex items-center gap-2"><IconGlyph name="calendar" :size="20" /> 学期设置</h2>
+        <h2 id="settings-section-semester" class="text-xl font-semibold text-text flex items-center gap-2"><IconGlyph name="calendar" :size="20" /> 学期设置</h2>
         <button
           @click="openAddSemester"
           :disabled="busySemester"
@@ -127,7 +171,7 @@
     <!-- ========== 撤销记录 ========== -->
     <div class="mb-6">
       <div class="flex items-center justify-between mb-4">
-        <h2 class="text-xl font-semibold text-text flex items-center gap-2"><IconGlyph name="undo" :size="20" /> 撤销记录</h2>
+        <h2 id="settings-section-undo" class="text-xl font-semibold text-text flex items-center gap-2"><IconGlyph name="undo" :size="20" /> 撤销记录</h2>
         <button
           v-if="hasUndoRecords"
           @click="clearUndo"
@@ -180,7 +224,7 @@
 
     <!-- ========== 主题设置 ========== -->
     <div class="mb-6">
-      <h2 class="text-xl font-semibold text-text mb-4 flex items-center gap-2"><IconGlyph name="palette" :size="20" /> 主题设置</h2>
+      <h2 id="settings-section-theme" class="text-xl font-semibold text-text mb-4 flex items-center gap-2"><IconGlyph name="palette" :size="20" /> 主题设置</h2>
 
       <div class="bg-surface rounded-lg border border-border p-6">
           <!-- 主题设置区：主题选择 + 图标样式 -->
@@ -302,7 +346,7 @@
 
     <!-- ========== 工具箱设置 ========== -->
     <div class="mb-6">
-      <h2 class="text-xl font-semibold text-text mb-4 flex items-center gap-2"><IconGlyph name="toolbox" :size="20" /> 工具箱设置</h2>
+      <h2 id="settings-section-toolbox" class="text-xl font-semibold text-text mb-4 flex items-center gap-2"><IconGlyph name="toolbox" :size="20" /> 工具箱设置</h2>
       <div class="bg-surface rounded-lg border border-border p-6">
         <div class="flex items-center gap-4">
           <label class="text-sm font-medium text-text w-40 flex-shrink-0">是否启用工具箱</label>
@@ -333,7 +377,7 @@
 
     <!-- ========== 桌面小组件设置 ========== -->
     <div class="mb-6">
-      <h2 class="text-xl font-semibold text-text mb-4 flex items-center gap-2"><IconGlyph name="monitor" :size="20" /> 桌面小组件设置</h2>
+      <h2 id="settings-section-widget" class="text-xl font-semibold text-text mb-4 flex items-center gap-2"><IconGlyph name="monitor" :size="20" /> 桌面小组件设置</h2>
       <div class="bg-surface rounded-lg border border-border p-6">
         <div class="flex items-center gap-4">
           <label class="text-sm font-medium text-text w-40 flex-shrink-0">启用桌面小组件</label>
@@ -348,7 +392,7 @@
 
     <!-- ========== 性能 ========== -->
     <div class="mb-6">
-      <h2 class="text-xl font-semibold text-text mb-4 flex items-center gap-2"><IconGlyph name="sliders" :size="20" /> 性能</h2>
+      <h2 id="settings-section-perf" class="text-xl font-semibold text-text mb-4 flex items-center gap-2"><IconGlyph name="sliders" :size="20" /> 性能</h2>
       <div class="bg-surface rounded-lg border border-border p-6">
         <!-- 四列等宽：前端 / 后端 / 小组件 / 全局（名称 / 状态 / 按钮 纵向排列） -->
         <div class="grid grid-cols-4 gap-4">
@@ -414,7 +458,7 @@
 
     <!-- ========== 保存路径设置 ========== -->
     <div class="mb-6">
-      <h2 class="text-xl font-semibold text-text mb-4 flex items-center gap-2"><IconGlyph name="folder" :size="20" /> 保存路径设置</h2>
+      <h2 id="settings-section-savepath" class="text-xl font-semibold text-text mb-4 flex items-center gap-2"><IconGlyph name="folder" :size="20" /> 保存路径设置</h2>
       <div class="bg-surface rounded-lg border border-border p-6 space-y-6">
         <div>
           <div class="flex items-center gap-4 mb-2">
@@ -445,7 +489,7 @@
 
     <!-- ========== 数据目录设置 ========== -->
     <div class="mb-6">
-      <h2 class="text-xl font-semibold text-text mb-4 flex items-center gap-2"><IconGlyph name="box" :size="20" /> 数据目录设置</h2>
+      <h2 id="settings-section-datadir" class="text-xl font-semibold text-text mb-4 flex items-center gap-2"><IconGlyph name="box" :size="20" /> 数据目录设置</h2>
       <div class="bg-surface rounded-lg border border-border p-6 space-y-6">
         <div>
           <div class="flex items-center gap-4 mb-2">
@@ -496,7 +540,7 @@
 
     <!-- ========== 危险操作 ========== -->
     <div class="mb-6">
-      <h2 class="text-xl font-semibold text-text mb-4 flex items-center gap-2"><IconGlyph name="trash" :size="20" /> 危险操作</h2>
+      <h2 id="settings-section-danger" class="text-xl font-semibold text-text mb-4 flex items-center gap-2"><IconGlyph name="trash" :size="20" /> 危险操作</h2>
       <div class="bg-surface rounded-lg border border-border p-6">
         <div class="flex items-center justify-between flex-wrap gap-4">
           <div class="space-y-2 text-text-secondary">
@@ -602,7 +646,9 @@ export default {
   components: { AppSelect, ConfirmDialog },
   // 懒加载弹窗保活：首次打开后保持挂载，关闭只降 visible，保留退出动画
   watch: {
-    'dialog.visible'(n) { if (n) this.dialogMounted = true }
+    'dialog.visible'(n) { if (n) this.dialogMounted = true },
+    // 关键字变化时高亮回到第一条（回车默认跳第一个）
+    settingsSearch() { this.searchActiveIndex = 0 }
   },
   data() {
     const themeStore = useThemeStore()
@@ -615,6 +661,49 @@ export default {
       glassOpacity,
       iconStyle,
       topbarColor,
+      // 设置项搜索：输入即匹配，结果以悬浮弹窗显示在搜索框下方，点击滚动到对应设置区
+      settingsSearch: '',
+      settingsSearchOpen: false,
+      // 悬浮弹窗的视口坐标（Teleport 到 body 后用 fixed 定位，需要手动计算）
+      searchPopup: { left: 0, top: 0, width: 0 },
+      // 搜索弹窗当前高亮项下标（方向键上下切换、回车跳转）
+      searchActiveIndex: 0,
+      // py 为标题拼音首字母，让单个字母（如 z → 主题设置）也能命中
+      settingsSections: [
+        { key: 'account',  label: '账号管理',       py: 'zhgl' },
+        { key: 'semester', label: '学期设置',       py: 'xqsz' },
+        { key: 'undo',     label: '撤销记录',       py: 'cxjl' },
+        { key: 'theme',    label: '主题设置',       py: 'ztsz' },
+        { key: 'toolbox',  label: '工具箱设置',     py: 'gjxsz' },
+        { key: 'widget',   label: '桌面小组件设置', py: 'zmxjjsz' },
+        { key: 'perf',     label: '性能',           py: 'xn' },
+        { key: 'savepath', label: '保存路径设置',   py: 'bcljsz' },
+        { key: 'datadir',  label: '数据目录设置',   py: 'sjmlsz' },
+        { key: 'danger',   label: '危险操作',       py: 'wxcz' },
+      ],
+      // 分区内的具体设置项：命中后滚动到该设置行（py 为标签拼音首字母）
+      settingsItems: [
+        { label: '选择学期',                 section: 'semester', py: 'xzq' },
+        { label: '学期开始时间',             section: 'semester', py: 'xqkssj' },
+        { label: '学期结束时间',             section: 'semester', py: 'xqjssj' },
+        { label: '本学期时长',               section: 'semester', py: 'bxqsc' },
+        { label: '主题',                     section: 'theme',    py: 'zt' },
+        { label: '图标样式',                 section: 'theme',    py: 'tbys' },
+        { label: '顶栏配色',                 section: 'theme',    py: 'dlps' },
+        { label: '提示合并',                 section: 'theme',    py: 'tshb' },
+        { label: '动画效果',                 section: 'theme',    py: 'dhxg' },
+        { label: '背景遮罩层（有自定义背景图时）', section: 'theme', py: 'bjzzc' },
+        { label: '组件透明玻璃层',           section: 'theme',    py: 'zjtmlbl' },
+        { label: '是否启用工具箱',           section: 'toolbox',  py: 'sfqygjx' },
+        { label: '本次启用工具箱',           section: 'toolbox',  py: 'bcqygjx' },
+        { label: '新U盘插入自动打开',        section: 'toolbox',  py: 'xupcrzddk' },
+        { label: '启用桌面小组件',           section: 'widget',   py: 'qyzmxjjs' },
+        { label: '注释截屏保存位置',         section: 'savepath', py: 'zsjpbcwz' },
+        { label: '一键截屏保存位置',         section: 'savepath', py: 'yjjpbcwz' },
+        { label: '数据库目录',               section: 'datadir',  py: 'sjkml' },
+        { label: '相册缩略图缓存',           section: 'datadir',  py: 'xcsltch' },
+        { label: '数据库加密',               section: 'datadir',  py: 'sjkjm' },
+      ],
       // 图标样式选项：彩色图标 / Emoji
       iconStyleOptions: [
         { value: 'color', label: '彩色图标' },
@@ -729,6 +818,21 @@ export default {
     isGlassTheme() {
       return this.currentTheme === 'glass' || this.currentTheme === 'glass2'
     },
+    // 设置项搜索结果：分区标题 + 分区内的具体设置项；关键字为空时全部列出
+    // 关键字按「标题文本 / 拼音首字母」匹配，单个汉字或单个字母都会即时搜索
+    // 渲染顺序为「先分区标题、再设置项」，逐条错开延迟直接取渲染下标 idx（见模板），
+    // 这样整份结果是一条连续的错开序列；行的 key 带关键字，每次搜索整批重新挂载，不会重启个别行。
+    settingsSearchResults() {
+      const q = this.settingsSearch.trim().toLowerCase()
+      const hit = (label, py) => !q || label.toLowerCase().includes(q) || py.includes(q)
+      const sections = this.settingsSections
+        .filter(s => hit(s.label, s.py))
+        .map(s => ({ id: 'section:' + s.key, label: s.label, key: s.key, section: '' }))
+      const items = this.settingsItems
+        .filter(i => hit(i.label, i.py))
+        .map(i => ({ id: 'item:' + i.section + ':' + i.label, label: i.label, key: i.section, section: i.section }))
+      return [...sections, ...items]
+    },
     // 学期下拉：值为学期 id，标签为学期名
     semesterOptions() {
       return this.semesters.map(s => ({ value: s.id, label: s.name || '未命名学期' }))
@@ -815,15 +919,135 @@ export default {
   },
   deactivated() {
     this._stopPerfPolling()
+    // 离开设置页时收起搜索弹窗并解除滚动监听，避免弹窗残留在 body 上
+    this._removeSearchPopupListeners()
+    this.settingsSearchOpen = false
+    clearTimeout(this._flashTimer)
+    cancelAnimationFrame(this._flashRaf)
   },
   beforeUnmount() {
     this.clearDeleteTimer()
     this._stopPerfPolling()
+    this._removeSearchPopupListeners()
+    clearTimeout(this._flashTimer)
+    cancelAnimationFrame(this._flashRaf)
     if (this._fromMainHandler) {
       window.electron?.off('from-main', this._fromMainHandler)
     }
   },
   methods: {
+    // 搜索框聚焦：展开悬浮弹窗，并同步坐标与滚动/缩放监听
+    onSettingsSearchFocus() {
+      this.searchActiveIndex = 0
+      this.settingsSearchOpen = true
+      this._updateSearchPopupPos()
+      window.addEventListener('scroll', this._updateSearchPopupPos, true)
+      window.addEventListener('resize', this._updateSearchPopupPos)
+    },
+    // 失焦收起悬浮弹窗（选项用 mousedown.prevent 保证点击先于失焦生效）
+    onSettingsSearchBlur() {
+      this.settingsSearchOpen = false
+      this._removeSearchPopupListeners()
+    },
+    _removeSearchPopupListeners() {
+      window.removeEventListener('scroll', this._updateSearchPopupPos, true)
+      window.removeEventListener('resize', this._updateSearchPopupPos)
+    },
+    // 按输入框当前位置计算弹窗的 fixed 坐标：右对齐、紧贴搜索框下方
+    _updateSearchPopupPos() {
+      const el = this.$refs.settingsSearchInput
+      if (!el) return
+      const r = el.getBoundingClientRect()
+      this.searchPopup = { left: r.left, top: r.bottom + 4, width: r.width }
+    },
+    // 方向键上下切换高亮项（到首/尾即停，并让高亮行滚入可视区）
+    moveSearchActive(step) {
+      const len = this.settingsSearchResults.length
+      if (!len) return
+      this.searchActiveIndex = Math.min(Math.max(this.searchActiveIndex + step, 0), len - 1)
+      this.$nextTick(() => {
+        const rows = this.$refs.settingsSearchPopup?.children
+        rows?.[this.searchActiveIndex]?.scrollIntoView({ block: 'nearest' })
+      })
+    },
+    // 回车：跳转到当前高亮项（默认第一条）
+    confirmSearchActive() {
+      const item = this.settingsSearchResults[this.searchActiveIndex]
+      if (item) this.goToSettingsSection(item)
+    },
+    // 点击 / 回车选中：清空关键字、收起悬浮弹窗，并按类型滚动到目标
+    goToSettingsSection(item) {
+      this.settingsSearch = ''
+      this.settingsSearchOpen = false
+      this._removeSearchPopupListeners()
+      this.$refs.settingsSearchInput?.blur()
+      const anchor = item.section
+        ? this._findSettingItemEl(item.section, item.label)
+        : document.getElementById('settings-section-' + item.key)
+      if (!anchor) return
+      // 分区标题对齐顶部，具体设置行居中，避免滚到后看不到目标行
+      anchor.scrollIntoView({ behavior: 'smooth', block: item.section ? 'center' : 'start' })
+      // 平滑滚动到位后再让目标毛玻璃块闪动（滚动途中就开始闪的话，头几次会被滚没）
+      this._flashAfterScrollSettled(anchor, item.section || item.key)
+    },
+    // 等目标位置稳定（滚动停止）后再触发闪动：逐帧比对目标顶部坐标，
+    // 连续若干帧不变即认为滚动结束。scrollIntoView 的 smooth 没有结束回调，故用此方式判定。
+    _flashAfterScrollSettled(anchor, sectionKey) {
+      cancelAnimationFrame(this._flashRaf)
+      let prevTop = null
+      let stableFrames = 0
+      const tick = () => {
+        if (!anchor.isConnected) { this._flashRaf = 0; return }
+        const top = Math.round(anchor.getBoundingClientRect().top)
+        if (prevTop !== null && Math.abs(top - prevTop) <= 1) stableFrames++
+        else stableFrames = 0
+        prevTop = top
+        // 约 6 帧（~100ms）不再位移，视为滚动已停
+        if (stableFrames >= 6) {
+          this._flashRaf = 0
+          this._flashSettingsBlock(anchor, sectionKey)
+          return
+        }
+        this._flashRaf = requestAnimationFrame(tick)
+      }
+      this._flashRaf = requestAnimationFrame(tick)
+    },
+    // 跳转后闪烁目标毛玻璃块：具体设置项闪它所在的玻璃卡；
+    // 分区标题本身不在玻璃卡内，改为闪该分区里的玻璃卡
+    _flashSettingsBlock(anchor, sectionKey) {
+      const cards = []
+      const card = anchor && anchor.closest ? anchor.closest('.bg-surface') : null
+      if (card) {
+        cards.push(card)
+      } else {
+        const wrapper = document.getElementById('settings-section-' + sectionKey)?.closest('.mb-6')
+        if (wrapper) {
+          // 只取最外层玻璃卡，避免嵌套的玻璃块一起闪、显得过重
+          const all = [...wrapper.querySelectorAll('.bg-surface')]
+          cards.push(...all.filter(c => !all.some(o => o !== c && o.contains(c))))
+        }
+      }
+      for (const el of cards) {
+        el.classList.remove('settings-flash')
+        // 强制重排，保证同一目标连续跳转时动画能重新触发
+        void el.offsetWidth
+        el.classList.add('settings-flash')
+      }
+      clearTimeout(this._flashTimer)
+      this._flashTimer = setTimeout(() => {
+        for (const el of cards) el.classList.remove('settings-flash')
+      }, 2600)
+    },
+    // 在分区内按标签文本定位具体设置行（同一分区内标签文本唯一）
+    _findSettingItemEl(section, label) {
+      const sectionEl = document.getElementById('settings-section-' + section)
+      const wrapper = sectionEl?.closest('.mb-6') || sectionEl?.parentElement
+      if (!wrapper) return null
+      for (const node of wrapper.querySelectorAll('label, h3, span')) {
+        if (node.textContent.trim() === label) return node
+      }
+      return null
+    },
     // ==================== 学期设置 ====================
     // 载入学期列表：默认选中当前学期（播种/新增学期时后端会把最新学期标为当前）
     async loadSemesterSettings() {
@@ -1507,3 +1731,51 @@ export default {
   },
 }
 </script>
+
+<style scoped>
+/* 设置项搜索跳转锚点：滚动到标题时留出上边距，避免紧贴内容区顶端 */
+[id^="settings-section-"] {
+  scroll-margin-top: 1.5rem;
+}
+
+/* 搜索弹窗：整体自下而上浮入 */
+.settings-search-popup {
+  animation: settingsSearchPopupIn 0.18s ease-out both;
+}
+@keyframes settingsSearchPopupIn {
+  from { opacity: 0; transform: translateY(10px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+/* 弹窗内每条记录：自下而上浮入，按顺序逐条错开（延迟由行内 animation-delay 控制） */
+.settings-search-row {
+  animation: settingsSearchRowIn 0.2s ease-out both;
+}
+@keyframes settingsSearchRowIn {
+  from { opacity: 0; transform: translateY(8px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+/* 搜索跳转后：目标毛玻璃块做一次柔和的蓝色荧光呼吸（2 次）。
+   关键帧只改颜色的透明度、不改阴影的模糊/扩散尺寸，再配 ease-in-out，
+   让荧光均匀地渐显渐隐（呼吸感），避免"撑开/突然亮起"的突变观感。
+   动画期的 box-shadow 会盖过主题里 .bg-surface 的常规 box-shadow（CSS 动画优先级高于普通声明），
+   故 keyframe 里带上原内高光，避免闪动时卡片失光。 */
+.settings-flash {
+  animation: settingsGlowFlash 0.8s ease-in-out 3;
+}
+@keyframes settingsGlowFlash {
+  0%, 100% {
+    box-shadow:
+      0 0 0 3px rgba(37, 99, 235, 0),
+      0 0 26px 8px rgba(37, 99, 235, 0),
+      inset 0 1px 0 rgba(255, 255, 255, 0.15);
+  }
+  50% {
+    box-shadow:
+      0 0 0 3px rgba(37, 99, 235, 0.55),
+      0 0 26px 8px rgba(37, 99, 235, 0.45),
+      inset 0 1px 0 rgba(255, 255, 255, 0.15);
+  }
+}
+</style>

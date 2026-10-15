@@ -593,7 +593,12 @@
   border-radius: 16px;
   background-color: rgba(255, 255, 255, calc(var(--glass-opacity, 0.4) + 0.02)) !important;
   backdrop-filter: blur(16px);
-  contain: paint;
+  /* contain: layout paint style —— 把布局/绘制/样式影响收窄到容器内部：
+     表格内部的重绘不再波及背后的毛玻璃重采样（外观完全不变）。
+     will-change: transform 让容器常驻独立合成层，模糊走合成器而非主线程重绘；
+     该容器本身已有 backdrop-filter，早就具备「fixed 包含块」语义，故无副作用。 */
+  contain: layout paint style;
+  will-change: transform;
   box-shadow:
     0 0 0 1px rgba(255, 255, 255, 0.12),
     0 0 16px rgba(255, 255, 255, 0.04),
@@ -700,11 +705,17 @@
   border-radius: 16px;
   background-color: rgba(255, 255, 255, 0.30) !important;
   backdrop-filter: blur(16px);
-  contain: paint;
+  /* 与 .table-scroll-wrapper 同法：布局/绘制/样式影响不出容器，内部重绘不再重采样毛玻璃 */
+  contain: layout paint style;
+  will-change: transform;
   box-shadow:
     0 0 0 1px rgba(255, 255, 255, 0.12),
     0 0 16px rgba(255, 255, 255, 0.04),
     inset 0 1px 0 rgba(255, 255, 255, 0.15);
+}
+/* 网格表内部滚动容器：滚动/编辑引起的重绘收窄在容器内 */
+:root:is([data-theme="glass"], [data-theme="win11"]) .grid-view-container > .overflow-auto {
+  contain: layout paint style;
 }
 :root:is([data-theme="glass"], [data-theme="win11"]) .grid-view-container::before {
   content: '';

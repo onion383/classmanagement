@@ -190,7 +190,8 @@ async function collectProcList() {
 
   // 内存口径统一改为「专用工作集」（与任务管理器「进程」页一致），逐进程按 pid 覆盖。
   // 计数器不可用（非 Windows / koffi 缺失）时 privWsKB 留空，前端回退到 Electron 自带口径。
-  const pwMap = getPrivateWorkingSetKB()
+  // 查询在 worker 线程里跑（首次 provider 载入约 0.7s），故此处 await，不阻塞主线程。
+  const pwMap = await getPrivateWorkingSetKB()
   if (pwMap) {
     for (const p of procs) {
       const kb = p.pid == null ? undefined : pwMap.get(p.pid)

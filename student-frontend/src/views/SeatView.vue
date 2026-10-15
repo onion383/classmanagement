@@ -277,6 +277,7 @@ import Tabs from '../components/base/Tabs.vue'
 import ViewSwitch from '../components/base/ViewSwitch.vue'
 import WeekSwitcher from '../components/base/WeekSwitcher.vue'
 import { useSeatGrid, buildSeatLikeRows, isAisleCol, getDisplayColCount } from '../composables/useSeatGrid.js'
+import { createRowReuseCache } from '../utils/rowReuse.js'
 import { useUndoShortcut, recordGridSnapshotUndo } from '../composables/useUndo.js'
 import { useNotification } from '../composables/useNotification.js'
 import { syncStudentNamesFromRows } from '../composables/useSyncStudentNames.js'
@@ -582,6 +583,8 @@ const WEIGHT_MIN = 0
 const WEIGHT_MAX = 1
 const weightLoaded = ref(false)
 const weightWeights = ref([]) // rows×cols 数字矩阵，null 表示空
+// 行对象复用缓存：编辑一格权重时只重建真正变化的那一行，避免整表重画
+const reuseWeightRows = createRowReuseCache()
 // 座位指数账本：学生 id → 截至「今日之前」累计的座位权重（供「位置公平」排表使用）
 const seatLedger = ref({})
 const weightRows = computed(() => (seatView.value === 'active' ? activeRows.value : masterRows.value))
@@ -611,7 +614,7 @@ function weightHeatFg(t) {
   const L = 0.2126 * lin(r) + 0.7152 * lin(g) + 0.0722 * lin(b)
   return L < 0.45 ? '#FFFFFF' : '#1E293B'
 }
-const weightDisplayRows = computed(() => buildSeatLikeRows(
+const weightDisplayRows = computed(() => reuseWeightRows(buildSeatLikeRows(
   weightRows.value, weightCols.value, weightMode.value, weightShowAisle.value,
   (r, c) => {
     const w = weightWeights.value[r]?.[c]
@@ -620,7 +623,7 @@ const weightDisplayRows = computed(() => buildSeatLikeRows(
     const t = weightMax.value > 0 ? w / weightMax.value : 0
     return { course: String(w), extra: { _bg: `rgb(${weightHeatRgb(t).join(', ')})`, _fg: weightHeatFg(t) } }
   }
-))
+)))
 
 // 尺寸（当前显示段的行列）变化时，把权重矩阵规整到 rows×cols：保留重叠、超出截断、不足补 null
 function resizeWeights() {
