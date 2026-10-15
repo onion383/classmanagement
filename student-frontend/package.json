@@ -18,6 +18,7 @@
     "jspdf-autotable": "^5.0.7",
     "marked": "^18.0.11",
     "pinia": "^3.0.4",
+    "pinyin-match": "^1.2.10",
     "sortablejs": "^1.15.7",
     "vue": "^3.5.32",
     "vue-router": "^5.0.6",

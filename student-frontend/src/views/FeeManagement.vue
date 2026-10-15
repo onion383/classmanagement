@@ -205,7 +205,7 @@
 </template>
 
 <script setup>
-import { ref, computed, watch, defineAsyncComponent } from 'vue'
+import { ref, computed, watch, onMounted, onActivated, getCurrentInstance, defineAsyncComponent } from 'vue'
 import axios from 'axios'
 import SearchBar from '../components/base/SearchBar.vue'
 import DynamicTable from '../components/tables/DynamicTable.vue'
@@ -213,6 +213,7 @@ import { useTableCRUD } from '../composables/useTableCRUD.js'
 import { useUndoShortcut } from '../composables/useUndo.js'
 import { useNotification } from '../composables/useNotification.js'
 import { resourceUrl } from '../utils/apiUrl'
+import { applyRouteRowFocus } from '../composables/useRowFocus.js'
 
 // 弹窗类组件懒加载：打开时才加载对应 chunk
 const ConfirmDialog = defineAsyncComponent(() => import('../components/base/ConfirmDialog.vue'))
@@ -267,6 +268,13 @@ const table = useTableCRUD(`${API_BASE}/fee-records`, DEFAULT_FIELDS, {
   undoTableKey: 'fee_records',
   protectedColumns: ['收据']
 })
+
+// 跨页定位：标题栏全局搜索点「班费记录」结果跳转 /fee?focus=<id> 时定位到该行
+const inst = getCurrentInstance()
+const applyFocus = () => applyRouteRowFocus(inst.proxy)
+onMounted(applyFocus)
+onActivated(applyFocus)
+watch(() => inst.proxy.$route.query.focus, applyFocus)
 
 const feeRecords = table.rows
 const {

@@ -154,6 +154,7 @@ import Tabs from '../components/base/Tabs.vue'
 import LeaveTimeline from '../components/base/LeaveTimeline.vue'
 import { useNotification } from '../composables/useNotification.js'
 import { recordRowInsert, recordRowUpdate, recordRowDelete, useUndoShortcut } from '../composables/useUndo.js'
+import { applyRouteRowFocus } from '../composables/useRowFocus.js'
 
 const loadAddActivityDialog = () => import('../components/dialogs/AddActivityDialog.vue')
 const AddActivityDialog = defineAsyncComponent(loadAddActivityDialog)
@@ -336,12 +337,29 @@ export default {
     cntDialogVisible(n) { if (n) this.cntDialogMounted = true },
     actExportVisible(n) { if (n) this.actExportMounted = true },
     cntExportVisible(n) { if (n) this.cntExportMounted = true },
-    'confirm.visible'(n) { if (n) this.confirmMounted = true }
+    'confirm.visible'(n) { if (n) this.confirmMounted = true },
+    // 跨页定位：标题栏全局搜索点「班级活动 / 倒计时」结果跳转 /activities?focus=<id>
+    '$route.query.focus'() { this._applyRowFocus() }
   },
   async created() {
     await this.loadAll()
   },
+  mounted() { this._applyRowFocus() },
+  activated() { this._applyRowFocus() },
   methods: {
+    // 跨页定位：活动/倒计时共用本页。倒计时结果带 countdown: 前缀，先切到倒计时页签再定位。
+    _applyRowFocus() {
+      applyRouteRowFocus(this, {
+        parse: (key) => {
+          if (key.startsWith('countdown:')) {
+            this.activeTab = 'countdown'
+            return key.slice('countdown:'.length)
+          }
+          this.activeTab = 'daily'
+          return key
+        }
+      })
+    },
     async loadAll() {
       this.loading = true
       try {

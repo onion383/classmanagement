@@ -420,6 +420,14 @@ router.post('/', (req, res) => {
   res.json({ id })
 })
 
+// 查询某 key 的撤销/重做可用态（供标题栏按钮显示禁用态与提示文案）
+router.get('/table/:key/status', (req, res) => {
+  const key = req.params.key
+  const u = db.prepare('SELECT label FROM undo_history WHERE key = ? AND dir = 1 ORDER BY id DESC LIMIT 1').get(key)
+  const r = db.prepare('SELECT label FROM undo_history WHERE key = ? AND dir = 0 ORDER BY id DESC LIMIT 1').get(key)
+  res.json({ canUndo: !!u, canRedo: !!r, undoLabel: u?.label || '', redoLabel: r?.label || '' })
+})
+
 // 按 key 撤销最近一条（dir 1 -> 0），供 Ctrl+Z 使用
 router.post('/table/:key/undo', async (req, res) => {
   const rec = db.prepare('SELECT id FROM undo_history WHERE key = ? AND dir = 1 ORDER BY id DESC LIMIT 1').get(req.params.key)

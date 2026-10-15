@@ -19,6 +19,7 @@
     <div v-if="albums.length > 1" class="flex gap-2 mb-4 flex-wrap">
       <button
         v-for="a in albums" :key="a.id"
+        :data-row-id="a.id"
         @click="selectAlbum(a.id)"
         class="px-4 py-2 rounded transition-theme text-sm"
         :class="activeAlbumId === a.id ? 'bg-primary text-text-inverse' : 'bg-surface text-text border border-border hover:bg-surface-hover'"
@@ -264,9 +265,10 @@
 </template>
 
 <script setup>
-import { ref, computed, nextTick, onMounted, onBeforeUnmount } from 'vue'
+import { ref, computed, nextTick, onMounted, onActivated, onBeforeUnmount, getCurrentInstance, watch } from 'vue'
 import axios from 'axios'
 import { useNotification } from '../composables/useNotification.js'
+import { applyRouteRowFocus } from '../composables/useRowFocus.js'
 import { useUndoShortcut } from '../composables/useUndo.js'
 import VideoThumb from '../components/import-export/VideoThumb.vue'
 import AppSelect from '../components/base/AppSelect.vue'
@@ -449,6 +451,19 @@ async function loadPhotos(first = true) {
 function selectAlbum(id) {
   activeAlbumId.value = id
   loadPhotos()
+}
+
+// 跨页定位：/album?focus=<相册id>
+const inst = getCurrentInstance()
+function applyFocus() {
+  applyRouteRowFocus(inst.proxy, {
+    parse: (key) => {
+      const id = Number(key)
+      if (!albums.value.some((a) => a.id === id)) return null
+      if (activeAlbumId.value !== id) selectAlbum(id)
+      return key
+    },
+  })
 }
 
 function openAdd() {
@@ -865,7 +880,11 @@ onMounted(async () => {
   await loadAlbums()
   await nextTick()
   measure()
+  applyFocus()
 })
+
+onActivated(applyFocus)
+watch(() => inst.proxy.$route.query.focus, applyFocus)
 
 onBeforeUnmount(() => {
   window.removeEventListener('resize', onResize)

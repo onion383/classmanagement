@@ -167,6 +167,7 @@ import DynamicTable from '../components/tables/DynamicTable.vue'
 import { useNotification } from '../composables/useNotification.js'
 import { recordCellUndo, recordRowInsert, recordRowDelete, recordRowUpdate, useUndoShortcut } from '../composables/useUndo.js'
 import { formatDate } from '../utils/dateTime.js'
+import { applyRouteRowFocus } from '../composables/useRowFocus.js'
 
 // 弹窗类组件懒加载：打开时才加载对应 chunk
 const loadAddScoreDialog = () => import('../components/dialogs/AddScoreDialog.vue')
@@ -195,7 +196,9 @@ export default {
   watch: {
     addDialogVisible(n) { if (n) this.addDialogMounted = true },
     exportVisible(n) { if (n) this.exportMounted = true },
-    'confirm.visible'(n) { if (n) this.confirmMounted = true }
+    'confirm.visible'(n) { if (n) this.confirmMounted = true },
+    // 跨页定位：标题栏全局搜索点「加扣分记录」结果跳转 /scores?focus=<id>
+    '$route.query.focus'() { this._applyRowFocus() }
   },
   data() {
     return {
@@ -351,7 +354,27 @@ export default {
   async created() {
     await this.loadAll()
   },
+  mounted() { this._applyRowFocus() },
+  activated() { this._applyRowFocus() },
   methods: {
+    // 跨页定位：命中记录在个人/小组哪一份数据里，就切到对应加分对象与「加分统计」页签，
+    // 再滚动到目标行并高亮闪动。数据尚未加载时返回 null，由 helper 安排重试。
+    _applyRowFocus() {
+      applyRouteRowFocus(this, {
+        parse: (key) => {
+          const id = Number(key)
+          const mode = this.scores.some(r => r.id === id) ? 'personal'
+            : this.groupScores.some(r => r.id === id) ? 'group' : null
+          if (!mode) return null
+          if (this.scoreMode !== mode) {
+            this.scoreMode = mode
+            this.buildScoreRows()
+          }
+          this.activeTab = 'stats'
+          return key
+        }
+      })
+    },
     async loadAll() {
       this.loading = true
       try {

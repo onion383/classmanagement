@@ -129,6 +129,7 @@ function startServer(port) {
       () => { app.use('/api/duty', auth(['teacher']), require('./routes/duty')); },
       () => { app.use('/api/widget-settings', auth(['teacher']), require('./routes/widgetSettings')); },
       () => { app.use('/api/undo', auth(['teacher']), require('./routes/undo')); },
+      () => { app.use('/api/search', auth(['teacher']), require('./routes/search')); },
       () => { app.use('/api/activities', auth(['teacher']), require('./routes/activities')); },
       () => { app.use('/api/countdowns', auth(['teacher']), require('./routes/countdowns')); },
       () => { app.use('/api/cadres', auth(['teacher']), require('./routes/cadres')); },
