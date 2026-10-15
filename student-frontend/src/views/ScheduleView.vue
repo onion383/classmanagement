@@ -21,7 +21,8 @@
             </div>
 
             <GridView
-              :title="activeTitle"    
+              :title="activeTitle"
+              :anchorPrefix="'s'"
               :colHeaders="activeColHeaders"
               :rows="activeDisplayRows"
               :showPeriodColumn="true"
@@ -72,6 +73,7 @@
             </div>
 
             <GridView
+              :anchorPrefix="'m'"
               :colHeaders="masterColHeaders"
               :rows="masterDisplayRows"
               :showPeriodColumn="true"
@@ -203,6 +205,7 @@ import WeekSwitcher from '../components/base/WeekSwitcher.vue';
 import { useNotification } from '../composables/useNotification.js';
 import { useUndoShortcut, recordGridCellUndo, recordGridSnapshotUndo } from '../composables/useUndo.js';
 import { createRowReuseCache } from '../utils/rowReuse.js';
+import { applyRouteRowFocus } from '../composables/useRowFocus.js';
 
 // 弹窗类组件懒加载：打开时才加载对应 chunk。loader 抽出为命名函数，
 // 可用 v-preload="loadXxx" 在悬停按钮时预取，点击时即时弹出。
@@ -337,6 +340,8 @@ export default {
         }
       }
     },
+    // 跨页定位：/schedule?focus=s:节次:周几（s=实行课表，m=一般课表）→ 切到课程表页签并高亮该格
+    '$route.query.focus'() { this._applyRowFocus() },
     // 懒加载弹窗保活：首次打开后保持挂载，关闭只降 visible，保留退出动画
     masterSettingsVisible(n) { if (n) this.masterSettingsMounted = true },
     masterExportVisible(n) { if (n) this.masterExportMounted = true },
@@ -605,6 +610,15 @@ export default {
     },
 
     // 课表单元格里是否有实际课程内容（行结构始终存在，不能用行数判空）
+    _applyRowFocus() {
+      applyRouteRowFocus(this, {
+        parse: (key) => {
+          if (!/^[sm]:\d+:\d+$/.test(key)) return null
+          if (this.activeTab !== 'schedule') this.activeTab = 'schedule'
+          return key
+        },
+      })
+    },
     hasScheduleData(cells) {
       return (cells || []).some(row => Array.isArray(row) && row.some(c => {
         const v = typeof c === 'string' ? c : (c && c.course)
@@ -1000,6 +1014,10 @@ export default {
     this.loadMaster();
     this.loadActive();
     this.fetchHistoryWeeks();
+    this._applyRowFocus();
+  },
+  activated() {
+    this._applyRowFocus();
   }
 };
 </script>

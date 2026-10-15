@@ -648,7 +648,9 @@ export default {
   watch: {
     'dialog.visible'(n) { if (n) this.dialogMounted = true },
     // 关键字变化时高亮回到第一条（回车默认跳第一个）
-    settingsSearch() { this.searchActiveIndex = 0 }
+    settingsSearch() { this.searchActiveIndex = 0 },
+    // 跨页定位：其他页面（如标题栏全局搜索）跳转到 /settings?focus=... 时定位到目标设置
+    '$route.query.focus'() { this._applyRouteFocus() }
   },
   data() {
     const themeStore = useThemeStore()
@@ -916,6 +918,8 @@ export default {
   // 必须在这里停掉轮询，否则离开设置页后仍会每 1.8s 采样一次（常驻开销）。
   activated() {
     this._startPerfPolling()
+    // 首次进入（或被缓存的页被重新激活）时若 URL 带 focus，定位到目标设置
+    this._applyRouteFocus()
   },
   deactivated() {
     this._stopPerfPolling()
@@ -1037,6 +1041,25 @@ export default {
       this._flashTimer = setTimeout(() => {
         for (const el of cards) el.classList.remove('settings-flash')
       }, 2600)
+    },
+    // 跨页定位：其他页面（标题栏全局搜索等）跳转 /settings?focus=section 或 section|label 时，
+    // 滚动到目标分区/设置行并闪动其毛玻璃块。
+    // 定位成功后清掉 query，避免回退/刷新时重复定位；`_focusSig` 去重防止 watch 与 activated 重复执行。
+    _applyRouteFocus() {
+      const focus = this.$route.query.focus
+      if (!focus) { this._focusSig = ''; return }
+      if (focus === this._focusSig) return
+      const [section, label] = String(focus).split('|')
+      const anchor = label
+        ? this._findSettingItemEl(section, label)
+        : document.getElementById('settings-section-' + section)
+      // DOM 尚未就绪（watch 早于 activated）时先返回，由 activated 再试一次
+      if (!anchor) return
+      this._focusSig = focus
+      this.$router.replace({ path: '/settings' })
+      // 分区标题对齐顶部，具体设置行居中，避免滚到后看不到目标行
+      anchor.scrollIntoView({ behavior: 'smooth', block: label ? 'center' : 'start' })
+      this._flashAfterScrollSettled(anchor, section)
     },
     // 在分区内按标签文本定位具体设置行（同一分区内标签文本唯一）
     _findSettingItemEl(section, label) {
@@ -1221,8 +1244,8 @@ export default {
     showAlert(msg) {
       this.dialog = { visible: true, message: msg, type: 'alert', showCancel: false }
     },
-    showConfirm(msg, onConfirm) {
-      this.dialog = { visible: true, message: msg, type: 'confirm', showCancel: true }
+    showConfirm(msg, onConfirm, confirmText) {
+      this.dialog = { visible: true, message: msg, type: 'confirm', showCancel: true, confirmText }
       this.dialogCallback = onConfirm
     },
     onDialogConfirm() {
@@ -1272,11 +1295,11 @@ export default {
       }
     },
     confirmLogout() {
-      this.showConfirm('确定要退出登录吗？', () => {
+      this.showConfirm('确认退出登录？', () => {
         localStorage.removeItem('token')
         localStorage.removeItem('currentUser')
         this.$router.push('/login')
-      })
+      }, '确认')
     },
     // 打开「删除账号」警告弹窗：确定按钮先置灰，10 秒倒计时结束后才可点击
     openDeleteAccount() {

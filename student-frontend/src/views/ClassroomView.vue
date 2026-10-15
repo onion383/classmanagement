@@ -144,7 +144,7 @@
 </template>
 
 <script setup>
-import { ref, computed, watch, defineAsyncComponent } from 'vue'
+import { ref, computed, watch, onMounted, onActivated, getCurrentInstance, defineAsyncComponent } from 'vue'
 import axios from 'axios'
 import SearchBar from '../components/base/SearchBar.vue'
 import DynamicTable from '../components/tables/DynamicTable.vue'
@@ -152,6 +152,7 @@ import Tabs from '../components/base/Tabs.vue'
 import { useTableCRUD } from '../composables/useTableCRUD.js'
 import { useUndoShortcut } from '../composables/useUndo.js'
 import { useNotification } from '../composables/useNotification.js'
+import { applyRouteRowFocus } from '../composables/useRowFocus.js'
 
 // 学生信息 / 班干部管理 Tab
 const tabsList = [
@@ -206,6 +207,16 @@ const table = useTableCRUD(`${API_BASE}/students`, DEFAULT_FIELDS, {
   protectedColumns: ['学号', '姓名'],
   undoTableKey: 'students'
 })
+
+// 跨页定位：标题栏全局搜索点「学生」结果跳转 /students?focus=<id> 时，
+// 先切回「学生信息」页签，再滚动到目标行并高亮闪动
+const inst = getCurrentInstance()
+const applyFocus = () => applyRouteRowFocus(inst.proxy, {
+  parse: (key) => { activeTab.value = 'students'; return key }
+})
+onMounted(applyFocus)
+onActivated(applyFocus)
+watch(() => inst.proxy.$route.query.focus, applyFocus)
 
 // 为了兼容原有模板，创建别名
 const students = table.rows

@@ -233,6 +233,7 @@ import LeaveTimeline from '../components/base/LeaveTimeline.vue'
 import { useNotification } from '../composables/useNotification.js'
 import { recordCellUndo, useUndoShortcut } from '../composables/useUndo.js'
 import { formatDate, formatDateTime } from '../utils/dateTime.js'
+import { applyRouteRowFocus } from '../composables/useRowFocus.js'
 
 // 弹窗类组件懒加载：打开时才加载对应 chunk
 const loadAddLeaveDialog = () => import('../components/dialogs/AddLeaveDialog.vue')
@@ -265,7 +266,9 @@ export default {
     addDialogVisible(n) { if (n) this.addDialogMounted = true },
     exportVisible(n) { if (n) this.exportMounted = true },
     'confirm.visible'(n) { if (n) this.confirmMounted = true },
-    overdueDialogVisible(n) { if (n) this.overdueDialogMounted = true }
+    overdueDialogVisible(n) { if (n) this.overdueDialogMounted = true },
+    // 跨页定位：标题栏全局搜索点「请假记录」结果跳转 /leaves?focus=<id>
+    '$route.query.focus'() { this._applyRowFocus() }
   },
   data() {
     return {
@@ -389,7 +392,13 @@ export default {
   beforeUnmount() {
     if (this._overdueTimer) clearInterval(this._overdueTimer)
   },
+  mounted() { this._applyRowFocus() },
+  activated() { this._applyRowFocus() },
   methods: {
+    // 跨页定位：切到「请假记录」页签后滚动到目标行并高亮闪动
+    _applyRowFocus() {
+      applyRouteRowFocus(this, { parse: (key) => { this.activeTab = 'records'; return key } })
+    },
     // 时间段展示：同日显示 "M-D H:mm~H:mm"，跨天显示完整起止
     formatRange(s, e) {
       s = s || ''

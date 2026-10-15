@@ -35,10 +35,7 @@
 import { ref, watch } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import { storeToRefs } from 'pinia'
-import {
-  Users, Network, CalendarDays, Coins, Armchair, Broom, BedDouble, Medal,
-  Images, PartyPopper, Bot, Settings, Info, Home,
-} from '@lucide/vue'
+import { PAGE_GROUPS as navGroups } from '../../config/searchIndex.js'
 import { useThemeStore } from '../../stores/theme'
 import { prefetchRoute } from '../../utils/routePrefetch.js'
 
@@ -61,48 +58,6 @@ function isSelected(to) {
 
 // 图标样式跟随主题设置：'lucide' 线性图标 | 'emoji' 表情
 const { iconStyle } = storeToRefs(useThemeStore())
-
-const navGroups = [
-  {
-    title: '概览',
-    items: [
-      { to: '/',              label: '班级概览', emoji: '🏠', color: '#10b981', lucide: Home },
-    ],
-  },
-  {
-    title: '基础信息',
-    items: [
-      { to: '/students',      label: '学生管理', emoji: '📚', color: '#60a5fa', lucide: Users },
-      { to: '/group-manage',   label: '分组管理', emoji: '👥', color: '#818cf8', lucide: Network },
-      { to: '/schedule',       label: '课程表',   emoji: '📅', color: '#22d3ee', lucide: CalendarDays },
-    ],
-  },
-  {
-    title: '核心管理',
-    items: [
-      { to: '/fee',            label: '班费管理', emoji: '💰', color: '#fbbf24', lucide: Coins },
-      { to: '/seats',          label: '座位管理', emoji: '🪑', color: '#fb923c', lucide: Armchair },
-      { to: '/duty',           label: '卫生值日', emoji: '🧹', color: '#34d399', lucide: Broom },
-      { to: '/leaves',         label: '请假管理', emoji: '🛌', color: '#a78bfa', lucide: BedDouble },
-      { to: '/scores',         label: '加分管理', emoji: '🏅', color: '#f87171', lucide: Medal },
-    ],
-  },
-  {
-    title: '活动中心',
-    items: [
-      { to: '/album',          label: '学生相册', emoji: '📷', color: '#f472b6', lucide: Images },
-      { to: '/activities',     label: '班级活动', emoji: '🎉', color: '#fb7185', lucide: PartyPopper },
-    ],
-  },
-  {
-    title: '系统管理',
-    items: [
-      { to: '/ai-assistant',   label: 'AI 助手', emoji: '🤖', color: '#38bdf8', lucide: Bot },
-      { to: '/settings',       label: '系统设置', emoji: '⚙️', color: '#94a3b8', lucide: Settings },
-      { to: '/about',          label: '关于软件', emoji: 'ℹ️', color: '#cbd5e1', lucide: Info },
-    ],
-  },
-]
 
 function onNavOver(e) {
   const link = e.target.closest('a[href]')

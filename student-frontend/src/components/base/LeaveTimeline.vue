@@ -22,6 +22,7 @@
       <div
         v-for="node in visibleNodes"
         :key="node.key"
+        :data-row-id="node.key"
         class="timeline-row content-visibility-auto"
       >
         <div class="timeline-marker" :style="markerStyle(node)"></div>

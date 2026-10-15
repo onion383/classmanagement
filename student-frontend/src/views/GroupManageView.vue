@@ -45,6 +45,7 @@
           <!-- 单个宿舍小组小表格卡片 -->
           <div
             v-for="g in sec.groups" :key="g.id"
+            :data-row-id="g.id"
             class="bg-surface rounded-xl border border-border overflow-hidden w-full flex flex-col"
           >
             <div class="flex items-center justify-between px-3 py-2 bg-primary/5 border-b border-border">
@@ -104,6 +105,7 @@
     <div v-else class="flex flex-wrap gap-4 content-start">
       <div
         v-for="g in active.groups" :key="g.id"
+        :data-row-id="g.id"
         class="bg-surface rounded-xl border border-border overflow-hidden w-80 flex flex-col"
       >
         <div class="flex items-center justify-between px-3 py-2 bg-primary/5 border-b border-border">
@@ -360,12 +362,13 @@
 </template>
 
 <script setup>
-import { ref, reactive, computed, onMounted, nextTick, defineAsyncComponent } from 'vue';
+import { ref, reactive, computed, onMounted, onActivated, nextTick, getCurrentInstance, watch, defineAsyncComponent } from 'vue';
 import axios from 'axios';
 import Tabs from '../components/base/Tabs.vue';
 import AppSelect from '../components/base/AppSelect.vue';
 import { useNotification } from '../composables/useNotification';
 import { useUndoShortcut } from '../composables/useUndo.js';
+import { applyRouteRowFocus } from '../composables/useRowFocus.js';
 
 // 弹窗类组件懒加载：打开时才加载对应 chunk
 const ConfirmDialog = defineAsyncComponent(() => import('../components/base/ConfirmDialog.vue'));
@@ -1065,7 +1068,31 @@ async function openExport() {
   exportVisible.value = true;
 }
 
-onMounted(() => { loadAll(); fetchStudents(); });
+// 跨页定位：标题栏全局搜索点「分组」结果跳转 /group-manage?focus=dim:<dimId>:<groupId>。
+// 组可能不在当前维度下：先切到其所属维度（异步加载），加载完成后再滚动并高亮该组卡片。
+const inst = getCurrentInstance();
+let pendingDim = null;
+function applyFocus() {
+  applyRouteRowFocus(inst.proxy, {
+    parse: (key) => {
+      const [tag, dimId, gid] = String(key).split(':');
+      if (tag !== 'dim' || !gid) return null;
+      if (String(activeDimId.value) !== String(dimId)) {
+        if (pendingDim !== String(dimId)) {
+          pendingDim = String(dimId);
+          selectDim(dimId); // 异步；本次返回 null，等维度加载后再由 helper 重试定位
+        }
+        return null;
+      }
+      pendingDim = null;
+      return gid;
+    }
+  });
+}
+
+onMounted(async () => { await loadAll(); fetchStudents(); applyFocus(); });
+onActivated(applyFocus);
+watch(() => inst.proxy.$route.query.focus, applyFocus);
 </script>
 
 <style scoped>

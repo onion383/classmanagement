@@ -20,6 +20,7 @@
     "mammoth": "^1.12.1",
     "multer": "^2.2.0",
     "pdf-parse": "^2.4.5",
+    "pinyin-match": "^1.2.10",
     "sharp": "^0.35.3",
     "trash": "^10.1.1",
     "xlsx": "^0.18.5"

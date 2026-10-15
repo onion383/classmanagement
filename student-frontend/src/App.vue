@@ -3,6 +3,31 @@
     <!-- 自绘标题栏（所有主题统一）：主窗口为无边框透明窗口，标题栏承载窗口控制，整条可拖动。
      应用名已放在侧边栏顶部，标题栏本身不再显示文字。 -->
     <div class="window-title-bar flex-shrink-0 select-none" style="height:44px;">
+      <!-- 左侧：撤销 / 重做 / 全局搜索（登录页隐藏，保持干净） -->
+      <div v-if="$route.path !== '/login'" class="titlebar-left flex items-center" style="gap:6px; padding-left:10px; height:100%;">
+        <button class="tb-btn" :disabled="!undoState.canUndo || undoState.busy" :title="undoTitle" @mouseenter="onUndoHover" @click="onUndo">
+          <Undo2 :size="15" stroke-width="1.8" />
+        </button>
+        <button class="tb-btn" :disabled="!undoState.canRedo || undoState.busy" :title="redoTitle" @mouseenter="onUndoHover" @click="onRedo">
+          <Redo2 :size="15" stroke-width="1.8" />
+        </button>
+        <button class="tb-btn" title="搜索（页面 / 设置）" v-preload="preloadSearchDialog" @click="searchOpen = true">
+          <Search :size="15" stroke-width="2" />
+        </button>
+        <button class="tb-btn" title="切换主题" v-preload="preloadThemePickerDialog" @click="themeOpen = true">
+          <Palette :size="15" stroke-width="1.8" />
+        </button>
+        <button class="tb-btn" title="账户" v-preload="preloadAccountDialog" @click="accountOpen = true">
+          <User :size="15" stroke-width="1.8" />
+        </button>
+        <button class="tb-btn" title="系统设置" @click="goToSettings">
+          <Settings :size="15" stroke-width="1.8" />
+        </button>
+        <button class="tb-btn" title="关于软件" @click="goToAbout">
+          <Info :size="15" stroke-width="1.8" />
+        </button>
+      </div>
+
       <div class="window-controls flex items-center" style="height:100%;">
         <button class="win-btn" title="最小化" @click="winMinimize">
           <Minus :size="14" stroke-width="1.5" />
@@ -15,6 +40,15 @@
         </button>
       </div>
     </div>
+
+    <!-- 标题栏全局搜索弹窗（懒加载组件，自包含 Teleport/Transition） -->
+    <SearchDialog :visible="searchOpen" @close="searchOpen = false" />
+
+    <!-- 标题栏「切换主题」弹窗：复用引导页的主题卡片 + 动画开关，点主题即时生效 -->
+    <ThemePickerDialog :visible="themeOpen" @close="themeOpen = false" />
+
+    <!-- 标题栏「账户」弹窗：用户名 / 权限 + 退出登录（带二次确认） -->
+    <AccountDialog :visible="accountOpen" @close="accountOpen = false" />
 
     <!-- 内容区：占满标题栏以下的剩余高度 -->
     <div class="flex-1 flex overflow-hidden">
@@ -139,8 +173,10 @@ import { useNotification } from './composables/useNotification'
 import { useSeatDraft } from './composables/useSeatDraft'
 import { defineAsyncComponent, h } from 'vue'
 import { prefetchRoutes } from './router'
-import { Minus, Square, X } from '@lucide/vue'
+import { Minus, Square, X, Undo2, Redo2, Search, Palette, User, Settings, Info } from '@lucide/vue'
 import axios from 'axios'
+import { undoState as undo, performUndo, refreshUndoStatus } from './composables/useUndo.js'
+import './styles/dialog-transition.css'
 
 // 异步组件：加载中/失败展示占位文案，避免浮窗点开就消失却毫无反馈
 const AiAssistant = defineAsyncComponent({
@@ -154,8 +190,16 @@ const AiAssistant = defineAsyncComponent({
   onError(retry, fail, attempts) { if (attempts < 3) retry() },
 })
 
+// 标题栏功能窗口懒加载：loader 抽成命名函数，既给 defineAsyncComponent 用，也供按钮 hover 预取（v-preload）
+const loadSearchDialog = () => import('./components/base/SearchDialog.vue')
+const loadThemePickerDialog = () => import('./components/base/ThemePickerDialog.vue')
+const loadAccountDialog = () => import('./components/base/AccountDialog.vue')
+const SearchDialog = defineAsyncComponent(loadSearchDialog)
+const ThemePickerDialog = defineAsyncComponent(loadThemePickerDialog)
+const AccountDialog = defineAsyncComponent(loadAccountDialog)
+
 export default {
-  components: { Sidebar, NotificationToast, ShutdownMenuDialog, ConfirmDialog, Minus, Square, X, AiAssistant },
+  components: { Sidebar, NotificationToast, ShutdownMenuDialog, ConfirmDialog, SearchDialog, ThemePickerDialog, AccountDialog, Minus, Square, X, Undo2, Redo2, Search, Palette, User, Settings, Info, AiAssistant },
   data() {
     return {
       themeStore: null,
@@ -182,6 +226,12 @@ export default {
       // 智能排表草稿：启动查到草稿时弹一次提示；draftChecked 保证只查一次（避免后端就绪事件重复触发）
       seatDraftPromptVisible: false,
       seatDraftChecked: false,
+      // 标题栏全局搜索弹窗开关（搜索逻辑在 SearchDialog.vue 内）
+      searchOpen: false,
+      // 标题栏「切换主题」弹窗开关
+      themeOpen: false,
+      // 标题栏「账户」弹窗开关
+      accountOpen: false,
     }
   },
   computed: {
@@ -198,11 +248,25 @@ export default {
         transform: `translate(${this.iconTranslate.x}px, ${this.iconTranslate.y}px)`,
       }
     },
+    // 标题栏撤销/重做：直接暴露共享的响应式状态供模板读取
+    undoState() { return undo },
+    undoTitle() {
+      if (!undo.key) return '当前页面不支持撤销'
+      if (!undo.canUndo) return '当前页面没有可撤销的操作'
+      return undo.undoLabel ? `撤销：${undo.undoLabel}` : '撤销'
+    },
+    redoTitle() {
+      if (!undo.key) return '当前页面不支持重做'
+      if (!undo.canRedo) return '当前页面没有可重做的操作'
+      return undo.redoLabel ? `重做：${undo.redoLabel}` : '重做'
+    },
   },
   watch: {
     '$route.path'() {
       // 切页时保持浮窗状态（用户可边操作边问）；若切换到 AI 助手页则收起浮窗
       if (this.$route.path === '/ai-assistant') this.assistantOpen = false
+      // 切页时收起搜索弹窗
+      this.searchOpen = false
     },
   },
   mounted() {
@@ -361,6 +425,29 @@ export default {
       window.electron?.send('win-close')
     },
 
+    // 模板只能访问实例成员，故把懒加载 loader 包成方法供 v-preload 预取
+    preloadSearchDialog() { return loadSearchDialog() },
+    preloadThemePickerDialog() { return loadThemePickerDialog() },
+    preloadAccountDialog() { return loadAccountDialog() },
+
+    // ---- 标题栏：跳转系统设置（跳转后给一条 info 提示） ----
+    goToSettings() {
+      if (this.$route.path !== '/settings') this.$router.push('/settings')
+      useNotification().info('已跳转到系统设置')
+    },
+
+    // ---- 标题栏：跳转关于软件（跳转后给一条 info 提示） ----
+    goToAbout() {
+      if (this.$route.path !== '/about') this.$router.push('/about')
+      useNotification().info('已跳转到关于软件')
+    },
+
+    // ---- 标题栏：撤销 / 重做（与页面内 Ctrl+Z 共用同一套逻辑） ----
+    onUndo() { refreshUndoStatus(); performUndo(false) },
+    onRedo() { refreshUndoStatus(); performUndo(true) },
+    // 悬停时轻量刷新可用态（非 force，内部 400ms 节流），避免长时间停留后状态过期
+    onUndoHover() { refreshUndoStatus() },
+
     // ---- 运行期后端异常 ----
     // 复用启动失败页的两个动作
     async retryBackendFromDead() {
@@ -517,12 +604,56 @@ export default {
   position: relative;
   display: flex;
   align-items: center;
-  justify-content: flex-end; /* 控制按钮靠右，左侧为可拖动空白区 */
+  justify-content: space-between; /* 左侧功能区靠左、窗口控制按钮靠右，中间为可拖动空白 */
   background: transparent;
   -webkit-app-region: drag; /* 整条可拖动窗口 */
   user-select: none;
   border-bottom: 1px solid rgba(0, 0, 0, 0.06);
 }
+/* 左侧功能区（撤销/重做/搜索）脱离拖拽区，可点击。app-region 不继承，须逐个子元素覆盖。 */
+.titlebar-left,
+.titlebar-left * {
+  -webkit-app-region: no-drag;
+}
+/* 标题栏小按钮（撤销/重做）：26×26 圆角方块，配色随顶栏文字（currentColor）。
+   必须清掉毛玻璃/Win11 主题的按钮皮肤（边框、阴影、荧光描边 ::before）。 */
+.tb-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  border: none !important;
+  box-shadow: none !important;
+  border-radius: 6px;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+  opacity: 0.85;
+  transition: background-color 0.12s ease, opacity 0.12s ease;
+}
+.tb-btn::before { display: none !important; }
+.tb-btn:hover:not(:disabled) {
+  background: color-mix(in srgb, currentColor 14%, transparent);
+  opacity: 1;
+}
+.tb-btn:disabled { opacity: 0.35; cursor: default; }
+/* 搜索弹窗结果行：逐条错开浮入（新类名，避免与设置页搜索动画互相干扰） */
+@keyframes titleSearchRowIn {
+  from { opacity: 0; transform: translateX(-10px); }
+  to { opacity: 1; transform: translateX(0); }
+}
+.tb-search-row { animation: titleSearchRowIn 0.18s ease-out both; }
+/* 清掉毛玻璃/Win11 主题给 button 加的皮肤：主题强制了 1px 实线边框而 Tailwind 默认边框色是
+   currentColor，会让每行外面多出一圈近黑色框；box-shadow / ::before 荧光描边同理。
+   圆角改回 8px，与上方搜索输入框的 rounded-lg 一致。 */
+.tb-search-row {
+  border: none !important;
+  box-shadow: none !important;
+  outline: none !important;
+  border-radius: 8px !important;
+}
+.tb-search-row::before { display: none !important; }
 /* 右侧三个控制按钮及其容器必须可点击（脱离拖拽区） */
 .window-controls {
   -webkit-app-region: no-drag;

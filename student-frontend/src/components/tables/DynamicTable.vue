@@ -92,6 +92,7 @@
           <tr
             v-for="(row, rowIndex) in rows"
             :key="row._rowKey"
+            :data-row-id="row.id"
             @contextmenu.prevent="$emit('contextmenu', $event, row._isNew ? 'newRow' : 'row', row)"
             :class="[
               'data-drag-item',

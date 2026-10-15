@@ -96,6 +96,7 @@
                   <td v-else-if="cell._isAisleHidden" style="display: none;"></td>
                   <td
                     v-else
+                    :data-row-id="anchorPrefix && row._lessonIdx != null ? anchorPrefix + ':' + row._lessonIdx + ':' + colIdx : undefined"
                     :ref="el => setCellRef(rowIdx, colIdx, el)"
                     :class="['border border-border px-2 py-2 text-center transition-colors relative', isDragTarget(rowIdx, colIdx) ? 'bg-info/10 outline outline-2 outline-info' : '', isCellSelected(rowIdx, colIdx) && !isEditing(rowIdx, colIdx) ? 'bg-info/10 outline outline-2 outline-info' : '', isEditing(rowIdx, colIdx) ? 'ring-2 ring-info ring-inset' : '', row._isReadonly ? '' : 'cursor-pointer', cell._bg != null ? 'cell-heat' : '', isEditing(rowIdx, colIdx) ? 'cell-editing' : '']"
                     :style="{
@@ -201,6 +202,9 @@ export default {
     colHeaders: { type: Array, required: true },
     rows: { type: Array, required: true },
     showPeriodColumn: { type: Boolean, default: false },
+    // 单元格锚点前缀：为空时不给单元格输出 data-row-id（其它页面零影响）；
+    // 传值时输出 `${anchorPrefix}:${节次索引}:${列索引}`（如 s:0:0），供全局搜索按记录定位。
+    anchorPrefix: { type: String, default: '' },
     title: { type: String, default: '' },
     hideMetaColumns: { type: Boolean, default: false },
     showRowNumber: { type: Boolean, default: false },
