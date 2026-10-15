@@ -107,8 +107,8 @@ export function useUndoShortcut(key, options = {}) {
       try {
         const { data } = await axios.post(`/api/undo/table/${resolveKey()}/${redo ? 'redo' : 'undo'}`)
         if (data.ok) {
-          if (redo) { if (onAfterRedo) onAfterRedo(data.label) }
-          else if (onAfterUndo) onAfterUndo(data.label)
+          if (redo) { if (onAfterRedo) onAfterRedo(data.label, data.change) }
+          else if (onAfterUndo) onAfterUndo(data.label, data.change)
           return true
         }
       } catch {

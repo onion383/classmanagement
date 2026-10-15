@@ -82,8 +82,8 @@
     @confirm="seatDraftPromptVisible = false"
   />
 
-  <!-- AI 助手：悬浮呼出按钮与浮窗（登录页不显示） -->
-  <template v-if="$route.path !== '/login'">
+  <!-- AI 助手：悬浮呼出按钮与浮窗（登录页不显示；AI 未启用时同样不显示悬浮按钮） -->
+  <template v-if="$route.path !== '/login' && aiEnabled">
     <Teleport to="body">
       <button
         ref="aiIcon"
@@ -140,6 +140,7 @@ import { useSeatDraft } from './composables/useSeatDraft'
 import { defineAsyncComponent, h } from 'vue'
 import { prefetchRoutes } from './router'
 import { Minus, Square, X } from '@lucide/vue'
+import axios from 'axios'
 
 // 异步组件：加载中/失败展示占位文案，避免浮窗点开就消失却毫无反馈
 const AiAssistant = defineAsyncComponent({
@@ -159,6 +160,8 @@ export default {
     return {
       themeStore: null,
       assistantOpen: false,
+      // AI 助手是否已启用（null=尚未查到，先用隐藏态，避免图标闪一下又消失）
+      aiEnabled: null,
       assistantPos: { x: null, y: null },
       assistantDrag: null,
       // 图标位置：用 CSS transform translate 做偏移，基准位置始终 right/bottom: 1.5rem
@@ -204,13 +207,19 @@ export default {
   },
   mounted() {
     window.addEventListener('resize', this.onWindowResize)
-    // 启动回报「桌面小组件启用状态 + 首帧真正空闲」：主进程据此错峰创建工具箱浮窗与（如启用）桌面小组件。
-    // 延迟到主窗口首帧「真正空闲」时回报，避免与首屏渲染抢占资源；不用固定延迟。
+    // 启动回报「桌面小组件启用状态」：主进程据此按需创建工具箱浮窗与（如启用）桌面小组件。
+    // 时机：首帧真正画完（双重 requestAnimationFrame）就立即回报，不再等浏览器「空闲」——
+    // 小组件能提前数百毫秒出现；首屏请求与组件创建都在首帧之前已发起，此处不与它们抢首帧资源。
     const reportWidgetsReady = () => {
       try {
         const enabled = (localStorage.getItem('desktopWidgetEnabled') ?? '1') !== '0'
         if (window.electron?.send) window.electron.send('widgets-ready', enabled)
       } catch (_) {}
+    }
+    if (typeof window.requestAnimationFrame === 'function') {
+      window.requestAnimationFrame(() => window.requestAnimationFrame(reportWidgetsReady))
+    } else {
+      reportWidgetsReady()
     }
     // 空闲预热其余页面路由 chunk：让侧边栏跳转不再等 chunk 下载/解析。
     // 未登录（登录页）时不预热业务页面，避免无谓的后台解析。
@@ -219,12 +228,9 @@ export default {
       prefetchRoutes()
     }
     if (typeof window.requestIdleCallback === 'function') {
-      // 双重 idle：确保首帧渲染与首屏请求都让出一段空闲后才上报
-      window.requestIdleCallback(() => window.requestIdleCallback(reportWidgetsReady))
-      // 再让出一轮空闲后预热路由 chunk，避免与首屏请求/组件创建抢资源
+      // 双重 idle：让首屏请求/组件创建彻底过去后再预热路由 chunk，避免抢资源
       window.requestIdleCallback(() => window.requestIdleCallback(startIdlePrefetch), { timeout: 4000 })
     } else {
-      reportWidgetsReady()
       setTimeout(startIdlePrefetch, 1500)
     }
   },
@@ -234,10 +240,13 @@ export default {
     this.fetchPendingNotification()
     // 兜住「就绪广播早于本组件创建」的竞态：查一次当前状态，确保之后运行期异常能接管提示。
     // 后端确认就绪后顺带查一次智能排表草稿（此时接口才可用，避免启动瞬间静默失败）。
-    window.electron?.invoke('backend-status').then((ok) => { if (ok) { this.backendEverReady = true; this.checkSeatDraft() } }).catch(() => {})
+    window.electron?.invoke('backend-status').then((ok) => { if (ok) { this.backendEverReady = true; this.checkSeatDraft(); this.loadAiEnabled() } }).catch(() => {})
+    // AI 设置变更（启用/停用、换模型）后刷新图标显隐
+    window.addEventListener('ai-config-changed', this.onAiConfigChanged)
   },
   beforeUnmount() {
     window.removeEventListener('resize', this.onWindowResize)
+    window.removeEventListener('ai-config-changed', this.onAiConfigChanged)
     this.stopDragAssistant()
     this.stopDragIcon()
     this.teardownShutdownIpc()
@@ -388,6 +397,23 @@ export default {
       if (draft.exists) this.seatDraftPromptVisible = true
     },
 
+    // 拉取 AI 助手启用状态：未启用时隐藏右下角悬浮按钮
+    async loadAiEnabled() {
+      // 未登录（登录页）没有 token，接口会 401，直接跳过
+      if (!localStorage.getItem('token')) return
+      try {
+        const { data } = await axios.get('/api/ai/config')
+        this.aiEnabled = !!(data && data.success && data.data && data.data.enabled)
+      } catch (_) {
+        this.aiEnabled = false
+      }
+      // 若浮窗正开着而此时 AI 已被停用，一并收起，避免留下一个打不开的窗口
+      if (!this.aiEnabled) this.assistantOpen = false
+    },
+    onAiConfigChanged() {
+      this.loadAiEnabled()
+    },
+
     // ---- 关闭选择弹窗（复用现有弹窗动画，替代主进程原生菜单） ----
     setupShutdownIpc() {
       // 告知主进程：渲染层已就绪，可接管关闭菜单（弹窗生命周期内有 IPC 时此标记生效）
@@ -408,6 +434,7 @@ export default {
           this.backendDead = false
           this.reconnectRetrying = false
           this.checkSeatDraft()
+          this.loadAiEnabled()
           return
         }
         if (data.type === 'backend-failed') {

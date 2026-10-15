@@ -1,6 +1,6 @@
 import axios from 'axios'
 import { setupSecureAxios } from '../composables/secureAxios'
-import { waitForBackendReady } from './backendReady'
+import { waitForBackendReady, isBackendUnreachable } from './backendReady'
 
 // 各窗口入口（主窗口 / 引导窗口 / 悬浮组件 / 桌面组件）共用同一套 axios 装配：
 // baseURL、登录态注入、后端未就绪时的退避重试、安全通道加密。
@@ -17,12 +17,13 @@ export function setupApiClient({ baseURL, getToken = () => localStorage.getItem(
 
   // 响应拦截器：后端稍慢于窗口（或引导页「改储存目录」重启后端）时，首屏请求可能遇到
   // 「连接被拒」网络错误。这类错误不立即失败，而是等后端就绪信号后再重试；
-  // 有 HTTP 响应（4xx/5xx）的错误不重试，避免重复提交等副作用。
+  // 有 HTTP 响应（4xx/5xx）的错误不重试，避免重复提交等副作用——但 502/503/504 网关错误
+  // 例外（dev 下 Vite 代理对「上游未就绪」的包装，与「连接被拒」同义），见 isBackendUnreachable。
   axios.interceptors.response.use(
     res => res,
     async (error) => {
       const config = error.config
-      if (!error.response && config) {
+      if (isBackendUnreachable(error) && config) {
         const retryCount = config.__retryCount || 0
         if (retryCount < 6) {
           config.__retryCount = retryCount + 1

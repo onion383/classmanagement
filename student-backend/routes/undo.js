@@ -114,6 +114,9 @@ const executors = {
       const old = oldValue == null ? '' : oldValue
       const new_ = newValue == null ? '' : newValue
       return mode === 'undo' ? `${field}：「${new_}」→「${old}」` : `${field}：「${old}」→「${new_}」`
+    },
+    change(p, mode) {
+      return { type: 'cell_update', table: p.table, rowId: p.rowId, field: p.field, value: mode === 'undo' ? p.oldValue : p.newValue }
     }
   },
 
@@ -129,6 +132,11 @@ const executors = {
     describe(p, mode) {
       const name = rowName(p.row)
       return mode === 'undo' ? `撤销添加：${name}` : `重新添加：${name}`
+    },
+    change(p, mode) {
+      return mode === 'undo'
+        ? { type: 'row_remove', table: p.table, rowId: p.row.id }
+        : { type: 'row_upsert', table: p.table, row: p.row }
     }
   },
 
@@ -143,6 +151,9 @@ const executors = {
     describe(p, mode) {
       const name = rowName(p.newRow || p.oldRow, p.rowId)
       return mode === 'undo' ? `撤销编辑：${name}` : `重新编辑：${name}`
+    },
+    change(p, mode) {
+      return { type: 'row_upsert', table: p.table, row: mode === 'undo' ? p.oldRow : p.newRow }
     }
   },
 
@@ -158,6 +169,11 @@ const executors = {
     describe(p, mode) {
       const name = rowName(p.row)
       return mode === 'undo' ? `恢复记录：${name}` : `删除记录：${name}`
+    },
+    change(p, mode) {
+      return mode === 'undo'
+        ? { type: 'row_upsert', table: p.table, row: p.row }
+        : { type: 'row_remove', table: p.table, rowId: p.row.id }
     }
   },
 
@@ -181,6 +197,9 @@ const executors = {
       const old = cellText(p.oldValue)
       const new_ = cellText(p.newValue)
       return mode === 'undo' ? `格子(${p.row + 1},${p.col + 1})：「${new_}」→「${old}」` : `格子(${p.row + 1},${p.col + 1})：「${old}」→「${new_}」`
+    },
+    change(p, mode) {
+      return { type: 'grid_cell', table: p.table, row: p.row, col: p.col, value: mode === 'undo' ? p.oldValue : p.newValue }
     }
   },
 
@@ -198,6 +217,9 @@ const executors = {
       const dim = (b) => Array.isArray(b) ? `${b.length} 行` : (b && typeof b === 'object' ? `${Object.keys(b).length} 项` : '')
       const old = dim(p.oldValue), new_ = dim(p.newValue)
       return mode === 'undo' ? `整块：${new_} → ${old}` : `整块：${old} → ${new_}`
+    },
+    change(p, mode) {
+      return { type: 'grid_snapshot', table: p.table, value: mode === 'undo' ? p.oldValue : p.newValue }
     }
   },
 
@@ -214,6 +236,9 @@ const executors = {
       const nameStmt = db.prepare('SELECT name FROM albums WHERE id = ?')
       const names = order.map(id => { const r = nameStmt.get(id); return r ? r.name : `#${id}` })
       return mode === 'undo' ? `相册排序恢复：${names.join('、')}` : `相册排序：${names.join('、')}`
+    },
+    change(p, mode) {
+      return { type: 'album_order', order: mode === 'undo' ? p.oldOrder : p.newOrder }
     }
   },
 
@@ -230,6 +255,9 @@ const executors = {
       const count = (s) => (s || []).length + '/' + (s || []).reduce((n, g) => n + ((g.members || []).length), 0)
       const old = count(p.oldValue), new_ = count(p.newValue)
       return mode === 'undo' ? `分组结构：${new_} → ${old}` : `分组结构：${old} → ${new_}`
+    },
+    change(p, mode) {
+      return { type: 'group_snapshot', dimId: p.dimId, snapshot: mode === 'undo' ? p.oldValue : p.newValue }
     }
   },
 
@@ -252,7 +280,8 @@ const executors = {
     describe(p, mode) {
       const name = p.photo ? (p.photo.file_name || `#${p.photo.id}`) : ''
       return mode === 'undo' ? `恢复照片：${name}` : `删除照片：${name}`
-    }
+    },
+    change() { return { type: 'full_reload' } }
   },
 
   // 删除相册（仅删索引+缩略图，源文件留在磁盘）：payload { album, photos }。
@@ -279,7 +308,8 @@ const executors = {
       const name = p.album ? (p.album.name || `#${p.album.id}`) : ''
       const c = (p.photos || []).length
       return mode === 'undo' ? `恢复相册：${name}（${c} 项）` : `删除相册：${name}（${c} 项）`
-    }
+    },
+    change() { return { type: 'full_reload' } }
   },
 
   // 添加相册（触发后台扫描建索引）：payload { album }。undo=撤销添加（删索引+缩略图+停扫描）；redo=重新添加相册。
@@ -307,7 +337,8 @@ const executors = {
     describe(p, mode) {
       const name = p.album ? (p.album.name || `#${p.album.id}`) : ''
       return mode === 'undo' ? `撤销添加相册：${name}` : `重新添加相册：${name}`
-    }
+    },
+    change() { return { type: 'full_reload' } }
   }
 }
 
@@ -348,7 +379,14 @@ async function flip(id, fromDir, toDir, mode) {
   db.prepare('UPDATE undo_history SET dir = ? WHERE id = ?').run(toDir, id)
   // 展示文案按当前操作方向生成，而非存库的方向
   const label = ex.describe ? ex.describe(rec.payload, mode) : rec.label
-  return { ok: true, label }
+  // 结构化变更结果（供前端本地增量应用）；生成失败一律兜底为全量重载，绝不影响撤销本身
+  let change
+  try {
+    change = ex.change ? ex.change(rec.payload, mode) : { type: 'full_reload' }
+  } catch {
+    change = { type: 'full_reload' }
+  }
+  return { ok: true, label, change }
 }
 
 // 按 key 分组返回（含每组计数与记录）
@@ -388,7 +426,7 @@ router.post('/table/:key/undo', async (req, res) => {
   if (!rec) return res.json({ ok: false, error: '当前表没有可撤销的记录' })
   const r = await flip(rec.id, 1, 0, 'undo')
   if (r.error) return res.status(400).json({ error: r.error })
-  res.json({ ok: true, label: r.label })
+  res.json({ ok: true, label: r.label, change: r.change })
 })
 
 // 按 key 重做最近一条（dir 0 -> 1），供 Ctrl+Shift+Z / Ctrl+Y 使用
@@ -397,7 +435,7 @@ router.post('/table/:key/redo', async (req, res) => {
   if (!rec) return res.json({ ok: false, error: '当前表没有可重做的记录' })
   const r = await flip(rec.id, 0, 1, 'redo')
   if (r.error) return res.status(400).json({ error: r.error })
-  res.json({ ok: true, label: r.label })
+  res.json({ ok: true, label: r.label, change: r.change })
 })
 
 // 撤销某条（dir 1 -> 0）
@@ -405,7 +443,7 @@ router.post('/:id/undo', async (req, res) => {
   const id = Number(req.params.id)
   const r = await flip(id, 1, 0, 'undo')
   if (r.error) return res.status(400).json({ error: r.error })
-  res.json({ ok: true, label: r.label })
+  res.json({ ok: true, label: r.label, change: r.change })
 })
 
 // 重做某条（dir 0 -> 1）
@@ -413,7 +451,7 @@ router.post('/:id/redo', async (req, res) => {
   const id = Number(req.params.id)
   const r = await flip(id, 0, 1, 'redo')
   if (r.error) return res.status(400).json({ error: r.error })
-  res.json({ ok: true, label: r.label })
+  res.json({ ok: true, label: r.label, change: r.change })
 })
 
 // 删除单条

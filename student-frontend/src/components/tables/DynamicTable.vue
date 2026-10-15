@@ -135,7 +135,7 @@
                 >⠿</span>
 
                 <template v-if="field.name === 'id'">{{ row._isNew ? '自动' : row.id }}</template>
-                <template v-else-if="field.name === 'position'">{{ row._isNew ? '-' : row._displayIndex }}</template>
+                <template v-else-if="field.name === 'position'">{{ row._isNew ? '-' : (displayIndexes ? displayIndexes[rowIndex] : row._displayIndex) }}</template>
                 <template v-else-if="field.name === '收据'">
                   <button @click="$emit('manageReceipt', { row, isNew: row._isNew })" class="bg-primary text-text-inverse border-none py-1 px-2 rounded text-xs cursor-pointer">管理收据{{ row._isNew ? '' : ' (' + getReceiptCount(row) + ')' }}</button>
                 </template>
@@ -251,6 +251,8 @@ export default {
     editOnClick: { type: Boolean, default: false },       // 新增：单击单元格直接进入编辑（配合失焦保存）
     readonly: { type: Boolean, default: false },          // 新增：纯只读展示（历史快照等）
     protectedColumns: { type: Array, default: () => [] },  // 受保护字段：表头名后加 *，提示不可删除
+    // 与 rows 对齐的序号数组（可选）。由数据源统一派生，避免把序号写回行对象而破坏行引用复用。
+    displayIndexes: { type: Array, default: null },
     searchActive: { type: Boolean, default: false }        // 搜索过滤进行中：行进入/离开时启用上下级联动画方向
   },
   emits: [

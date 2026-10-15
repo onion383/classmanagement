@@ -202,6 +202,7 @@ import Tabs from '../components/base/Tabs.vue';
 import WeekSwitcher from '../components/base/WeekSwitcher.vue';
 import { useNotification } from '../composables/useNotification.js';
 import { useUndoShortcut, recordGridCellUndo, recordGridSnapshotUndo } from '../composables/useUndo.js';
+import { createRowReuseCache } from '../utils/rowReuse.js';
 
 // 弹窗类组件懒加载：打开时才加载对应 chunk。loader 抽出为命名函数，
 // 可用 v-preload="loadXxx" 在悬停按钮时预取，点击时即时弹出。
@@ -265,6 +266,9 @@ export default {
   },
   data() {
     return {
+      // 行对象复用缓存（非响应式实例状态）：编辑一格时只重建真正变化的那一行，避免整表重画
+      masterRowReuse: createRowReuseCache(),
+      activeRowReuse: createRowReuseCache(),
       // ========== 一般课表 ==========
       masterColHeaders: ['周一', '周二', '周三', '周四', '周五'],
       masterCells: [],
@@ -345,7 +349,7 @@ export default {
   computed: {
     // ---- 一般课表显示行 ----
     masterDisplayRows() {
-      return this.buildDisplayRows(this.masterCells, this.masterSettings);
+      return this.masterRowReuse(this.buildDisplayRows(this.masterCells, this.masterSettings));
     },
     masterExportFields() {
       const fields = [{ name: '行号' }];
@@ -381,7 +385,7 @@ export default {
 
     // ---- 实行课表显示行（顶部自动添加周数标题行） ----
     activeDisplayRows() {
-      return this.buildDisplayRows(this.activeCells, this.activeSettings);
+      return this.activeRowReuse(this.buildDisplayRows(this.activeCells, this.activeSettings));
     },
 
     activeExportFields() {

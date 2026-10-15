@@ -336,9 +336,10 @@ export default {
         }
       } catch (_) { this.enabled = false }
     },
-    // 设置弹窗保存成功后刷新启用状态
+    // 设置弹窗保存成功后刷新启用状态，并通知根组件同步悬浮按钮的显隐
     onSettingsSaved() {
       this.loadEnabled()
+      window.dispatchEvent(new Event('ai-config-changed'))
     },
     renderMarkdown(text) {
       if (!text) return ''

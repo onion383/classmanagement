@@ -492,7 +492,10 @@
   background-color: var(--g2-glass) !important;
   backdrop-filter: blur(var(--g2-blur)) saturate(var(--g2-saturate));
   border-radius: var(--radius-lg);
-  contain: paint;
+  /* 收窄布局/绘制/样式影响到容器内部，表格内部重绘不再重采样背后的毛玻璃；
+     will-change: transform 让容器常驻合成层（该容器已有 backdrop-filter，无新增副作用） */
+  contain: layout paint style;
+  will-change: transform;
   box-shadow: var(--g2-shadow-1), var(--g2-hl);
 }
 :root[data-theme="glass2"] table {
@@ -583,8 +586,14 @@
   background-color: var(--g2-glass) !important;
   backdrop-filter: blur(var(--g2-blur)) saturate(var(--g2-saturate));
   border-radius: var(--radius-lg);
-  contain: paint;
+  /* 与 .table-scroll-wrapper 同法：重绘收窄到容器内，且常驻合成层 */
+  contain: layout paint style;
+  will-change: transform;
   box-shadow: var(--g2-shadow-1), var(--g2-hl);
+}
+/* 网格表内部滚动容器：滚动/编辑引起的重绘收窄在容器内 */
+:root[data-theme="glass2"] .grid-view-container > .overflow-auto {
+  contain: layout paint style;
 }
 :root[data-theme="glass2"] .grid-view-container table th {
   background-color: rgba(91, 124, 250, 0.16) !important;

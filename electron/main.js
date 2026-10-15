@@ -6,19 +6,34 @@ const os = require('os')
 const fs = require('fs')
 const crypto = require('crypto')
 const startupTimer = require('./main/startup-timer')
+
+// 【启动剖析打点·仅开发模式】主进程模块 require 逐项计时。打点只在 dev 生效：
+// 打包版 _profMark 是空操作，既不写控制台也不写时间线。
+const _profOn = !app.isPackaged
+const _profMark = (name, t0) => {
+  if (!_profOn) return
+  startupTimer.mark(t0 ? `${name}（${Date.now() - t0}ms）` : name)
+}
+const _profReq = (p) => {
+  const _t = _profOn ? Date.now() : 0
+  const _m = require(p)
+  _profMark(`【prof】require ${p}`, _t)
+  return _m
+}
+
 // 内存采样与主密钥派生已分别迁至 perf.js / config.js 内部使用，main.js 不再直接引用
-const { resolveCompileCacheDir, getMasterKey, saveAppConfig, resolveDataDir, resolveThumbsDir } = require('./main/config')
-const { setupRendererCodeCache, setupAppProtocol } = require('./main/protocol')
-const { applyBackgroundMaterial } = require('./main/window-material')
-const { buildWebPreferences } = require('./main/web-prefs')
-const usb = require('./main/usb')
-const updater = require('./main/updater')
-const dialogs = require('./main/dialogs')
-const apps = require('./main/apps')
-const perf = require('./main/perf')
-const tray = require('./main/tray')
-const backend = require('./main/backend')
-const widget = require('./main/widget')
+const { resolveCompileCacheDir, getMasterKey, saveAppConfig, resolveDataDir, resolveThumbsDir } = _profReq('./main/config')
+const { setupRendererCodeCache, setupAppProtocol } = _profReq('./main/protocol')
+const { applyBackgroundMaterial } = _profReq('./main/window-material')
+const { buildWebPreferences } = _profReq('./main/web-prefs')
+const usb = _profReq('./main/usb')
+const updater = _profReq('./main/updater')
+const dialogs = _profReq('./main/dialogs')
+const apps = _profReq('./main/apps')
+const perf = _profReq('./main/perf')
+const tray = _profReq('./main/tray')
+const backend = _profReq('./main/backend')
+const widget = _profReq('./main/widget')
 
 // 应用窗口/任务栏图标：与托盘同源，随 electron/**/* 一起打包，开发与生产均能直接读取。
 // Windows 任务栏优先取窗口图标，设置后不再显示 Electron 默认图标（打包版还会用 win.icon 作为 exe 图标）。
@@ -144,6 +159,10 @@ widget.registerWidgetIpc({
   getMainWindow: () => mainWindow,
   loadUrlWithRetry,
 })
+
+// INP 归因落盘（仅开发模式）：渲染层探针把交互耗时汇总经 'inp-report' 发来，
+// 追加写入 <数据目录>/inp.log。打包版既不 require 该模块、也不注册通道。
+if (!app.isPackaged) require('./main/inpLog').registerInpLogIpc()
 
 // 单实例锁：防止手快点多次图标导致同时跑出多个应用实例。
 // 第一个实例拿到锁；后续实例 requestSingleInstanceLock 返回 false，直接退出，
@@ -281,12 +300,17 @@ function pollViteAndNavigate(win, retries = 40) {
 // 主窗口统一「无边框透明 + 窗外亚克力」：所有主题一致，由渲染层自绘标题栏
 // （标题栏显示应用名），避免原生标题栏与侧边栏标题重复。边框类型不再随主题切换。
 function createMainWindow() {
+  _profMark('【prof】createMainWindow 进入')
   // 主窗口（重）建时移除托盘图标：主窗口已恢复，无需再驻留托盘
   tray.destroyTray()
   // （新窗口）关闭菜单状态复位（allowMainClose / shutdownMenuOpen / mainRendererShutdownReady）
   tray.resetShutdownState()
   const isFrameless = true
   mainWindowChrome = 'frameless'
+  // webPreferences 提出对象字面量单独计时（仅 dev 打点用；打包版行为与内联写法完全一致）
+  const _profWpT0 = Date.now()
+  const _webPrefs = buildWebPreferences({ devTools: true })
+  _profMark('【prof】buildWebPreferences 完成', _profWpT0)
   const win = new BrowserWindow({
     width: 1280,
     height: 800,
@@ -307,8 +331,9 @@ function createMainWindow() {
     backgroundColor: '#f0f4f8',
     // 渲染进程安全配置见 web-prefs.js（各窗口统一）。后台节流保持默认：
     // 窗口失焦/最小化/被遮挡时暂停后台重绘，降低后台 GPU/CPU 占用。
-    webPreferences: buildWebPreferences({ devTools: true }),
+    webPreferences: _webPrefs,
   })
+  _profMark('【prof】BrowserWindow 构造返回')
 
   // 立即绑定全局（供 theme-chrome 重建等判断）；内部事件全部用局部 win 引用，
   // 避免重建时旧窗口的 'closed' 事件把 mainWindow 置空，影响到刚创建的新窗口。

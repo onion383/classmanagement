@@ -7,8 +7,9 @@ import './styles/index.css'
 import { useThemeStore } from './stores/theme'
 import { setupSecureAxios } from './composables/secureAxios'
 import { useNotification } from './composables/useNotification'
-import { waitForBackendReady } from './utils/backendReady'
+import { waitForBackendReady, isBackendUnreachable } from './utils/backendReady'
 import { ensureDashboardData } from './composables/useDashboardData'
+import { installInpProbe } from './utils/inpProbe'
 
 // 生产模式（file:// 协议）下无 Vite 代理，需指定完整后端地址
 if (import.meta.env.PROD) {
@@ -47,7 +48,9 @@ const isWriteRequest = (config) => {
 // 响应拦截器：主窗口先于后端启动时，首屏请求可能遇到「连接被拒」等网络错误
 // （此时 error.response 为 undefined）。等待后端就绪信号（backend-ready）后再重试：
 // 后端一就绪立即重试，不再盲等固定退避；信号缺失时退化为原先的退避等待。
-// 有 HTTP 响应（4xx/5xx）的错误不重试，避免重复提交等副作用。
+// 有 HTTP 响应（4xx/5xx）的错误不重试，避免重复提交等副作用；
+// 例外是 502/503/504 网关错误（dev 下 Vite 代理对「上游未就绪」的包装），
+// 它与「连接被拒」同义，一并走等就绪重试（见 isBackendUnreachable）。
 axios.interceptors.response.use(
   res => res,
   async (error) => {
@@ -72,7 +75,7 @@ axios.interceptors.response.use(
     // 主动取消的请求不是故障，既不探测也不重试
     if (error.code === 'ERR_CANCELED') return Promise.reject(error)
 
-    if (!error.response && config) {
+    if (isBackendUnreachable(error) && config) {
       // 没拿到任何响应 = 后端可能已不可达。让主进程立刻探测一次，
       // 把用户的每一次失败操作变成探针，不必等下一个心跳周期。
       if (!config.__probed) {
@@ -171,6 +174,10 @@ themeStore.applyTheme()
 // 弹窗遮罩点击脉冲（事件委托）：点遮罩本尊时卡片轻放大收回提示，点卡片内部不触发
 import { initDialogOverlayPulse } from './utils/dialogOverlayPulse'
 initDialogOverlayPulse()
+
+// INP 归因探针：仅开发模式安装。`import.meta.env.DEV` 在打包版被静态替换为 false，
+// 该调用连同上方 import 一起被摇树删除——正式版既无探针代码也无可观察开销。
+if (import.meta.env.DEV) installInpProbe()
 
 // 原生右键菜单：页面未自行处理右键（模板里没 .prevent）时，交给主进程弹系统菜单。
 // 用 defaultPrevented 判定——表格/课堂/收费等已有自定义右键菜单的区域是 .stop.prevent，

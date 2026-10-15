@@ -163,6 +163,57 @@ router.put('/template', (req, res) => {
   }
 });
 
+// ======================== 一次性保存（设置 + 当前表 + 模板） ========================
+// 前端「保存设置」原会并发发 3 个请求（settings / 当前表 / 模板），各写各的表、各提交一次。
+// 这里合并为单请求：一个事务里依次落三张表，省 2 次 HTTP 往返 + 2 次事务提交，
+// 且三处要么一起成功、要么一起回滚，不会出现「设置存了但表没存」的错位状态。
+// active / master 为可选：只有显式传入（对象，哪怕空对象 {}）时才写对应的表。
+router.put('/save', (req, res) => {
+  try {
+    const { days, items, active, master } = req.body;
+    const mode = normalizeMode(req.body.mode || req.query.mode);
+    if (!Array.isArray(days) || !Array.isArray(items)) {
+      return res.status(400).json({ error: '参数格式错误' });
+    }
+    if (active !== undefined && (!active || typeof active !== 'object')) {
+      return res.status(400).json({ error: '参数格式错误' });
+    }
+    if (master !== undefined && (!master || typeof master !== 'object')) {
+      return res.status(400).json({ error: '参数格式错误' });
+    }
+
+    db.transaction(() => {
+      // ① 全局设置（时间 + 劳动项目）
+      const s = db.prepare('SELECT items FROM duty_settings WHERE id = 1').get();
+      const mergedItems = packMode(s ? s.items : null, mode, items);
+      db.prepare('UPDATE duty_settings SET days=?, items=? WHERE id=1')
+        .run(JSON.stringify(days), JSON.stringify(mergedItems));
+
+      // ② 当前值日表（仅当显式传入 active 时）
+      if (active !== undefined) {
+        const row = db.prepare('SELECT cells, settings FROM duty_layout WHERE id = 1').get();
+        const mergedCells = packMode(row ? row.cells : null, mode, active);
+        const mergedSettings = packMode(row ? row.settings : null, mode, {});
+        db.prepare('UPDATE duty_layout SET cells=?, settings=? WHERE id=1')
+          .run(JSON.stringify(mergedCells), JSON.stringify(mergedSettings));
+      }
+
+      // ③ 值日模板（仅当显式传入 master 时）
+      if (master !== undefined) {
+        const row = db.prepare('SELECT cells, settings FROM duty_template WHERE id = 1').get();
+        const mergedCells = packMode(row ? row.cells : null, mode, master);
+        const mergedSettings = packMode(row ? row.settings : null, mode, {});
+        db.prepare('UPDATE duty_template SET cells=?, settings=? WHERE id=1')
+          .run(JSON.stringify(mergedCells), JSON.stringify(mergedSettings));
+      }
+    })();
+
+    res.json({ message: '保存成功' });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // ======================== 从模板应用到当前值日表 ========================
 router.post('/apply-master', (req, res) => {
   try {

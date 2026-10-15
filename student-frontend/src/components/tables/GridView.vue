@@ -25,7 +25,20 @@
             </th>
           </tr>
         </thead>
-        <TransitionGroup name="row-flip" tag="tbody">
+        <tbody>
+          <!--
+            行过渡容器只在「行的集合真正变化」的短窗口内（新增/删除行、数据初载）才是 TransitionGroup，
+            其余时候退化成 Fragment。
+
+            为什么必须这样分：Vue 的 TransitionGroup 在**每次更新**里都会对 prevChildren 逐个
+            getBoundingClientRect()，并在 onUpdated 里 cloneNode → appendChild → getComputedStyle
+            → removeChild 去探测 move 过渡。这两步都是「写 DOM 之后立刻读布局」，会强制同步样式重算 + 布局。
+            而这些开销在「编辑一格、编辑态键入、Esc、框选、弹窗开合」等日常操作里毫无收益——
+            行没增没减，Enter/Leave 动画本来就不会播。退化成 Fragment 后 TransitionGroup 的
+            setup/hooks 完全不执行，强制布局随之消失（与 DynamicTable 同款处理）。
+            行入场/离场的观感不变：CSS 类仍挂在 <tr> 上（.row-flip-*），只是容器按需切换。
+          -->
+          <component :is="rowsWrapper" :name="rowsAnimEnabled ? 'row-flip' : undefined" tag="">
             <tr
               v-for="(row, rowIdx) in rows"
               :key="row._rowKey || rowIdx"
@@ -118,7 +131,8 @@
                 </template>
               </template>
             </tr>
-          </TransitionGroup>
+          </component>
+        </tbody>
       </table>
 
       <!--
@@ -156,6 +170,25 @@
 </template>
 
 <script>
+import { TransitionGroup } from 'vue';
+
+// 无动画时的「透明包裹」组件：只把默认插槽原样渲染成 Fragment，不产生任何真实 DOM 元素，
+// 保证 <tr> 仍是 <tbody> 的直接子节点。
+// 注意：不能直接 <component :is="Fragment">，也不能用字符串 'template'：
+//   - 编译器会把 <component> 的子节点编译成「默认插槽」，而 Fragment 不消费插槽 → 所有行都不渲染；
+//   - 'template' 会生成真实的 <template> DOM 元素，同样不渲染任何行。
+const RowsFragment = {
+  name: 'RowsFragment',
+  inheritAttrs: false,
+  props: {
+    name: { type: String, default: undefined },
+    tag: { type: String, default: '' },
+  },
+  render() {
+    return this.$slots.default ? this.$slots.default() : null
+  },
+}
+
 const COURSE_COLORS = {
   '语文': '#FFE4E1', '数学': '#E0F7FA', '英语': '#F3E5F5', '物理': '#E8F5E9', '化学': '#FFF3E0',
   '生物': '#F1F8E9', '历史': '#FBE9E7', '地理': '#E0F2F1', '政治': '#F9FBE7', '体育': '#DCEDC8',
@@ -190,6 +223,9 @@ export default {
       rowDragIdx: null, rowDragOverIdx: null, _rowGhost: null, _rowGrab: null, _rowMove: null, _rowUp: null, _rowDropBox: null,
       colDragIdx: null, colDragOverIdx: null, _colGhost: null, _colGrab: null, _colMove: null, _colUp: null, _colDropBox: null,
       firstActivate: true, _tableEnterCleanup: null,
+      // 行过渡容器是否启用（见模板说明）：只在行集合真正变化的短窗口内为 true，
+      // 日常编辑/键入/框选时退化成 Fragment，避免 TransitionGroup 每次更新的强制同步布局。
+      rowsAnimEnabled: false, _rowsAnimTimer: null,
       editingCell: null, editingCellData: { course: '' }, editingMeta: null, editingMetaValue: '',
       candidateHighlightIndex: 0, showCandidatePopup: false, candidatePopupX: 0, candidatePopupY: 0,
       cellRefs: {},
@@ -203,9 +239,16 @@ export default {
       if (this.hideMetaColumns && this.showRowNumber) count += 1;
       return count;
     },
+    // 行容器组件：开动画窗时用 TransitionGroup，否则用 RowsFragment 做「透明包裹」，
+    // 让 <tr> 始终是 <tbody> 的直接子节点。两者都必须能在实例上取到（模板表达式不会
+    // 自动解析 components 选项，直接写 TransitionGroup 会得到 undefined 而整表不渲染）。
+    rowsWrapper() { return this.rowsAnimEnabled ? TransitionGroup : RowsFragment; },
+    // 行集合指纹（只看 _rowKey 序列）：行增删/换表才会变，改格子内容不变。
+    // 用它驱动「动画窗」的开关，避免每次数据变化都白白启用 TransitionGroup。
+    rowsKeySig() { return (this.rows || []).map(r => (r._rowKey != null ? r._rowKey : '')).join('|'); },
     filteredCandidates() {
       if (!this.enableCandidate || !this.editingCell) return [];
-      const list = this.allowDuplicate ? [...this.candidateItems] : this.candidateItems.filter(s => !this.candidateExcludeIds.includes(s.id));
+      const list = this.candidateBaseList;
       const text = this.editingCellData.course?.trim() || '';
       if (text) {
         const kw = text.toLowerCase();
@@ -214,6 +257,15 @@ export default {
         return list.filter(s => cache.get(s).includes(kw));
       }
       return list;
+    },
+    // 候选基础列表（已剔除已被占用的学生）：只在候选数据/排除集合变化时重建一次。
+    // 进入编辑时编辑框每次按键都会重算 filteredCandidates，这里把「造数组 + 逐个 includes」
+    // 挪出击键路径（排除集合改成 Set 命中，也不再复制一遍整个候选数组）。
+    candidateBaseList() {
+      if (!this.enableCandidate) return [];
+      if (this.allowDuplicate) return this.candidateItems;
+      const exclude = new Set(this.candidateExcludeIds);
+      return this.candidateItems.filter(s => !exclude.has(s.id));
     },
     // 候选标签小写缓存：仅当候选列表变更时重建一次，供过滤 O(1) 命中，避免击键时逐项构造字符串。
     candidateLabelCache() {
@@ -545,6 +597,24 @@ export default {
       this.playSwapFlip(items);
     },
 
+    // ==================== 行过渡容器开关（见模板说明） ====================
+    // 开窗：行集合刚发生结构性变化，短窗口内保留 Enter/Leave 动画能力
+    openRowsAnimWindow() {
+      if (this._rowsAnimTimer) clearTimeout(this._rowsAnimTimer);
+      if (!this.rowsAnimEnabled) this.rowsAnimEnabled = true;
+      this._rowsAnimTimer = setTimeout(this.closeRowsAnimWindow, 800);
+    },
+    // 关窗：回退到 Fragment（重建一次 tbody，但无动画类，观感无变化）。
+    // 编辑中/拖拽中回退会重建正在输入的编辑框并丢焦点，故延后到这些操作结束。
+    closeRowsAnimWindow() {
+      if (this.editingCell || this.rowDragIdx != null || this.colDragIdx != null || this.longPressActive) {
+        this._rowsAnimTimer = setTimeout(this.closeRowsAnimWindow, 300);
+        return;
+      }
+      this._rowsAnimTimer = null;
+      this.rowsAnimEnabled = false;
+    },
+
     // ==================== 数据区(tbody)整体从左往右弹入（不含表头） ====================
     playTableEnter() {
       const tbody = this.$el ? this.$el.querySelector('tbody') : null;
@@ -806,6 +876,10 @@ export default {
     // 单元格文字色：调用方在 cell 上给了 _fg（深底白字）才覆盖，否则继承主题文字色
     getCellTextColor(cell) { return cell._fg || ''; },
   },
+  watch: {
+    // 行集合变化（数据初载、增删行、换行集）才开动画窗；改格子内容不会触发
+    rowsKeySig() { this.openRowsAnimWindow(); },
+  },
   mounted() {
     document.addEventListener('mouseup', this.handleGlobalMouseUp);
     // 首屏：数据区整体从左往右弹入
@@ -831,6 +905,7 @@ export default {
     if (this._rowDropBox) this._rowDropBox.remove();
     if (this._colDropBox) this._colDropBox.remove();
     if (this._tableEnterCleanup) this._tableEnterCleanup();
+    if (this._rowsAnimTimer) clearTimeout(this._rowsAnimTimer);
     this.cellRefs = {}; // 清除 DOM 引用，避免内存泄漏
   },
 };

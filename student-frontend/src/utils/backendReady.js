@@ -26,6 +26,17 @@ function subscribe() {
 
 export function isBackendReady() { return ready }
 
+// 「后端不可达」判定：无响应（连接被拒/中断）或网关错误都算同一类故障。
+// 后者是 dev 模式的产物——Vite 代理连不上上游时会把「连接被拒」包装成真正的
+// HTTP 502（见 vite proxy），此时 error.response 存在，若不特判就会被 axios 拦截器
+// 当成业务错误而跳过重试。502/503/504 在本项目里只会由「后端未就绪/不可达」产生，
+// 故与网络错误合并处理，统一走「等后端就绪再重试」。
+export function isBackendUnreachable(error) {
+  if (!error.response) return true
+  const s = error.response.status
+  return s === 502 || s === 503 || s === 504
+}
+
 export function waitForBackendReady(timeoutMs = 4000) {
   if (ready) return Promise.resolve(true)
   const api = electronApi()

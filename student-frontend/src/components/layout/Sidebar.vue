@@ -1,5 +1,5 @@
 <template>
-  <div class="w-60 bg-sidebar text-text-inverse h-screen p-4 flex flex-col">
+  <div class="w-60 bg-sidebar text-text-inverse h-full p-4 flex flex-col">
     <h2 class="app-name text-lg font-bold mb-6 flex items-center gap-2">
       <img src="/logo.png" alt="logo" class="w-7 h-7 object-contain shrink-0" />
       <span class="truncate">班集</span>

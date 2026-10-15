@@ -80,6 +80,7 @@
       ref="dynamicTable"
       :fields="visibleFields"
       :rows="displayRows"
+      :displayIndexes="displayIndexes"
       :newRow="newRow"
       :protectedColumns="['学号', '姓名']"
       :sortField="sortField"
@@ -213,8 +214,8 @@ const {
   sortField, sortOrder, searchField, searchKeyword,
   selectedCount, selectedRowKeys,
   importDialogVisible, dedupeDialogVisible,
-  displayRows, visibleFields, allBusinessFields,
-  fetchRows, showAlert, showConfirm, onDialogConfirm, onDialogCancel,
+  displayRows, displayIndexes, visibleFields, allBusinessFields,
+  fetchRows, applyUndoChange, showAlert, showConfirm, onDialogConfirm, onDialogCancel,
   startEditCell, saveCell, validateValue,
   addNewRowAtBottom, insertRowAbove, insertRowBelow, createNewRow, cancelNewRow, saveNewRow,
   moveRow, deleteColumn, startAddColumn, confirmAddColumn,
@@ -260,8 +261,8 @@ const searchActive = computed(() => !!searchField.value)
 
 // Ctrl+Z / Ctrl+Shift+Z / Ctrl+Y 撤销、重做本页学生表
 useUndoShortcut('students', {
-  onAfterUndo: (label) => { fetchRows(); notifySuccess(label ? `已撤销：${label}` : '已撤销') },
-  onAfterRedo: (label) => { fetchRows(); notifySuccess(label ? `已重做：${label}` : '已重做') }
+  onAfterUndo: (label, change) => { if (!applyUndoChange(change)) fetchRows(); notifySuccess(label ? `已撤销：${label}` : '已撤销') },
+  onAfterRedo: (label, change) => { if (!applyUndoChange(change)) fetchRows(); notifySuccess(label ? `已重做：${label}` : '已重做') }
 })
 
 async function refreshStudents() {

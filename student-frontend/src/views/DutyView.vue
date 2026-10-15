@@ -169,6 +169,7 @@ import AppSelect from '../components/base/AppSelect.vue'
 import { useNotification } from '../composables/useNotification.js'
 import { useUndoShortcut, recordGridSnapshotUndo } from '../composables/useUndo.js'
 import { syncStudentNamesFromRows, syncStudentNames } from '../composables/useSyncStudentNames.js'
+import { createRowReuseCache } from '../utils/rowReuse.js'
 
 // 弹窗类组件懒加载：打开时才加载对应 chunk。loader 抽出为命名函数，
 // 可用 v-preload="loadXxx" 在悬停按钮时预取，点击时即时弹出。
@@ -324,7 +325,10 @@ const loadActive = async (silent = false) => {
     syncCellsNames(activeCells.value) // 加载后检测未收录姓名
   } catch (e) { console.error(e) } finally { activeLoaded.value = true }
 }
-const dutyActiveRows = computed(() => buildGridRows(activeCells.value))
+// 行对象复用缓存：编辑一格时只重建真正变化的那一行，避免整表重画
+const reuseActiveRows = createRowReuseCache()
+const reuseMasterRows = createRowReuseCache()
+const dutyActiveRows = computed(() => reuseActiveRows(buildGridRows(activeCells.value)))
 
 // ==================== 值日模板 ====================
 const masterCells = ref({})
@@ -337,7 +341,7 @@ const loadMaster = async (silent = false) => {
     syncCellsNames(masterCells.value) // 加载后检测未收录姓名
   } catch (e) { console.error(e) } finally { masterLoaded.value = true }
 }
-const dutyMasterRows = computed(() => buildGridRows(masterCells.value))
+const dutyMasterRows = computed(() => reuseMasterRows(buildGridRows(masterCells.value)))
 
 // ==================== 网格编辑回写 ====================
 // 值日 cells 是 {项目:{星期:[人名]}} 对象，无法按行/列坐标拆格，因此用整块快照撤销：
@@ -415,10 +419,12 @@ async function persistMaster() {
 
 // ==================== 行/列拖拽 & 删除（作用于设置） ====================
 function persistSettings(extra) {
-  const tasks = [axios.put(`${API_BASE}/duty/settings`, { days: settingsDays.value, items: settingsItems.value, mode: dutyMode.value })]
-  if (extra && extra.active !== undefined) tasks.push(axios.put(`${API_BASE}/duty`, { cells: activeCells.value, mode: dutyMode.value }))
-  if (extra && extra.master !== undefined) tasks.push(axios.put(`${API_BASE}/duty/template`, { cells: masterCells.value, mode: dutyMode.value }))
-  return Promise.all(tasks)
+  // 单请求：后端 /duty/save 用一个事务依次写 duty_settings / duty_layout / duty_template，
+  // 省去原先 3 个并发请求的往返与重复提交；active/master 仅在需要时附加。
+  const payload = { days: settingsDays.value, items: settingsItems.value, mode: dutyMode.value }
+  if (extra && extra.active !== undefined) payload.active = activeCells.value
+  if (extra && extra.master !== undefined) payload.master = masterCells.value
+  return axios.put(`${API_BASE}/duty/save`, payload)
 }
 
 function swapItems(oldIndex, newIndex) {
