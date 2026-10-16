@@ -3,6 +3,10 @@ import { ref, computed, watch } from 'vue'
 import { resourceUrl } from '../utils/apiUrl'
 
 const THEME_KEY = 'app-theme'
+// 全局日/夜模式：与「主题」正交，任何主题之上再叠一层夜间配色（见 styles/theme-night.css）。
+// 目前仅 glass / glass2 实现了夜间配色，其余主题保持日间外观（切换按钮禁用）。
+const MODE_KEY = 'app-mode'
+const NIGHT_THEMES = ['glass', 'glass2']
 const CUSTOM_KEY = 'app-theme-custom'
 const CUSTOM_THEMES_KEY = 'app-custom-themes'
 const BG_IMAGE_KEY = 'app-bg-image'
@@ -18,6 +22,11 @@ const ANIMATIONS_KEY = 'app-animations'
 const DEFAULT_GLASS_BG = import.meta.env.PROD
   ? window.location.origin + '/glass-bg-opt.jpg'
   : `${import.meta.env.BASE_URL}glass-bg-opt.jpg`
+// glass 夜间模式的默认底图：本身已是深色风景图，故其上的黑色遮罩要更轻（见 theme-night.css
+// 的 .bg-night-default 规则），否则会把图压死。仅夜间生效，日间仍用 DEFAULT_GLASS_BG。
+const DEFAULT_GLASS_BG_NIGHT = import.meta.env.PROD
+  ? window.location.origin + '/glass-bg-night.jpg'
+  : `${import.meta.env.BASE_URL}glass-bg-night.jpg`
 
 const PRESETS = [
   { id: 'base', name: '彩色色块主题', editable: false },
@@ -29,6 +38,11 @@ const PRESETS = [
 
 export const useThemeStore = defineStore('theme', () => {
   const currentTheme = ref(localStorage.getItem(THEME_KEY) || 'glass')
+  // 全局日/夜模式：'day' | 'night'（默认日间，保持现有观感）
+  const mode = ref(localStorage.getItem(MODE_KEY) === 'night' ? 'night' : 'day')
+  const isNight = computed(() => mode.value === 'night')
+  // 当前主题是否已实现夜间配色（决定切换按钮是否可用）
+  const nightSupported = computed(() => NIGHT_THEMES.includes(currentTheme.value))
   const customColors = ref(JSON.parse(localStorage.getItem(CUSTOM_KEY) || '{}'))
   const customThemes = ref(JSON.parse(localStorage.getItem(CUSTOM_THEMES_KEY) || '[]'))
   const backgroundImage = ref(localStorage.getItem(BG_IMAGE_KEY) || '')
@@ -54,6 +68,8 @@ export const useThemeStore = defineStore('theme', () => {
 
   const applyTheme = () => {
     document.documentElement.dataset.theme = currentTheme.value
+    // 全局日/夜模式：写 data-mode，styles/theme-night.css 据此叠加夜间配色
+    document.documentElement.dataset.mode = mode.value
     // 标题栏/侧边栏毛玻璃配色：写 data-topbar-color，CSS 据此切深蓝/白色调
     document.documentElement.dataset.topbarColor = topbarColor.value
     // 动画总开关：关闭时给根元素打 no-animations，配合全局 CSS 瞬时化所有动效
@@ -72,7 +88,9 @@ export const useThemeStore = defineStore('theme', () => {
       document.documentElement.classList.remove('win11-acrylic')
     }
     const isCustomBg = Boolean(backgroundImage.value)
-    const bg = (!isWin11 && backgroundImage.value) || (currentTheme.value === 'glass' ? DEFAULT_GLASS_BG : '')
+    // glass 内置默认底图：日/夜各一张（夜间图本身是深色风景图，遮罩随之变轻）
+    const defaultGlassBg = mode.value === 'night' ? DEFAULT_GLASS_BG_NIGHT : DEFAULT_GLASS_BG
+    const bg = (!isWin11 && backgroundImage.value) || (currentTheme.value === 'glass' ? defaultGlassBg : '')
     if (bg) {
       const bgUrl = isCustomBg ? resourceUrl(bg) : bg
       document.documentElement.style.setProperty('--bg-image', `url('${bgUrl}')`)
@@ -81,6 +99,12 @@ export const useThemeStore = defineStore('theme', () => {
       document.documentElement.style.removeProperty('--bg-image')
       document.documentElement.classList.remove('has-bg-image')
     }
+    // 夜间内置默认底图标记：仅「glass + 夜间 + 未用自定义图」时加。
+    // 供 theme-night.css 给这张深色图配一层更轻的遮罩；自定义图仍走通用遮罩系数。
+    document.documentElement.classList.toggle(
+      'bg-night-default',
+      !isCustomBg && currentTheme.value === 'glass' && mode.value === 'night'
+    )
     // 应用透明度设置
     document.documentElement.style.setProperty('--bg-mask-opacity', bgMaskOpacity.value)
     document.documentElement.style.setProperty('--glass-opacity', glassOpacity.value)
@@ -170,6 +194,15 @@ export const useThemeStore = defineStore('theme', () => {
     applyTheme()
   }
 
+  // 全局日/夜模式：立即生效（写 localStorage + 重应用主题类）
+  const setMode = (value) => {
+    mode.value = value === 'night' ? 'night' : 'day'
+    localStorage.setItem(MODE_KEY, mode.value)
+    applyTheme()
+  }
+
+  const toggleMode = () => setMode(mode.value === 'night' ? 'day' : 'night')
+
   watch(currentTheme, applyTheme)
   watch(backgroundImage, (val) => {
     localStorage.setItem(BG_IMAGE_KEY, val)
@@ -177,6 +210,9 @@ export const useThemeStore = defineStore('theme', () => {
 
   return {
     currentTheme,
+    mode,
+    isNight,
+    nightSupported,
     customColors,
     customThemes,
     backgroundImage,
@@ -201,5 +237,7 @@ export const useThemeStore = defineStore('theme', () => {
     setIconStyle,
     setTopbarColor,
     setAnimationsEnabled,
+    setMode,
+    toggleMode,
   }
 })

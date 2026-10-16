@@ -17,6 +17,20 @@ const marks = []
 const startTime = Date.now()
 const startHR = process.hrtime.bigint()
 
+// 起点校正：上面的零点只是「本计时器被 require」的时刻，而主进程 JS 此前已经跑了一段——
+// 更早还隔着「Electron 进程创建 → Chromium/Node 引导 → main.js 顶层 require」。
+// process.getCreationTime() 给出进程创建时刻，把这段量出来并计入总耗时；
+// 取不到时保持 null，总耗时就退回旧口径（计时器加载 → 可见）。
+let preStartMs = null
+try {
+  const createdAt = typeof process.getCreationTime === 'function' ? process.getCreationTime() : null
+  if (typeof createdAt === 'number' && createdAt > 0 && createdAt <= startTime) {
+    // 刻意保留原样小数：getCreationTime() 给的是微秒级精度的毫秒值（如 126.85693359375），
+    // 这份精度会顺着 totalMs() 一路带到控制台与设置页性能面板（面板按秒呈现），不作截断。
+    preStartMs = startTime - createdAt
+  }
+} catch (_) { /* 信息不可用则跳过校正 */ }
+
 // 「启动完成」锚点：首个窗口首次显示时由 startWindowEnd() 定死。
 // 一旦设定，getTimeline().total 便固定为此刻耗时，不再被「用户在引导页停留」「引导完成后
 // 才创建的窗口/小组件」等更晚的 mark 抬高——即口径为「纯启动耗时」，不含用户交互停留时间。
@@ -30,30 +44,51 @@ function mark(name) {
   console.log(`[startup] +${elapsed}ms  ${name}`)
 }
 
+// 用「事件真实发生时刻」打点：epochMs 为毫秒级 epoch（渲染层传 performance.timeOrigin + performance.now()）。
+// 渲染层日志经 console-message 送到主进程存在几十毫秒投递延迟，按送达时刻打点会把这段延迟算进耗时；
+// 由渲染层自报时刻、主进程只做搬运，即可去掉它。
+// 数值越界（落在零点之前或远超本次启动）时退回送达时刻，避免脏值污染时间线。
+function markAt(name, epochMs) {
+  const at = Number(epochMs)
+  if (!Number.isFinite(at) || at < startTime || at > startTime + 600000) return mark(name)
+  const elapsed = Math.round(at - startTime)
+  marks.push({ name, time: at, elapsed })
+  console.log(`[startup] +${elapsed}ms  ${name}`)
+}
+
 function msFromStart() {
   return Date.now() - startTime
 }
 
 // 标记「启动完成」：首个窗口首次显示时调用，仅第一次生效（幂等）。
-function end(name = '') {
+// epochMs 可选：由渲染层自报的锚点时刻，越界时退回本机送达时刻（引导场景由此定锚点）。
+function end(name = '', epochMs = null) {
   if (endElapsed !== null) return
-  endElapsed = msFromStart()
+  const at = Number(epochMs)
+  const valid = Number.isFinite(at) && at >= startTime && at <= startTime + 600000
+  endElapsed = valid ? Math.round(at - startTime) : msFromStart()
   console.log(`[startup] +${endElapsed}ms  启动完成${name ? '：' + name : ''}`)
 }
 
+// 总耗时 = 「计时起点 → 事件」的耗时 + 「进程创建 → 计时起点」的前段（取不到前段时即为旧口径）
+function totalMs() {
+  const tail = endElapsed !== null
+    ? endElapsed
+    : (marks.length > 0 ? marks[marks.length - 1].elapsed : 0)
+  return tail + (preStartMs || 0)
+}
+
 // 结构化时间线：供性能面板读取（不改动原有 report/saveLog 的日志输出格式）。
-// 返回 { total, marks: [{ label, at, delta }] }，at/delta 单位均为毫秒。
+// 返回 { total, preStartMs, marks: [{ label, at, delta }] }，at/delta 单位均为毫秒。
 // total 优先取「启动完成」锚点；未设定锚点（如异常路径）时回退到最后一条 mark。
+// 两者都额外并入 preStartMs（进程创建 → 计时起点），与 report/saveLog 的总耗时口径一致。
 function getTimeline() {
   const list = marks.map((m, i) => ({
     label: m.name,
     at: m.elapsed,
     delta: i === 0 ? 0 : m.elapsed - marks[i - 1].elapsed,
   }))
-  const total = endElapsed !== null
-    ? endElapsed
-    : (marks.length > 0 ? marks[marks.length - 1].elapsed : 0)
-  return { total, marks: list }
+  return { total: totalMs(), preStartMs, marks: list }
 }
 
 function report() {
@@ -63,15 +98,16 @@ function report() {
     console.log('=================================\n')
     return
   }
+  if (preStartMs !== null) {
+    console.log(`  （零点为主进程计时器加载；Electron 进程创建更早 ${preStartMs}ms，已并入总耗时）`)
+  }
   const first = marks[0]
   for (const m of marks) {
     const gap = m === first ? 0 : m.elapsed - (marks[marks.indexOf(m) - 1]?.elapsed || 0)
     console.log(`  +${String(m.elapsed).padStart(5)}ms  ${m.name}  (间隔 ${gap}ms)`)
   }
-  const last = marks[marks.length - 1]
   // 总耗时口径与性能面板一致：优先取「启动完成」锚点，未设锚点时回退到最后一条 mark
-  const total = endElapsed !== null ? endElapsed : (last ? last.elapsed : 0)
-  console.log(`  总耗时: ${total}ms`)
+  console.log(`  总耗时: ${totalMs()}ms`)
   console.log('=================================\n')
 }
 
@@ -92,17 +128,15 @@ function saveLog(filePath) {
       const gap = i === 0 ? 0 : m.elapsed - marks[i - 1].elapsed
       return `+${String(m.elapsed).padStart(5)}ms  ${m.name}  (间隔 ${gap}ms)`
     })
-    const total = endElapsed !== null
-      ? endElapsed
-      : (marks.length > 0 ? marks[marks.length - 1].elapsed : 0)
     const content = [
       `===== 启动时间线 @ ${new Date().toISOString()} =====`,
+      preStartMs !== null ? `（进程创建 → 计时起点: ${preStartMs}ms，已并入总耗时）` : null,
       ...lines,
-      `总耗时: ${total}ms`,
+      `总耗时: ${totalMs()}ms`,
       '',
-    ].join('\n')
+    ].filter((l) => l !== null).join('\n')
     fs.appendFileSync(filePath, content)
   } catch (_) { /* 忽略写入失败 */ }
 }
 
-module.exports = { mark, end, msFromStart, report, saveLog, getTimeline }
+module.exports = { mark, markAt, end, msFromStart, report, saveLog, getTimeline }

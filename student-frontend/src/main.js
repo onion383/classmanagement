@@ -106,12 +106,16 @@ setupSecureAxios(axios)
 
 // 1. 立即设置主题 CSS 变量（不依赖 Pinia/Vue），防止 splash 到 Vue 渲染之间的闪烁
 const THEME_KEY = 'app-theme'
+const MODE_KEY = 'app-mode'
 const CUSTOM_KEY = 'app-theme-custom'
 const BG_IMAGE_KEY = 'app-bg-image'
 const GLASS_KEY = 'app-glass-opacity'
 const BG_MASK_KEY = 'app-bg-mask-opacity'
 const savedTheme = localStorage.getItem(THEME_KEY) || 'glass'
 document.documentElement.dataset.theme = savedTheme
+// 全局日/夜模式：与主题同批在 Vue 初始化前落地，避免日→夜首帧闪烁
+const savedMode = localStorage.getItem(MODE_KEY) === 'night' ? 'night' : 'day'
+document.documentElement.dataset.mode = savedMode
 // 应用自定义颜色
 try {
   const custom = JSON.parse(localStorage.getItem(CUSTOM_KEY) || '{}')
@@ -126,14 +130,25 @@ document.documentElement.style.setProperty('--glass-opacity', glassOpacity)
 document.documentElement.style.setProperty('--bg-mask-opacity', bgMaskOpacity)
 // 应用背景图：glass 用「自选图 ?? 内置默认图」，glass2（新毛玻璃）只用自选图
 // —— 它自带的 CSS 光斑底已经提供了可模糊的内容，不需要再挂一张图片。
+// glass 内置默认图日/夜各一张：夜间图本身是深色风景图，遮罩要更轻（bg-night-default）。
 const DEFAULT_GLASS_BG = import.meta.env.PROD
   ? window.location.origin + '/glass-bg-opt.jpg'
   : `${import.meta.env.BASE_URL}glass-bg-opt.jpg`
+const DEFAULT_GLASS_BG_NIGHT = import.meta.env.PROD
+  ? window.location.origin + '/glass-bg-night.jpg'
+  : `${import.meta.env.BASE_URL}glass-bg-night.jpg`
+const customBg = localStorage.getItem(BG_IMAGE_KEY) || ''
 const startupBgUrl = () => {
-  if (savedTheme !== 'glass' && savedTheme !== 'glass2') return ''
-  return localStorage.getItem(BG_IMAGE_KEY) || (savedTheme === 'glass' ? DEFAULT_GLASS_BG : '')
+  if (customBg) return customBg
+  if (savedTheme !== 'glass') return ''
+  return savedMode === 'night' ? DEFAULT_GLASS_BG_NIGHT : DEFAULT_GLASS_BG
 }
 const startupBg = startupBgUrl()
+// 仅「glass + 夜间 + 无自选图」时标记夜间内置底图，供 theme-night.css 配更轻遮罩
+document.documentElement.classList.toggle(
+  'bg-night-default',
+  !customBg && savedTheme === 'glass' && savedMode === 'night'
+)
 console.log('[startup] 背景图 URL:', startupBg)
 if (startupBg) {
   document.documentElement.style.setProperty('--bg-image', `url('${startupBg.replace(/'/g, "\\'")}')`)
@@ -244,9 +259,20 @@ if (splashEl) {
     dropped = true
     // 硬切：等路由组件真正绘制完成后直接移除占位，不做透明度过渡。
     // 过渡会让占位文案与下方页面同时可见（「层叠」观感），硬切则是一帧换一帧。
-    requestAnimationFrame(() => requestAnimationFrame(() => {
-      if (splashEl.isConnected) splashEl.remove()
-    }))
+    // 只等一帧：DOM 早已被 Vue 渲染队列刷完（微任务），这一帧的绘制会把「移除占位」与
+    // 「首屏内容」合并进同一帧，观感仍是硬切；多等第二帧只是白等一次帧边界——
+    // 毛玻璃首次 raster 卡顿时，一次帧边界实测可达 ~180ms。
+    requestAnimationFrame(() => {
+      if (!splashEl.isConnected) return
+      splashEl.remove()
+      // 打点「界面真正可见」：占位移除的下一帧就是应用首屏被绘制的时刻。
+      // 主进程的启动时间线会捕获这条（见 electron/main.js 的 console-message 监听）。
+      // 尾部 @<epoch 毫秒> 是渲染层自报的事件时刻：主进程按它打点，剔除跨进程投递延迟。
+      // performance.timeOrigin 为文档导航开始的 epoch 毫秒数，与主进程 Date.now() 同一把钟。
+      console.log(`[startup] 占位页移除（界面可见） @${Math.round(performance.timeOrigin + performance.now())}`)
+      // 广播给 App.vue：此刻才回报「小组件就绪」，避免主进程建窗的同步开销压在启动关键路径上。
+      window.dispatchEvent(new Event('app-visible'))
+    })
   }
 
   // ===== 启动失败兜底 =====
@@ -333,5 +359,8 @@ if (splashEl) {
   whenSplashReady.then(() => { splashReady = true; dropSplash() })
   // 兜底：路由守卫抛错/卡住时也移除，避免界面被永久挡在占位页后面。
   setTimeout(dropSplash, 5000)
+} else {
+  // 没有占位页的窗口（理论上不会发生）：直接广播，否则小组件要等 App 里的兜底计时才建
+  window.dispatchEvent(new Event('app-visible'))
 }
 

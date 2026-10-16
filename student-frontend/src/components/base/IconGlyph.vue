@@ -6,7 +6,7 @@
     :is="entry.comp"
     :size="size"
     :stroke-width="strokeWidth"
-    :class="{ 'icon-loading': isLoading }"
+    :class="{ 'icon-loading': isLoading, 'icon-color': tint !== 'current' }"
     :style="tint === 'current' ? { color: 'currentColor', flexShrink: 0 } : { color: entry.color, flexShrink: 0 }"
   />
   <span v-else class="icon-emoji" :class="{ 'icon-loading': isLoading }" :style="{ fontSize: size + 'px', lineHeight: 1 }">{{ entry.emoji }}</span>

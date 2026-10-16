@@ -49,11 +49,19 @@
 
 <script>
 import '../../styles/dialog-transition.css'
-import AppSelect from './AppSelect.vue'
+import { defineAsyncComponent } from 'vue'
+
+// 下拉组件只在「添加列」弹窗（type === 'columnAdd'）里用到，属业务页操作触发，
+// 与启动时的确认弹窗主路径无关。改为懒加载后不再计入首屏同步入口 chunk；
+// ConfirmDialog 在 App 挂载时就会实例化，这里 mounted 里直接触发一次加载，
+// chunk 与首屏并行下载，用户真打开该弹窗时早已就绪，观感不变。
+const loadAppSelect = () => import('./AppSelect.vue')
+const AppSelect = defineAsyncComponent(loadAppSelect)
 
 export default {
   name: 'ConfirmDialog',
   components: { AppSelect },
+  mounted() { loadAppSelect().catch(() => {}) },
   props: {
     visible: Boolean,
     message: String,

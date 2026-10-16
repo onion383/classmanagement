@@ -3,6 +3,15 @@
     <h2 class="app-name text-lg font-bold mb-6 flex items-center gap-2">
       <img src="/logo.png" alt="logo" class="w-7 h-7 object-contain shrink-0" />
       <span class="truncate">班集</span>
+      <button
+        class="mode-toggle-btn"
+        :disabled="!nightSupported"
+        :title="!nightSupported ? '当前主题暂不支持夜间模式' : (isNight ? '切换到日间模式' : '切换到夜间模式')"
+        @click="toggleMode"
+      >
+        <Sun v-if="isNight" :size="15" stroke-width="1.8" />
+        <Moon v-else :size="15" stroke-width="1.8" />
+      </button>
     </h2>
     <nav class="space-y-1 flex-1 min-h-0 overflow-y-auto sidebar-scroll" @pointerover="onNavOver">
       <template v-for="group in navGroups" :key="group.title">
@@ -18,6 +27,7 @@
           <component
             v-if="iconStyle === 'color'"
             :is="item.lucide"
+            class="icon-color"
             :size="16"
             :stroke-width="2"
             :style="{ color: item.color }"
@@ -35,6 +45,7 @@
 import { ref, watch } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import { storeToRefs } from 'pinia'
+import { Sun, Moon } from '@lucide/vue'
 import { PAGE_GROUPS as navGroups } from '../../config/searchIndex.js'
 import { useThemeStore } from '../../stores/theme'
 import { prefetchRoute } from '../../utils/routePrefetch.js'
@@ -57,7 +68,10 @@ function isSelected(to) {
 }
 
 // 图标样式跟随主题设置：'lucide' 线性图标 | 'emoji' 表情
-const { iconStyle } = storeToRefs(useThemeStore())
+const themeStore = useThemeStore()
+const { iconStyle, isNight, nightSupported } = storeToRefs(themeStore)
+// 全局日/夜切换（仅 glass / glass2 支持，见 theme-night.css）
+const { toggleMode } = themeStore
 
 function onNavOver(e) {
   const link = e.target.closest('a[href]')
