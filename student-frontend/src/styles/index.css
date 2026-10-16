@@ -24,6 +24,7 @@ select {
 @import "./theme-glass2.css";
 @import "./theme-minimal.css";
 @import "./theme-win11.css";
+@import "./theme-night.css";
 @import "./utilities.css";
 
 /* 系统字体：统一走系统 UI 字体栈，避免默认字体带来的「网页感」。

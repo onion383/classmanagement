@@ -1668,7 +1668,9 @@ export default {
     async loadStartup() {
       try {
         const t = await window.electron?.invoke('perf-startup')
-        this.perfStartupTotal = Math.round(t?.total || 0)
+        // 不做取整：主进程传来的 total 带 getCreationTime 的微秒级小数，
+        // 面板按秒原样呈现（如 1.17285693359375 s）。
+        this.perfStartupTotal = t?.total || 0
       } catch (_) {}
     },
     // KB → MB 文本；无数据时占位，保持列宽稳定

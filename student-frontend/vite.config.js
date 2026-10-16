@@ -99,12 +99,25 @@ export default defineConfig({
     // 显式清空输出目录，避免旧 hash 文件残留被打进安装包
     emptyOutDir: true,
     // 运行环境只有 Electron（内嵌新版 Chromium），不存在需要兼容的老浏览器。
-    // 显式指定现代目标，避免 Vite 默认目标向下转译语法、产出多余体积与解析开销。
-    target: 'chrome120',
+    // 指定 esnext 表示不做任何降级转译，避免多余语法转换与解析开销
+    // （当前打包 Electron 43，Chromium 140+，新语法原生支持）。
+    target: 'esnext',
+    // 显式写出最小化器：Vite 8 默认就是 'oxc'，这里只是把默认值写明，
+    // 避免以后误以为没启用压缩（CSS 最小化默认跟随 build.minify，无需单独配置）。
+    minify: 'oxc',
     // Electron 的 Chromium 原生支持 modulepreload，关掉 Vite 注入的 polyfill
     // （它会被打进入口 chunk，对首屏只增加体积、无任何收益）。
     modulePreload: { polyfill: false },
-    rollupOptions: {
+    // 小资源内联阈值：本地 file:// 加载，请求数收益很小，此处仅为减少碎片文件。
+    // 注：src 下当前没有被 Vite 处理的图片/字体资源，此项暂无实际产物变化。
+    assetsInlineLimit: 8192,
+    // 大 chunk 警告阈值：xlsx / exceljs / jspdf / html2canvas 本就是按需加载的独立 chunk，
+    // 不占首屏，警告属噪音，调高阈值避免误导。
+    chunkSizeWarningLimit: 1000,
+    // 不在构建时统计 gzip 体积：日志更干净、构建略快（需要体积数据时用其它工具看）。
+    reportCompressedSize: false,
+    // Vite 8 已用 rolldown 取代 rollup，rollupOptions 是 deprecated 别名，这里改用新名（行为不变）
+    rolldownOptions: {
       input: {
         main: path.resolve(__dirname, 'index.html'),
         widget: path.resolve(__dirname, 'widget.html'),

@@ -85,15 +85,18 @@ const FORCE_OS_WARN = 0
 const SPLASH_CSS_PATH = path.join(__dirname, '..', 'student-frontend', 'splash', 'splash.css')
 const SPLASH_HTML_PATH = path.join(__dirname, '..', 'student-frontend', 'splash', 'splash.html')
 
-// ============ 启动耗时锚点：「后端就绪」+「首屏渲染完成」============
-// 「上次启动耗时」的口径：主进程启动 → 后端就绪与首屏渲染完成两者都满足的那一刻。
-// 只取后端就绪偏早（界面还没出来），只取首屏也偏早（此刻往往还没有数据）；取较晚者最接近
-// 「点开就能用」。引导场景下 setup-ready 即视为首屏渲染完成，从而天然剔除用户在引导页的停留。
+// ============ 启动耗时锚点：「后端就绪」+「首屏可见」============
+// 「上次启动耗时」的口径：主进程启动 → 后端就绪与「首屏真正可见」两者都满足的那一刻。
+// 主窗口以「占位页移除（界面可见）」为准：此刻用户才真正看到首屏（首页数据已到 + 首次绘制完成），
+// 即体感上的可用时刻。引导场景下引导界面挂载即视为首屏可见，从而天然剔除用户在引导页的停留。
 let backendStartupReady = false
-let firstScreenRendered = false
+let firstScreenVisible = false
+// 首屏可见事件的自报时刻（渲染层 epoch ms）：非空时用它定锚点，剔除跨进程投递延迟；
+// 引导场景由主进程直接定锚点，保持 null 走本机时刻。
+let firstScreenVisibleAt = null
 function tryEndStartup() {
-  if (backendStartupReady && firstScreenRendered) {
-    startupTimer.end('后端就绪且首屏渲染完成')
+  if (backendStartupReady && firstScreenVisible) {
+    startupTimer.end('后端就绪且首屏可见', firstScreenVisibleAt)
   }
 }
 backend.onFirstReady(() => {
@@ -365,13 +368,26 @@ function createMainWindow() {
   // 仅记录「首次加载」：重启前端（webContents.reload）会重新打这些日志，若继续记录，
   // 其 elapsed 以主进程已运行的时长为基准，会把重启前的时间也一并算进启动耗时——故首屏完成后停收。
   let rendererStartupLogged = false
+  // 例外：占位页移除（界面真正可见）必然发生在 did-finish-load 之后，必须放行才能记录；
+  // 但只认第一次，避免 reload 再打一遍把时间线污染成两份。
+  let splashDropLogged = false
   win.webContents.on('console-message', (event, level, message) => {
-    if (rendererStartupLogged) return
+    const isSplashDrop = message.startsWith('[startup] 占位页移除')
+    if (rendererStartupLogged && !(isSplashDrop && !splashDropLogged)) return
     if (message.startsWith('[startup]')) {
-      startupTimer.mark(message.replace('[startup] ', ''))
-      // 首屏渲染完成：Vue 挂载结束（启动锚点条件之一，见 tryEndStartup）
-      if (message.includes('Vue 挂载完成')) {
-        firstScreenRendered = true
+      // 渲染层自报时刻协议：日志尾部带「@<epoch 毫秒>」表示该行由渲染层发出，
+      // 数值为事件真实发生时刻（performance.timeOrigin + performance.now()）。
+      // 按它打点可剔除 console-message 的跨进程投递延迟；未附数值时退回送达时刻。
+      const selfAt = / @(\d{10,})$/.exec(message)
+      const at = selfAt ? Number(selfAt[1]) : null
+      const label = message.replace('[startup] ', '').replace(/ @\d{10,}$/, '')
+      if (isSplashDrop) splashDropLogged = true
+      if (at !== null) startupTimer.markAt(label, at)
+      else startupTimer.mark(label)
+      // 首屏可见：占位移除的下一帧就是首屏被绘制的时刻（启动锚点条件之一，见 tryEndStartup）
+      if (isSplashDrop) {
+        firstScreenVisibleAt = at
+        firstScreenVisible = true
         tryEndStartup()
       }
     }
@@ -956,8 +972,8 @@ ipcMain.on('setup-ready', (event) => {
   clearTimeout(setupWindow.__revealTimer)
   revealWindow(setupWindow)
   startupTimer.mark('引导界面挂载完成')
-  // 引导界面即本场景的「首屏」：视为首屏渲染完成，配合后端就绪定锚点（引导页停留不计入启动耗时）。
-  firstScreenRendered = true
+  // 引导界面即本场景的「首屏」：引导界面挂载后窗口立即显示，视为首屏可见，配合后端就绪定锚点（引导页停留不计入启动耗时）。
+  firstScreenVisible = true
   tryEndStartup()
   // 界面完全加载完成后，再让出一次事件循环，随后才在后台开始预热（不与首帧显示抢资源）。
   // 纯低版本提示（plan.setup 为假）没有引导流程，无需预热。

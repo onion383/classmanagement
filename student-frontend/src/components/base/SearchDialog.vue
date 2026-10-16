@@ -58,7 +58,7 @@ import { Search } from '@lucide/vue'
 import axios from 'axios'
 import {
   PAGES, SETTINGS_SECTIONS, SETTINGS_ITEMS, matchKeywords, REMOTE_SOURCE, buildRemoteResults,
-} from '../../config/searchIndex.js'
+} from '../../config/searchData.js'
 
 const props = defineProps({ visible: { type: Boolean, default: false } })
 const emit = defineEmits(['close'])

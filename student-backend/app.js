@@ -43,6 +43,7 @@ const app = express();
 const PORT = Number(process.env.PORT) || 3000;
 
 app.use(cors());
+
 // Host 校验：仅接受本机回环地址的请求，阻断「任意网页/DNS rebinding 探测 localhost API」。
 // 本服务是本地单用户后端，且 Token 可通过 Header/Cookie/Query 携带，
 // 恶意网页即使跨域发来请求，其 Host 头也不是 localhost，故一律拒绝。

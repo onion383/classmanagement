@@ -166,7 +166,6 @@
 <script>
 import Sidebar from './components/layout/Sidebar.vue'
 import NotificationToast from './components/base/NotificationToast.vue'
-import ShutdownMenuDialog from './components/base/ShutdownMenuDialog.vue'
 import ConfirmDialog from './components/base/ConfirmDialog.vue'
 import { useThemeStore } from './stores/theme'
 import { useNotification } from './composables/useNotification'
@@ -197,6 +196,11 @@ const loadAccountDialog = () => import('./components/base/AccountDialog.vue')
 const SearchDialog = defineAsyncComponent(loadSearchDialog)
 const ThemePickerDialog = defineAsyncComponent(loadThemePickerDialog)
 const AccountDialog = defineAsyncComponent(loadAccountDialog)
+// 关闭选择弹窗：只有点窗口关闭按钮/Alt+F4 才用得上。
+// 组件在 App 挂载时就会被渲染，因此 chunk 在挂载那一刻就开始加载（不阻塞首帧），
+// 只是不再计入入口 chunk 的同步解析；实际弹窗前必定已就绪。
+const loadShutdownMenuDialog = () => import('./components/base/ShutdownMenuDialog.vue')
+const ShutdownMenuDialog = defineAsyncComponent(loadShutdownMenuDialog)
 
 export default {
   components: { Sidebar, NotificationToast, ShutdownMenuDialog, ConfirmDialog, SearchDialog, ThemePickerDialog, AccountDialog, Minus, Square, X, Undo2, Redo2, Search, Palette, User, Settings, Info, AiAssistant },
@@ -272,19 +276,27 @@ export default {
   mounted() {
     window.addEventListener('resize', this.onWindowResize)
     // 启动回报「桌面小组件启用状态」：主进程据此按需创建工具箱浮窗与（如启用）桌面小组件。
-    // 时机：首帧真正画完（双重 requestAnimationFrame）就立即回报，不再等浏览器「空闲」——
-    // 小组件能提前数百毫秒出现；首屏请求与组件创建都在首帧之前已发起，此处不与它们抢首帧资源。
+    // 时机：推迟到占位页消失（首屏真正可用）之后 —— 主进程建这两个窗口有约 40ms 的同步开销，
+    // 早于此前它会紧压在「后端就绪」的处理之前，占用启动关键路径的时间。
     const reportWidgetsReady = () => {
       try {
         const enabled = (localStorage.getItem('desktopWidgetEnabled') ?? '1') !== '0'
         if (window.electron?.send) window.electron.send('widgets-ready', enabled)
       } catch (_) {}
     }
-    if (typeof window.requestAnimationFrame === 'function') {
-      window.requestAnimationFrame(() => window.requestAnimationFrame(reportWidgetsReady))
-    } else {
+    // 占位页移除时由渲染层入口广播 app-visible（见 src/main.js 的 dropSplash）。
+    // 兜底 5s：后端起不来时占位页会常驻（它是失败提示的载体），此时照旧把小组件建出来。
+    let widgetsReported = false
+    let widgetsFallback = null
+    const reportWidgetsOnce = () => {
+      if (widgetsReported) return
+      widgetsReported = true
+      if (widgetsFallback) clearTimeout(widgetsFallback)
+      window.removeEventListener('app-visible', reportWidgetsOnce)
       reportWidgetsReady()
     }
+    window.addEventListener('app-visible', reportWidgetsOnce)
+    widgetsFallback = setTimeout(reportWidgetsOnce, 5000)
     // 空闲预热其余页面路由 chunk：让侧边栏跳转不再等 chunk 下载/解析。
     // 未登录（登录页）时不预热业务页面，避免无谓的后台解析。
     const startIdlePrefetch = () => {

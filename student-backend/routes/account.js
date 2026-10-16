@@ -3,7 +3,14 @@ const router = express.Router();
 const jwt = require('jsonwebtoken');
 const { db } = require('../db');
 const dbManager = require('../dbManager');
-const bcrypt = require('bcryptjs');
+// bcryptjs 只在改用户名/改密码/删除账号等「用户操作」里用到，不需要在后端就绪前加载：
+// 改为首次调用时才 require，避免把它的冷加载成本压在启动关键路径上（行为完全不变）。
+let _bcrypt = null;
+const useBcrypt = () => (_bcrypt || (_bcrypt = require('bcryptjs')));
+const bcrypt = {
+  compareSync: (...a) => useBcrypt().compareSync(...a),
+  hashSync: (...a) => useBcrypt().hashSync(...a),
+};
 const { SECRET, auth } = require('../middleware/auth');
 const { pickPhrase, deriveRestoreHash, formatPhrase } = require('../services/recoveryKey');
 
