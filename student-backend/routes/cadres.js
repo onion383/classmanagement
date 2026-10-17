@@ -1,6 +1,7 @@
 const express = require('express');
 const router = express.Router();
 const { db } = require('../db');
+const { cleanText } = require('../services/sanitize');
 
 // ======================== 数据读写 ========================
 // cadres: { id, name, parent_id, max_count, sort_order, children: [], members: [] }
@@ -43,7 +44,7 @@ router.get('/', (req, res) => {
 // 新增职务
 router.post('/', (req, res) => {
   try {
-    const name = String(req.body.name || '').trim();
+    const name = cleanText(req.body.name || '');
     if (!name) return res.status(400).json({ error: '职务名不能为空' });
     const parentId = Number(req.body.parent_id) || 0;
     const maxCount = Math.max(1, Number(req.body.max_count) || 1);
@@ -64,7 +65,7 @@ router.put('/:id', (req, res) => {
     const id = Number(req.params.id);
     const node = db.prepare('SELECT * FROM cadres WHERE id=?').get(id);
     if (!node) return res.status(404).json({ error: '职务不存在' });
-    const name = req.body.name !== undefined ? String(req.body.name).trim() : node.name;
+    const name = req.body.name !== undefined ? cleanText(req.body.name) : node.name;
     if (!name) return res.status(400).json({ error: '职务名不能为空' });
     const parentId = req.body.parent_id !== undefined ? (Number(req.body.parent_id) || 0) : node.parent_id;
     const maxCount = req.body.max_count !== undefined ? Math.max(1, Number(req.body.max_count) || 1) : node.max_count;
@@ -111,7 +112,7 @@ router.post('/:id/members', (req, res) => {
       return res.status(404).json({ error: '职务不存在' });
     }
     const studentId = req.body.student_id ? Number(req.body.student_id) || null : null;
-    const studentName = String(req.body.student_name || '').trim();
+    const studentName = cleanText(req.body.student_name || '');
     if (!studentName) return res.status(400).json({ error: '请选择担任学生' });
     const maxSort = db.prepare('SELECT COALESCE(MAX(sort_order),0) AS max FROM cadre_members WHERE cadre_id=?').get(cadreId).max;
     const info = db.prepare('INSERT INTO cadre_members (cadre_id, student_id, student_name, sort_order) VALUES (?,?,?,?)')

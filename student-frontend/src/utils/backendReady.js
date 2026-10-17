@@ -4,6 +4,7 @@
 //
 // 契约：resolve(true) = 已就绪（可能远早于 timeout）；resolve(false) = 等满 timeout 仍未知。
 // 调用方把它当成「可提前结束的退避等待」：慢不过原来的固定 sleep，快则在后端就绪瞬间立即重试。
+
 let ready = false
 const waiters = new Set()
 let subscribed = false
@@ -18,13 +19,13 @@ function subscribe() {
   const api = electronApi()
   if (!api || typeof api.on !== 'function') return
   api.on('from-main', (msg) => {
-    if (!msg || msg.type !== 'backend-ready') return
-    ready = true
-    for (const fn of [...waiters]) fn()
+    if (!msg) return
+    if (msg.type === 'backend-ready') {
+      ready = true
+      for (const fn of [...waiters]) fn()
+    }
   })
 }
-
-export function isBackendReady() { return ready }
 
 // 「后端不可达」判定：无响应（连接被拒/中断）或网关错误都算同一类故障。
 // 后者是 dev 模式的产物——Vite 代理连不上上游时会把「连接被拒」包装成真正的

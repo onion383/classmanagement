@@ -5,7 +5,7 @@
     <div class="bg-surface p-5 rounded-lg min-w-[300px] max-w-[600px] text-center shadow-card dialog-card">
       <h3 v-if="title" class="text-lg font-bold mb-3">{{ title }}</h3>
       <!-- 添加列：显示列名输入 + 类型选择 -->
-      <p v-if="message" class="mb-3 whitespace-pre-line break-words text-sm leading-relaxed" v-html="message"></p>
+      <p v-if="message" class="mb-3 whitespace-pre-line break-words text-sm leading-relaxed">{{ message }}</p>
       <div v-if="type === 'columnAdd'" class="text-left">
         <label class="block mb-2">新列名：
           <input
@@ -39,6 +39,7 @@
 
       <div class="mt-4">
         <button v-if="showCancel" @click="$emit('cancel')" class="bg-surface-hover border-none px-4 py-1.5 rounded mr-2 cursor-pointer">{{ cancelText }}</button>
+        <button v-if="extraText" @click="$emit('extra')" class="bg-surface-hover border-none px-4 py-1.5 rounded mr-2 cursor-pointer">{{ extraText }}</button>
         <button @click="$emit('confirm')" :disabled="confirmDisabled" class="bg-info text-text-inverse border-none px-4 py-1.5 rounded cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed">{{ confirmText }}</button>
       </div>
     </div>
@@ -72,11 +73,13 @@ export default {
     confirmDisabled: Boolean,
     confirmText: { type: String, default: '确定' },
     cancelText: { type: String, default: '取消' },
+    // 可选的第三个按钮（如「仅删学生/保留记录」）；为空则不显示
+    extraText: { type: String, default: '' },
     columnName: String,
     columnType: String,
     errorMsg: String,
   },
-  emits: ['confirm', 'cancel', 'update:columnName', 'update:columnType'],
+  emits: ['confirm', 'cancel', 'extra', 'update:columnName', 'update:columnType'],
   methods: {
     handleOverlayClick() {
       if (this.showCancel) this.$emit('cancel');

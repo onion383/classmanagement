@@ -17,7 +17,7 @@ const routes = [
   { path: '/scores', name: 'scoreManage', component: () => import('../views/ScoreManagement.vue'), meta: { requiresAuth: true } },
   { path: '/duty', name: 'duty', component: () => import('../views/DutyView.vue'), meta: { requiresAuth: true } },
   { path: '/activities', name: 'activities', component: () => import('../views/ActivitiesView.vue'), meta: { requiresAuth: true } },
-  { path: '/ai-assistant', name: 'aiAssistant', component: () => import('../views/AiAssistant.vue'), meta: { requiresAuth: true } },
+  { path: '/ai-assistant', name: 'aiAssistant', component: () => import('../views/AiAssistant.vue'), meta: { requiresAuth: true, deferPrefetch: true } },
   { path: '/about', name: 'about', component: () => import('../views/AboutView.vue') },
 ]
 
@@ -65,27 +65,48 @@ router.beforeEach(async (to, from) => {
 // 空闲预热所有懒加载路由 chunk：登录后主窗口空闲时后台按「逐条 + 让出空闲」的方式
 // 拉取各页面模块，让点击侧边栏跳转时不再等 chunk 下载/解析/V8 编译。
 // 逐条而非并发，是为了避免同一时刻下载并解析大量 chunk 抢占主线程造成卡顿。
-export function prefetchRoutes() {
+//
+// meta.deferPrefetch 的路由（如 /ai-assistant）不在启动期预热，而是排在最后一档：
+// 等所有常规路由都预热完、且系统真正空闲时才加载。这样既不抢启动资源，
+// 又能在长时间空闲后把 chunk 备好，让首次打开浮窗近乎即时。
+export function prefetchRoutes(options = {}) {
+  const warmDeferred = options.warmDeferred !== false
   const loaders = []
+  const deferred = []
   const seen = new Set()
   for (const record of router.getRoutes()) {
     const comp = record.components && record.components.default
-    if (typeof comp === 'function' && !seen.has(comp)) { seen.add(comp); loaders.push(comp) }
+    if (typeof comp !== 'function' || seen.has(comp)) continue
+    seen.add(comp)
+    if (record.meta && record.meta.deferPrefetch) deferred.push(comp)
+    else loaders.push(comp)
   }
-  let i = 0
-  const idle = (fn) => {
-    if (typeof window.requestIdleCallback === 'function') window.requestIdleCallback(fn, { timeout: 2000 })
+  const idle = (fn, timeout) => {
+    if (typeof window.requestIdleCallback === 'function') window.requestIdleCallback(fn, { timeout })
     else setTimeout(fn, 80)
   }
+  let j = 0
+  const nextDeferred = () => {
+    if (j >= deferred.length) return
+    const loader = deferred[j++]
+    Promise.resolve()
+      .then(() => loader())
+      .catch(() => {})
+      .then(() => idle(nextDeferred, 8000)) // 末档更保守：等更长的真空闲，避免与交互抢资源
+  }
+  let i = 0
   const next = () => {
-    if (i >= loaders.length) return
+    if (i >= loaders.length) {
+      if (warmDeferred && deferred.length) idle(nextDeferred, 8000)
+      return
+    }
     const loader = loaders[i++]
     Promise.resolve()
       .then(() => loader())
       .catch(() => {})
-      .then(() => idle(next)) // 每条加载完都让出一次空闲，避免连续解析阻塞交互
+      .then(() => idle(next, 2000)) // 每条加载完都让出一次空闲，避免连续解析阻塞交互
   }
-  idle(next)
+  idle(next, 2000)
 }
 
 export default router

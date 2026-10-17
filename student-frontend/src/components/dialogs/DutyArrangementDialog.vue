@@ -111,9 +111,14 @@
         <div v-else class="flex items-center justify-center h-full text-text-muted text-sm py-8">设置劳动项目后开始排表</div>
       </div>
 
-      <div class="flex justify-end gap-2">
-        <button @click="$emit('cancel')" class="bg-surface-hover px-4 py-2 rounded text-text border border-border">取消</button>
-        <button @click="confirm" class="bg-info text-text-inverse px-4 py-2 rounded border-none">确定</button>
+      <div class="flex justify-between gap-2">
+        <button v-if="draft && draft.exists" @click="onClearDraft" class="text-text-muted hover:text-text px-4 py-2 rounded text-sm border border-border bg-surface-hover">清除草稿</button>
+        <div v-else></div>
+        <div class="flex gap-2">
+          <button @click="onSaveDraft" :disabled="!arranged" class="bg-surface-hover px-4 py-2 rounded text-text border border-border disabled:opacity-40 disabled:cursor-not-allowed">保存草稿</button>
+          <button @click="$emit('cancel')" class="bg-surface-hover px-4 py-2 rounded text-text border border-border">取消</button>
+          <button @click="confirm" class="bg-info text-text-inverse px-4 py-2 rounded border-none">确定</button>
+        </div>
       </div>
     </div>
   </div>
@@ -143,6 +148,7 @@ function shuffle(arr) {
 const OPTIONS = [
   { key: 'random', label: '随机排表', type: 'method' },
   { key: 'group', label: '分组排表', type: 'method' },
+  { key: 'fair', label: '权重公平', type: 'method' },
   { key: 'relation', label: '特殊关系', type: 'constraint' },
   { key: 'labor', label: '特殊劳动', type: 'constraint' }
 ]
@@ -156,9 +162,15 @@ export default {
     days: { type: Array, default: () => [] },
     items: { type: Array, default: () => [] },
     // 全班学生（含 id / 姓名）
-    students: { type: Array, default: () => [] }
+    students: { type: Array, default: () => [] },
+    // 值日项目权重表：{ 项目名: { 星期: 权重值 } }
+    weights: { type: Object, default: () => ({}) },
+    // 公平账本：{ 学生姓名: 累计权重值 }
+    ledger: { type: Object, default: () => ({}) },
+    // 草稿：{ exists, cells, settings, conditions, savedAt }
+    draft: { type: Object, default: () => ({ exists: false }) }
   },
-  emits: ['cancel', 'confirm'],
+  emits: ['cancel', 'confirm', 'save-draft', 'clear-draft'],
   data() {
     return {
       tree: [{ key: 'random', label: '随机排表', children: [] }],
@@ -215,6 +227,17 @@ export default {
         this.previewVersion++
         this.satisfaction = {}
         this.rejectText = ''
+        // 草稿恢复：若存在草稿则先恢复（树 + 预览），让用户接着上次继续
+        if (this.draft && this.draft.exists && this.draft.conditions && this.draft.conditions.length) {
+          this.tree = this.draft.conditions.map(c => ({ ...c, children: c.children || [] }))
+          if (this.draft.cells && Object.keys(this.draft.cells).length) {
+            this.previewCells = this.draft.cells
+            this.arranged = true
+            this.previewVersion++
+          }
+        } else {
+          this.tree = [{ key: 'random', label: '随机排表', children: [] }]
+        }
         this.fetchDimensions()
       }
     },
@@ -339,16 +362,19 @@ export default {
     isMethod(n) {
       return OPTIONS.find(o => o.key === n.key)?.type === 'method'
     },
-    // 先序处理：随机/分组可并存，主填充优先分组；后应用全部约束
+    // 先序处理：随机/分组/权重公平可并存，主填充优先级：公平 > 分组 > 随机
     buildAssignment() {
       this.satisfaction = {}
       const slots = this.buildSlots()
       if (!slots.length) { this.previewCells = {}; return }
-      // 方式节点：随机/分组可同时存在，去重后取「分组」作主策略（若已选维度），否则随机
+      // 方式节点：多个方式可同时存在，取最高优先级的作主策略
       const methods = this.tree.filter(n => this.isMethod(n))
       const group = methods.find(n => n.key === 'group')
+      const fair = methods.find(n => n.key === 'fair')
       let assigned
-      if (group && this.groupBuckets().length) {
+      if (fair && this.hasWeightData()) {
+        assigned = this.fairFill(slots)
+      } else if (group && this.groupBuckets().length) {
         this._groupMainDay = {}
         assigned = this.groupFill(slots, this.groupBuckets())
       } else {
@@ -363,6 +389,11 @@ export default {
         else if (c.key === 'labor') assigned = this.applyLabor(slots, assigned, c)
       }
       return { slots, assigned }
+    },
+    // 是否具备可用的权重数据（每个槽位都能取到权重值）
+    hasWeightData() {
+      const w = this.weights || {}
+      return this.itemsArr.every(it => w[it.name] && typeof w[it.name] === 'object')
     },
 
     // 分组符合度：组内成员落在「其组主天」人数的占比（由 computeGroupSatisfaction 依据实际排表结果计算）
@@ -438,6 +469,27 @@ export default {
         }
       }
       this.trackSatisfaction('labor:' + a + ':' + node.item, ok ? 1 : 0, 1)
+      return assigned
+    },
+
+    // ==================== 权重公平分配 ====================
+    // 把槽位按权重升序排列、学生按累计权重（账本）降序排列，配对分配——
+    // 权重低的槽位给累计多的人，权重高的槽位给累计少的人，使长期趋于公平。
+    fairFill(slots) {
+      const w = this.weights || {}
+      const led = this.ledger || {}
+      // 学生名单 + 账本值（没记录的按 0 计），按账本降序
+      const students = this.studentNames.map(name => ({ name, led: led[name] || 0 }))
+      students.sort((a, b) => b.led - a.led)
+      // 槽位按权重升序（权重相同保持原顺序）
+      const slotOrder = slots.map((s, i) => ({ i, w: w[s.item]?.[s.day] ?? 0.5 }))
+      slotOrder.sort((a, b) => a.w - b.w)
+      const assigned = new Array(slots.length).fill('')
+      // 多对多：若学生数 < 槽位数，循环使用（仍按账本降序轮询）；反之多余学生不上表
+      for (let i = 0; i < slotOrder.length; i++) {
+        assigned[slotOrder[i].i] = students[i % students.length].name
+      }
+      this.trackSatisfaction('fair', slots.length, slots.length)
       return assigned
     },
 
@@ -585,6 +637,21 @@ export default {
     },
     confirm() {
       this.$emit('confirm', { cells: this.previewCells })
+    },
+    onSaveDraft() {
+      // 保存条件树 + 当前预览结果；父组件负责调后端接口
+      const conditions = this.tree.map(n => ({
+        key: n.key, label: n.label, option: n.option,
+        a: n.a, b: n.b, student: n.student, action: n.action, item: n.item,
+        children: (n.children || []).map(c => ({
+          key: c.key, label: c.label,
+          a: c.a, b: c.b, student: c.student, action: c.action, item: c.item
+        }))
+      }))
+      this.$emit('save-draft', { cells: this.previewCells, conditions })
+    },
+    onClearDraft() {
+      this.$emit('clear-draft')
     }
   }
 }

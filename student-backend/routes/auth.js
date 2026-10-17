@@ -1,7 +1,11 @@
 const express = require('express');
 const router = express.Router();
 const crypto = require('crypto');
-const jwt = require('jsonwebtoken');
+// jsonwebtoken 只在登录/注册/重置密码等「签发 Token」时用到，不需要在后端就绪前加载：
+// 改为首次调用时才 require，避免把它（连带 semver / side-channel 等）的冷加载成本
+// 压在启动关键路径上（行为完全不变）。
+let _jwt = null;
+const useJwt = () => (_jwt || (_jwt = require('jsonwebtoken')));
 // bcryptjs 只在登录/注册/重置密码等「用户操作」里用到，不需要在后端就绪前加载：
 // 改为首次调用时才 require，避免把它的冷加载成本压在启动关键路径上（行为完全不变）。
 let _bcrypt = null;
@@ -10,7 +14,8 @@ const bcrypt = {
   compareSync: (...a) => useBcrypt().compareSync(...a),
   hashSync: (...a) => useBcrypt().hashSync(...a),
 };
-const { SECRET, auth } = require('../middleware/auth');
+const { SECRET, auth, TOKEN_SIGN_OPTS, TOKEN_COOKIE_MAX_AGE } = require('../middleware/auth');
+const sessions = require('../services/sessions');
 const { pickPhrase, deriveRestoreHash, normalizePhrase, formatPhrase, safeEqualHash } = require('../services/recoveryKey');
 const dbManager = require('../dbManager');
 
@@ -40,6 +45,16 @@ router.get('/accounts', (req, res) => {
 // 无效即返回 401，前端据此直接回登录页，避免「先渲染内部页再被踢回」的闪烁。
 router.get('/me', auth(), (req, res) => {
   res.json({ username: req.user.username, role: req.user.role, dbSlug: req.user.dbSlug });
+});
+
+// ---------------------------------------------------------------------------
+// POST /logout  —— 主动退出登录
+// 把当前 token 的会话（sid）从名单里移除，原 token 立即失效：即使旧 token 被留用也验不过。
+// 只吊销本次登录的这一条会话，同账号在其它设备上的登录态不受影响。
+router.post('/logout', auth(), (req, res) => {
+  sessions.revoke(req.user && req.user.sid);
+  res.clearCookie('token', { path: '/' });
+  res.json({ ok: true });
 });
 
 // 「从数据库文件登录」：前端用文件选择器选中一个 .db 文件后把文件名传上来，
@@ -87,16 +102,20 @@ router.post('/login', (req, res) => {
     return res.status(401).json({ error: '账号或密码错误' });
   }
 
-  const token = jwt.sign(
-    { userId: user.id, username: user.username, role: user.role, dbSlug: user.db_slug || resolved.slug },
+  const token = useJwt().sign(
+    {
+      userId: user.id, username: user.username, role: user.role,
+      dbSlug: user.db_slug || resolved.slug,
+      sid: sessions.create(user.id), // 会话名单：主动退出时吊销，原 token 立即失效
+    },
     SECRET,
-    { expiresIn: '7d' }
+    TOKEN_SIGN_OPTS
   );
   res.cookie('token', token, {
     httpOnly: true,
     sameSite: 'lax',
     path: '/',
-    maxAge: 7 * 24 * 60 * 60 * 1000
+    maxAge: TOKEN_COOKIE_MAX_AGE
   });
   res.json({
     token,
@@ -158,16 +177,16 @@ router.post('/register', (req, res) => {
     try {
       const { slug } = dbManager.createTeacher(uname, passwordHash, 'teacher', wantEncrypted);
       console.log('[register] 无密码注册成功:', uname, 'slug:', slug, 'encrypted:', wantEncrypted);
-      const token = jwt.sign(
-        { userId: 1, username: uname, role: 'teacher', dbSlug: slug },
+      const token = useJwt().sign(
+        { userId: 1, username: uname, role: 'teacher', dbSlug: slug, sid: sessions.create(1) },
         SECRET,
-        { expiresIn: '7d' }
+        TOKEN_SIGN_OPTS
       );
       res.cookie('token', token, {
         httpOnly: true,
         sameSite: 'lax',
         path: '/',
-        maxAge: 7 * 24 * 60 * 60 * 1000
+        maxAge: TOKEN_COOKIE_MAX_AGE
       });
       return res.json({
         message: '注册成功',
@@ -221,16 +240,20 @@ router.post('/register/confirm', (req, res) => {
     console.log('[register/confirm] 确认注册成功:', draft.username, 'slug:', slug);
     // 签发登录态，注册成功即自动进入系统，无需再回登录页手动登录
     const userRow = resolved.conn.prepare('SELECT id, username, role FROM users WHERE username = ?').get(draft.username);
-    const token = jwt.sign(
-      { userId: userRow.id, username: userRow.username, role: userRow.role, dbSlug: slug },
+    const token = useJwt().sign(
+      {
+        userId: userRow.id, username: userRow.username, role: userRow.role,
+        dbSlug: slug,
+        sid: sessions.create(userRow.id),
+      },
       SECRET,
-      { expiresIn: '7d' }
+      TOKEN_SIGN_OPTS
     );
     res.cookie('token', token, {
       httpOnly: true,
       sameSite: 'lax',
       path: '/',
-      maxAge: 7 * 24 * 60 * 60 * 1000
+      maxAge: TOKEN_COOKIE_MAX_AGE
     });
     res.json({
       message: '注册成功',

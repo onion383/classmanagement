@@ -226,6 +226,100 @@ function registerDialogsIpc(opts = {}) {
     }
   })
 
+  // ===== 截屏选区（AI 对话里「截屏发图」用）=====
+  // 三步配合完成「主窗口消失 → 框选区域 → 确定/取消」：
+  //   1) screenshot-region：把主窗口/工具箱临时透明后截取主屏，返回冻结画面（此时不显示窗口，避免闪一下原界面）
+  //   2) screenshot-region-show：渲染层画好冻结画面后，主窗口铺满整屏并置顶，作为选区遮罩
+  //   3) screenshot-region-end：把主窗口还原到截屏前的尺寸/层级/不透明度
+  // 裁剪由渲染层用 canvas 完成，不必把整屏数据再传回主进程。
+  let regionState = null
+
+  function setWinOpacity(win, opacity) {
+    if (win && !win.isDestroyed()) {
+      try { win.setOpacity(opacity) } catch (_) { /* 忽略 */ }
+    }
+  }
+
+  // 还原截屏前的窗口状态：正常结束与异常兜底共用
+  function restoreAfterRegion() {
+    const st = regionState
+    regionState = null
+    if (!st) return
+    const win = st.window
+    if (win && !win.isDestroyed()) {
+      // 先透明，再改回原尺寸/层级，最后恢复不透明：遮住尺寸变化过程
+      setWinOpacity(win, 0)
+      try { win.setAlwaysOnTop(st.alwaysOnTop) } catch (_) { /* 忽略 */ }
+      try {
+        if (st.maximized) win.maximize()
+        else win.setBounds(st.bounds)
+      } catch (_) { /* 忽略 */ }
+      setWinOpacity(win, 1)
+      win.show()
+      win.focus()
+    }
+    // 工具箱恢复可见
+    if (st.widgetWasVisible) setWinOpacity(getWidgetWindow(), 1)
+  }
+
+  ipcMain.handle('screenshot-region', async () => {
+    const mainWindow = getMainWindow()
+    if (!mainWindow || mainWindow.isDestroyed()) return { success: false, error: '主窗口不可用' }
+    if (regionState) return { success: false, error: '已有截屏进行中' }
+
+    const widgetWindow = getWidgetWindow()
+    const display = screen.getPrimaryDisplay()
+    regionState = {
+      window: mainWindow,
+      bounds: mainWindow.getBounds(),
+      maximized: mainWindow.isMaximized(),
+      alwaysOnTop: mainWindow.isAlwaysOnTop(),
+      widgetWasVisible: !!(widgetWindow && !widgetWindow.isDestroyed() && widgetWindow.getOpacity() > 0),
+    }
+
+    try {
+      // 1. 常驻屏幕上的窗口会进入截图，先让主窗口与工具箱临时透明，等一帧让合成器更新
+      setWinOpacity(mainWindow, 0)
+      if (regionState.widgetWasVisible) setWinOpacity(widgetWindow, 0)
+      await new Promise((resolve) => setTimeout(resolve, 150))
+
+      // 2. 截取整个主屏（物理像素，供渲染层按显示尺寸比例裁剪）
+      const { width, height } = display.size
+      const scaleFactor = display.scaleFactor || 1
+      const sources = await desktopCapturer.getSources({
+        types: ['screen'],
+        thumbnailSize: { width: Math.round(width * scaleFactor), height: Math.round(height * scaleFactor) },
+      })
+      const primarySource = sources.find((s) => s.display_id === String(display.id)) || sources[0]
+      const image = primarySource.thumbnail.toPNG()
+      return { success: true, dataUrl: `data:image/png;base64,${image.toString('base64')}` }
+    } catch (err) {
+      restoreAfterRegion()
+      return { success: false, error: err.message || '截屏失败' }
+    }
+  })
+
+  ipcMain.handle('screenshot-region-show', async () => {
+    const st = regionState
+    if (!st || !st.window || st.window.isDestroyed()) return { success: false }
+    const display = screen.getPrimaryDisplay()
+    // 铺满整屏并置顶作为选区遮罩；渲染层此时已画好冻结画面，再恢复不透明度就不会露出原界面
+    st.window.setBounds({
+      x: display.bounds.x, y: display.bounds.y,
+      width: display.bounds.width, height: display.bounds.height,
+    })
+    st.window.setAlwaysOnTop(true)
+    setWinOpacity(st.window, 1)
+    st.window.show()
+    st.window.focus()
+    return { success: true }
+  })
+
+  ipcMain.handle('screenshot-region-end', async () => {
+    restoreAfterRegion()
+    return { success: true }
+  })
+
   // 保存注释后的截图
   ipcMain.handle('note-save', async (event, uint8Array, options) => {
     const buffer = Buffer.from(uint8Array)

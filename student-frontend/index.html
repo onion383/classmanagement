@@ -2,7 +2,7 @@
 <html lang="en">
   <head>
     <meta charset="UTF-8">
-    <link rel="icon" type="image/png" href="/logo.png">
+    <link rel="icon" type="image/webp" href="/logo.webp">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <link rel="preconnect" href="http://localhost:3000">
     <!-- 注意：这里不要手写 <link rel="modulepreload" href="/src/main.js">。
@@ -17,6 +17,9 @@
          这里给 body 一层同色兜底，窗口出现的瞬间即无白屏。 */
       html, body { margin: 0; height: 100%; }
       body { background: linear-gradient(160deg, #eef2ff 0%, #e2e8ff 100%); }
+      /* 深色模式兜底底色：与 splash.css 的深色占位同一取色（glass 夜间底），
+         避免占位页移除、Vue 首屏尚未接管时闪一下浅色。判定口径同 src/stores/theme.js。 */
+      :root[data-mode="night"]:is([data-theme="glass"], [data-theme="glass2"]) body { background: #182238; }
     </style>
   </head>
   <body>

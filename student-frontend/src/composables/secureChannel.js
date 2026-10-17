@@ -107,6 +107,35 @@ export async function decryptBody(d) {
   return JSON.parse(new TextDecoder().decode(pt))
 }
 
+// --- 流式（SSE）专用封装 ---
+// 请求体：安全通道开启时加密整个 body（与其它 JSON API 一致）；否则原样返回。
+// 降级：握手失败时退回明文，保证「开关不一致」也能各自正常工作。
+export async function encodeStreamRequest(obj) {
+  if (!safe()) return obj
+  try {
+    return await encryptBody(obj)
+  } catch (_) {
+    clearSession()
+    return obj
+  }
+}
+
+// 响应帧：SSE 每帧先按 JSON 解析；命中 { d } 密文信封（后端 encodeStreamEvent/responseEncrypt 同形）
+// 则解密还原为事件对象，明文帧直接返回。解析/解密失败返回 null，由调用方丢弃该帧。
+export async function decodeStreamEvent(raw) {
+  let obj
+  try { obj = JSON.parse(raw) } catch (_) { return null }
+  if (obj && typeof obj === 'object' && typeof obj.d === 'string') {
+    try {
+      return await decryptBody(obj.d)
+    } catch (_) {
+      clearSession()
+      return null
+    }
+  }
+  return obj
+}
+
 // 会话失效（15 分钟超时等）后强制清空，下次请求重新握手
 export function clearSession() {
   sessionKey = null

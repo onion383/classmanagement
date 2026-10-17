@@ -2,6 +2,8 @@ const express = require('express');
 const router = express.Router();
 const { db, renumber } = require('../db');
 const { now, cleanUp, maxPosition, buildInsert, buildUpdate } = require('../utils/sql');
+const { sanitizeField } = require('../services/sanitize');
+const { validateRow } = require('../services/businessRules');
 
 // 允许前端更新的字段白名单
 const EDITABLE = ['姓名', '类型', '开始时间', '结束时间', '家长联系电话', '学生联系电话', '状态', '返校时间', '备注'];
@@ -41,13 +43,16 @@ router.post('/', (req, res) => {
       data.学生联系电话 = body.学生联系电话 || null;
     }
 
-    data.类型 = body.类型 || null;
-    data.开始时间 = body.开始时间 || null;
-    data.结束时间 = body.结束时间 || null;
+    data.类型 = body.类型 ? sanitizeField(body.类型, 'leave_records', '类型', '文字') : null;
+    data.开始时间 = sanitizeField(body.开始时间 || null, 'leave_records', '开始时间', '日期');
+    data.结束时间 = sanitizeField(body.结束时间 || null, 'leave_records', '结束时间', '日期');
     data.备注 = body.备注 || null;
     data.状态 = '请假中';
     data.返校时间 = null;
     data.created_at = now();
+
+    // 跨字段校验：结束时间必须晚于开始时间（不合法直接拒绝，避免写入「负时长 / 倒置」请假）
+    validateRow('leave_records', { 开始时间: data.开始时间, 结束时间: data.结束时间 });
 
     data.position = maxPosition('leave_records') + 1;
     const result = buildInsert('leave_records', data);
@@ -61,7 +66,7 @@ router.post('/', (req, res) => {
 // PUT /api/leaves/:id 编辑
 router.put('/:id', (req, res) => {
   try {
-    const row = cleanUp(req.body || {}, EDITABLE);
+    const row = cleanUp(req.body || {}, EDITABLE, 'leave_records');
     if (Object.keys(row).length === 0) return res.status(400).json({ error: '没有可更新的字段' });
     buildUpdate('leave_records', row, req.params.id);
     res.json({ message: '修改成功' });

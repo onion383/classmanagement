@@ -122,6 +122,7 @@
       <button
         ref="aiIcon"
         @mousedown="startDragIcon"
+        v-preload="preloadAiAssistant"
         @click="onIconClick"
         class="fixed z-[20000] w-12 h-12 rounded-full bg-primary hover:bg-primary-hover text-text-inverse text-xl shadow-lg flex items-center justify-center cursor-move select-none"
         :style="iconStyle"
@@ -131,7 +132,7 @@
     <Teleport to="body" v-if="assistantOpen">
       <div
         ref="assistantPanel"
-        class="fixed z-[20001] border border-border rounded-xl shadow-2xl flex flex-col overflow-hidden"
+        class="fixed z-[20001] border border-border rounded-card shadow-2xl flex flex-col overflow-hidden"
         style="background-color: rgba(255,255,255,0.72); backdrop-filter: blur(28px) saturate(1.5);"
         :style="{
           width: '24rem',
@@ -151,7 +152,7 @@
           <button
             type="button"
             @click.stop="assistantOpen = false"
-            class="text-text-muted hover:text-text text-lg leading-none transition-theme cursor-pointer"
+            class="dlg-close"
             title="关闭"
           >✕</button>
         </div>
@@ -172,14 +173,17 @@ import { useNotification } from './composables/useNotification'
 import { useSeatDraft } from './composables/useSeatDraft'
 import { defineAsyncComponent, h } from 'vue'
 import { prefetchRoutes } from './router'
+import { prefetchThemeStyles } from './styles/themeLoader'
 import { Minus, Square, X, Undo2, Redo2, Search, Palette, User, Settings, Info } from '@lucide/vue'
 import axios from 'axios'
 import { undoState as undo, performUndo, refreshUndoStatus } from './composables/useUndo.js'
 import './styles/dialog-transition.css'
 
+// AI 助手懒加载：loader 抽成命名函数，既给 defineAsyncComponent 用，也供悬浮图标 hover 预取（v-preload）
+const loadAiAssistant = () => import('./views/AiAssistant.vue')
 // 异步组件：加载中/失败展示占位文案，避免浮窗点开就消失却毫无反馈
 const AiAssistant = defineAsyncComponent({
-  loader: () => import('./views/AiAssistant.vue'),
+  loader: loadAiAssistant,
   loadingComponent: {
     render() { return h('div', { class: 'h-full flex items-center justify-center text-sm text-text-muted' }, 'AI 助手加载中…') },
   },
@@ -301,14 +305,24 @@ export default {
     // 未登录（登录页）时不预热业务页面，避免无谓的后台解析。
     const startIdlePrefetch = () => {
       if (this.$route.path === '/login') return
-      prefetchRoutes()
+      // AI 助手 chunk 排到预热末档；仅当 AI 未被明确禁用时才预热（未知/已启用都预热）
+      prefetchRoutes({ warmDeferred: this.aiEnabled !== false })
+      // 其余主题/日夜间 CSS 一并空闲预热：切换主题时不再有下载/解析间隙（见 styles/themeLoader.js）
+      prefetchThemeStyles()
     }
-    if (typeof window.requestIdleCallback === 'function') {
-      // 双重 idle：让首屏请求/组件创建彻底过去后再预热路由 chunk，避免抢资源
-      window.requestIdleCallback(() => window.requestIdleCallback(startIdlePrefetch), { timeout: 4000 })
-    } else {
-      setTimeout(startIdlePrefetch, 1500)
+    // 预热锚点：等首屏占位页移除（app-visible）后再等「真正空闲」才预热。
+    // 不设 timeout：宁可一直不预热，也不用兜底强制把 chunk 解析插进启动/交互的忙碌期。
+    // app-visible 由渲染层入口在占位移除的下一帧派发（见 src/main.js 的 dropSplash），
+    // 必定晚于本组件 mounted，故此处注册不会漏。
+    const onAppVisiblePrefetch = () => {
+      window.removeEventListener('app-visible', onAppVisiblePrefetch)
+      if (typeof window.requestIdleCallback === 'function') {
+        window.requestIdleCallback(startIdlePrefetch)
+      } else {
+        setTimeout(startIdlePrefetch, 300)
+      }
     }
+    window.addEventListener('app-visible', onAppVisiblePrefetch)
   },
   created() {
     this.themeStore = useThemeStore()
@@ -441,6 +455,7 @@ export default {
     preloadSearchDialog() { return loadSearchDialog() },
     preloadThemePickerDialog() { return loadThemePickerDialog() },
     preloadAccountDialog() { return loadAccountDialog() },
+    preloadAiAssistant() { return loadAiAssistant() },
 
     // ---- 标题栏：跳转系统设置（跳转后给一条 info 提示） ----
     goToSettings() {
@@ -537,8 +552,10 @@ export default {
           return
         }
         if (data.type === 'backend-failed') {
-          // 启动阶段的失败由首屏占位页接管；本页只接管「跑起来之后再挂」
-          if (!this.backendEverReady) return
+          // 启动阶段的失败默认由首屏占位页接管（避免两层全屏遮罩叠在一起）。
+          // 但占位页可能已先移除（乐观退出方案下不再等后端就绪），那时它已无法承载失败提示，
+          // 这时必须由本页接管，否则用户会卡在骨架屏上、没有任何「重启后端 / 退出」入口。
+          if (!this.backendEverReady && document.querySelector('.app-splash')) return
           this.backendDead = !!data.failed
           return
         }
@@ -685,7 +702,8 @@ export default {
   background: rgba(0, 0, 0, 0.06);
 }
 .window-controls .win-btn-close:hover {
-  background: #e81123;
+  /* 关闭钮 hover 红：Win11 官方关闭红 #c42b1c，比原来的 #e81123 深一档，不那么刺眼 */
+  background: #c42b1c;
   color: #fff;
 }
 </style>

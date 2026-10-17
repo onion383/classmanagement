@@ -1,7 +1,17 @@
 <template>
   <div class="dashboard-page">
+    <!-- 数据尚未就绪：首页骨架屏（仅首页做骨架，其它页面直接渲染各自内容）。
+         `initialLoading` 只在首次加载期间为真，切回首页的后台刷新不会闪骨架。 -->
+    <template v-if="initialLoading">
+      <div class="skeleton-block sk-welcome"></div>
+      <div class="skeleton-block sk-info"></div>
+      <div class="card-grid">
+        <div v-for="i in 8" :key="i" class="skeleton-block sk-card"></div>
+      </div>
+    </template>
+
     <!-- 顶部信息行：左班级大字，右关键数据 -->
-    <div class="welcome-card bg-surface shadow-md rounded-xl mb-6 px-6 py-5 border border-border">
+    <div v-if="!initialLoading" class="welcome-card bg-surface shadow-md rounded-xl mb-6 px-6 py-5 border border-border">
       <div class="flex items-center justify-between gap-6">
         <div class="flex items-center gap-3 min-w-0">
           <IconGlyph name="home" :size="30" />
@@ -34,11 +44,11 @@
     </div>
 
     <!-- 班级信息大框：时间 / 班级班风 / 倒计时 三部分 -->
-    <div class="class-info-card">
+    <div v-if="!initialLoading" class="class-info-card">
       <!-- 第一部分：时钟（汇总小组件逐字符动画） -->
       <div class="info-part clock-part">
         <AnimatedClock
-          style="--ac-time-size:40px; --ac-date-size:14px; --ac-time-color:#111827;"
+          style="--ac-time-size:40px; --ac-date-size:14px;"
           date-format="星期{W}  {Y}-{M}-{D}"
         />
       </div>
@@ -66,7 +76,7 @@
     </div>
 
     <!-- 数据看板：卡片按容器宽度自适应排列（auto-fit），不固定栏数 -->
-    <div class="card-grid">
+    <div v-if="!initialLoading" class="card-grid">
       <!-- 今日值日 -->
         <div class="bg-surface shadow rounded-xl p-5 border border-border card-link" @click="goTo('/duty')" title="跳转：今日值日">
           <h2 class="text-base font-semibold text-text mb-3 flex items-center gap-2">
@@ -222,6 +232,9 @@ const albumPhoto = ref('')
 const showFee = ref(localStorage.getItem('dashboard-fee-visible') === '1')
 
 const loading = ref(false)
+// 首次加载标记：为真时首页显示骨架屏（仅首页做骨架）。
+// 首次数据到位后置 false 并保持，切回首页的后台刷新只在后台进行，不再闪骨架。
+const initialLoading = ref(true)
 
 // ========== 计算属性 ==========
 
@@ -456,6 +469,7 @@ async function loadData(force = false) {
     console.error('[dashboard] 加载数据失败:', err)
   } finally {
     loading.value = false
+    initialLoading.value = false
   }
 }
 
@@ -509,6 +523,11 @@ onBeforeUnmount(() => {
   align-self: stretch;
   background: rgba(0, 0, 0, 0.12);
   margin: 4px 0;
+}
+/* 时钟取色通过变量下传（AnimatedClock 内以 var() 读取），夜间由 theme-night.css 覆盖 */
+.clock-part {
+  --ac-time-color: #111827;
+  --ac-date-color: #4b5563;
 }
 /* 第二部分：班级信息 */
 .class-name {
@@ -642,5 +661,23 @@ onBeforeUnmount(() => {
 .class-gear:hover {
   background: rgba(59, 130, 246, 0.1);
   color: #2563eb;
+}
+
+/* ======================== 首页骨架屏（仅首页） ========================
+   与真实首页同构：欢迎条 / 班级信息大框 / 卡片瀑布流，尺寸对齐以减少加载完成后的跳动。
+   底色与流光复用全局 .skeleton-block。 */
+.sk-welcome {
+  height: 92px;
+  margin-bottom: 24px;
+  border-radius: 12px;
+}
+.sk-info {
+  height: 122px;
+  margin-bottom: 20px;
+  border-radius: 16px;
+}
+.sk-card {
+  height: 180px;
+  border-radius: 12px;
 }
 </style>

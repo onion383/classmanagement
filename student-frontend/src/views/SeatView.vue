@@ -130,22 +130,24 @@
             <button @click="openBackfill()" v-preload="loadSeatBackfillDialog" class="bg-primary text-text-inverse px-4 py-2 rounded flex items-center gap-1.5"><IconGlyph name="clock" :size="14" tint="current" /> 补录记录</button>
           </div>
 
-          <Transition :name="slideDir">
-            <div :key="historyCurrentWeek" class="history-content">
-              <div v-if="historyLoading" class="skeleton-block"></div>
-              <EmptySnapshot v-else-if="!historySnapshot" />
-              <template v-else>
-                <GridView :colHeaders="historyColHeaders" :rows="historyDisplayRows" :hideMetaColumns="true" :showRowNumber="true" />
-                <p class="text-xs text-text-muted mt-2">代表日期：{{ historySnapDate || '—' }}</p>
-              </template>
-            </div>
-          </Transition>
+          <div class="history-swap">
+            <Transition :name="slideDir">
+              <div :key="historyCurrentWeek" class="history-content">
+                <div v-if="historyLoading" class="skeleton-block"></div>
+                <EmptySnapshot v-else-if="!historySnapshot" />
+                <template v-else>
+                  <GridView :colHeaders="historyColHeaders" :rows="historyDisplayRows" :hideMetaColumns="true" :showRowNumber="true" />
+                  <p class="text-xs text-text-muted mt-2">代表日期：{{ historySnapDate || '—' }}</p>
+                </template>
+              </div>
+            </Transition>
+          </div>
           <ExportExcel v-if="historyExportMounted" :is-visible="historyExportVisible" :rows="historyExportRows" :fields="historyExportFields" defaultFilename="座位记录" @update:is-visible="historyExportVisible = $event" />
           <!-- 快照菜单栏：周切换 + 下拉框 + 补存/删除按钮，同处一条毛玻璃栏 -->
           <WeekSwitcher
             v-model:currentWeek="historyCurrentWeek"
             :weeks="historyWeeks"
-            @update:currentWeek="loadHistorySnapshot"
+            @update:currentWeek="onWeekChange"
             @direction="onSwitchWeek"
           >
             <template #actions>
@@ -816,7 +818,7 @@ const historyDisplayRows = computed(() => {
   return result
 })
 
-async function fetchHistoryWeeks() {
+async function fetchHistoryWeeks(options) {
   try {
     const res = await axios.get(`${API_BASE}/seats/history`)
     historyWeeks.value = res.data || []
@@ -826,13 +828,16 @@ async function fetchHistoryWeeks() {
     if (!historyCurrentWeek.value && historyWeeks.value.length > 0) {
       historyCurrentWeek.value = historyWeeks.value[0].week_start
     }
-    if (historyCurrentWeek.value) await loadHistorySnapshot()
+    if (historyCurrentWeek.value) await loadHistorySnapshot(options)
   } catch (e) { console.error(e) }
 }
 
-async function loadHistorySnapshot() {
+async function loadHistorySnapshot(options) {
   if (!historyCurrentWeek.value) return
-  historyLoading.value = true
+  // 静默模式：不切换骨架屏（骨架屏为固定 320px 占位，会先把表格区撑高再回弹，
+  // 导致下方操作栏“闪一下”），仅原地替换数据
+  const silent = !!(options && options.silent)
+  if (!silent) historyLoading.value = true
   try {
     const res = await axios.get(`${API_BASE}/seats/history/${historyCurrentWeek.value}`)
     historySnapshot.value = res.data
@@ -849,8 +854,15 @@ async function loadHistorySnapshot() {
       historySnapDate.value = ''
       historyData.value = { mode: 'single', rows: 0, cols: 0, seats: [], showAisle: false }
     }
-  } catch (e) { console.error(e) } finally { historyLoading.value = false }
+  } catch (e) { console.error(e) } finally { if (!silent) historyLoading.value = false }
   await loadSeatIndex()
+}
+
+// 周切换：静默加载（不显示固定高度骨架屏），避免表格区高度先被撑高再回弹；
+// 滑动过渡动画照常由 key 变化触发
+function onWeekChange(week) {
+  if (week) historyCurrentWeek.value = week
+  loadHistorySnapshot({ silent: true })
 }
 
 // ==================== 座位指数（公平账本） ====================
@@ -997,7 +1009,7 @@ function openHistorySettings() { historySettingsVisible.value = true }
 function openBackfill() { historyBackfillVisible.value = true }
 async function refreshHistory() {
   try {
-    await fetchHistoryWeeks()
+    await fetchHistoryWeeks({ silent: true })
     notifySuccess('已刷新座位记录')
   } catch (e) { /* 错误已在 load 内部处理 */ }
 }
@@ -1054,16 +1066,18 @@ onMounted(async () => {
 <style scoped>
 /* 历史表格周切换滑动动画：新旧表同向并行滑动（推拉感），不影响 WeekSwitcher */
 .history-content { width: 100%; }
+/* 过渡容器：grid 叠放新旧表（同一格），容器高度取两者较大值，切换时高度不塌陷、下方操作栏不跳动；
+   横向 clip 掉 translateX(±60px) 的溢出，避免出现横向滚动条；overflow-y 保持 visible 不误伤浮层 */
+.history-swap { display: grid; grid-template-columns: minmax(0, 1fr); overflow-x: clip; overflow-y: visible; }
+.history-swap > * { grid-area: 1 / 1; min-width: 0; }
 .next-enter-active, .next-leave-active,
 .prev-enter-active, .prev-leave-active {
   transition: transform 0.25s ease, opacity 0.25s ease;
 }
-/* 退场表绝对定位到容器顶部，与进场表重叠实现并行滑动 */
-.next-leave-active, .prev-leave-active {
-  position: absolute;
-  top: 0;
-  left: 0;
-  width: 100%;
+/* 进场表置于上层：滑动时新表压在前，退场表在其下层 */
+.next-enter-active, .prev-enter-active {
+  position: relative;
+  z-index: 1;
 }
 /* 下一周：向右推进（新表从左侧跟进向右移动，旧表向右滑出，同方向） */
 .next-enter-from { transform: translateX(-60px); opacity: 0; }

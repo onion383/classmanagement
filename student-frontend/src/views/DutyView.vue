@@ -75,28 +75,90 @@
               <ExportExcel v-if="masterExportMounted" :is-visible="masterExportVisible" :rows="masterExportRows" :fields="exportFields" defaultFilename="值日模板" @update:is-visible="masterExportVisible = $event" />
             </template>
           </section>
+
+          <!-- 值日项目权重表：与值日表同构（项目×星期），格内填数字权重，热力图展示 -->
+          <section class="mb-4">
+            <div class="mb-4 flex items-center gap-3">
+              <h2 class="text-xl font-semibold text-text flex items-center gap-2 min-h-7"><IconGlyph name="chart" :size="20" /> 值日项目权重表</h2>
+            </div>
+            <div class="mb-4 flex flex-wrap items-center gap-3 opbar">
+              <button @click="openWeightAlgo" v-preload="loadWeightAlgoDialog" class="bg-primary text-text-inverse px-4 py-2 rounded flex items-center gap-1.5"><IconGlyph name="settings" :size="14" tint="current" /> 设置</button>
+              <button @click="refreshWeight()" class="bg-text-muted text-text-inverse px-4 py-2 rounded flex items-center gap-1.5 btn-refresh"><IconGlyph name="refresh" :size="14" tint="current" /> 刷新</button>
+              <button @click="openWeightExport()" class="bg-warning text-text-inverse px-4 py-2 rounded flex items-center gap-1.5"><IconGlyph name="download" :size="14" tint="current" /> 导出 Excel</button>
+            </div>
+            <div v-if="!weightLoaded" class="skeleton-block"></div>
+            <GridView
+              v-else
+              :col-headers="settingsDays"
+              :rows="weightDisplayRows"
+              :hide-meta-columns="true"
+              :show-row-number="true"
+              :disable-row-drag="true"
+              row-header-label="劳动项目"
+              :enable-candidate="false"
+              :min-table-height="200"
+              @update:cells="onWeightCellsUpdate"
+              @swap-rows="onWeightSwapRows"
+              @swap-columns="onWeightSwapColumns"
+            />
+            <ExportExcel v-if="weightExportMounted" :is-visible="weightExportVisible" :rows="weightExportRows" :fields="exportFields" defaultFilename="值日项目权重表" @update:is-visible="weightExportVisible = $event" />
+          </section>
         </div>
 
         <div v-else-if="activeTab === 'history'" class="relative">
-          <Transition :name="slideDir">
-            <div :key="historyCurrentWeek" class="history-content">
-              <div v-if="historyLoading" class="skeleton-block"></div>
-              <EmptySnapshot v-else-if="!historySnapshot" />
-              <GridView v-else :col-headers="historyDays" :rows="historyRows" :hide-meta-columns="true" :show-row-number="true" row-header-label="劳动项目" :min-table-height="200" />
+          <!-- 值日指数（公平账本）：每人一根长条，按所做值日项目的权重逐天累加，截至所选周 -->
+          <div v-if="historySnapshot" class="mb-8">
+            <div class="flex flex-wrap items-center justify-between gap-3 mb-4">
+              <h2 class="text-xl font-semibold text-text flex items-center gap-2"><IconGlyph name="chart" :size="20" /> 值日指数</h2>
+              <span class="text-xs text-text-muted">按每人所做值日项目的权重逐天累加 · 截至 {{ historySnapDate || '—' }}</span>
             </div>
-          </Transition>
+            <div class="bg-surface rounded-lg border border-border p-6">
+              <div v-if="dutyIndexRows.length" class="space-y-2.5">
+                <div v-for="(row, idx) in dutyIndexRows" :key="row.name" class="flex items-center gap-3">
+                  <span class="w-20 text-sm text-text truncate text-right shrink-0">{{ row.name }}</span>
+                  <div class="flex-1 h-5 bg-surface-hover rounded overflow-hidden">
+                    <div class="h-full rounded bar-grow bg-primary" :style="{ width: dutyIndexBarWidth(row) + '%', animationDelay: (idx * 90) + 'ms' }"></div>
+                  </div>
+                  <span class="w-14 text-sm font-bold text-right shrink-0 text-text">{{ row.value.toFixed(2) }}</span>
+                </div>
+              </div>
+              <div v-else class="text-center text-text-muted py-8 text-sm">暂无值日指数数据</div>
+            </div>
+          </div>
+
+          <!-- 值日记录：标题 + 菜单栏（设置 / 刷新 / 导出 Excel / 补录记录） -->
+          <h2 class="text-xl font-semibold text-text flex items-center gap-2 min-h-7 mb-3"><IconGlyph name="calendar" :size="20" /> 值日记录</h2>
+          <div class="mb-4 flex flex-wrap items-center gap-3 opbar">
+            <button @click="openHistorySettings()" v-preload="loadDutyRecordSettingsDialog" class="bg-primary text-text-inverse px-4 py-2 rounded flex items-center gap-1.5"><IconGlyph name="settings" :size="14" tint="current" /> 设置</button>
+            <button @click="refreshHistory()" class="bg-text-muted text-text-inverse px-4 py-2 rounded flex items-center gap-1.5 btn-refresh"><IconGlyph name="refresh" :size="14" tint="current" /> 刷新</button>
+            <button @click="openHistoryExport()" class="bg-warning text-text-inverse px-4 py-2 rounded flex items-center gap-1.5"><IconGlyph name="download" :size="14" tint="current" /> 导出 Excel</button>
+            <button @click="openBackfill()" v-preload="loadDutyBackfillDialog" class="bg-primary text-text-inverse px-4 py-2 rounded flex items-center gap-1.5"><IconGlyph name="clock" :size="14" tint="current" /> 补录记录</button>
+          </div>
+
+          <!-- 表格过渡容器：用 grid 把新旧表叠放同一格 → 容器高度取两者较大值，
+               切换时下方操作栏不会因高度塌陷而跳动；横向 clip 掉平移溢出，避免横向滚动条 -->
+          <div class="history-swap">
+            <Transition :name="slideDir">
+              <div :key="historyCurrentWeek" class="history-content">
+                <div v-if="historyLoading" class="skeleton-block"></div>
+                <EmptySnapshot v-else-if="!historySnapshot" />
+                <GridView v-else :col-headers="historyDays" :rows="historyRows" :hide-meta-columns="true" :show-row-number="true" row-header-label="劳动项目" :min-table-height="200" />
+              </div>
+            </Transition>
+          </div>
+          <ExportExcel v-if="historyExportMounted" :is-visible="historyExportVisible" :rows="historyExportRows" :fields="historyExportFields" defaultFilename="值日记录" @update:is-visible="historyExportVisible = $event" />
           <!-- 快照菜单栏：周切换 + 下拉框 + 保存/删除按钮，同处一条毛玻璃栏 -->
           <WeekSwitcher
             v-model:currentWeek="historyCurrentWeek"
             :weeks="historyWeeks"
-            @update:currentWeek="loadHistorySnapshot"
+            @update:currentWeek="onWeekChange"
             @direction="onSwitchWeek"
           >
             <template #actions>
               <button
                 @click="captureHistorySnapshot"
                 class="bg-primary text-text-inverse px-3 py-1.5 rounded whitespace-nowrap cursor-pointer"
-              >📸 保存本周快照</button>
+              >📸 补存已过日期</button>
               <button
                 @click="requestDeleteHistorySnapshot"
                 :disabled="!canDeleteHistorySnapshot"
@@ -151,8 +213,39 @@
       :days="settingsDays"
       :items="settingsItems"
       :students="allStudents"
+      :weights="dutyWeights"
+      :ledger="dutyLedger"
+      :draft="arrangeDraft"
       @cancel="arrangeVisible = false"
       @confirm="onArrangeConfirm"
+      @save-draft="onSaveArrangeDraft"
+      @clear-draft="onClearArrangeDraft"
+    />
+
+    <!-- 值日项目权重算法弹窗 -->
+    <DutyWeightAlgorithmDialog
+      v-if="weightAlgoMounted"
+      :visible="weightAlgoVisible"
+      :days="settingsDays"
+      :items="settingsItems"
+      @cancel="weightAlgoVisible = false"
+      @apply="onApplyWeightAlgorithm"
+    />
+    <!-- 管理周值日记录弹窗：选择学期 + 周列表 + 删除 -->
+    <DutyRecordSettingsDialog
+      v-if="historySettingsMounted"
+      :visible="historySettingsVisible"
+      :mode="dutyMode"
+      @close="historySettingsVisible = false"
+    />
+
+    <!-- 补录记录弹窗：周切换 + 增加周记录（周数与日期双向联动） -->
+    <DutyBackfillDialog
+      v-if="historyBackfillMounted"
+      :visible="historyBackfillVisible"
+      :mode="dutyMode"
+      @close="historyBackfillVisible = false"
+      @changed="onBackfillChanged"
     />
   </div>
 </template>
@@ -177,8 +270,14 @@ const loadSettingsDialog = () => import('../components/dialogs/DutySettingsDialo
 const DutySettingsDialog = defineAsyncComponent(loadSettingsDialog)
 const loadArrangementDialog = () => import('../components/dialogs/DutyArrangementDialog.vue')
 const DutyArrangementDialog = defineAsyncComponent(loadArrangementDialog)
+const loadWeightAlgoDialog = () => import('../components/dialogs/DutyWeightAlgorithmDialog.vue')
+const DutyWeightAlgorithmDialog = defineAsyncComponent(loadWeightAlgoDialog)
 const ExportExcel = defineAsyncComponent(() => import('../components/import-export/ExportExcel.vue'))
 const ConfirmDialog = defineAsyncComponent(() => import('../components/base/ConfirmDialog.vue'))
+const loadDutyRecordSettingsDialog = () => import('../components/dialogs/DutyRecordSettingsDialog.vue')
+const DutyRecordSettingsDialog = defineAsyncComponent(loadDutyRecordSettingsDialog)
+const loadDutyBackfillDialog = () => import('../components/dialogs/DutyBackfillDialog.vue')
+const DutyBackfillDialog = defineAsyncComponent(loadDutyBackfillDialog)
 
 const API_BASE = '/api'
 const { success: notifySuccess, error: notifyError } = useNotification()
@@ -188,9 +287,34 @@ const settingsVisible = ref(false)
 const arrangeVisible = ref(false)
 // 智能排表目标：'active' 当前值日 / 'master' 值日模板
 const arrangeTarget = ref('active')
-function openArrange(target) {
+const arrangeDraft = ref({ exists: false })
+async function openArrange(target) {
   arrangeTarget.value = target
+  // 先加载账本（公平算法需要）和草稿
+  await Promise.all([loadDutyLedger(), loadArrangeDraft()])
   arrangeVisible.value = true
+}
+async function loadArrangeDraft() {
+  try {
+    const res = await axios.get(`${API_BASE}/duty/draft?mode=${dutyMode.value}`)
+    arrangeDraft.value = res.data || { exists: false }
+  } catch (e) { arrangeDraft.value = { exists: false }; console.error(e) }
+}
+function onSaveArrangeDraft({ cells, conditions }) {
+  axios.put(`${API_BASE}/duty/draft`, { cells, conditions, mode: dutyMode.value })
+    .then(res => {
+      arrangeDraft.value = { exists: true, cells, conditions, savedAt: res.data.savedAt }
+      notifySuccess('草稿已保存')
+    })
+    .catch(e => { notifyError('保存草稿失败'); console.error(e) })
+}
+function onClearArrangeDraft() {
+  axios.delete(`${API_BASE}/duty/draft`)
+    .then(() => {
+      arrangeDraft.value = { exists: false }
+      notifySuccess('草稿已清除')
+    })
+    .catch(e => { notifyError('清除草稿失败'); console.error(e) })
 }
 
 // 导出弹窗可见状态（受控模式配合 v-if 实现懒加载）
@@ -288,8 +412,8 @@ function onDutyModeChange() {
 }
 async function reloadAll() {
   await fetchSettings()
-  // 静默加载：切换模式时不清空 loading 层，避免下方表格出现“加载中→内容”的闪动
-  await Promise.all([loadActive(true), loadMaster(true)])
+  // 静默加载：切换模式时不清空 loading 层，避免下方表格出现"加载中→内容"的闪动
+  await Promise.all([loadActive(true), loadMaster(true), loadWeight()])
 }
 
 async function fetchAllStudents() {
@@ -564,12 +688,274 @@ function onSwitchWeek(dir) { slideDir.value = dir }
 const historyItems = ref([])
 const historyDays = ref([])
 const historyCells = ref({})
+// 所选周代表日期（该周最后一天的快照日期），用于值日指数的"截至"日期显示
+const historySnapDate = computed(() => {
+  if (!historySnapshot.value) return ''
+  return historySnapshot.value.snap_date || historyCurrentWeek.value
+})
 
 const historyRows = computed(() => buildGridRows(historyCells.value, historyItems.value, historyDays.value, true))
 
-async function fetchHistoryWeeks() {
+// ==================== 值日项目权重表 ====================
+// 结构：{ 项目名: { 星期几: 权重值 } }。与值日表同构，供指数与权重公平算法使用。
+const dutyWeights = ref({})
+const weightLoaded = ref(false)
+const WEIGHT_MIN = 0
+const WEIGHT_MAX = 1
+async function loadWeight() {
+  weightLoaded.value = false
   try {
-    const res = await axios.get(`${API_BASE}/duty/history`)
+    const res = await axios.get(`${API_BASE}/duty/weight?mode=${dutyMode.value}`)
+    const w = (res.data && res.data.weights) || {}
+    if (Object.keys(w).length > 0) {
+      dutyWeights.value = w
+    } else {
+      // 首次加载：用 items[].difficulty 铺出初始权重矩阵（整行同权重，按 difficulty）
+      const init = {}
+      settingsItems.value.forEach(it => {
+        init[it.name] = {}
+        const d = Number(it.difficulty)
+        settingsDays.value.forEach(day => { init[it.name][day] = isNaN(d) ? 0.5 : d })
+      })
+      dutyWeights.value = init
+    }
+  } catch (e) { console.error(e) } finally { weightLoaded.value = true }
+}
+async function refreshWeight() {
+  try { await loadWeight(); notifySuccess('已刷新值日项目权重表') } catch (_) { /* 已在 load 内处理 */ }
+}
+async function saveWeight() {
+  try {
+    await axios.put(`${API_BASE}/duty/weight`, { weights: dutyWeights.value, mode: dutyMode.value })
+  } catch (e) { console.error(e) }
+}
+// 表内最大值：热力图按「当前表内最大值」做相对映射（表内最高值最深蓝）
+const weightMax = computed(() => {
+  let m = 0
+  for (const item of Object.keys(dutyWeights.value)) {
+    const days = dutyWeights.value[item] || {}
+    for (const day of Object.keys(days)) {
+      const v = days[day]
+      if (typeof v === 'number' && v > m) m = v
+    }
+  }
+  return m
+})
+// 蓝色热力：浅蓝(#EFF6FF) → 深蓝(#1E3A8A) 线性插值
+function weightHeatRgb(t) {
+  const k = Math.max(0, Math.min(1, t))
+  const from = [239, 246, 255], to = [30, 58, 138]
+  return from.map((f, i) => Math.round(f + (to[i] - f) * k))
+}
+function weightHeatFg(t) {
+  const [r, g, b] = weightHeatRgb(t).map(v => v / 255)
+  const lin = v => (v <= 0.03928 ? v / 12.92 : Math.pow((v + 0.055) / 1.055, 2.4))
+  const L = 0.2126 * lin(r) + 0.7152 * lin(g) + 0.0722 * lin(b)
+  return L < 0.45 ? '#FFFFFF' : '#1E293B'
+}
+// 权重表的 GridView 行：与值日表同构（项目按 count 拆多子行），首子行跨行合并，
+// 同一项目的所有子行共用相同权重值（count>1 时视觉上是一行大单元格）
+const weightDisplayRows = computed(() => {
+  const items = settingsItems.value
+  const days = settingsDays.value
+  const w = dutyWeights.value
+  const rows = []
+  items.forEach(it => {
+    const n = Math.max(1, Number(it.count) || 1)
+    for (let k = 0; k < n; k++) {
+      const cells = days.map(day => {
+        const raw = w[it.name]?.[day]
+        const val = (raw == null || raw === '') ? '' : String(raw)
+        const num = val === '' ? null : Number(val)
+        if (num == null || !Number.isFinite(num)) return { course: val }
+        const t = weightMax.value > 0 ? num / weightMax.value : 0
+        return { course: val, extra: { _bg: `rgb(${weightHeatRgb(t).join(', ')})`, _fg: weightHeatFg(t) } }
+      })
+      rows.push({
+        _rowKey: `w_${it.name}_${k}`,
+        label: it.name,
+        _isReadonly: false,
+        _rowHeaderRowSpan: k === 0 ? n : 0,
+        cells
+      })
+    }
+  })
+  return rows
+})
+// 编辑权重：把 GridView 的行还原回 {项目:{星期:数值}}，非数字/超范围做容错
+function onWeightCellsUpdate(newRows) {
+  const prev = JSON.parse(JSON.stringify(dutyWeights.value))
+  const days = settingsDays.value
+  const groups = {}
+  newRows.forEach(row => {
+    if (row.label && !row._isSeparator) {
+      if (!groups[row.label]) groups[row.label] = []
+      groups[row.label].push(row.cells)
+    }
+  })
+  const next = {}
+  Object.keys(groups).forEach(name => {
+    next[name] = {}
+    const arr = groups[name]
+    days.forEach((day, i) => {
+      // 取首子行的值（多子行共享同一权重）
+      const raw = arr[0]?.[i]?.course
+      const text = (raw == null ? '' : String(raw)).trim()
+      const num = text === '' ? null : Number(text)
+      next[name][day] = Number.isFinite(num) ? Math.max(WEIGHT_MIN, Math.min(WEIGHT_MAX, num)) : 0
+    })
+  })
+  dutyWeights.value = next
+  recordGridSnapshotUndo('值日表', 'duty_weight', prev, next, '编辑权重')
+  saveWeight()
+}
+function onWeightSwapRows(oldIndex, newIndex) {
+  const arr = [...settingsItems.value]
+  const [moved] = arr.splice(oldIndex, 1)
+  arr.splice(newIndex, 0, moved)
+  settingsItems.value = arr
+  // 同时重排权重表中的项目顺序（用项目名映射，保持原有权重值）
+  const prev = JSON.parse(JSON.stringify(dutyWeights.value))
+  const next = {}
+  arr.forEach(it => { next[it.name] = prev[it.name] || {} })
+  dutyWeights.value = next
+  persistSettings({ active: true, master: true })
+  saveWeight()
+}
+function onWeightSwapColumns(oldIndex, newIndex) {
+  const arr = [...settingsDays.value]
+  const [tmp] = [arr[oldIndex]]; arr[oldIndex] = arr[newIndex]; arr[newIndex] = tmp
+  settingsDays.value = arr
+  // 同步交换所有权重项中的列
+  const prev = JSON.parse(JSON.stringify(dutyWeights.value))
+  const next = {}
+  for (const item of Object.keys(prev)) {
+    next[item] = {}
+    for (let i = 0; i < arr.length; i++) {
+      next[item][arr[i]] = prev[item][arr[i]]
+    }
+  }
+  dutyWeights.value = next
+  persistSettings({ active: true, master: true })
+  saveWeight()
+}
+
+// ---------- 权重表导出 ----------
+const weightExportVisible = ref(false)
+const weightExportMounted = ref(false)
+watch(() => weightExportVisible.value, v => { if (v) weightExportMounted.value = true })
+const weightExportRows = computed(() => {
+  return settingsItems.value.map(it => {
+    const row = { 项目: it.name }
+    settingsDays.value.forEach(d => {
+      const v = dutyWeights.value[it.name]?.[d]
+      row['d_' + d] = (v == null || v === '') ? '' : String(v)
+    })
+    return row
+  })
+})
+function openWeightExport() {
+  const hasData = Object.values(dutyWeights.value || {}).some(days =>
+    days && Object.values(days).some(v => v != null && v !== ''))
+  if (!hasData) return useNotification().info('暂无权重数据可导出')
+  weightExportVisible.value = true
+}
+
+// ---------- 权重算法设置弹窗 ----------
+const weightAlgoVisible = ref(false)
+const weightAlgoMounted = ref(false)
+watch(() => weightAlgoVisible.value, v => { if (v) weightAlgoMounted.value = true })
+function openWeightAlgo() { weightAlgoVisible.value = true }
+function onApplyWeightAlgorithm(weights) {
+  const prev = JSON.parse(JSON.stringify(dutyWeights.value))
+  dutyWeights.value = weights
+  recordGridSnapshotUndo('值日表', 'duty_weight', prev, weights, '生成中心权重')
+  saveWeight()
+  weightAlgoVisible.value = false
+  notifySuccess('已生成并应用权重')
+}
+
+// ==================== 值日指数（公平账本） ====================
+// 逐天累加：对每一天的每个值日槽位，取 dutyWeights[项目][星期] 累加到该学生名下
+const dutyIndexDaily = ref([])
+async function loadDutyIndex() {
+  if (!historyCurrentWeek.value) return
+  try {
+    const s = await axios.get(`${API_BASE}/schedule/settings`)
+    const from = (s.data && s.data.semester_start) || ''
+    const to = historySnapDate.value || ''
+    const params = { mode: dutyMode.value }
+    if (from) params.from = from
+    if (to) params.to = to
+    const res = await axios.get(`${API_BASE}/duty/daily`, { params })
+    dutyIndexDaily.value = res.data || []
+  } catch (e) { console.error(e) }
+}
+const dutyIndexRows = computed(() => {
+  const weights = dutyWeights.value
+  if (!weights || !dutyIndexDaily.value.length) return []
+  const acc = {}
+  for (const day of dutyIndexDaily.value) {
+    const cells = day.cells || {}
+    for (const item of Object.keys(cells)) {
+      const days = cells[item] || {}
+      for (const dayName of Object.keys(days)) {
+        const names = days[dayName] || []
+        const w = weights[item]?.[dayName]
+        if (typeof w !== 'number') continue
+        names.forEach(name => {
+          if (!name) return
+          acc[name] = (acc[name] || 0) + w
+        })
+      }
+    }
+  }
+  const rows = Object.keys(acc).map(name => ({ name, value: acc[name] })).filter(r => r.value !== 0)
+  rows.sort((a, b) => b.value - a.value)
+  const max = Math.max(...rows.map(r => Math.abs(r.value)), 0)
+  rows.forEach(r => { r._max = max || 1 })
+  return rows
+})
+function dutyIndexBarWidth(row) {
+  return Math.round((Math.abs(row.value) / row._max) * 100)
+}
+
+// 载入「权重公平」所需账本：统计学期范围内、截至昨日每人累计的值日权重
+const dutyLedger = ref({})
+async function loadDutyLedger() {
+  try {
+    const y = new Date(); y.setDate(y.getDate() - 1)
+    const pad = n => String(n).padStart(2, '0')
+    const to = `${y.getFullYear()}-${pad(y.getMonth() + 1)}-${pad(y.getDate())}`
+    let from = ''
+    try {
+      const s = await axios.get(`${API_BASE}/schedule/settings`)
+      from = s.data.semester_start || ''
+    } catch (_) { /* 后端未就绪时忽略 */ }
+    const params = { mode: dutyMode.value, to }
+    if (from) params.from = from
+    const res = await axios.get(`${API_BASE}/duty/daily`, { params })
+    const weights = dutyWeights.value
+    const led = {}
+    for (const day of res.data || []) {
+      const cells = day.cells || {}
+      for (const item of Object.keys(cells)) {
+        const days = cells[item] || {}
+        for (const dayName of Object.keys(days)) {
+          const names = days[dayName] || []
+          const w = weights[item]?.[dayName]
+          if (typeof w !== 'number') continue
+          names.forEach(name => { if (name) led[name] = (led[name] || 0) + w })
+        }
+      }
+    }
+    dutyLedger.value = led
+  } catch (e) { console.error(e) }
+}
+
+async function fetchHistoryWeeks(options = {}) {
+  try {
+    const res = await axios.get(`${API_BASE}/duty/history?mode=${dutyMode.value}`)
     historyWeeks.value = res.data || []
     if (historyCurrentWeek.value && !historyWeeks.value.some(w => w.week_start === historyCurrentWeek.value)) {
       historyCurrentWeek.value = ''
@@ -577,15 +963,17 @@ async function fetchHistoryWeeks() {
     if (!historyCurrentWeek.value && historyWeeks.value.length > 0) {
       historyCurrentWeek.value = historyWeeks.value[0].week_start
     }
-    if (historyCurrentWeek.value) await loadHistorySnapshot()
+    if (historyCurrentWeek.value) await loadHistorySnapshot(options)
   } catch (e) { console.error(e) }
 }
 
-async function loadHistorySnapshot() {
+async function loadHistorySnapshot(options = {}) {
   if (!historyCurrentWeek.value) return
-  historyLoading.value = true
+  // 静默刷新：跳过骨架屏切换，避免表格重建触发进场/生长动画，仅替换数据
+  const silent = !!(options && options.silent)
+  if (!silent) historyLoading.value = true
   try {
-    const res = await axios.get(`${API_BASE}/duty/history/${historyCurrentWeek.value}`)
+    const res = await axios.get(`${API_BASE}/duty/history/${historyCurrentWeek.value}?mode=${dutyMode.value}`)
     historySnapshot.value = res.data
     if (res.data) {
       const s = (res.data.settings && res.data.settings) || {}
@@ -597,7 +985,16 @@ async function loadHistorySnapshot() {
       historyDays.value = []
       historyCells.value = {}
     }
-  } catch (e) { console.error(e) } finally { historyLoading.value = false }
+    // 切换周后重新结算值日指数
+    await loadDutyIndex()
+  } catch (e) { console.error(e) } finally { if (!silent) historyLoading.value = false }
+}
+
+// 周切换：静默加载（不显示固定高度骨架屏），避免表格区高度先被 320px 占位撑高、
+// 数据返回后又回弹，导致下方操作栏出现“往下闪一下”。滑动过渡动画照常由 key 变化触发。
+function onWeekChange(week) {
+  if (week) historyCurrentWeek.value = week
+  loadHistorySnapshot({ silent: true })
 }
 
 function getMonday(date) {
@@ -607,17 +1004,15 @@ function getMonday(date) {
   return new Date(d.setDate(diff))
 }
 
+// 补存已过日期：仅补齐「今天之前」缺失的历史快照（今天由启动时的静默补存负责）
 async function captureHistorySnapshot() {
   try {
-    const weekStart = getMonday(new Date()).toISOString().slice(0, 10)
-    await axios.post(`${API_BASE}/duty/snapshot`, {
-      week_start: weekStart,
-      cells: activeCells.value,
-      settings: { items: settingsItems.value, days: settingsDays.value }
-    })
-    notifySuccess('本周快照已保存')
+    const res = await axios.post(`${API_BASE}/duty/snapshot/backfill`, { includeToday: false, mode: dutyMode.value })
+    const n = res.data && res.data.inserted
+    if (n > 0) notifySuccess(`已补存 ${n} 天的历史快照`)
+    else useNotification().info((res.data && res.data.message) || '暂无需要补存的日期')
     await fetchHistoryWeeks()
-  } catch (e) { notifyError('保存失败'); console.error(e) }
+  } catch (e) { notifyError('补存失败'); console.error(e) }
 }
 
 // 删除的是当前下拉框选中的那一周（也就是正在看的那份快照）
@@ -641,7 +1036,7 @@ async function confirmDeleteHistorySnapshot() {
   const week = historyCurrentWeek.value
   if (!week) return
   try {
-    await axios.delete(`${API_BASE}/duty/history/${week}`)
+    await axios.delete(`${API_BASE}/duty/history/${week}?mode=${dutyMode.value}`)
     notifySuccess('该周快照已删除')
     if (historyCurrentWeek.value === week) historySnapshot.value = null
     await fetchHistoryWeeks()
@@ -650,27 +1045,87 @@ async function confirmDeleteHistorySnapshot() {
   }
 }
 
+// ==================== 值日记录：设置 / 补录 / 导出 / 刷新 ====================
+const historySettingsVisible = ref(false)
+const historySettingsMounted = ref(false)
+watch(() => historySettingsVisible.value, v => { if (v) historySettingsMounted.value = true })
+const historyBackfillVisible = ref(false)
+const historyBackfillMounted = ref(false)
+watch(() => historyBackfillVisible.value, v => { if (v) historyBackfillMounted.value = true })
+
+function openHistorySettings() { historySettingsVisible.value = true }
+function openBackfill() { historyBackfillVisible.value = true }
+async function refreshHistory() {
+  try {
+    // 静默刷新：只重取数据，不触发骨架屏/表格重建，避免重绘动画
+    await fetchHistoryWeeks({ silent: true })
+    notifySuccess('已刷新值日记录')
+  } catch (e) { /* 错误已在 fetchHistoryWeeks 内部处理 */ }
+}
+// 补录完成后重新拉取周列表（保持当前选中周不变）
+function onBackfillChanged() { fetchHistoryWeeks() }
+
+// ---------- 值日记录导出（列为劳动项目 + 各星期，取当前所选周快照） ----------
+const historyExportVisible = ref(false)
+const historyExportMounted = ref(false)
+watch(() => historyExportVisible.value, v => { if (v) historyExportMounted.value = true })
+const historyExportFields = computed(() => [
+  { name: '项目', label: '劳动项目' },
+  ...historyDays.value.map(d => ({ name: 'd_' + d, label: d }))
+])
+const historyExportRows = computed(() => historyItems.value.map(it => {
+  const row = { 项目: it.name }
+  historyDays.value.forEach(d => {
+    const names = historyCells.value[it.name]?.[d]
+    row['d_' + d] = Array.isArray(names) ? names.filter(Boolean).join('、') : (names || '')
+  })
+  return row
+}))
+function openHistoryExport() {
+  if (!historySnapshot.value || !historyExportRows.value.length) return useNotification().info('暂无值日记录可导出')
+  historyExportVisible.value = true
+}
+
 watch(activeTab, (newTab) => { if (newTab === 'history') fetchHistoryWeeks() })
+
+// 启动时静默补存：把今天及之前的快照补齐（失败静默，不影响正常使用）
+async function silentBackfill() {
+  try { await axios.post(`${API_BASE}/duty/snapshot/backfill`, { includeToday: true, mode: dutyMode.value }) }
+  catch (_) { /* 静默失败 */ }
+}
 
 onMounted(async () => {
   await fetchSettings()
-  await Promise.all([loadActive(), loadMaster(), fetchAllStudents()])
+  await Promise.all([loadActive(), loadMaster(), fetchAllStudents(), loadWeight()])
+  silentBackfill()
 })
 </script>
 
 <style scoped>
+/* 值日指数柱状图：从左往右非线性生长进场动画（与座位指数一致） */
+.bar-grow {
+  transform-origin: left center;
+  animation: score-bar-grow 0.5s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+@keyframes score-bar-grow {
+  from { transform: scaleX(0); }
+  to { transform: scaleX(1); }
+}
+
 /* 历史表格周切换滑动动画：新旧表同向并行滑动（推拉感），不影响 WeekSwitcher */
 .history-content { width: 100%; }
+/* 过渡容器：grid 叠放新旧表（同一格），容器高度取两者较大值，切换时高度不塌陷、下方操作栏不跳动；
+   横向 clip 掉 translateX(±60px) 的溢出，避免出现横向滚动条；overflow-y 保持 visible 不误伤浮层 */
+.history-swap { display: grid; grid-template-columns: minmax(0, 1fr); overflow-x: clip; overflow-y: visible; }
+.history-swap > * { grid-area: 1 / 1; min-width: 0; }
 .next-enter-active, .next-leave-active,
 .prev-enter-active, .prev-leave-active {
   transition: transform 0.25s ease, opacity 0.25s ease;
 }
-/* 退场表绝对定位到容器顶部，与进场表重叠实现并行滑动 */
-.next-leave-active, .prev-leave-active {
-  position: absolute;
-  top: 0;
-  left: 0;
-  width: 100%;
+/* 进场表置于上层：滑动时新表压在前，退场表在其下层 */
+.next-enter-active, .prev-enter-active {
+  position: relative;
+  z-index: 1;
 }
 /* 下一周：向右推进（新表从左侧跟进向右移动，旧表向右滑出，同方向） */
 .next-enter-from { transform: translateX(-60px); opacity: 0; }

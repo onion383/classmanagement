@@ -27,3 +27,46 @@
 .app-splash .fail-btn.primary { background: #1e40af; border-color: #1e40af; color: #fff; }
 .app-splash .fail-btn:disabled { opacity: .5; cursor: default; }
 @keyframes rotate { to { transform: rotate(360deg); } }
+
+/* ============ 深色模式适配（仅 glass / glass2 实现了夜间配色，口径见 src/stores/theme.js） ============
+   占位页在 Vue 挂载前绘制，拿不到主题仓库；由 splash.html 顶部那段脚本先把 localStorage 里的
+   主题 / 模式写到 <html> 上，下面这组规则据此在首帧即生效，避免深色模式下启动闪一下浅色。
+   底色与弥散光斑刻意与 theme-night.css 的 glass 夜间（body / main）取同一组值，
+   保证「占位页 → 应用首屏」无跳变；日间的样式与取值完全不变。 */
+:root[data-mode="night"]:is([data-theme="glass"], [data-theme="glass2"]) .app-splash {
+  background-color: #182238;
+  background-image:
+    radial-gradient(ellipse 40% 30% at 10% 15%, rgba(59, 130, 246, 0.24) 0%, transparent 60%),
+    radial-gradient(ellipse 40% 30% at 90% 10%, rgba(99, 102, 241, 0.16) 0%, transparent 60%),
+    radial-gradient(ellipse 45% 35% at 50% 95%, rgba(56, 132, 222, 0.14) 0%, transparent 60%);
+}
+/* 转圈：轨道更淡、进度弧改用夜间主色（glass 夜间 --color-primary = #60a5fa） */
+:root[data-mode="night"]:is([data-theme="glass"], [data-theme="glass2"]) .app-splash .ring circle:not(.spin) {
+  stroke: rgba(96, 165, 250, 0.25);
+}
+:root[data-mode="night"]:is([data-theme="glass"], [data-theme="glass2"]) .app-splash .ring .spin {
+  stroke: #60a5fa;
+}
+:root[data-mode="night"]:is([data-theme="glass"], [data-theme="glass2"]) .app-splash .warn-icon {
+  stroke: #60a5fa;
+}
+:root[data-mode="night"]:is([data-theme="glass"], [data-theme="glass2"]) .app-splash .logo {
+  color: #60a5fa;
+}
+:root[data-mode="night"]:is([data-theme="glass"], [data-theme="glass2"]) .app-splash .tip {
+  color: #7f8ea6;
+}
+/* 启动失败兜底（后端一直起不来）同样跟随夜间 */
+:root[data-mode="night"]:is([data-theme="glass"], [data-theme="glass2"]) .app-splash .fail-msg {
+  color: #f87171;
+}
+:root[data-mode="night"]:is([data-theme="glass"], [data-theme="glass2"]) .app-splash .fail-btn {
+  background: rgba(255, 255, 255, 0.08);
+  border-color: rgba(96, 165, 250, 0.35);
+  color: #60a5fa;
+}
+:root[data-mode="night"]:is([data-theme="glass"], [data-theme="glass2"]) .app-splash .fail-btn.primary {
+  background: #3b82f6;
+  border-color: #3b82f6;
+  color: #fff;
+}

@@ -141,7 +141,8 @@ function initSchema(conn) {
       base_url TEXT DEFAULT '',
       model TEXT DEFAULT '',
       api_key TEXT DEFAULT '',
-      is_active INTEGER DEFAULT 0
+      is_active INTEGER DEFAULT 0,
+      reasoning INTEGER DEFAULT 1
     );
     -- 将旧的单模型配置迁移为第一条已选模型（仅当旧配置曾填写过模型名/密钥/地址）
     INSERT INTO ai_models (name, provider, base_url, model, api_key, is_active)
@@ -154,6 +155,11 @@ function initSchema(conn) {
     CREATE TABLE IF NOT EXISTS ai_conversations (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       title TEXT DEFAULT '新对话',
+      -- 上下文压缩：summary 为较早消息的摘要，summary_upto 为已摘要到的消息 id（含）；
+      -- last_prompt_tokens 记录最近一轮模型实际返回的 prompt token 用量，用于触发压缩
+      summary TEXT DEFAULT '',
+      summary_upto INTEGER DEFAULT 0,
+      last_prompt_tokens INTEGER DEFAULT 0,
       created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
       updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
     );
@@ -162,6 +168,9 @@ function initSchema(conn) {
       conversation_id INTEGER NOT NULL,
       role TEXT NOT NULL,
       content TEXT DEFAULT '',
+      process_json TEXT DEFAULT '',
+      -- 该条消息附带的文件（[{name, text}]，JSON 字符串），供后续轮次仍能读取
+      attachments_json TEXT DEFAULT '',
       created_at DATETIME DEFAULT CURRENT_TIMESTAMP
     );
     CREATE INDEX IF NOT EXISTS idx_ai_messages_conv ON ai_messages (conversation_id, id);
@@ -370,6 +379,40 @@ function initSchema(conn) {
     }
   }
 
+  // 存量库迁移：为 AI 模型表补充 reasoning 列（是否开启思考模式，默认开启）
+  {
+    const aiCols = conn.prepare('PRAGMA table_info(ai_models)').all().map(c => c.name);
+    if (!aiCols.includes('reasoning')) {
+      conn.exec(`ALTER TABLE ai_models ADD COLUMN reasoning INTEGER DEFAULT 1`);
+    }
+  }
+
+  // 存量库迁移：为 AI 消息表补充 process_json 列（过程块：步骤 / 思维链 / 耗时）
+  {
+    const msgCols = conn.prepare('PRAGMA table_info(ai_messages)').all().map(c => c.name);
+    if (!msgCols.includes('process_json')) {
+      conn.exec(`ALTER TABLE ai_messages ADD COLUMN process_json TEXT DEFAULT ''`);
+    }
+    // 存量库迁移：附件内容随消息落库，供后续轮次仍能读取历史文件
+    if (!msgCols.includes('attachments_json')) {
+      conn.exec(`ALTER TABLE ai_messages ADD COLUMN attachments_json TEXT DEFAULT ''`);
+    }
+  }
+
+  // 存量库迁移：为 AI 会话表补充上下文压缩相关列
+  {
+    const convCols = conn.prepare('PRAGMA table_info(ai_conversations)').all().map(c => c.name);
+    if (!convCols.includes('summary')) {
+      conn.exec(`ALTER TABLE ai_conversations ADD COLUMN summary TEXT DEFAULT ''`);
+    }
+    if (!convCols.includes('summary_upto')) {
+      conn.exec(`ALTER TABLE ai_conversations ADD COLUMN summary_upto INTEGER DEFAULT 0`);
+    }
+    if (!convCols.includes('last_prompt_tokens')) {
+      conn.exec(`ALTER TABLE ai_conversations ADD COLUMN last_prompt_tokens INTEGER DEFAULT 0`);
+    }
+  }
+
   // ======================== 元数据默认列 ========================
   const initMeta = conn.prepare(`INSERT OR IGNORE INTO table_meta (table_name, column_name, sort_order) VALUES (?, ?, ?)`);
   ['学号','年级','班级','姓名','年龄','家长联系电话','学生联系电话','备注'].forEach((c, i) => initMeta.run('students', c, i + 1));
@@ -549,10 +592,11 @@ function initSchema(conn) {
     { column: '成员数', sql: `"成员数" INTEGER DEFAULT 0` }
   ]);
 
-  // ======================== 卫生值日表（设置/当前/模板/历史） ========================
+  // ======================== 卫生值日表（设置/当前/模板/权重/草稿/历史） ========================
   // duty_settings：全局「时间(星期几) + 劳动项目(含辛苦度、人数)」配置
   // duty_layout / duty_template：当前值日表与值日模板（cells 按 项目名→星期→学生名单 存储）
-  // duty_history：按周保存的当前值日表快照
+  // duty_weight：值日项目权重表（项目名→星期→权重值），按 daily/big 分模式打包存储
+  // duty_draft：智能排表的临时草稿（cells/settings/conditions + saved_at，saved_at 为空即无草稿）
   conn.exec(`
     CREATE TABLE IF NOT EXISTS duty_settings (
       id INTEGER PRIMARY KEY CHECK (id = 1),
@@ -575,14 +619,41 @@ function initSchema(conn) {
     );
     INSERT OR IGNORE INTO duty_template (id) VALUES (1);
 
-    CREATE TABLE IF NOT EXISTS duty_history (
+    CREATE TABLE IF NOT EXISTS duty_weight (
+      id INTEGER PRIMARY KEY CHECK (id = 1),
+      weights TEXT NOT NULL DEFAULT '{}',
+      settings TEXT NOT NULL DEFAULT '{}'
+    );
+    INSERT OR IGNORE INTO duty_weight (id) VALUES (1);
+
+    CREATE TABLE IF NOT EXISTS duty_draft (
+      id INTEGER PRIMARY KEY CHECK (id = 1),
+      cells TEXT NOT NULL DEFAULT '{}',
+      settings TEXT NOT NULL DEFAULT '{}',
+      conditions TEXT NOT NULL DEFAULT '[]',
+      saved_at TEXT NOT NULL DEFAULT ''
+    );
+    INSERT OR IGNORE INTO duty_draft (id) VALUES (1);
+  `);
+
+  // duty_history 迁移：由「按周」升级为「按天」（对齐座位快照）。
+  // 新增 snap_date（该行对应的具体日期）与 mode（daily/big），
+  // 存量记录以其 week_start 作为 snap_date、并归入 daily 模式。
+  ensureTableWithMigration('duty_history', `
+    CREATE TABLE duty_history (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       week_start TEXT NOT NULL,
+      snap_date TEXT NOT NULL DEFAULT '',
+      mode TEXT NOT NULL DEFAULT 'daily',
       cells TEXT NOT NULL DEFAULT '{}',
       settings TEXT NOT NULL DEFAULT '{}',
       created_at DATETIME DEFAULT CURRENT_TIMESTAMP
     );
-  `);
+  `, [
+    { column: 'snap_date', sql: "snap_date TEXT NOT NULL DEFAULT ''" },
+    { column: 'mode', sql: "mode TEXT NOT NULL DEFAULT 'daily'" }
+  ]);
+  conn.exec(`UPDATE duty_history SET snap_date = week_start WHERE snap_date = '';`);
 
   // ======================== 撤销历史（持久化 undo） ========================
   // 按资源 key 分组记录编辑动作，支持跨重启后继续撤销。
@@ -600,6 +671,14 @@ function initSchema(conn) {
   `);
   // 优化：按资源分组查询/删最旧记录
   conn.exec(`CREATE INDEX IF NOT EXISTS idx_undo_key ON undo_history (key, id);`);
+  // 存量库迁移：为撤销历史补充 origin（来源标记）。
+  // 空字符串=老师手动编辑产生；非空=AI 助手一次更改的批次标识，同一批次整批回退。
+  {
+    const undoCols = conn.prepare('PRAGMA table_info(undo_history)').all().map(c => c.name);
+    if (!undoCols.includes('origin')) {
+      conn.exec(`ALTER TABLE undo_history ADD COLUMN origin TEXT NOT NULL DEFAULT ''`);
+    }
+  }
 
   // ======================== 班干部 ========================
   // cadres：职务树节点。parent_id=0 表示顶级（直接挂在根下，如班主任/班长）。

@@ -9,7 +9,7 @@
         <div class="bg-surface p-5 rounded-xl w-[340px] max-w-[92vw] shadow-lg dialog-card">
           <div class="flex items-center justify-between mb-4">
             <h3 class="text-lg font-bold text-text flex items-center gap-2"><User :size="18" /> 账户</h3>
-            <button class="text-text-muted hover:text-text text-lg leading-none px-2 cursor-pointer" @click="$emit('close')">✕</button>
+            <button class="dlg-close" @click="$emit('close')">✕</button>
           </div>
 
           <div class="space-y-2 text-sm text-text-secondary">

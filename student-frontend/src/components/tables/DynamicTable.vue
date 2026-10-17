@@ -251,6 +251,7 @@ export default {
     noRowDrag: { type: Boolean, default: false },         // 新增：禁用整行拖拽（避免与双击内联编辑冲突）
     editOnClick: { type: Boolean, default: false },       // 新增：单击单元格直接进入编辑（配合失焦保存）
     readonly: { type: Boolean, default: false },          // 新增：纯只读展示（历史快照等）
+    maxHeight: { type: Number, default: 400 },             // 容器最大高度（px），内容超出即纵向滚动
     protectedColumns: { type: Array, default: () => [] },  // 受保护字段：表头名后加 *，提示不可删除
     // 与 rows 对齐的序号数组（可选）。由数据源统一派生，避免把序号写回行对象而破坏行引用复用。
     displayIndexes: { type: Array, default: null },
@@ -285,8 +286,8 @@ export default {
       // 纵向滚动判定：按固定高度（fixedMaxHeight）判断，内容超高才出现纵向滚动条，
       // 而不再按行数判断——多行/换行导致的行高不同也能正确触发，表头随之吸顶。
       vScroll: false,
-      // 表格最大高度：内容超过此高度即启用纵向滚动（固定高度判断）
-      fixedMaxHeight: 400,
+      // 表格最大高度：内容超过此高度即启用纵向滚动（固定高度判断），默认 400，可由父组件按内容调整
+      fixedMaxHeight: this.maxHeight,
     };
   },
   computed: {

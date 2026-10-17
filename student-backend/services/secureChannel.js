@@ -142,6 +142,18 @@ function responseEncrypt(req, res, next) {
   return next();
 }
 
+// 流式响应分帧加密（SSE 场景）：SSE 是逐帧 res.write，无法用 res.json 统一包装，
+// 故在此按「单帧」封装。仅当本请求来自加密会话（req.sessionId 已由 requestDecrypt 置位）
+// 时，把事件对象封成与 responseEncrypt 同形的 { d: 'iv.tag.ct' }；否则原样返回，明文直通。
+function encodeStreamEvent(req, data) {
+  const sid = req && req.sessionId;
+  if (!!sid && hasMaster()) {
+    const key = getSessionKey(sid);
+    if (key) return { d: seal(key, Buffer.from(JSON.stringify(data), 'utf8')) };
+  }
+  return data;
+}
+
 // 清理过期会话
 function cleanupSessions() {
   const now = Date.now();
@@ -154,7 +166,7 @@ module.exports = {
   initMaster, hasMaster, sessionCount,
   genServerEphemeral, deriveEcdhShared, deriveSessionKey,
   seal, open, performHandshake, getSessionKey, destroySession,
-  requestDecrypt, responseEncrypt,
+  requestDecrypt, responseEncrypt, encodeStreamEvent,
   SESSION_TTL_MS,
 };
 

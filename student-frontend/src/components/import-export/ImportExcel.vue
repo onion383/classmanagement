@@ -111,6 +111,13 @@ export default {
     handleFile(e) {
       const file = e.target.files[0];
       if (!file) return;
+      // 大小上限：超大文件会让 xlsx 解析长时间卡死甚至内存暴涨，超过 10MB 直接拒绝
+      if (file.size > 10 * 1024 * 1024) {
+        this.resetFile();
+        this.fileName = file.name;
+        this.parseError = '文件过大，请选择 10MB 以内的表格文件';
+        return;
+      }
       this.fileName = file.name;
       const reader = new FileReader();
       reader.onload = async (ev) => {

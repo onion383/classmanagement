@@ -88,6 +88,17 @@ function dirsIn(dir) {
   try { return fs.readdirSync(dir); } catch (_) { return []; }
 }
 
+// 递归检测目录内是否存在符号链接（用于解压后的安全校验）
+function hasSymlink(dir) {
+  let entries;
+  try { entries = fs.readdirSync(dir, { withFileTypes: true }); } catch (_) { return false; }
+  for (const e of entries) {
+    if (e.isSymbolicLink()) return true;
+    if (e.isDirectory() && hasSymlink(path.join(dir, e.name))) return true;
+  }
+  return false;
+}
+
 // 同步定位本机已有的 ffmpeg（不做网络请求）
 function resolveFfmpegPath() {
   // 1. 显式指定可执行文件
@@ -151,6 +162,14 @@ async function ensureFfmpeg() {
 
     const extract = require('extract-zip'); // 轻量纯 JS，按需加载
     await extract(zipPath, { dir: CACHE_DIR });
+
+    // 解压后安全校验：正常 LGPL 包内不应存在符号链接（符号链接可被用于穿越写入缓存目录外）。
+    // 一旦发现即视为被篡改，清空缓存并放弃使用该二进制（fail-closed）。
+    if (hasSymlink(CACHE_DIR)) {
+      await fsp.unlink(zipPath).catch(() => {});
+      await fsp.rm(CACHE_DIR, { recursive: true, force: true }).catch(() => {});
+      throw new Error('解压结果含符号链接，已中止使用（疑似被篡改）');
+    }
 
     await fsp.unlink(zipPath).catch(() => {});
     await fsp.unlink(path.join(CACHE_DIR, '.inflight')).catch(() => {});

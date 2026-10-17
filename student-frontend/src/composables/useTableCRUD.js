@@ -122,9 +122,10 @@ export function useTableCRUD(apiBase, defaultFields, options = {}) {
     dialogCallback.value = cb
   }
 
-  function showConfirm(msg, onConfirm, onCancel) {
-    dialog.value = { visible: true, message: msg, type: 'confirm', showCancel: true }
-    dialogCallback.value = { confirm: onConfirm, cancel: onCancel }
+  // opts.extraText / opts.onExtra：可选的第三个动作按钮（如删学生时「仅删学生、保留关联记录」）
+  function showConfirm(msg, onConfirm, onCancel, opts = {}) {
+    dialog.value = { visible: true, message: msg, type: 'confirm', showCancel: true, extraText: opts.extraText || '' }
+    dialogCallback.value = { confirm: onConfirm, cancel: onCancel, extra: opts.onExtra }
   }
 
   function onDialogConfirm() {
@@ -138,6 +139,12 @@ export function useTableCRUD(apiBase, defaultFields, options = {}) {
   function onDialogCancel() {
     dialog.value.visible = false
     if (dialogCallback.value?.cancel) dialogCallback.value.cancel()
+  }
+
+  // 第三个动作按钮（extraText 非空时显示，如「仅删学生」）
+  function onDialogExtra() {
+    dialog.value.visible = false
+    if (dialogCallback.value?.extra) dialogCallback.value.extra()
   }
 
   // ==================== 数据加载 ====================
@@ -669,7 +676,7 @@ export function useTableCRUD(apiBase, defaultFields, options = {}) {
     dialogCallback, selectedCount, clipboard, selectedRowKeys,
     importDialogVisible, dedupeDialogVisible,
     displayRows, displayIndexes, visibleFields, allBusinessFields,
-    fetchRows, applyUndoChange, showAlert, showConfirm, onDialogConfirm, onDialogCancel,
+    fetchRows, applyUndoChange, showAlert, showConfirm, onDialogConfirm, onDialogCancel, onDialogExtra,
     startEditCell, saveCell, validateValue,
     addNewRowAtBottom, insertRowAbove, insertRowBelow, createNewRow, cancelNewRow, saveNewRow,
     moveRow, deleteColumn, startAddColumn, confirmAddColumn,

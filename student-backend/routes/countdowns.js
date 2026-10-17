@@ -18,7 +18,7 @@ router.get('/', (req, res) => {
 // POST /api/countdowns 新增
 router.post('/', (req, res) => {
   try {
-    const data = cleanUp(req.body || {}, EDITABLE);
+    const data = cleanUp(req.body || {}, EDITABLE, 'countdowns');
     data.position = maxPosition('countdowns') + 1;
     const result = buildInsert('countdowns', data);
     renumber('countdowns');
@@ -31,7 +31,7 @@ router.post('/', (req, res) => {
 // PUT /api/countdowns/:id 编辑
 router.put('/:id', (req, res) => {
   try {
-    const row = cleanUp(req.body || {}, EDITABLE);
+    const row = cleanUp(req.body || {}, EDITABLE, 'countdowns');
     if (Object.keys(row).length === 0) return res.status(400).json({ error: '没有可更新的字段' });
     buildUpdate('countdowns', row, req.params.id);
     res.json({ message: '修改成功' });

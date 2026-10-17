@@ -1,8 +1,17 @@
-const jwt = require('jsonwebtoken');
+// jsonwebtoken 懒加载：它连带 semver / side-channel 等一次性要花 ~40ms 同步加载，
+// 而 auth 模块在 app.js 里是启动时同步 require 的，这 40ms 全部压在「后端就绪信号」之前。
+// 改为首次验签时才 require：这 40ms 从「就绪前」挪到「首个鉴权请求」，
+// 而首个鉴权请求本来就在就绪之后才发出，前端可感知的启动时间因此提前。
+let _jwt = null;
+function jwtLib() {
+  if (!_jwt) _jwt = require('jsonwebtoken');
+  return _jwt;
+}
 const crypto = require('crypto');
 const fs = require('fs');
 const path = require('path');
 const dbManager = require('../dbManager');
+const sessions = require('../services/sessions');
 
 // 杜绝硬编码兜底：优先使用环境变量 JWT_SECRET。
 // 若未配置，则从 .jwt-secret 文件读取（无则自动生成并持久化），保证重启后已签发 Token 仍有效。
@@ -31,6 +40,15 @@ function resolveSecret() {
 
 const SECRET = resolveSecret();
 
+// 登录 Token 签发策略：不设过期时间（不带 exp 声明），只要用户不主动退出就一直有效；
+// 主动退出时由 services/sessions 把该 token 的 sid 移出会话名单，原 token 立即失效。
+// 属本地单机应用，这是「长期保持登录」与「可吊销」之间的平衡做法。
+const TOKEN_SIGN_OPTS = {};
+// 配套 Cookie 同样按 100 年设置。Chromium 会把 Cookie 有效期上限截到 400 天，
+// 但不影响登录保持：前端登录态走 localStorage + Authorization 头，
+// Cookie 仅用于图片/CSS 等静态资源请求（且这些请求也可用 ?token= 兜底）。
+const TOKEN_COOKIE_MAX_AGE = 100 * 365 * 24 * 60 * 60 * 1000;
+
 // 解析请求中的 Token：优先 Authorization 头，其次 Cookie，最后 URL 查询参数。
 // 查询参数供 <img> / CSS url() 等无法携带请求头的资源请求使用（渲染层受 file:// 跨源限制，
 // Lax Cookie 不会自动带过去），后端仍校验 Token 有效性，不降低鉴权。
@@ -45,7 +63,11 @@ function resolveToken(req) {
 }
 
 function verifyToken(token) {
-  return jwt.verify(token, SECRET);
+  const payload = jwtLib().verify(token, SECRET);
+  // 会话名单校验：主动退出会把 sid 移出名单，此后原 token 立即失效（用户须重新登录）。
+  // 不带 sid 的旧 token（本次改动之前签发的）同样视为失效，全部需要重新登录一次。
+  if (!payload || !sessions.has(payload.sid)) throw new Error('会话已失效');
+  return payload;
 }
 
 function auth(requiredRoles = []) {
@@ -82,4 +104,4 @@ function authStatic() {
   };
 }
 
-module.exports = { auth, authStatic, SECRET, resolveToken, verifyToken };
+module.exports = { auth, authStatic, SECRET, resolveToken, verifyToken, TOKEN_SIGN_OPTS, TOKEN_COOKIE_MAX_AGE };

@@ -1,6 +1,8 @@
 const express = require('express');
 const router = express.Router();
 const { db } = require('../db');
+const { validateRow } = require('../services/businessRules');
+const { normalizeSeats } = require('../services/sanitize');
 
 const MAX_ROWS = 50;
 const MAX_COLS = 30;
@@ -9,6 +11,15 @@ function validateSeatSize(rows, cols) {
   if (rows < 1 || rows > MAX_ROWS) return `行数需在 1 ~ ${MAX_ROWS} 之间`;
   if (cols < 1 || cols > MAX_COLS) return `列数需在 1 ~ ${MAX_COLS} 之间`;
   return null;
+}
+
+// 读取座位：库中若被历史/AI 写成了「扁平对象数组」，这里静默规范化为二维数组返回，
+// 保证前端（按 seats[行][列] 渲染）拿到的一直是可用形态。解析失败则回退原文。
+function readSeats(raw) {
+  let parsed;
+  try { parsed = raw ? JSON.parse(raw) : []; } catch (_) { return []; }
+  try { return Array.isArray(parsed) ? normalizeSeats(parsed, 'seats') : parsed; }
+  catch (_) { return parsed; }
 }
 
 // ======================== 当前座位 ========================
@@ -20,7 +31,7 @@ router.get('/', (req, res) => {
       mode: row.mode,
       rows: row.rows,
       cols: row.cols,
-      seats: JSON.parse(row.seats),
+      seats: readSeats(row.seats),
       aisleCols: JSON.parse(row.aisle_cols),
       groupsConfig: JSON.parse(row.groups_config),
       settings: JSON.parse(row.settings)
@@ -40,13 +51,19 @@ router.put('/', (req, res) => {
     if (sizeError) {
       return res.status(400).json({ error: sizeError });
     }
+    // 规范化座位结构（兼容「二维数组」与「扁平对象数组」），并做元素级校验
+    let normSeats;
+    try { normSeats = normalizeSeats(seats, 'seats'); } catch (e) { return res.status(400).json({ error: e.message }); }
     // 确保 seats 尺寸与 rows/cols 匹配
-    const trimmed = seats.slice(0, rows).map(r => {
+    const trimmed = normSeats.slice(0, rows).map(r => {
       const row = Array.isArray(r) ? r.slice(0, cols) : [];
       while (row.length < cols) row.push(null);
       return row;
     });
     while (trimmed.length < rows) trimmed.push(Array(cols).fill(null));
+
+    // 依赖既有数据的一致性校验：座位里的学生 id 必须真实存在（尺寸越界也在此拦下）
+    validateRow('seat_layout', { seats: trimmed, rows, cols });
 
     db.prepare(`UPDATE seat_layout SET mode=?, rows=?, cols=?, seats=?, aisle_cols=?, groups_config=?, settings=? WHERE id=1`)
       .run(
@@ -100,7 +117,7 @@ router.get('/master', (req, res) => {
       mode: row.mode,
       rows: row.rows,
       cols: row.cols,
-      seats: JSON.parse(row.seats),
+      seats: readSeats(row.seats),
       aisleCols: JSON.parse(row.aisle_cols),
       groupsConfig: JSON.parse(row.groups_config),
       settings: JSON.parse(row.settings)
@@ -120,12 +137,18 @@ router.put('/master', (req, res) => {
     if (sizeError) {
       return res.status(400).json({ error: sizeError });
     }
-    const trimmed = seats.slice(0, rows).map(r => {
+    // 规范化座位结构（兼容「二维数组」与「扁平对象数组」），并做元素级校验
+    let normSeats;
+    try { normSeats = normalizeSeats(seats, 'seats'); } catch (e) { return res.status(400).json({ error: e.message }); }
+    const trimmed = normSeats.slice(0, rows).map(r => {
       const row = Array.isArray(r) ? r.slice(0, cols) : [];
       while (row.length < cols) row.push(null);
       return row;
     });
     while (trimmed.length < rows) trimmed.push(Array(cols).fill(null));
+
+    // 依赖既有数据的一致性校验：座位里的学生 id 必须真实存在
+    validateRow('seat_template', { seats: trimmed, rows, cols });
 
     db.prepare(`UPDATE seat_template SET mode=?, rows=?, cols=?, seats=?, aisle_cols=?, groups_config=?, settings=? WHERE id=1`)
       .run(
