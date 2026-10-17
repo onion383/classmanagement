@@ -20,12 +20,11 @@ select {
 
 @import "tailwindcss";
 @import "./theme-base.css";
-@import "./theme-glass.css";
-@import "./theme-glass2.css";
-@import "./theme-minimal.css";
-@import "./theme-win11.css";
-@import "./theme-night.css";
 @import "./utilities.css";
+/* 主题皮肤（theme-glass / glass2 / minimal / win11）与夜间层（theme-night）不再在此静态引入：
+   改为按「当前 data-theme / data-mode」在运行时按需加载（见 styles/themeLoader.js）。
+   各主题 CSS 都是 [data-theme=...] / [data-mode="night"] 属性选择器，属性不匹配时本就不生效，
+   因此「只加载当前主题」与「全部加载」视觉等价，只是少了未用主题的下载与解析。 */
 
 /* 系统字体：统一走系统 UI 字体栈，避免默认字体带来的「网页感」。
    Win11 用 Segoe UI Variable Text，旧系统回退 Segoe UI；中文用雅黑 UI 变体。

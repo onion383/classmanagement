@@ -9,7 +9,7 @@
         <div class="bg-surface p-5 rounded-xl w-[520px] max-w-[92vw] shadow-lg dialog-card">
           <div class="flex items-center justify-between mb-4">
             <h3 class="text-lg font-bold text-text flex items-center gap-2"><Palette :size="18" /> 切换主题</h3>
-            <button class="text-text-muted hover:text-text text-lg leading-none px-2 cursor-pointer" @click="$emit('close')">✕</button>
+            <button class="dlg-close" @click="$emit('close')">✕</button>
           </div>
 
           <!-- 主题卡片：点卡片立即生效（无需保存），与引导页「主题选择」一致 -->

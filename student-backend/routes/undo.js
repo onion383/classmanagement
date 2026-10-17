@@ -5,8 +5,12 @@ const router = express.Router()
 
 const MAX_PER_KEY = 50
 
-// 允许记录的动态表名（防注入）
-const ALLOWED_TABLES = ['students', 'fee_records', 'leave_records', 'score_records', 'group_members', 'groups', 'group_dimensions', 'activities', 'countdowns']
+// 允许记录的动态表名（防注入）。含 cadre_members：跨表批量写入（propose_batch）可能写入职务成员，需可撤销。
+const ALLOWED_TABLES = ['students', 'fee_records', 'leave_records', 'score_records', 'group_members', 'groups', 'group_dimensions', 'activities', 'countdowns', 'cadres', 'cadre_members']
+
+// 「整块 JSON 列」表：数据以整块 JSON 存于单列（座位 seats / 权重 weights / 课表 cells…），
+// 撤销时按「整块列值」整体还原。表名固定，杜绝注入。
+const DOC_TABLES = ['schedule', 'master_schedule', 'seat_layout', 'seat_template', 'seat_weight', 'duty_settings', 'duty_layout', 'duty_template', 'duty_weight', 'widget_settings', 'schedule_settings']
 
 // 网格型数据：整块 JSON 存于单列，撤销按单格或整块处理。
 // 表名固定，杜绝注入。列名到具体网格列一一对应。
@@ -61,6 +65,21 @@ function updateRowById(table, id, row) {
   if (!keys.length) return
   const set = keys.map(k => `"${k}" = ?`).join(', ')
   db.prepare(`UPDATE ${table} SET ${set} WHERE id = ?`).run(...keys.map(k => row[k]), id)
+}
+// 整块写入「非行式」表：按给定列整体覆盖某行（对象/数组列按 JSON 文本落库）。
+// obj 为「列名 → 列值」，仅写入该表真实列（不含 id）。
+function writeDocCols(table, id, obj) {
+  const keys = rowKeys(table, obj).filter(k => k !== 'id')
+  if (!keys.length) return
+  const set = keys.map(k => `"${k}" = ?`).join(', ')
+  const params = keys.map(k => {
+    const v = obj[k]
+    if (v != null && typeof v === 'object') return JSON.stringify(v)
+    // 布尔按 1/0 落库，避免 INTEGER 列（如 toolbox_enabled / auto_apply）被写入文本
+    if (typeof v === 'boolean') return v ? 1 : 0
+    return v
+  })
+  db.prepare(`UPDATE ${table} SET ${set} WHERE id = ?`).run(...params, id)
 }
 // 记录显示名：取姓名/小组名/活动主题/倒计时名称，否则回退 #id
 function rowName(row, id) {
@@ -175,6 +194,25 @@ const executors = {
         ? { type: 'row_upsert', table: p.table, row: p.row }
         : { type: 'row_remove', table: p.table, rowId: p.row.id }
     }
+  },
+
+  // 整块写入「非行式」表（座位/权重/课表/值日/模板等）：
+  // payload { table, id, before, after, label }，before/after 为「列名 → 整块列值」。
+  // 覆盖一列或多列；对象/数组列按 JSON 文本落库。undo 写回 before，redo 写回 after。
+  doc_update: {
+    validate({ table, id, before }) {
+      if (!DOC_TABLES.includes(table) || !Number.isInteger(id)) return '参数不完整'
+      if (!before || typeof before !== 'object') return '参数不完整'
+      return null
+    },
+    undo({ table, id, before }) { writeDocCols(table, id, before) },
+    redo({ table, id, after }) { writeDocCols(table, id, after) },
+    describe(p, mode) {
+      if (p.label) return p.label
+      const cols = Object.keys(p.before || {}).join('、')
+      return mode === 'undo' ? `整块还原：${cols}` : `整块写入：${cols}`
+    },
+    change() { return { type: 'full_reload' } }
   },
 
   // 单格编辑（网格 JSON 列）：payload { table, row, col, oldValue, newValue }
@@ -351,13 +389,14 @@ function getRecord(id) {
 }
 
 // 新增一条可撤销记录（undo侧）
-function pushRecord(key, type, label, payload) {
+// origin：来源标记。空=老师手动编辑；非空=AI 助手一次更改的批次标识（同批次整批回退）
+function pushRecord(key, type, label, payload, origin) {
   const ts = new Date().toISOString()
   // 新增动作使该 key 的 redo 侧失效
   db.prepare('DELETE FROM undo_history WHERE key = ? AND dir = 0').run(key)
   const info = db.prepare(
-    'INSERT INTO undo_history (key, type, label, payload, dir, ts) VALUES (?, ?, ?, ?, 1, ?)'
-  ).run(key, type, label, JSON.stringify(payload), ts)
+    'INSERT INTO undo_history (key, type, label, payload, dir, origin, ts) VALUES (?, ?, ?, ?, 1, ?, ?)'
+  ).run(key, type, label, JSON.stringify(payload), origin || '', ts)
   // 每 key 上限，删最旧
   const over = db.prepare(
     'SELECT id FROM undo_history WHERE key = ? ORDER BY id DESC LIMIT -1 OFFSET ?'
@@ -389,6 +428,77 @@ async function flip(id, fromDir, toDir, mode) {
   return { ok: true, label, change }
 }
 
+// 回退某一批次（origin 相同）的全部记录。origin 为 AI 一次更改的批次标识。
+async function undoOriginBatch(origin) {
+  const rows = db.prepare('SELECT id FROM undo_history WHERE dir = 1 AND origin = ? ORDER BY id DESC').all(origin)
+  const labels = []
+  for (const r of rows) {
+    const res = await flip(r.id, 1, 0, 'undo')
+    if (res.error) return { ok: false, error: res.error, count: labels.length, labels }
+    if (res.label) labels.push(res.label)
+  }
+  return { ok: true, count: labels.length, labels }
+}
+
+// 撤销「AI 助手」此前做出的最近一次数据更改（同一批次整批回退）。
+//   key 可选：限定只撤销该资源（表名 / 分组名）上的最近一次 AI 更改。
+//   只处理 origin 非空的记录，不会误撤销老师手动编辑产生的撤销记录。
+//   返回 { ok, count, labels } 或 { ok:false, error }。供 AI 工具 undo_change 复用。
+async function undoAiChange(key) {
+  let sql = "SELECT origin FROM undo_history WHERE dir = 1 AND origin <> ''"
+  const params = []
+  if (key) { sql += ' AND key = ?'; params.push(String(key)) }
+  sql += ' ORDER BY id DESC LIMIT 1'
+  const last = db.prepare(sql).get(...params)
+  if (!last) {
+    return { ok: false, error: key ? `没有可撤销的、你此前对「${key}」做出的更改` : '你此前没有可撤销的更改' }
+  }
+  return undoOriginBatch(last.origin)
+}
+
+// 列出 AI 助手此前的可撤销更改，按「批次」分组（同一 origin 为一次更改），最新在前。
+//   step 从 1 起：1 = 最近一次更改。返回 [{ step, label, count, keys, ts, id, origin }]。
+//   供 AI 工具 list_changes 复用，让模型看到撤销栈（不再是盲退）。
+function listAiChanges(limit) {
+  const rows = db.prepare("SELECT id, key, label, origin, ts FROM undo_history WHERE dir = 1 AND origin <> '' ORDER BY id DESC").all()
+  const batches = []
+  const map = new Map()
+  for (const r of rows) {
+    let b = map.get(r.origin)
+    if (!b) { b = { origin: r.origin, labels: [], keys: [], ids: [], ts: r.ts }; map.set(r.origin, b); batches.push(b) }
+    b.labels.push(r.label || '')
+    if (!b.keys.includes(r.key)) b.keys.push(r.key)
+    b.ids.push(r.id)
+  }
+  const lim = Math.min(Math.max(Number(limit) || 10, 1), 30)
+  return batches.slice(0, lim).map((b, i) => ({
+    step: i + 1,
+    label: b.labels.filter(Boolean).join('；') || '（无描述）',
+    count: b.labels.length,
+    keys: b.keys,
+    ts: b.ts,
+    id: Math.max(...b.ids),
+    origin: b.origin,
+  }))
+}
+
+// 回退最近 N 批 AI 更改（最新在前逐批回退）：steps=1 即只回退最近一次更改。
+//   返回 { ok, count, labels, batches } 或 { ok:false, error }。供 AI 工具 undo_change（steps）复用。
+async function undoAiChanges(steps) {
+  const n = Math.min(Math.max(Number(steps) || 1, 1), 20)
+  const batches = listAiChanges(n)
+  if (!batches.length) return { ok: false, error: '你此前没有可撤销的更改' }
+  const labels = []
+  let undone = 0
+  for (const b of batches) {
+    const res = await undoOriginBatch(b.origin)
+    if (res.error) return { ok: false, error: res.error, count: labels.length, labels }
+    labels.push(...res.labels)
+    undone++
+  }
+  return { ok: true, count: labels.length, labels, batches: undone }
+}
+
 // 按 key 分组返回（含每组计数与记录）
 router.get('/', (req, res) => {
   const rows = db.prepare('SELECT * FROM undo_history ORDER BY id ASC').all()
@@ -413,10 +523,10 @@ router.get('/', (req, res) => {
 
 // 新增记录
 router.post('/', (req, res) => {
-  const { key, type, label, payload } = req.body || {}
+  const { key, type, label, payload, origin } = req.body || {}
   if (!key || !type) return res.status(400).json({ error: '缺少参数' })
   if (!(type in executors)) return res.status(400).json({ error: `不支持的记录类型: ${type}` })
-  const id = pushRecord(key, type, label || '', payload || {})
+  const id = pushRecord(key, type, label || '', payload || {}, origin || '')
   res.json({ id })
 })
 
@@ -477,5 +587,10 @@ router.delete('/', (req, res) => {
   else return res.status(400).json({ error: '缺少 key' })
   res.json({ ok: true })
 })
+
+// 供 AI 工具（undo_change / list_changes）复用：撤销 AI 助手自己此前的更改
+router.undoAiChange = undoAiChange
+router.undoAiChanges = undoAiChanges
+router.listAiChanges = listAiChanges
 
 module.exports = router

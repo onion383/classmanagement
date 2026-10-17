@@ -68,6 +68,50 @@ const thumbsDir = ensureDir(
 );
 // 相册应用内回收站目录：删除照片时的文件先移到这里（可编程撤销还原），替代系统回收站。
 const trashDir = ensureDir(path.join(dataDir, 'album-trash'));
+// AI 数据快照目录：整库文件快照按 slug 隔离存于 dataDir/snapshots/<slug>/，文件名即时间戳。
+// 快照是加密 .db 原文（沿用同一库密钥），还原时直接覆盖库文件，用于大批量写入前的「后悔药」。
+const snapshotsDirRoot = ensureDir(path.join(dataDir, 'snapshots'));
+function snapshotsDir(slug) {
+  const safe = /^[A-Za-z0-9_@-]+$/.test(String(slug || '')) ? String(slug) : 'default';
+  return ensureDir(path.join(snapshotsDirRoot, safe));
+}
+
+// ---------- AI 长期记忆（md 文档） ----------
+// 与数据库同层存放，按班主任 slug 隔离：dataDir/ai-memory/<slug>.md；
+// 内容会注入 AI 系统提示，并随备份/恢复一起带走。
+const memoryDir = ensureDir(path.join(dataDir, 'ai-memory'));
+function memoryFilePath(slug) {
+  // 仅允许内部 slug 字符，异常值兜底为 default，避免路径穿越
+  const safe = /^[A-Za-z0-9_@-]+$/.test(String(slug || '')) ? String(slug) : 'default';
+  return path.join(memoryDir, `${safe}.md`);
+}
+// 读取记忆 md 原文（不存在返回空串）
+function readMemory(slug) {
+  try { return fs.readFileSync(memoryFilePath(slug), 'utf8'); } catch (_) { return ''; }
+}
+// 覆盖写入；内容为空则删除文件（相当于清空）
+function writeMemory(slug, content) {
+  const p = memoryFilePath(slug);
+  const text = String(content == null ? '' : content);
+  if (!text.trim()) { try { fs.rmSync(p, { force: true }); } catch (_) { /* 忽略 */ } return; }
+  fs.writeFileSync(p, text, 'utf8');
+}
+// 追加记忆条目：按日期分组，条目写为列表项
+function appendMemory(slug, items) {
+  const list = (Array.isArray(items) ? items : [])
+    .map((s) => String(s == null ? '' : s).trim())
+    .filter(Boolean)
+    .slice(0, 20);
+  if (!list.length) return { error: '没有可记住的内容' };
+  let cur = readMemory(slug).trimEnd();
+  const today = new Date().toISOString().slice(0, 10);
+  const heading = `## ${today}`;
+  if (!cur) cur = `# 用户偏好记忆\n\n${heading}`;
+  else if (!cur.includes(heading)) cur += `\n\n${heading}`;
+  cur += '\n' + list.map((t) => `- ${t}`).join('\n') + '\n';
+  writeMemory(slug, cur);
+  return { ok: true, count: list.length };
+}
 
 // ---------- 库密钥 包裹/解包 ----------
 // wrapped = base64(iv).base64(tag).base64(ciphertext)
@@ -538,9 +582,16 @@ module.exports = {
   registrySetEncrypted,
   registryDelete,
   evictConn,
+  // 快照/还原用：库文件路径（按 slug）与快照目录
+  dbFilePath,
+  snapshotsDir,
   registryList,
   registryListValid,
   warmup,
+  // AI 长期记忆（md 文档，随备份/恢复一起带走）
+  readMemory,
+  writeMemory,
+  appendMemory,
   // 可写资源目录（与数据库同层，随 userData 持久化）
   dataDir,
   uploadsDir,

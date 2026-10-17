@@ -62,7 +62,7 @@ router.post('/', (req, res) => {
 // PUT /api/scores/:id 编辑
 router.put('/:id', (req, res) => {
   try {
-    const row = cleanUp(req.body || {}, EDITABLE);
+    const row = cleanUp(req.body || {}, EDITABLE, 'score_records');
     if (row['分值'] !== undefined && row['分值'] !== null) row['分值'] = Number(row['分值']);
     if (row['成员数'] !== undefined && row['成员数'] !== null) row['成员数'] = Number(row['成员数']);
     if (Object.keys(row).length === 0) return res.status(400).json({ error: '没有可更新的字段' });

@@ -29,9 +29,11 @@ function hasImageSignature(filePath) {
   return false;
 }
 
-require('./db');
+const { db } = require('./db');
 const dbManager = require('./dbManager');
 const secureChannel = require('./services/secureChannel');
+const { deleteRow } = require('./services/tableService');
+const { studentRelations, purgeStudentRelations } = require('./services/studentRelations');
 
 // 关键路由：启动时立即加载（登录必需）
 const authRoutes = require('./routes/auth');
@@ -90,7 +92,41 @@ app.use('/api', authRoutes);
 app.use('/api/account', accountRoutes);
 app.use('/api/students', auth(['teacher']), createDynamicTableRouter('students', {
   minCount: 1,
-  protectedColumns: ['学号', '姓名']
+  protectedColumns: ['学号', '姓名'],
+  extraRoutes: (router) => {
+    // 删前影响预览：返回该生关联的 请假/加分/座位/值日 数量（学生本身不与它们建外键，靠 id/姓名弱关联）
+    router.get('/:id/relations', (req, res) => {
+      try {
+        const id = Number(req.params.id);
+        const student = db.prepare('SELECT * FROM students WHERE id = ?').get(id);
+        if (!student) return res.status(404).json({ error: '学生不存在' });
+        res.json(studentRelations(student));
+      } catch (err) {
+        res.status(500).json({ error: err.message });
+      }
+    });
+
+    // 一并删除学生 + 勾选的关联记录（body.relations：{ leave/score/seat/duty }）。
+    // 返回被删的请假/加分整行，便于前端登记撤销。
+    router.post('/:id/delete-with-relations', (req, res) => {
+      try {
+        const id = Number(req.params.id);
+        const student = db.prepare('SELECT * FROM students WHERE id = ?').get(id);
+        if (!student) return res.status(404).json({ error: '学生不存在' });
+        const rel = (req.body && req.body.relations) || {};
+        let removed = null;
+        db.transaction(() => {
+          removed = purgeStudentRelations(student, {
+            leave: !!rel.leave, score: !!rel.score, seat: !!rel.seat, duty: !!rel.duty,
+          });
+          deleteRow('students', id, { minCount: 1 });
+        })();
+        res.json({ message: '已删除学生及其关联记录', removed });
+      } catch (err) {
+        res.status(400).json({ error: err.message });
+      }
+    });
+  }
 }));
 
 // 托管前端静态文件（生产模式用）

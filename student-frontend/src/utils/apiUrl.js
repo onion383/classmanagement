@@ -7,6 +7,16 @@ export function apiUrl(path) {
   return base + path
 }
 
+// 带鉴权的 fetch 封装：打包版渲染层为 app:// 协议，相对路径会被解析到该协议（拿不到后端），
+// 且跨源请求默认不带 cookie（后端鉴权中间件优先读 Authorization 头），故统一补全后端地址并附带 Token。
+// 供各窗口里绕过 axios 的裸 fetch（流式响应、二进制导入等）使用。
+export function apiFetch(path, options = {}) {
+  const headers = { ...(options.headers || {}) }
+  const token = localStorage.getItem('token')
+  if (token) headers.Authorization = `Bearer ${token}`
+  return fetch(apiUrl(path), { ...options, headers })
+}
+
 // 资源 URL：<img> / CSS url() 等请求无法携带 Authorization 头，且打包版页面为 file:// 协议，
 // 跨源也不会自动带上 Lax Cookie，故把 JWT 追加为查询参数，由后端 resolveToken 校验。
 // data:/blob: 无需鉴权，直接返回；其余 URL 统一补 token。

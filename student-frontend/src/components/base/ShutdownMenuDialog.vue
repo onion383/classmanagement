@@ -6,7 +6,7 @@
         <!-- 顶部条：左侧小标签 + 右侧 X 关闭 -->
         <div class="shutdown-header">
           <span class="shutdown-tag">退出行为</span>
-          <button class="shutdown-x" @click="cancel" title="关闭">×</button>
+          <button class="dlg-close" @click="cancel" title="关闭">×</button>
         </div>
 
         <!-- 标题区 -->
@@ -106,11 +106,17 @@ export default {
   width: 460px;
   max-width: calc(100vw - 32px);
   padding: 24px 28px 20px;
-  background: #ffffff;
+  /* 取色一律走主题变量：--color-surface 各主题都有定义，glass / glass2 的夜间取值
+     已在 theme-night.css 里重映射，故日/夜与其它主题都会自动跟随，无硬编码颜色。
+     再叠一层 backdrop-filter 做「第二层毛玻璃」（与引导页玻璃面板同一套做法）。 */
+  background: var(--color-surface);
+  backdrop-filter: blur(14px) saturate(1.15);
+  -webkit-backdrop-filter: blur(14px) saturate(1.15);
+  border: 1px solid var(--color-border);
   border-radius: 16px;
-  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.18), 0 4px 12px rgba(0, 0, 0, 0.06);
+  box-shadow: var(--shadow-lg);
   text-align: left;
-  color: #1f2937;
+  color: var(--color-text);
 }
 
 /* ========== 顶部：标签 + 关闭按钮 ========== */
@@ -124,30 +130,12 @@ export default {
   display: inline-block;
   padding: 3px 10px;
   font-size: 12px;
-  color: #6b7280;
-  background: #f3f4f6;
+  color: var(--color-text-secondary);
+  background: color-mix(in srgb, var(--color-text) 6%, transparent);
   border-radius: 999px;
   letter-spacing: 0.5px;
 }
-.shutdown-x {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 28px;
-  height: 28px;
-  border: none;
-  border-radius: 50%;
-  background: #f3f4f6;
-  color: #6b7280;
-  font-size: 18px;
-  line-height: 1;
-  cursor: pointer;
-  transition: background 0.15s, color 0.15s;
-}
-.shutdown-x:hover {
-  background: #e5e7eb;
-  color: #111827;
-}
+/* 关闭按钮：方形毛玻璃 × 统一走全局公共类 .dlg-close（见 styles/utilities.css） */
 
 /* ========== 标题区 ========== */
 .shutdown-title-wrap {
@@ -157,13 +145,13 @@ export default {
   margin: 0 0 6px;
   font-size: 22px;
   font-weight: 700;
-  color: #111827;
+  color: var(--color-text);
   line-height: 1.3;
 }
 .shutdown-subtitle {
   margin: 0;
   font-size: 13px;
-  color: #6b7280;
+  color: var(--color-text-secondary);
   line-height: 1.5;
 }
 
@@ -180,7 +168,9 @@ export default {
   gap: 14px;
   width: 100%;
   padding: 14px 16px;
-  background: #f9fafb;
+  /* 用文字色按比例混出的弱底纹：日间接近原来的 #f9fafb，夜间自动变成浅色微亮，
+     无需为深浅两套模式各写一份取色。 */
+  background: color-mix(in srgb, var(--color-text) 4%, transparent);
   border: 1px solid transparent;
   border-radius: 12px;
   text-align: left;
@@ -188,8 +178,8 @@ export default {
   transition: background 0.15s, border-color 0.15s, transform 0.1s;
 }
 .shutdown-opt:hover:not(:disabled) {
-  background: #f3f4f6;
-  border-color: #e5e7eb;
+  background: color-mix(in srgb, var(--color-text) 9%, transparent);
+  border-color: var(--color-border-strong);
 }
 .shutdown-opt:active:not(:disabled) {
   transform: scale(0.99);
@@ -199,11 +189,13 @@ export default {
   cursor: not-allowed;
 }
 .shutdown-opt.opt-danger:hover:not(:disabled) {
-  background: #fef2f2;
-  border-color: #fecaca;
+  /* 危险项 hover：用 --color-danger 按比例混出浅红底 / 描边（日间 ≈ 原来的 #fef2f2 / #fecaca），
+     夜间由 theme-night.css 的 C3 覆盖成更明显的暗红。 */
+  background: color-mix(in srgb, var(--color-danger) 8%, transparent);
+  border-color: color-mix(in srgb, var(--color-danger) 28%, transparent);
 }
 
-/* 图标盒 */
+/* 图标盒：底色/图标色沿用日间语义色，夜间在 theme-night.css C3 统一提亮 */
 .opt-icon {
   flex-shrink: 0;
   display: inline-flex;
@@ -228,19 +220,19 @@ export default {
 .opt-title {
   font-size: 14px;
   font-weight: 600;
-  color: #111827;
+  color: var(--color-text);
   line-height: 1.4;
 }
 .opt-desc {
   font-size: 12px;
-  color: #6b7280;
+  color: var(--color-text-secondary);
   line-height: 1.5;
 }
 .opt-muted-inline {
   margin-left: 6px;
   font-size: 12px;
   font-weight: 400;
-  color: #9ca3af;
+  color: var(--color-text-muted);
 }
 
 /* ========== 复选框 ========== */
@@ -250,17 +242,18 @@ export default {
   gap: 8px;
   padding: 10px 14px;
   margin: 4px 0 12px;
-  background: #f9fafb;
-  border: 1px solid #f3f4f6;
+  /* 弱底纹统一用文字色按比例混出：日间≈原来的 #f9fafb，夜间自动变浅色微亮 */
+  background: color-mix(in srgb, var(--color-text) 4%, transparent);
+  border: 1px solid var(--color-border);
   border-radius: 10px;
   font-size: 13px;
-  color: #4b5563;
+  color: var(--color-text-secondary);
   cursor: pointer;
   user-select: none;
   transition: background 0.15s;
 }
 .shutdown-check:hover {
-  background: #f3f4f6;
+  background: color-mix(in srgb, var(--color-text) 7%, transparent);
 }
 .shutdown-check input {
   display: none;
@@ -269,15 +262,15 @@ export default {
   flex-shrink: 0;
   width: 16px;
   height: 16px;
-  border: 1.5px solid #d1d5db;
+  border: 1.5px solid var(--color-border-strong);
   border-radius: 4px;
-  background: #fff;
+  background: var(--color-surface);
   position: relative;
   transition: background 0.15s, border-color 0.15s;
 }
 .shutdown-check input:checked + .check-box {
-  background: #2563eb;
-  border-color: #2563eb;
+  background: var(--color-primary);
+  border-color: var(--color-primary);
 }
 .shutdown-check input:checked + .check-box::after {
   content: '';
@@ -286,7 +279,7 @@ export default {
   top: 0px;
   width: 5px;
   height: 10px;
-  border: solid #fff;
+  border: solid var(--color-text-inverse);
   border-width: 0 2px 2px 0;
   transform: rotate(45deg);
 }
@@ -298,17 +291,17 @@ export default {
 }
 .shutdown-cancel {
   padding: 8px 22px;
-  background: #fff;
-  border: 1px solid #e5e7eb;
+  background: var(--color-surface);
+  border: 1px solid var(--color-border-strong);
   border-radius: 999px;
-  color: #374151;
+  color: var(--color-text-secondary);
   font-size: 13px;
   cursor: pointer;
   transition: background 0.15s, border-color 0.15s, color 0.15s;
 }
 .shutdown-cancel:hover {
-  background: #f9fafb;
-  border-color: #d1d5db;
-  color: #111827;
+  background: var(--color-surface-hover);
+  border-color: var(--color-border-strong);
+  color: var(--color-text);
 }
 </style>

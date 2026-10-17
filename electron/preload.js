@@ -57,6 +57,10 @@ const validInvokeChannels = [
   'save-background-image',
   'save-file',
   'screenshot-capture',
+  // 截屏选区（AI 对话里「截屏发图」）：截屏 / 铺满整屏显示选区 / 还原窗口
+  'screenshot-region',
+  'screenshot-region-show',
+  'screenshot-region-end',
   'note-save',
   'open-file',
   'open-folder',

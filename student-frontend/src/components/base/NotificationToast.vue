@@ -21,8 +21,8 @@
             <span class="nt-msg">{{ item.message }}</span>
           </div>
 
-          <!-- 关闭按钮 -->
-          <button class="nt-close" @click="remove(item.id)">&times;</button>
+          <!-- 关闭按钮：方形毛玻璃外观统一走全局 .dlg-close -->
+          <button class="dlg-close" @click="remove(item.id)">&times;</button>
 
           <!-- 进度条（从左往右消失）；合并后通过 _barKey 重播 -->
           <span
@@ -166,26 +166,13 @@ function onLeave(item) {
   white-space: pre-line;
 }
 
-/* 关闭按钮 */
-.nt-close {
-  flex-shrink: 0;
+/* 关闭按钮：方形毛玻璃外观统一走全局 .dlg-close（见 styles/utilities.css），
+   这里只按吐司的紧凑尺寸收小一档（22px，与左侧图标同高）。 */
+.nt-toast .dlg-close {
   width: 22px;
   height: 22px;
-  border: none;
-  background: none;
-  color: var(--color-text-muted, #6b7280);
-  font-size: 16px;
-  line-height: 1;
-  cursor: pointer;
-  border-radius: 6px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  transition: background 0.15s, color 0.15s;
-}
-.nt-close:hover {
-  background: var(--color-surface-hover, #f3f4f6);
-  color: var(--color-text, #111827);
+  margin-top: 1px;
+  font-size: 15px;
 }
 
 /* 进度条（从右定位，向左收缩 = 从左往右消失） */

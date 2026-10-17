@@ -1,7 +1,7 @@
 import { createApp } from 'vue'
 import DesktopWidget from './DesktopWidget.vue'
 import '../styles/index.css'
-import { setupApiClient } from '../utils/httpClient'
+import { setupApiClient, backendBaseUrl } from '../utils/httpClient'
 
 // 桌面组件在桌面常驻，不依赖主窗口的登录态同步。
 // 通过 IPC 从主进程获取当前 token（主窗口保存的），避免 cookie 跨域读取问题。
@@ -24,7 +24,8 @@ function getToken() {
 }
 
 // 共用 axios 装配：登录态（此处经 IPC 取 token）、网络错误退避重试、安全通道加密。
-// 桌面组件不设 baseURL，保持原有相对路径请求行为。
-setupApiClient({ getToken })
+// 打包版桌面组件加载自 app://local/desktop-widget.html（见 electron/main/widget.js），
+// 相对路径会被解析到该协议而拿不到后端，故与其它窗口一样补全后端地址；开发模式仍走 Vite 代理的相对路径。
+setupApiClient({ baseURL: backendBaseUrl(), getToken })
 
 createApp(DesktopWidget).mount('#desktop-widget-app')

@@ -1,6 +1,7 @@
 import { defineStore } from 'pinia'
 import { ref, computed, watch } from 'vue'
 import { resourceUrl } from '../utils/apiUrl'
+import { loadThemeStyles } from '../styles/themeLoader'
 
 const THEME_KEY = 'app-theme'
 // 全局日/夜模式：与「主题」正交，任何主题之上再叠一层夜间配色（见 styles/theme-night.css）。
@@ -20,13 +21,13 @@ const ANIMATIONS_KEY = 'app-animations'
 // 不经 resourceUrl/鉴权直接加载。用户选择本地图片后由 backgroundImage 覆盖它；清除则回此图。
 // 生产环境下用 window.location.origin 构造绝对 URL（app:// 协议），避免相对路径解析问题。
 const DEFAULT_GLASS_BG = import.meta.env.PROD
-  ? window.location.origin + '/glass-bg-opt.jpg'
-  : `${import.meta.env.BASE_URL}glass-bg-opt.jpg`
+  ? window.location.origin + '/glass-bg-opt.webp'
+  : `${import.meta.env.BASE_URL}glass-bg-opt.webp`
 // glass 夜间模式的默认底图：本身已是深色风景图，故其上的黑色遮罩要更轻（见 theme-night.css
 // 的 .bg-night-default 规则），否则会把图压死。仅夜间生效，日间仍用 DEFAULT_GLASS_BG。
 const DEFAULT_GLASS_BG_NIGHT = import.meta.env.PROD
-  ? window.location.origin + '/glass-bg-night.jpg'
-  : `${import.meta.env.BASE_URL}glass-bg-night.jpg`
+  ? window.location.origin + '/glass-bg-night.webp'
+  : `${import.meta.env.BASE_URL}glass-bg-night.webp`
 
 const PRESETS = [
   { id: 'base', name: '彩色色块主题', editable: false },
@@ -70,6 +71,9 @@ export const useThemeStore = defineStore('theme', () => {
     document.documentElement.dataset.theme = currentTheme.value
     // 全局日/夜模式：写 data-mode，styles/theme-night.css 据此叠加夜间配色
     document.documentElement.dataset.mode = mode.value
+    // 按需加载当前主题/模式的样式：首次进入加载一份，切换主题或日/夜时自动补载新的一份
+    // （同一份只加载一次，命中缓存；未用到的主题样式不参与首屏）
+    loadThemeStyles(currentTheme.value, mode.value)
     // 标题栏/侧边栏毛玻璃配色：写 data-topbar-color，CSS 据此切深蓝/白色调
     document.documentElement.dataset.topbarColor = topbarColor.value
     // 动画总开关：关闭时给根元素打 no-animations，配合全局 CSS 瞬时化所有动效

@@ -1,6 +1,10 @@
 const express = require('express');
 const router = express.Router();
-const jwt = require('jsonwebtoken');
+// jsonwebtoken 只在改用户名/改密码等「重新签发 Token」时用到，不需要在后端就绪前加载：
+// 改为首次调用时才 require，避免把它（连带 semver / side-channel 等）的冷加载成本
+// 压在启动关键路径上（行为完全不变）。
+let _jwt = null;
+const useJwt = () => (_jwt || (_jwt = require('jsonwebtoken')));
 const { db } = require('../db');
 const dbManager = require('../dbManager');
 // bcryptjs 只在改用户名/改密码/删除账号等「用户操作」里用到，不需要在后端就绪前加载：
@@ -11,7 +15,7 @@ const bcrypt = {
   compareSync: (...a) => useBcrypt().compareSync(...a),
   hashSync: (...a) => useBcrypt().hashSync(...a),
 };
-const { SECRET, auth } = require('../middleware/auth');
+const { SECRET, auth, TOKEN_SIGN_OPTS, TOKEN_COOKIE_MAX_AGE } = require('../middleware/auth');
 const { pickPhrase, deriveRestoreHash, formatPhrase } = require('../services/recoveryKey');
 
 // 重置恢复密钥：为当前登录账号生成一组新的 12 词恢复密钥并保存哈希。
@@ -77,6 +81,8 @@ router.post('/export', auth(), (req, res) => {
       data,
       // 备份包是否来自加密库：明文库恢复时无需任何密钥
       encrypted: bundle.encrypted,
+      // AI 长期记忆（md 原文）：随包一起带走，换机后可原样恢复
+      memory: dbManager.readMemory(slug) || '',
     };
     if (!bundle.encrypted) {
       // 明文库数据本身不加密，「用导出密码加密」对该库无意义，包内不携带库钥匙
@@ -98,7 +104,7 @@ router.post('/export', auth(), (req, res) => {
 // 校验库身份：仅允许与当前登录账号一致的备份包。
 router.post('/restore', auth(), (req, res) => {
   try {
-    const { data, wrappedByPassword, wrappedByMnemonic, password, mnemonic, key, encrypted } = req.body || {};
+    const { data, wrappedByPassword, wrappedByMnemonic, password, mnemonic, key, encrypted, memory } = req.body || {};
     const curSlug = req.user && req.user.dbSlug ? req.user.dbSlug : 'default';
     // 备份包未标注 encrypted 时按旧格式（加密库）处理，保证兼容
     const isEncrypted = !(encrypted === false || encrypted === 0 || encrypted === '0');
@@ -106,6 +112,8 @@ router.post('/restore', auth(), (req, res) => {
       ? dbManager.decryptBundleKey({ key, wrappedByPassword, wrappedByMnemonic, password, mnemonic })
       : null;
     const result = dbManager.restoreBundle({ slug: curSlug, username: req.user.username, data, dbKey, encrypted: isEncrypted });
+    // 一并恢复 AI 长期记忆（旧包无该字段则跳过，不影响恢复）
+    if (typeof memory === 'string') dbManager.writeMemory(curSlug, memory);
     res.json({ message: '恢复成功', slug: result.slug });
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -152,7 +160,7 @@ router.post('/db-encryption', auth(), async (req, res) => {
 // 以免误恢复盖掉本机已有数据。前端确认后带 confirm:true 才会真正落盘。
 router.post('/restore-offline', (req, res) => {
   try {
-    const { data, slug, wrappedByPassword, wrappedByMnemonic, password, mnemonic, key, encrypted } = req.body || {};
+    const { data, slug, wrappedByPassword, wrappedByMnemonic, password, mnemonic, key, encrypted, memory } = req.body || {};
     // 备份包未标注 encrypted 时按旧格式（加密库）处理，保证兼容
     const isEncrypted = !(encrypted === false || encrypted === 0 || encrypted === '0');
     const dbKey = isEncrypted
@@ -171,17 +179,19 @@ router.post('/restore-offline', (req, res) => {
     }
 
     const result = dbManager.restoreBundle({ slug, username, data, dbKey, encrypted: isEncrypted });
+    // 一并恢复 AI 长期记忆（旧包无该字段则跳过，不影响恢复）
+    if (typeof memory === 'string') dbManager.writeMemory(result.slug || slug, memory);
     // 恢复成功后直接签发登录态，前端据此跳转首页，无需再次手动登录
-    const token = jwt.sign(
+    const token = useJwt().sign(
       { userId: 1, username, role: 'teacher', dbSlug: result.slug || slug },
       SECRET,
-      { expiresIn: '7d' }
+      TOKEN_SIGN_OPTS
     );
     res.cookie('token', token, {
       httpOnly: true,
       sameSite: 'lax',
       path: '/',
-      maxAge: 7 * 24 * 60 * 60 * 1000
+      maxAge: TOKEN_COOKIE_MAX_AGE
     });
     res.json({
       message: '恢复成功',

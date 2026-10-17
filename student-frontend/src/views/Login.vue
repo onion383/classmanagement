@@ -338,6 +338,7 @@ export default {
         key: b.key,
         password: this.password || undefined,
         mnemonic: this.recoverPhrase || undefined,
+        memory: b.memory, // AI 长期记忆（随备份包一起还原）
       };
       this.busy = true;
       try {

@@ -61,11 +61,13 @@
       :message="dialog.message"
       :type="dialog.type"
       :showCancel="dialog.showCancel"
+      :extraText="dialog.extraText"
       v-model:columnName="columnForm.name"
       v-model:columnType="columnForm.dataType"
       :errorMsg="columnForm.error"
       @confirm="onDialogConfirm"
       @cancel="onDialogCancel"
+      @extra="onDialogExtra"
     />
 
     <ContextMenu
@@ -226,7 +228,7 @@ const {
   selectedCount, selectedRowKeys,
   importDialogVisible, dedupeDialogVisible,
   displayRows, displayIndexes, visibleFields, allBusinessFields,
-  fetchRows, applyUndoChange, showAlert, showConfirm, onDialogConfirm, onDialogCancel,
+  fetchRows, applyUndoChange, showAlert, showConfirm, onDialogConfirm, onDialogCancel, onDialogExtra,
   startEditCell, saveCell, validateValue,
   addNewRowAtBottom, insertRowAbove, insertRowBelow, createNewRow, cancelNewRow, saveNewRow,
   moveRow, deleteColumn, startAddColumn, confirmAddColumn,
@@ -304,21 +306,68 @@ const tableElement = computed(() => {
   return dynamicTable.value?.$el || null
 })
 
-function deleteStudent(id) {
+async function deleteStudent(id) {
   if (selectedCount.value > 1) {
     onBatchDelete()
-  } else {
+    return
+  }
+  // 删前先问后端：该生被哪些记录引用（请假/加分/座位/值日），据结果决定提示与处理方式
+  let rel = { leave: 0, score: 0, seat: 0, duty: 0, total: 0 }
+  try {
+    const res = await axios.get(`${API_BASE}/students/${id}/relations`)
+    rel = res.data || rel
+  } catch (_) { /* 预览失败按“无关联”处理，不阻断删除 */ }
+
+  const finish = async () => {
+    await fetchStudents()
+    selectedCount.value = 0
+    selectedRowKeys.value = []
+  }
+
+  if (!rel.total) {
     showConfirm('确定删除该学生吗？', async () => {
       try {
         await axios.delete(`${API_BASE}/students/${id}`)
-        await fetchStudents()
-        selectedCount.value = 0
-        selectedRowKeys.value = []
+        await finish()
+        notifySuccess('已删除学生')
       } catch (err) {
-        showAlert('删除失败')
+        showAlert(err.response?.data?.error || '删除失败')
       }
     })
+    return
   }
+
+  const student = students.value.find(s => s.id === id)
+  const parts = []
+  if (rel.leave) parts.push(`${rel.leave} 条请假记录`)
+  if (rel.score) parts.push(`${rel.score} 条加减分记录`)
+  if (rel.seat) parts.push(`${rel.seat} 个座位`)
+  if (rel.duty) parts.push(`${rel.duty} 个值日岗位`)
+  const who = student ? `「${student['姓名']}」` : '该学生'
+  const msg = `${who}还有 ${parts.join('、')}。\n\n「一并删除」会同时删除这些关联记录；\n「仅删学生」保留它们（可能成为指向不存在学生的孤儿数据）；\n「取消」不做任何操作。`
+
+  showConfirm(msg, async () => {
+    try {
+      await axios.post(`${API_BASE}/students/${id}/delete-with-relations`, {
+        relations: { leave: true, score: true, seat: true, duty: true }
+      })
+      await finish()
+      notifySuccess('已删除学生及关联记录')
+    } catch (err) {
+      showAlert(err.response?.data?.error || '删除失败')
+    }
+  }, null, {
+    extraText: '仅删学生',
+    onExtra: async () => {
+      try {
+        await axios.delete(`${API_BASE}/students/${id}`)
+        await finish()
+        notifySuccess('已删除学生（保留关联记录）')
+      } catch (err) {
+        showAlert(err.response?.data?.error || '删除失败')
+      }
+    }
+  })
 }
 
 function onExportFinish() {

@@ -21,7 +21,7 @@ import {
   RefreshCw, Download, Upload, Trash2, Search, ClipboardList, Folder, FolderOpen,
   Undo2, Image as ImageIcon, SlidersHorizontal, Check, Wrench, Paperclip,
   Clock, BarChart3, Loader2, Toolbox, User, Palette, Brain,
-  Home, Zap,
+  Home, Zap, Camera, RotateCcw,
 } from '@lucide/vue'
 import { useThemeStore } from '../../stores/theme'
 
@@ -79,6 +79,8 @@ const MAP = {
   loading:  { comp: Loader2, emoji: '🔄', color: '#64748b' },
   home:     { comp: Home, emoji: '🏠', color: '#10b981' },
   zap:      { comp: Zap, emoji: '⚡', color: '#f59e0b' },
+  camera:   { comp: Camera, emoji: '📸', color: '#64748b' },
+  rollback: { comp: RotateCcw, emoji: '↺', color: '#f59e0b' },
 }
 
 const { iconStyle } = storeToRefs(useThemeStore())

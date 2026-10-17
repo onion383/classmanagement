@@ -1,8 +1,14 @@
 <template>
-  <div class="w-60 bg-sidebar text-text-inverse h-full p-4 flex flex-col">
-    <h2 class="app-name text-lg font-bold mb-6 flex items-center gap-2">
-      <img src="/logo.png" alt="logo" class="w-7 h-7 object-contain shrink-0" />
-      <span class="truncate">班集</span>
+  <div
+    class="bg-sidebar text-text-inverse h-full p-4 flex flex-col sidebar-root"
+    :class="collapsed ? 'w-16 sidebar-collapsed' : 'w-60'"
+  >
+    <h2
+      class="app-name text-lg font-bold mb-6 flex items-center gap-2"
+      :class="{ 'flex-col sidebar-header-collapsed': collapsed }"
+    >
+      <img src="/logo.webp" alt="logo" class="w-7 h-7 object-contain shrink-0" />
+      <span v-if="!collapsed" class="truncate">班集</span>
       <button
         class="mode-toggle-btn"
         :disabled="!nightSupported"
@@ -12,16 +18,25 @@
         <Sun v-if="isNight" :size="15" stroke-width="1.8" />
         <Moon v-else :size="15" stroke-width="1.8" />
       </button>
+      <button
+        class="mode-toggle-btn"
+        :title="collapsed ? '展开侧边栏' : '折叠侧边栏'"
+        @click="toggleCollapsed"
+      >
+        <PanelLeftOpen v-if="collapsed" :size="15" stroke-width="1.8" />
+        <PanelLeftClose v-else :size="15" stroke-width="1.8" />
+      </button>
     </h2>
     <nav class="space-y-1 flex-1 min-h-0 overflow-y-auto sidebar-scroll" @pointerover="onNavOver">
       <template v-for="group in navGroups" :key="group.title">
-        <div class="text-[11px] sidebar-group-title uppercase tracking-wider px-3 pt-1 pb-0.5">{{ group.title }}</div>
+        <div v-if="!collapsed" class="text-[11px] sidebar-group-title uppercase tracking-wider px-3 pt-1 pb-0.5">{{ group.title }}</div>
         <router-link
           v-for="item in group.items"
           :key="item.to"
           :to="item.to"
           class="nav-item hover:bg-sidebar-hover transition-theme"
           :class="{ 'bg-sidebar-active': isSelected(item.to) }"
+          :title="collapsed ? item.label : null"
           @pointerdown="onNavPointerDown($event, item.to)"
         >
           <component
@@ -33,7 +48,7 @@
             :style="{ color: item.color }"
           />
           <span v-else class="nav-emoji">{{ item.emoji }}</span>
-          {{ item.label }}
+          <span v-if="!collapsed" class="nav-label">{{ item.label }}</span>
         </router-link>
         <div class="border-t border-white/10 my-2"></div>
       </template>
@@ -45,7 +60,7 @@
 import { ref, watch } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import { storeToRefs } from 'pinia'
-import { Sun, Moon } from '@lucide/vue'
+import { Sun, Moon, PanelLeftClose, PanelLeftOpen } from '@lucide/vue'
 import { PAGE_GROUPS as navGroups } from '../../config/searchIndex.js'
 import { useThemeStore } from '../../stores/theme'
 import { prefetchRoute } from '../../utils/routePrefetch.js'
@@ -78,6 +93,14 @@ function onNavOver(e) {
   if (!link) return
   prefetchRoute(router, link.getAttribute('href'))
 }
+
+/* 侧边栏折叠：折叠后仅保留图标，状态写入 localStorage 记忆 */
+const COLLAPSE_KEY = 'app-sidebar-collapsed'
+const collapsed = ref(localStorage.getItem(COLLAPSE_KEY) === '1')
+function toggleCollapsed() {
+  collapsed.value = !collapsed.value
+  localStorage.setItem(COLLAPSE_KEY, collapsed.value ? '1' : '0')
+}
 </script>
 
 <style scoped>
@@ -106,7 +129,8 @@ function onNavOver(e) {
   padding: 8px 12px;
   border-radius: 8px;
   text-decoration: none;
-  transition-property: background-color, border-color, color, box-shadow, border-radius, transform;
+  /* padding 也纳入过渡：折叠/展开时图标靠 padding-left 平滑移动，避免瞬跳 */
+  transition-property: background-color, border-color, color, box-shadow, border-radius, transform, padding-left, padding-right;
   transition-duration: 100ms;
   transition-timing-function: ease-out;
   /* 原常驻 will-change: background-color, color, box-shadow, transform 已移除：
@@ -122,5 +146,49 @@ function onNavOver(e) {
   text-align: center;
   font-size: 14px;
   line-height: 1;
+}
+
+/* ==================== 折叠 ====================
+   要让「宽度 240↔64」与「内部布局 行排↔竖排」两件事同步，否则布局瞬变会
+   形成跳动。做法：
+   1) 根节点宽度平滑过渡，并 overflow:hidden —— 展开时文字以 nowrap 溢出，
+      被容器裁掉后随宽度增长逐步「揭示」，不再换行撑高；
+   2) 头部固定高度并过渡：展开 28px（一行）、折叠 96px（logo 28 + 按钮 26×2
+       + 间距 8×2），高度变化平滑带动下方导航区平稳移动；
+   3) 导航项图标靠 padding-left 过渡平移，取代无过渡的 justify-content 居中。 */
+.sidebar-root {
+  transition: width 0.15s ease;
+  overflow: hidden;
+}
+.sidebar-root > h2 {
+  transition: height 0.15s ease;
+  overflow: hidden;
+}
+.sidebar-root:not(.sidebar-collapsed) > h2 {
+  height: 28px;
+}
+.sidebar-collapsed > h2 {
+  height: 96px;
+}
+/* 文字一律不换行（配合根节点裁剪，形成平滑揭示），避免换行把行高撑大 */
+.sidebar-group-title,
+.nav-label {
+  white-space: nowrap;
+}
+/* 折叠后导航项只留图标：左右内边距收窄到 8px，使 16px 图标在 64px 栏内居中；
+   展开态为 12px，两者之间的差值由上面的 padding 过渡平滑衔接。 */
+.sidebar-collapsed .nav-item {
+  padding-left: 8px;
+  padding-right: 8px;
+}
+/* 顶部两个按钮：展开态下第一个占满左侧剩余空间（沿用全局 margin-left:auto），
+   第二个紧跟其后不再撑开；折叠态为竖排，两个按钮都取消 auto 边距以居中。
+   这两条选择器特异性均高于 theme-night.css 的 `:root .bg-sidebar .mode-toggle-btn`(0,3,0)，
+   确保覆盖生效。 */
+.sidebar-root .mode-toggle-btn + .mode-toggle-btn {
+  margin-left: 0;
+}
+.sidebar-header-collapsed button.mode-toggle-btn {
+  margin-left: 0;
 }
 </style>

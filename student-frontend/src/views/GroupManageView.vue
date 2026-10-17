@@ -369,6 +369,7 @@ import AppSelect from '../components/base/AppSelect.vue';
 import { useNotification } from '../composables/useNotification';
 import { useUndoShortcut } from '../composables/useUndo.js';
 import { applyRouteRowFocus } from '../composables/useRowFocus.js';
+import { apiFetch } from '../utils/apiUrl.js';
 
 // 弹窗类组件懒加载：打开时才加载对应 chunk
 const ConfirmDialog = defineAsyncComponent(() => import('../components/base/ConfirmDialog.vue'));
@@ -380,8 +381,8 @@ const ExportExcel = defineAsyncComponent(loadExportExcel);
 const { success, error, info } = useNotification();
 
 const api = (path, options = {}) =>
-  fetch(`/api/group-manage${path}`, {
-    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${localStorage.getItem('token')}` },
+  apiFetch(`/api/group-manage${path}`, {
+    headers: { 'Content-Type': 'application/json' },
     ...options,
   }).then(async (res) => {
     const data = await res.json().catch(() => ({}));
@@ -499,7 +500,7 @@ function onOverwriteCancel() {
 const allStudents = ref([]);
 async function fetchStudents() {
   try {
-    const res = await fetch('/api/students', { headers: { Authorization: `Bearer ${localStorage.getItem('token')}` } });
+    const res = await apiFetch('/api/students');
     const data = await res.json();
     allStudents.value = data.data || data || [];
   } catch (e) { /* 学生列表不可用时不阻塞分组功能 */ }

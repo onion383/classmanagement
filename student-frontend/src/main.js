@@ -4,6 +4,7 @@ import App from './App.vue'
 import router from './router'
 import axios from 'axios'   // 必须导入
 import './styles/index.css'
+import { loadThemeStyles } from './styles/themeLoader'
 import { useThemeStore } from './stores/theme'
 import { setupSecureAxios } from './composables/secureAxios'
 import { useNotification } from './composables/useNotification'
@@ -91,6 +92,8 @@ axios.interceptors.response.use(
       const retryCount = config.__retryCount || 0
       if (retryCount < 6) {
         config.__retryCount = retryCount + 1
+        // 启动窗口内的等待保持静默：主窗口此时仍被首屏占位页盖着，弹提示条毫无意义
+        // （占位页已移除、且后端迟迟不来的情形由全屏失败页接管，见 main.js 的 dropSplash）。
         await waitForBackendReady(200 * config.__retryCount)
         return axios(config)
       }
@@ -116,6 +119,9 @@ document.documentElement.dataset.theme = savedTheme
 // 全局日/夜模式：与主题同批在 Vue 初始化前落地，避免日→夜首帧闪烁
 const savedMode = localStorage.getItem(MODE_KEY) === 'night' ? 'night' : 'day'
 document.documentElement.dataset.mode = savedMode
+// 按需加载当前主题/模式的样式：与其余启动逻辑并行开始；占位移除前会等它就绪（见 whenSplashReady），
+// 避免出现「入口样式已应用、主题样式还没到」时闪一下基础主题配色。
+const themeStylesReady = loadThemeStyles(savedTheme, savedMode)
 // 应用自定义颜色
 try {
   const custom = JSON.parse(localStorage.getItem(CUSTOM_KEY) || '{}')
@@ -132,11 +138,11 @@ document.documentElement.style.setProperty('--bg-mask-opacity', bgMaskOpacity)
 // —— 它自带的 CSS 光斑底已经提供了可模糊的内容，不需要再挂一张图片。
 // glass 内置默认图日/夜各一张：夜间图本身是深色风景图，遮罩要更轻（bg-night-default）。
 const DEFAULT_GLASS_BG = import.meta.env.PROD
-  ? window.location.origin + '/glass-bg-opt.jpg'
-  : `${import.meta.env.BASE_URL}glass-bg-opt.jpg`
+  ? window.location.origin + '/glass-bg-opt.webp'
+  : `${import.meta.env.BASE_URL}glass-bg-opt.webp`
 const DEFAULT_GLASS_BG_NIGHT = import.meta.env.PROD
-  ? window.location.origin + '/glass-bg-night.jpg'
-  : `${import.meta.env.BASE_URL}glass-bg-night.jpg`
+  ? window.location.origin + '/glass-bg-night.webp'
+  : `${import.meta.env.BASE_URL}glass-bg-night.webp`
 const customBg = localStorage.getItem(BG_IMAGE_KEY) || ''
 const startupBgUrl = () => {
   if (customBg) return customBg
@@ -251,11 +257,19 @@ if (splashEl) {
   let backendFailed = false
   let backendOk = false
   let splashReady = false
+  // 乐观退出开关（可回退）：
+  //   true  = 不再等 main 的 backend-ready 信号：样式 + 路由就绪即移除占位页。后端稍后才起时，
+  //           首屏那批请求由 axios 响应拦截器等到 backend-ready 后自动重试（isBackendUnreachable 分支），
+  //           等待期间由首页骨架屏顶着——这段等待从「整窗被占位页挡住」变成「只挡住内容区」。
+  //           占位页此时已不在，启动失败提示改由 App.vue 的 backend-overlay 承载。
+  //   false = 旧方案：后端就绪后才允许移除（占位页兼作启动失败提示的载体）。当前取 false。
+  const SPLASH_EXIT_BEFORE_BACKEND = false
   const dropSplash = () => {
     if (dropped || !splashEl.isConnected) return
-    // 占位页同时是启动失败提示的载体：后端未就绪（可能稍后失败）或已失败时都必须保留，
-    // 否则失败提示没有落脚处。只有后端确实就绪后才允许移除占位。
-    if (backendFailed || !backendOk) return
+    // 占位页同时是启动失败提示的载体：已失败时必须保留，否则失败提示没有落脚处
+    // （该情形下改由 App.vue 的 backend-overlay 兜住）。后端尚未就绪是否放行见上方开关。
+    if (backendFailed) return
+    if (!backendOk && !SPLASH_EXIT_BEFORE_BACKEND) return
     dropped = true
     // 硬切：等路由组件真正绘制完成后直接移除占位，不做透明度过渡。
     // 过渡会让占位文案与下方页面同时可见（「层叠」观感），硬切则是一帧换一帧。
@@ -344,16 +358,22 @@ if (splashEl) {
   window.electron?.invoke('backend-status').then((ok) => { if (ok) markBackendOk() }).catch(() => {})
   window.electron?.invoke('backend-failure').then((f) => { if (f) setBackendFailed(true) }).catch(() => {})
 
-  // 首屏内容就绪 = 首次导航完成 + 样式已应用 + （落地业务首页时）首页数据已到。
-  // 只等 router.isReady() 会早于首页 9 个接口返回，导致占位先消失、页面还在填充，
-  // 所以这里把首页数据也纳入等待。ensureDashboardData 内部各请求均有 .catch() 兜底，
-  // Promise 必定 resolve，不会把占位永久卡住；仍加 2s 上限，避免后端异常时干等。
+  // 骨架屏方案开关（可回退）：
+  //   true  = 只在首页(Dashboard)做骨架屏。占位页不再等首页数据，首次导航一就绪即移除，
+  //           「数据还在路上」这段等待改由首页自身的骨架屏承接；其余页面照常直接渲染。
+  //   false = 旧方案：占位页一直等到首页 9 个接口返回后才移除（整窗被多挡一段接口往返）。当前取 false。
+  // 回退方式：把常量改回 true 即可（新分支代码原样保留）。
+  const HOME_SKELETON_ONLY = false
+
+  // 首屏内容就绪 = 首次导航完成 + 样式已应用 + （旧方案下，落地业务首页时）首页数据已到。
+  // 新方案只等路由与样式：首页数据不再阻塞占位移除，未到的部分由 DashboardView 骨架屏先顶上，
+  // 避免占位页长时间挡在整窗前。ensureDashboardData 各请求均有 .catch() 兜底，不会永久卡住。
   const whenSplashReady = router.isReady().catch(() => {}).then(() => {
     const onHome = router.currentRoute.value.path === '/' && localStorage.getItem('token')
-    const dataReady = onHome
+    const dataReady = (onHome && !HOME_SKELETON_ONLY)
       ? Promise.race([ensureDashboardData().catch(() => {}), new Promise((r) => setTimeout(r, 2000))])
       : Promise.resolve()
-    return Promise.all([whenStylesReady(), dataReady])
+    return Promise.all([whenStylesReady(), dataReady, themeStylesReady])
   })
 
   whenSplashReady.then(() => { splashReady = true; dropSplash() })

@@ -1,4 +1,5 @@
 const { db, getFields, renumber } = require('../db');
+const { sanitizeField } = require('./sanitize');
 
 // 列名白名单：与 addColumn/renameColumn 保持一致，防止列名拼入 SQL 造成注入。
 // 仅允许中英文、数字、下划线，且禁止保留字段（id/position 由内部管理，atPosition 为插入位置参数）。
@@ -9,6 +10,13 @@ function assertValidColumn(name) {
   if (!name || RESERVED_COLUMNS.includes(name) || !COLUMN_NAME_RE.test(name)) {
     throw new Error('字段名不合法');
   }
+}
+
+// 列名 → 类型 映射（取自 table_meta；缺省按「文字」处理），供写入时按类型清洗
+function fieldTypeMap(tableName) {
+  const map = {};
+  for (const f of getFields(tableName)) map[f.name] = f.type || '文字';
+  return map;
 }
 
 function queryAll(tableName) {
@@ -28,9 +36,10 @@ function insertRow(tableName, data) {
   if (keys.length === 0) throw new Error('没有字段');
 
   const cleaned = {};
+  const typeMap = fieldTypeMap(tableName);
   keys.forEach(k => {
     assertValidColumn(k);
-    cleaned[k] = (data[k] === '' || data[k] === undefined) ? null : data[k];
+    cleaned[k] = sanitizeField(data[k], tableName, k, typeMap[k]);
   });
 
   const maxPos = db.prepare(`SELECT MAX(position) AS maxPos FROM ${tableName}`).get().maxPos || 0;
@@ -58,9 +67,10 @@ function updateRow(tableName, id, data) {
   if (keys.length === 0) throw new Error('没有字段');
 
   const cleaned = {};
+  const typeMap = fieldTypeMap(tableName);
   keys.forEach(k => {
     assertValidColumn(k);
-    cleaned[k] = (data[k] === '' || data[k] === undefined) ? null : data[k];
+    cleaned[k] = sanitizeField(data[k], tableName, k, typeMap[k]);
   });
 
   const setClause = Object.keys(cleaned).map(k => `"${k}" = ?`).join(', ');
@@ -188,7 +198,10 @@ function importRows(tableName, fields, rows) {
     throw new Error('缺少有效的字段或数据');
   }
 
-  const existingFields = getFields(tableName).map(f => f.name);
+  const fieldMeta = getFields(tableName);
+  const existingFields = fieldMeta.map(f => f.name);
+  const typeMap = {};
+  fieldMeta.forEach(f => { typeMap[f.name] = f.type || '文字'; });
 
   for (const f of fields) {
     assertValidColumn(f);
@@ -198,6 +211,7 @@ function importRows(tableName, fields, rows) {
       db.prepare(`INSERT INTO table_meta (table_name, column_name, data_type, sort_order) VALUES (?, ?, '文字', ?)`)
         .run(tableName, f, maxSort + 1);
       existingFields.push(f);
+      typeMap[f] = '文字';
     }
   }
 
@@ -207,7 +221,7 @@ function importRows(tableName, fields, rows) {
 
   const insertMany = db.transaction((dataRows) => {
     for (const row of dataRows) {
-      const filledRow = fields.map((_, idx) => (row[idx] !== undefined ? row[idx] : ''));
+      const filledRow = fields.map((f, idx) => sanitizeField(row[idx], tableName, f, typeMap[f] || '文字'));
       insertStmt.run(...filledRow);
     }
   });

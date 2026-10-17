@@ -5,7 +5,7 @@
       <div class="dialog-card bg-surface rounded-lg p-6 min-w-[32rem] w-auto min-h-[32rem] max-w-[calc(100vw-2rem)] border border-border shadow-lg flex flex-col" style="max-height: 90vh; overflow: visible;">
         <div class="flex items-center justify-between mb-5 flex-shrink-0">
           <h3 class="text-lg font-extrabold text-text tracking-wide">🧠 AI 助手设置</h3>
-          <button @click="close" class="text-text-muted hover:text-text text-lg leading-none cursor-pointer" title="关闭">✕</button>
+          <button @click="close" class="dlg-close" title="关闭">✕</button>
         </div>
 
         <div class="flex-1 overflow-y-auto overflow-x-hidden min-h-0">
@@ -60,10 +60,37 @@
                 </div>
               </div>
               <div class="flex items-center gap-3 flex-shrink-0" @click.stop>
+                <label class="inline-flex items-center gap-1.5 cursor-pointer" title="推理（思考模式）：DeepSeek / 智谱 / 通义 支持">
+                  <input
+                    type="checkbox"
+                    :checked="m.reasoning"
+                    @change="toggleReasoning(m, $event)"
+                    class="w-4 h-4 rounded border-border text-primary focus:ring-primary cursor-pointer"
+                  />
+                  <span class="text-xs" :class="m.reasoning ? 'text-text' : 'text-text-muted'">推理</span>
+                </label>
                 <button @click="removeModel(m)" class="text-danger hover:underline text-sm cursor-pointer">删除</button>
               </div>
             </div>
           </div>
+
+          <!-- 长期记忆：AI 记住的用户偏好（md 文档），失焦即自动保存 -->
+          <div class="flex items-center justify-between mt-6 mb-3">
+            <span class="text-sm font-bold text-text">记忆</span>
+            <button
+              @click="clearMemoryShow = true"
+              :disabled="!memory.trim()"
+              class="text-danger hover:underline text-sm cursor-pointer disabled:opacity-40 disabled:cursor-default disabled:no-underline"
+            >清空</button>
+          </div>
+          <textarea
+            v-model="memory"
+            @blur="saveMemory"
+            rows="6"
+            placeholder="AI 会把记住的用户偏好写在这里（md 格式），也可手动编辑"
+            class="w-full border border-border bg-surface text-text text-sm px-3 py-2 rounded-lg resize-y focus:outline-none focus:ring-2 focus:ring-primary/40"
+            style="font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;"
+          ></textarea>
         </div>
       </div>
     </div>
@@ -80,6 +107,15 @@
     :show-cancel="true"
     @confirm="onRemoveConfirm"
     @cancel="confirmShow = false"
+  />
+
+  <!-- 清空记忆确认弹窗 -->
+  <ConfirmDialog
+    :visible="clearMemoryShow"
+    message="确定清空全部记忆？清空后 AI 将不再记得这些偏好。"
+    :show-cancel="true"
+    @confirm="onClearMemoryConfirm"
+    @cancel="clearMemoryShow = false"
   />
 </template>
 
@@ -109,6 +145,8 @@ export default {
       confirmTitle: '',
       confirmMessage: '',
       removeTarget: null,
+      memory: '',            // 长期记忆 md 原文（AI 记住的用户偏好）
+      clearMemoryShow: false, // 清空记忆确认弹窗
       providerLabels: {
         deepseek: 'DeepSeek',
         openai: 'OpenAI',
@@ -151,6 +189,11 @@ export default {
       try {
         const cfg = await axios.get('/api/ai/config')
         this.enabled = cfg.data.success && cfg.data.data.enabled
+        // 长期记忆（md 原文）
+        try {
+          const mem = await axios.get('/api/ai/memory')
+          this.memory = mem.data.success ? (mem.data.data.content || '') : ''
+        } catch (_) { this.memory = '' }
         const list = await axios.get('/api/ai/models')
         this.models = list.data.success ? list.data.data : []
         // 先拉取所有服务商可用模型列表，再一次性更新 modelChoices（避免中间态闪烁）
@@ -207,6 +250,18 @@ export default {
         console.error('切换失败:', err)
       }
     },
+    // 切换该模型的推理开关（即时保存，无需确定按钮）
+    async toggleReasoning(m, e) {
+      const on = e.target.checked
+      try {
+        await axios.put(`/api/ai/models/${m.id}/reasoning`, { reasoning: on })
+        m.reasoning = on
+        this.$emit('saved')
+      } catch (err) {
+        e.target.checked = !on
+        alert((err.response && err.response.data && err.response.data.error) || '切换失败')
+      }
+    },
     // 添加模型成功后的回调：刷新列表
     async onModelSaved() {
       await this.load()
@@ -239,6 +294,20 @@ export default {
         console.error('删除失败:', err)
       }
       this.removeTarget = null
+    },
+    // 失去焦点即保存记忆（无需确定按钮，编辑即时生效）
+    async saveMemory() {
+      try {
+        await axios.put('/api/ai/memory', { content: this.memory })
+      } catch (err) {
+        console.error('保存记忆失败:', err)
+      }
+    },
+    // 清空记忆（确认后写入空内容，后端会删除 md 文件）
+    async onClearMemoryConfirm() {
+      this.clearMemoryShow = false
+      this.memory = ''
+      await this.saveMemory()
     },
   },
 }

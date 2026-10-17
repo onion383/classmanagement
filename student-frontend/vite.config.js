@@ -66,6 +66,13 @@ export default defineConfig({
         './src/components/base/AppSelect.vue',
         './src/components/base/IconGlyph.vue',
         './src/styles/index.css',
+        // 主题 CSS 改为按需动态加载（见 styles/themeLoader.js）：dev 下要等首次渲染才请求、才编译，
+        // 故一并预热，避免首屏/切主题时现编译。仅 dev 生效，对正式版无影响。
+        './src/styles/theme-glass.css',
+        './src/styles/theme-glass2.css',
+        './src/styles/theme-minimal.css',
+        './src/styles/theme-win11.css',
+        './src/styles/theme-night.css',
         // 首屏落地页（未登录→Login，已登录→Dashboard）：提前编译，避免跳转后才逐模块编译
         './src/views/Login.vue',
         './src/views/DashboardView.vue',

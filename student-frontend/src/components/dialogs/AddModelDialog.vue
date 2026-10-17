@@ -5,7 +5,7 @@
       <div class="dialog-card bg-surface rounded-lg p-6 w-[28rem] max-w-[calc(100vw-2rem)] border border-border shadow-lg">
         <div class="flex items-center justify-between mb-5 flex-shrink-0">
           <h3 class="text-lg font-bold text-text">添加模型</h3>
-          <button @click="close" class="text-text-muted hover:text-text text-lg leading-none cursor-pointer" title="关闭">✕</button>
+          <button @click="close" class="dlg-close" title="关闭">✕</button>
         </div>
 
         <div class="space-y-4">
@@ -27,7 +27,7 @@
           <div class="flex items-center gap-4">
             <label class="text-sm font-medium text-text w-20 flex-shrink-0">模型名</label>
             <template v-if="mode === 'input'">
-              <input v-model="form.model" placeholder="如 deepseek-chat" class="flex-1 border border-border bg-surface text-text px-3 py-2 rounded" />
+              <input v-model="form.model" placeholder="如 deepseek-v4-flash" class="flex-1 border border-border bg-surface text-text px-3 py-2 rounded" />
               <button
                 @click="discover"
                 :disabled="discovering"
@@ -99,7 +99,7 @@ export default {
         api_key: '',
       },
       providerPresets: {
-        deepseek: { base_url: 'https://api.deepseek.com/v1', model: 'deepseek-chat' },
+        deepseek: { base_url: 'https://api.deepseek.com/v1', model: 'deepseek-v4-flash' },
         openai: { base_url: 'https://api.openai.com/v1', model: 'gpt-4o-mini' },
         moonshot: { base_url: 'https://api.moonshot.cn/v1', model: 'moonshot-v1-8k' },
         qwen: { base_url: 'https://dashscope.aliyuncs.com/compatible-mode/v1', model: 'qwen-plus' },

@@ -9,7 +9,7 @@
       <div class="bg-surface shadow-md rounded-xl border border-border p-6 md:col-span-2">
         <div class="flex items-center gap-4 mb-4">
           <div class="w-14 h-14 rounded-xl bg-primary/10 flex items-center justify-center overflow-hidden">
-            <img src="/logo.png" alt="logo" class="w-full h-full object-contain" />
+            <img src="/logo.webp" alt="logo" class="w-full h-full object-contain" />
           </div>
           <div>
             <div class="flex items-center gap-2">
@@ -81,14 +81,14 @@
       </div>
     </div>
 
-    <div class="text-center text-xs text-text-muted mt-6 pb-2 space-y-1">
+    <div class="mt-6 bg-surface shadow-md rounded-xl border border-border p-6 text-center text-sm text-text-muted space-y-1.5">
       <div>本软件遵循 <a href="https://polyformproject.org/licenses/noncommercial/1.0.0" target="_blank" rel="noopener" @click="openExternal($event, 'https://polyformproject.org/licenses/noncommercial/1.0.0')" class="text-primary hover:underline">PolyForm Noncommercial License 1.0.0</a> 发布</div>
       <div class="text-text-muted/70">仅非商业使用，商业使用需本人授权</div>
       <div>
         Copyright &copy; 无聊的小洋葱 2026 &nbsp;|&nbsp;
         <a href="https://github.com/onion383/classmanagement" target="_blank" rel="noopener" @click="openExternal($event, 'https://github.com/onion383/classmanagement')" class="text-primary hover:underline">仓库地址</a>
       </div>
-      <div class="text-[10px] text-text-muted/50">https://github.com/onion383/classmanagement</div>
+      <div class="text-text-muted/50">https://github.com/onion383/classmanagement</div>
     </div>
 
     <!-- 协议弹窗 -->
@@ -98,7 +98,7 @@
           <div class="dialog-card bg-surface rounded-xl shadow-2xl border border-border w-full max-w-2xl mx-4 max-h-[85vh] flex flex-col" @click.stop>
           <div class="flex items-center justify-between px-6 py-4 border-b border-border shrink-0">
             <h2 class="text-lg font-semibold text-text">PolyForm Noncommercial License 1.0.0</h2>
-            <button @click="dialogProtocol = false" class="text-text-muted hover:text-text text-xl leading-none">&times;</button>
+            <button @click="dialogProtocol = false" class="dlg-close">&times;</button>
           </div>
           <div class="overflow-y-auto px-6 py-4 text-sm text-text-secondary leading-relaxed whitespace-pre-line flex-1">{{ licenseText }}</div>
           <div class="px-6 py-4 border-t border-border shrink-0 flex justify-end">
@@ -114,11 +114,11 @@
       <Transition name="dialog">
         <div v-if="dialogVersion" class="fixed inset-0 z-[9999] flex items-center justify-center bg-black/40" @click.self="dialogVersion = false">
           <div class="dialog-card bg-surface rounded-xl shadow-2xl border border-border w-full max-w-md mx-4 relative flex flex-col max-h-[85vh]" @click.stop>
-          <button @click="dialogVersion = false" class="absolute! top-3 right-3 w-7 h-7 flex items-center justify-center rounded-full text-text-muted hover:text-text hover:bg-black/5 transition-colors text-xl leading-none">&times;</button>
+          <button @click="dialogVersion = false" class="dlg-close absolute! top-3 right-3">&times;</button>
 
           <!-- 上半部分：居中信息 -->
           <div class="px-6 pt-8 pb-4 text-center shrink-0">
-            <img src="/logo.png" alt="logo" class="w-16 h-16 mx-auto object-contain" />
+            <img src="/logo.webp" alt="logo" class="w-16 h-16 mx-auto object-contain" />
             <div class="mt-4 flex items-center justify-center gap-2">
               <span class="text-base font-semibold text-text">v{{ currentVersion || '0.8.0' }}</span>
               <span class="inline-flex items-center rounded-md px-2 py-0.5 text-xs font-semibold text-white bg-blue-500 leading-none">预览版</span>
@@ -164,7 +164,7 @@
           <div class="dialog-card bg-surface rounded-xl shadow-2xl border border-border w-full max-w-md mx-4" @click.stop>
           <div class="flex items-center justify-between px-6 py-4 border-b border-border">
             <h2 class="text-lg font-semibold text-text">打赏</h2>
-            <button @click="dialogDonate = false" class="text-text-muted hover:text-text text-xl leading-none">&times;</button>
+            <button @click="dialogDonate = false" class="dlg-close">&times;</button>
           </div>
           <div class="px-6 py-4 text-sm text-text-secondary text-center">
             <p class="mb-4">本软件个人免费使用，如果你觉得好的话欢迎打赏我们</p>

@@ -3,6 +3,7 @@ import { createPinia } from 'pinia'
 import Setup from './Setup.vue'
 // 复用全局主题变量（:root 默认值），使引导窗口与主界面配色一致
 import '../styles/index.css'
+import { loadThemeStyles } from '../styles/themeLoader'
 import { useThemeStore } from '../stores/theme'
 import { setupApiClient, backendBaseUrl } from '../utils/httpClient'
 
@@ -40,12 +41,14 @@ async function resolveLaunch() {
 }
 
 // 先解析画面、再等样式，二者就绪后才挂载：避免先渲染欢迎页再跳到提示页的闪动。
-Promise.all([stylesReady, resolveLaunch()]).then(([, launch]) => {
+Promise.all([stylesReady, resolveLaunch()]).then(async ([, launch]) => {
   const app = createApp(Setup, { initialScreen: launch.screen, plan: launch.plan })
   const pinia = createPinia()
   app.use(pinia)
   // 套用当前主题：默认「毛玻璃（glass）」，用户在引导内切换后即时生效。
   // applyTheme 内的 theme-chrome 通知来自非主窗口，主进程会直接忽略（见 electron/main.js）。
   useThemeStore(pinia).applyTheme()
+  // 等当前主题的按需样式就绪（applyTheme 已触发加载）后再挂载，避免闪一下基础主题配色。
+  await loadThemeStyles(document.documentElement.dataset.theme, document.documentElement.dataset.mode)
   app.mount('#setup-app')
 })

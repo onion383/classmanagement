@@ -1,3 +1,16 @@
+<script>
+  // 首帧占位在 Vue 挂载前就已绘制，此时主题仓库（src/stores/theme.js）还没初始化，
+  // 因此这里直接读 localStorage 里的主题 / 模式，抢先把 data-theme / data-mode 写到 <html> 上，
+  // 让 splash.css 的深色规则在首帧就生效 —— 否则深色模式下启动会先闪一下浅色。
+  // 判定口径与 theme.js 保持一致：只有 glass / glass2 实现了夜间配色。
+  (function () {
+    try {
+      var root = document.documentElement
+      root.dataset.theme = localStorage.getItem('app-theme') || 'glass'
+      root.dataset.mode = localStorage.getItem('app-mode') === 'night' ? 'night' : 'day'
+    } catch (_) { /* 读不到（隐私模式 / dev 的 data: 页面独立源）时保持默认日间 */ }
+  })()
+</script>
 <div class="app-splash">
   <svg class="ring" width="34" height="34" viewBox="0 0 22 22">
     <circle cx="11" cy="11" r="8" fill="none" stroke="rgba(30,64,175,.25)" stroke-width="3"/>

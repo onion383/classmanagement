@@ -5,7 +5,7 @@
     <!-- 低版本系统提示：与安装器同款一屏，复用欢迎页的卡片与居中布局，仅内容区不同 -->
     <div v-if="screen === 'warning'" class="setup-card bg-surface welcome">
       <div class="welcome-inner">
-        <img src="/logo.png" alt="logo" class="welcome-logo" />
+        <img src="/logo.webp" alt="logo" class="welcome-logo" />
         <div class="welcome-title">
           <span class="welcome-name">班集</span>
         </div>
@@ -28,12 +28,12 @@
     <div v-else-if="screen === 'welcome'" class="setup-card bg-surface welcome">
       <button
         type="button"
-        class="welcome-x absolute! top-3 right-3 w-7 h-7 flex items-center justify-center rounded-full text-text-muted hover:text-text hover:bg-black/5 transition-colors text-xl leading-none"
+        class="welcome-x dlg-close absolute! top-3 right-3"
         title="关闭"
         @click="quitSetup"
       >&times;</button>
       <div class="welcome-inner">
-        <img src="/logo.png" alt="logo" class="welcome-logo" />
+        <img src="/logo.webp" alt="logo" class="welcome-logo" />
         <div class="welcome-title">
           <span class="welcome-name">班集</span>
           <span class="inline-flex items-center rounded-md px-2 py-0.5 text-xs font-semibold text-white bg-blue-500 leading-none">预览版</span>
@@ -53,7 +53,7 @@
              no-drag 才会真正生效、点击才可响应；点击完全退出软件（前后端） -->
         <button
           type="button"
-          class="setup-x absolute! top-3 right-3 w-7 h-7 flex items-center justify-center rounded-full text-text-muted hover:text-text hover:bg-black/5 transition-colors text-xl leading-none"
+          class="setup-x dlg-close absolute! top-3 right-3"
           title="关闭"
           @click="quitSetup"
         >&times;</button>

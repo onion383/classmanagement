@@ -110,22 +110,31 @@
 }
 
 /* ========== 自定义背景图 ========== */
+/* 背景图不再直接画在 body 上（body 只留兜底底色）：
+   原先 body 用 background-attachment: fixed 绘制背景图，Windows/Electron 下会被
+   栅格化成分块图层，屏幕上每隔一段距离出现一条 1px 拼接缝（夜间深色底图上尤其明显）。
+   现统一由下方固定的伪元素层绘制，照片内容与原来完全一致，只是不再有接缝。 */
 :root[data-theme="glass"].has-bg-image body {
-  background-image: var(--bg-image);
-  background-size: cover;
-  background-position: center;
-  background-attachment: fixed;
   background-color: #f0f4f8;
 }
-/* 全局图片背景遮罩：设为固定在视口的独立层（body::before），而非 main 的背景。
+/* 全局图片背景 + 遮罩：统一画在固定视口的独立层（body::before），而非 main 的背景。
    橡皮筋滚动会对可滚动容器 main 做 translateY；若遮罩是 main 的背景就会跟随位移，
-   在顶部/底部露出一条背景图（“跑出遮罩”）。固定层始终覆盖整个视口，拉伸时也不会跑出。 */
+   在顶部/底部露出一条背景图（“跑出遮罩”）。固定层始终覆盖整个视口，拉伸时也不会跑出。
+   遮罩色走 --bg-mask-color 变量，夜间改这个变量即可（见 theme-night.css）。 */
+:root[data-theme="glass"].has-bg-image {
+  --bg-mask-color: rgba(240, 244, 248, var(--bg-mask-opacity, 0.6));
+}
 :root[data-theme="glass"].has-bg-image body::before {
   content: '';
   position: fixed;
   inset: 0;
   z-index: -1;
-  background-color: rgba(240, 244, 248, var(--bg-mask-opacity, 0.6));
+  background-image:
+    linear-gradient(var(--bg-mask-color), var(--bg-mask-color)),
+    var(--bg-image);
+  background-size: cover, cover;
+  background-position: center, center;
+  background-repeat: no-repeat, no-repeat;
   pointer-events: none;
 }
 /* main 不再自带遮罩背景，透明以透出上方固定的背景遮罩 */
@@ -148,9 +157,12 @@
 :root[data-topbar-color="light"]:is([data-theme="glass"], [data-theme="win11"]) .bg-sidebar {
   background-color: rgba(255, 255, 255, 0.35) !important;
   color: #1e293b !important;
+  /* 只去掉外侧扩散投影 4px 0 32px rgba(15,23,42,0.12)：它会向右铺出一条约 32px 的暗带，
+     正好压在网格表格左列背后，被表格单元格/容器的 backdrop-filter 再次采样后
+     抹成"越往右越深的蓝色渐变"（悬停侧边栏触发重绘时才显形）。
+     背景色与顶部/右侧内侧高光保持原样不变。 */
   box-shadow:
     inset 0 1px 0 rgba(255, 255, 255, 0.35),
-    4px 0 32px rgba(15, 23, 42, 0.12),
     inset -1px 0 0 rgba(255, 255, 255, 0.4);
 }
 /* 深蓝（旧款，还原最后一次提交前的原版配方：右侧圆角 + 浅色边框 + 原投影） */
@@ -160,9 +172,9 @@
   /* 右侧 1px 浅色 border 与 box-shadow 内侧 -1px 白线会在深蓝半透明底上透出浅蓝细线，统一改透明（勿误删） */
   border-right-color: transparent !important;
   border-radius: 0 18px 18px 0;
-  box-shadow:
-    inset 0 1px 0 rgba(255, 255, 255, 0.12),
-    4px 0 32px rgba(15, 23, 42, 0.18);
+  /* 同样的预防处理：去掉右向 4px 0 32px 的暗带投影（它会压在网格表格左列背后，
+     被表格 backdrop-filter 二次采样成那条"越往右越深"的渐变线），保留顶部内侧高光。 */
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.12);
 }
 /* 顶部玻璃受光渐变高光（与原版完全一致：淡 0.22→0.06→0） */
 :root:is([data-theme="glass"], [data-theme="win11"]) .bg-sidebar::before {

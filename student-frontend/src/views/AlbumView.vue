@@ -103,7 +103,7 @@
       <div class="bg-surface rounded-xl p-6 w-[820px] max-w-[94vw] flex flex-col border border-border shadow-card dialog-card">
         <div class="flex items-center justify-between mb-4 flex-shrink-0">
           <h3 class="text-lg font-bold text-text">相册管理</h3>
-          <button @click="showManage = false" class="text-text-muted hover:text-text text-lg leading-none px-2">✕</button>
+          <button @click="showManage = false" class="dlg-close">✕</button>
         </div>
 
         <!-- 添加文件夹 -->

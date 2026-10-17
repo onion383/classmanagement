@@ -12,42 +12,6 @@
    ============================================================ */
 
 /* ------------------------------------------------------------
-   0. 日夜切换按钮（侧边栏「班集」旁，见 Sidebar.vue）
-   该按钮的外观与日/夜无关，故不做 mode 判定；主要目的是压掉 glass 主题给
-   「所有 button」套上的荧光描边皮肤（原规则特异性 0,2,1，这里用 0,3,0 覆盖）。
-   ------------------------------------------------------------ */
-:root .bg-sidebar .mode-toggle-btn {
-  margin-left: auto;
-  flex-shrink: 0;
-  width: 26px;
-  height: 26px;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  padding: 0;
-  border: none;
-  border-radius: 8px;
-  background: transparent;
-  box-shadow: none;
-  color: currentColor;
-  line-height: 1;
-  cursor: pointer;
-  transition: background-color 0.15s ease, color 0.15s ease, opacity 0.15s ease;
-}
-/* 关掉 glass 主题给 button::before 加的荧光描边环 */
-:root .bg-sidebar .mode-toggle-btn::before {
-  display: none;
-  content: none;
-}
-:root .bg-sidebar .mode-toggle-btn:hover:not(:disabled) {
-  background: rgba(127, 127, 127, 0.18);
-}
-:root .bg-sidebar .mode-toggle-btn:disabled {
-  opacity: 0.4;
-  cursor: not-allowed;
-}
-
-/* ------------------------------------------------------------
    0.1 语义彩色图标：沿用日间色系，深色模式下整体提亮
    图标颜色来自 IconGlyph 的 MAP / 侧边栏配置（固定 hex），这里用亮度滤镜
    在夜间统一提亮，保持色相不变（saturate 稍加补偿，避免提亮后发灰）。
@@ -62,17 +26,19 @@
    A. glass（毛玻璃主题）夜间
    ============================================================ */
 
-/* A1. 设计变量重映射 */
+/* A1. 设计变量重映射
+   底色一族本次已整体提亮一档（页面底 #182238，玻璃面基色 rgba(36,53,88) 系），
+   避免「太黑」。若还要再调，按同样幅度抬亮 A 段所有 rgba(3x,5x,9x) 基色 + 页面底即可。 */
 :root[data-mode="night"][data-theme="glass"] {
   --color-primary: #60a5fa;
   --color-primary-hover: #4b93f0;
   --color-primary-active: #3b82f6;
   --color-primary-light: rgba(96, 165, 250, 0.18);
 
-  --color-bg: #0c1626;
-  --color-surface: rgba(28, 42, 70, 0.92);
-  --color-surface-hover: rgba(37, 53, 86, 0.95);
-  --color-sidebar: rgba(22, 35, 66, 0.72);
+  --color-bg: #182238;
+  --color-surface: rgba(46, 64, 100, 0.92);
+  --color-surface-hover: rgba(55, 76, 118, 0.95);
+  --color-sidebar: rgba(38, 55, 90, 0.72);
   --color-sidebar-hover: rgba(255, 255, 255, 0.08);
   --color-sidebar-active: rgba(96, 165, 250, 0.22);
 
@@ -96,10 +62,10 @@
 
 /* A2. 页面底色与弥散光斑 */
 :root[data-mode="night"][data-theme="glass"] body {
-  background-color: #0c1626;
+  background-color: #182238;
 }
 :root[data-mode="night"][data-theme="glass"] main {
-  background-color: #0c1626;
+  background-color: #182238;
   background-image:
     radial-gradient(ellipse 40% 30% at 10% 15%, rgba(59, 130, 246, 0.24) 0%, transparent 60%),
     radial-gradient(ellipse 40% 30% at 90% 10%, rgba(99, 102, 241, 0.16) 0%, transparent 60%),
@@ -108,15 +74,16 @@
 }
 /* 自定义背景图：遮罩改成深蓝压暗 */
 :root[data-mode="night"][data-theme="glass"].has-bg-image body {
-  background-color: #0c1626;
+  background-color: #182238;
 }
-:root[data-mode="night"][data-theme="glass"].has-bg-image body::before {
-  background-color: rgba(10, 19, 40, calc(var(--bg-mask-opacity, 0.6) * 0.6));
+/* 背景图与遮罩现由 body::before 一层绘制（见 theme-glass.css），故夜间改遮罩变量而非背景色 */
+:root[data-mode="night"][data-theme="glass"].has-bg-image {
+  --bg-mask-color: rgba(16, 26, 52, calc(var(--bg-mask-opacity, 0.6) * 0.6));
 }
 /* 夜间内置默认底图本身已是深色风景图：遮罩再压轻，避免把这层夜色压死。
    仅「glass + 夜间 + 无自选图」（.bg-night-default）生效；自选图仍走上一档系数。 */
-:root[data-mode="night"][data-theme="glass"].has-bg-image.bg-night-default body::before {
-  background-color: rgba(10, 19, 40, calc(var(--bg-mask-opacity, 0.6) * 0.30));
+:root[data-mode="night"][data-theme="glass"].has-bg-image.bg-night-default {
+  --bg-mask-color: rgba(16, 26, 52, calc(var(--bg-mask-opacity, 0.6) * 0.30));
 }
 
 /* A3. 自绘标题栏 */
@@ -131,11 +98,11 @@
   background: linear-gradient(180deg, rgba(255, 255, 255, 0.07) 0%, rgba(255, 255, 255, 0.02) 55%, rgba(255, 255, 255, 0) 100%);
 }
 :root[data-mode="night"][data-topbar-color="light"][data-theme="glass"] .window-title-bar {
-  background-color: rgba(21, 34, 66, 0.46) !important;
+  background-color: rgba(37, 54, 90, 0.46) !important;
   color: #e6ecf5 !important;
 }
 :root[data-mode="night"][data-topbar-color="blue"][data-theme="glass"] .window-title-bar {
-  background-color: rgba(23, 42, 94, 0.46) !important;
+  background-color: rgba(39, 64, 116, 0.46) !important;
   color: #e6ecf5 !important;
 }
 :root[data-mode="night"][data-topbar-color="light"][data-theme="glass"] .window-controls .win-btn:hover {
@@ -148,20 +115,21 @@
 /* A4. 侧边栏 */
 :root[data-mode="night"][data-theme="glass"] .bg-sidebar {
   border-right-color: rgba(255, 255, 255, 0.08);
+  /* 同 theme-glass 的预防处理：去掉右向 4px 0 32px 暗带投影（夜间这条是 0.32 的纯黑，
+     更容易被网格表格的 backdrop-filter 采样成那条渐变线），保留两条内侧高光。 */
   box-shadow:
     inset 0 1px 0 rgba(255, 255, 255, 0.10),
-    4px 0 32px rgba(0, 0, 0, 0.32),
     inset -1px 0 0 rgba(255, 255, 255, 0.06);
 }
 :root[data-mode="night"][data-theme="glass"] .bg-sidebar::before {
   background: linear-gradient(180deg, rgba(255, 255, 255, 0.07) 0%, rgba(255, 255, 255, 0.02) 55%, rgba(255, 255, 255, 0) 100%);
 }
 :root[data-mode="night"][data-topbar-color="light"][data-theme="glass"] .bg-sidebar {
-  background-color: rgba(22, 35, 66, 0.50) !important;
+  background-color: rgba(38, 55, 90, 0.50) !important;
   color: #e6ecf5 !important;
 }
 :root[data-mode="night"][data-topbar-color="blue"][data-theme="glass"] .bg-sidebar {
-  background-color: rgba(24, 44, 98, 0.48) !important;
+  background-color: rgba(40, 66, 120, 0.48) !important;
   color: #eef3fb !important;
 }
 /* 白色调侧栏：文字/hover/选中改浅色 */
@@ -191,37 +159,36 @@
     0 2px 8px rgba(0, 0, 0, 0.25);
 }
 
-/* A5. 卡片 / 面板 */
+/* A5. 卡片 / 面板
+   日间卡片描边是 1px 白色叠在浅底上，基本看不出；到夜间换成浅蓝描边叠在深底上，
+   就会显成一圈清晰的亮边（圆角处即一段弧线）。同理，顶部内高光与 ::before 的
+   第一行受光渐变，在深底上都会变成卡片顶边的一条细线（被圆角裁切后带弧度）。
+   故夜间统一去掉描边与顶部内高光，并把受光渐变压到几乎不可见，与日间观感对齐。 */
 :root[data-mode="night"][data-theme="glass"] .bg-surface {
-  background-color: rgba(20, 33, 64, calc(var(--glass-opacity, 0.4) + 0.16)) !important;
-  border-color: rgba(140, 175, 250, 0.16);
-  box-shadow:
-    0 0 20px rgba(0, 0, 0, 0.25),
-    inset 0 1px 0 rgba(255, 255, 255, 0.06);
+  background-color: rgba(36, 53, 88, calc(var(--glass-opacity, 0.4) + 0.16)) !important;
+  border-color: transparent;
+  box-shadow: 0 0 20px rgba(0, 0, 0, 0.25);
 }
 :root[data-mode="night"][data-theme="glass"] .bg-surface::before {
-  background: linear-gradient(180deg, rgba(255, 255, 255, 0.07) 0%, rgba(255, 255, 255, 0.02) 55%, rgba(255, 255, 255, 0) 100%);
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.02) 0%, rgba(255, 255, 255, 0.008) 55%, rgba(255, 255, 255, 0) 100%);
 }
 :root[data-mode="night"][data-theme="glass"] .bg-surface-hover {
-  background-color: rgba(29, 45, 80, calc(var(--glass-opacity, 0.4) + 0.24)) !important;
+  background-color: rgba(47, 66, 106, calc(var(--glass-opacity, 0.4) + 0.24)) !important;
 }
 :root[data-mode="night"][data-theme="glass"] .bg-surface.shadow-md {
-  background-color: rgba(20, 33, 64, 0.36) !important;
+  background-color: rgba(36, 53, 88, 0.36) !important;
   box-shadow: 0 2px 10px rgba(0, 0, 0, 0.3);
 }
 :root[data-mode="night"][data-theme="glass"] .bg-surface.shadow-md::before {
-  background: linear-gradient(180deg, rgba(255, 255, 255, 0.10) 0%, rgba(255, 255, 255, 0.03) 50%, rgba(255, 255, 255, 0.05) 100%);
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.03) 0%, rgba(255, 255, 255, 0.01) 50%, rgba(255, 255, 255, 0.015) 100%);
 }
 /* 班费统计卡片 */
 :root[data-mode="night"][data-theme="glass"] .grid.grid-cols-3 > div {
-  background-color: rgba(20, 33, 64, 0.36) !important;
-  box-shadow:
-    0 0 0 1px rgba(140, 175, 250, 0.10),
-    0 0 16px rgba(0, 0, 0, 0.25),
-    inset 0 1px 0 rgba(255, 255, 255, 0.06);
+  background-color: rgba(36, 53, 88, 0.36) !important;
+  box-shadow: 0 0 16px rgba(0, 0, 0, 0.25);
 }
 :root[data-mode="night"][data-theme="glass"] .grid.grid-cols-3 > div::before {
-  background: linear-gradient(180deg, rgba(255, 255, 255, 0.10) 0%, rgba(255, 255, 255, 0.03) 50%, rgba(255, 255, 255, 0.05) 100%);
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.03) 0%, rgba(255, 255, 255, 0.01) 50%, rgba(255, 255, 255, 0.015) 100%);
 }
 :root[data-mode="night"][data-theme="glass"] .grid.grid-cols-3 .text-success { color: #4ade80 !important; }
 :root[data-mode="night"][data-theme="glass"] .grid.grid-cols-3 .text-info { color: #7cb3fb !important; }
@@ -230,14 +197,11 @@
 
 /* A6. 表格 */
 :root[data-mode="night"][data-theme="glass"] .table-scroll-wrapper {
-  background-color: rgba(21, 35, 66, calc(var(--glass-opacity, 0.4) + 0.16)) !important;
-  box-shadow:
-    0 0 0 1px rgba(140, 175, 250, 0.10),
-    0 0 16px rgba(0, 0, 0, 0.25),
-    inset 0 1px 0 rgba(255, 255, 255, 0.06);
+  background-color: rgba(37, 55, 90, calc(var(--glass-opacity, 0.4) + 0.16)) !important;
+  box-shadow: 0 0 16px rgba(0, 0, 0, 0.25);
 }
 :root[data-mode="night"][data-theme="glass"] .table-scroll-wrapper::before {
-  border-color: rgba(150, 180, 255, 0.16);
+  border-color: rgba(150, 180, 255, 0.05);
 }
 :root[data-mode="night"][data-theme="glass"] table th,
 :root[data-mode="night"][data-theme="glass"] table td {
@@ -262,23 +226,18 @@
   color: #e6ecf5 !important;
 }
 :root[data-mode="night"][data-theme="glass"] .add-row-bar {
-  background-color: rgba(26, 41, 74, calc(var(--glass-opacity, 0.4) + 0.14)) !important;
+  background-color: rgba(44, 63, 102, calc(var(--glass-opacity, 0.4) + 0.14)) !important;
   border-color: rgba(150, 180, 255, 0.18) !important;
-  box-shadow:
-    0 1px 6px rgba(0, 0, 0, 0.25),
-    inset 0 1px 0 rgba(255, 255, 255, 0.06);
+  box-shadow: 0 1px 6px rgba(0, 0, 0, 0.25);
 }
 
 /* A7. 网状表格（GridView） */
 :root[data-mode="night"][data-theme="glass"] .grid-view-container {
-  background-color: rgba(21, 35, 66, calc(var(--glass-opacity, 0.4) + 0.10)) !important;
-  box-shadow:
-    0 0 0 1px rgba(140, 175, 250, 0.10),
-    0 0 16px rgba(0, 0, 0, 0.25),
-    inset 0 1px 0 rgba(255, 255, 255, 0.06);
+  background-color: rgba(37, 55, 90, calc(var(--glass-opacity, 0.4) + 0.10)) !important;
+  box-shadow: 0 0 16px rgba(0, 0, 0, 0.25);
 }
 :root[data-mode="night"][data-theme="glass"] .grid-view-container::before {
-  background: linear-gradient(180deg, rgba(255, 255, 255, 0.16) 0%, rgba(255, 255, 255, 0.04) 50%, rgba(255, 255, 255, 0.07) 100%);
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.04) 0%, rgba(255, 255, 255, 0.012) 50%, rgba(255, 255, 255, 0.02) 100%);
 }
 :root[data-mode="night"][data-theme="glass"] .grid-view-container table th {
   background-color: rgba(255, 255, 255, 0.07) !important;
@@ -323,7 +282,7 @@
 :root[data-mode="night"][data-theme="glass"] input[type="time"],
 :root[data-mode="night"][data-theme="glass"] textarea,
 :root[data-mode="night"][data-theme="glass"] select {
-  background-color: rgba(16, 27, 52, calc(var(--glass-opacity, 0.4) + 0.10)) !important;
+  background-color: rgba(32, 46, 78, calc(var(--glass-opacity, 0.4) + 0.10)) !important;
   border-color: rgba(150, 180, 255, 0.18) !important;
   color: var(--color-text, #e6ecf5);
 }
@@ -341,7 +300,7 @@
 :root[data-mode="night"][data-theme="glass"] textarea:focus,
 :root[data-mode="night"][data-theme="glass"] select:focus {
   border-color: #60a5fa !important;
-  background-color: rgba(30, 46, 82, 0.88) !important;
+  background-color: rgba(48, 68, 108, 0.88) !important;
   box-shadow: 0 0 0 3px rgba(96, 165, 250, 0.28);
 }
 :root[data-mode="night"][data-theme="glass"] input:disabled,
@@ -349,22 +308,22 @@
   background-color: rgba(255, 255, 255, 0.04) !important;
 }
 :root[data-mode="night"][data-theme="glass"] select option {
-  background-color: #111827;
+  background-color: #1e263a;
   color: var(--color-text, #e6ecf5);
 }
 /* 自定义下拉框（AppSelect / .av-select）：select.css 给 glass 的触发区与菜单
    硬编码了白色底（!important），此处用更高特异性 + !important 覆盖成夜间玻璃面。
    菜单是 Teleport 到 body 的，仍在 html 下，故选择器同样命中。 */
 :root[data-mode="night"][data-theme="glass"] .av-select__trigger {
-  background-color: rgba(16, 27, 52, calc(var(--glass-opacity, 0.4) + 0.10)) !important;
+  background-color: rgba(32, 46, 78, calc(var(--glass-opacity, 0.4) + 0.10)) !important;
   border-color: rgba(150, 180, 255, 0.18) !important;
   color: var(--color-text, #e6ecf5);
 }
 :root[data-mode="night"][data-theme="glass"] .av-select__trigger:hover {
-  background-color: rgba(24, 38, 68, calc(var(--glass-opacity, 0.4) + 0.16)) !important;
+  background-color: rgba(40, 58, 94, calc(var(--glass-opacity, 0.4) + 0.16)) !important;
 }
 :root[data-mode="night"][data-theme="glass"] .av-select--open .av-select__trigger {
-  background-color: rgba(30, 46, 82, 0.88) !important;
+  background-color: rgba(48, 68, 108, 0.88) !important;
 }
 :root[data-mode="night"][data-theme="glass"] .av-select--open .av-select__trigger,
 :root[data-mode="night"][data-theme="glass"] .av-select__trigger:focus-visible {
@@ -375,7 +334,7 @@
   background-color: rgba(255, 255, 255, 0.04) !important;
 }
 :root[data-mode="night"][data-theme="glass"] .av-select__menu {
-  background-color: rgba(27, 41, 74, 0.85) !important;
+  background-color: rgba(45, 63, 102, 0.85) !important;
   border-color: rgba(150, 180, 255, 0.18) !important;
   color: var(--color-text, #e6ecf5);
   box-shadow: 0 10px 30px rgba(0, 0, 0, 0.45);
@@ -389,25 +348,25 @@
 }
 /* 登录页输入框 */
 :root[data-mode="night"][data-theme="glass"] .login-bg input {
-  background-color: rgba(16, 27, 52, calc(var(--glass-opacity, 0.4) + 0.10)) !important;
+  background-color: rgba(32, 46, 78, calc(var(--glass-opacity, 0.4) + 0.10)) !important;
   border-color: rgba(150, 180, 255, 0.18);
 }
 :root[data-mode="night"][data-theme="glass"] .login-bg input:focus {
   border-color: #60a5fa !important;
-  background-color: rgba(30, 46, 82, 0.88) !important;
+  background-color: rgba(48, 68, 108, 0.88) !important;
   box-shadow: 0 0 0 3px rgba(96, 165, 250, 0.28);
 }
 :root[data-mode="night"][data-theme="glass"] .login-bg input:-webkit-autofill:not(:focus),
 :root[data-mode="night"][data-theme="glass"] .login-bg input:-webkit-autofill:hover:not(:focus) {
   -webkit-text-fill-color: #e6ecf5;
-  -webkit-box-shadow: 0 0 0 1000px rgba(30, 46, 82, 0.9) inset;
-  box-shadow: 0 0 0 1000px rgba(30, 46, 82, 0.9) inset;
+  -webkit-box-shadow: 0 0 0 1000px rgba(48, 68, 108, 0.9) inset;
+  box-shadow: 0 0 0 1000px rgba(48, 68, 108, 0.9) inset;
   border-color: rgba(150, 180, 255, 0.18) !important;
 }
 :root[data-mode="night"][data-theme="glass"] .login-bg input:-webkit-autofill:focus {
   -webkit-text-fill-color: #e6ecf5;
-  -webkit-box-shadow: 0 0 0 1000px rgba(30, 46, 82, 0.92) inset;
-  box-shadow: 0 0 0 1000px rgba(30, 46, 82, 0.92) inset;
+  -webkit-box-shadow: 0 0 0 1000px rgba(48, 68, 108, 0.92) inset;
+  box-shadow: 0 0 0 1000px rgba(48, 68, 108, 0.92) inset;
   border-color: #60a5fa !important;
 }
 :root[data-mode="night"][data-theme="glass"] .login-glow {
@@ -523,7 +482,7 @@
 /* A10. 浮层：候选列表 / 右键菜单 / 搜索面板 */
 :root[data-mode="night"][data-theme="glass"] .candidate-popup,
 :root[data-mode="night"][data-theme="glass"] .context-menu-popup {
-  background-color: rgba(27, 41, 74, 0.78) !important;
+  background-color: rgba(45, 63, 102, 0.78) !important;
   border-color: rgba(96, 165, 250, 0.4) !important;
   box-shadow:
     0 0 0 1px rgba(140, 175, 250, 0.10),
@@ -542,7 +501,7 @@
   background-color: rgba(96, 165, 250, 0.14) !important;
 }
 :root[data-mode="night"][data-theme="glass"] .search-panel {
-  background-color: rgba(21, 35, 66, calc(var(--glass-opacity, 0.4) + 0.12)) !important;
+  background-color: rgba(37, 55, 90, calc(var(--glass-opacity, 0.4) + 0.12)) !important;
   border-color: rgba(255, 255, 255, 0.10);
   box-shadow:
     0 1px 6px rgba(0, 0, 0, 0.35),
@@ -561,7 +520,7 @@
 
 /* A11. 通知吐司 */
 :root[data-mode="night"][data-theme="glass"] .nt-toast {
-  background-color: rgba(26, 40, 72, calc(var(--glass-opacity, 0.4) - 0.1)) !important;
+  background-color: rgba(44, 62, 100, calc(var(--glass-opacity, 0.4) - 0.1)) !important;
   border-color: rgba(255, 255, 255, 0.10) !important;
   box-shadow:
     0 4px 24px rgba(0, 0, 0, 0.4),
@@ -585,11 +544,12 @@
    B. glass2（新毛玻璃主题）夜间
    ============================================================ */
 
-/* B1. 设计变量重映射（--g2-* 是玻璃配方，改这几个即可整体翻转卡片/表格/弹窗） */
+/* B1. 设计变量重映射（--g2-* 是玻璃配方，改这几个即可整体翻转卡片/表格/弹窗）
+   底色同样已整体提亮一档（页面底 #1b2036，玻璃基色 rgba(42,50,76) 系）。 */
 :root[data-mode="night"][data-theme="glass2"] {
-  --g2-glass: rgba(28, 34, 54, calc(var(--g2-a) + 0.16));
-  --g2-glass-strong: rgba(35, 42, 66, calc(var(--g2-a) + 0.30));
-  --g2-glass-soft: rgba(22, 28, 46, calc(var(--g2-a) + 0.1));
+  --g2-glass: rgba(42, 50, 76, calc(var(--g2-a) + 0.16));
+  --g2-glass-strong: rgba(49, 58, 88, calc(var(--g2-a) + 0.30));
+  --g2-glass-soft: rgba(36, 43, 68, calc(var(--g2-a) + 0.1));
   --g2-line: rgba(255, 255, 255, 0.10);
   --g2-line-soft: rgba(255, 255, 255, 0.07);
   --g2-hair: rgba(255, 255, 255, 0.12);
@@ -619,10 +579,10 @@
   --color-info: #7c93ff;
   --color-info-hover: #6a82f5;
 
-  --color-bg: #0e1120;
+  --color-bg: #1b2036;
   --color-surface: var(--g2-glass);
   --color-surface-hover: var(--g2-glass-strong);
-  --color-sidebar: rgba(22, 27, 46, 0.66);
+  --color-sidebar: rgba(36, 42, 68, 0.66);
   --color-sidebar-hover: rgba(255, 255, 255, 0.08);
   --color-sidebar-active: rgba(124, 147, 255, 0.2);
 
@@ -637,10 +597,10 @@
 
 /* B2. 背景：深色渐变 + 柔光斑 */
 :root[data-mode="night"][data-theme="glass2"] body {
-  background-color: #0e1120;
+  background-color: #1b2036;
   background-image:
     radial-gradient(circle at 30% 108%, rgba(63, 110, 140, 0.85) 0%, rgba(63, 110, 140, 0) 44%),
-    linear-gradient(160deg, #0f1226 0%, #161027 45%, #0d1724 100%);
+    linear-gradient(160deg, #1a1f3a 0%, #241e3c 45%, #192434 100%);
 }
 :root[data-mode="night"][data-theme="glass2"] body::before {
   background: radial-gradient(circle at 35% 35%, rgba(70, 96, 180, 0.8) 0%, rgba(70, 96, 180, 0) 70%);
@@ -650,11 +610,11 @@
 }
 /* 自定义背景图：遮罩改深色（其余 background-size/position 等沿用日间规则） */
 :root[data-mode="night"][data-theme="glass2"].has-bg-image body {
-  background-color: #0e1120;
+  background-color: #1b2036;
   background-image:
     linear-gradient(
-      rgba(10, 14, 26, var(--bg-mask-opacity, 0.6)),
-      rgba(10, 14, 26, var(--bg-mask-opacity, 0.6))
+      rgba(15, 21, 38, var(--bg-mask-opacity, 0.6)),
+      rgba(15, 21, 38, var(--bg-mask-opacity, 0.6))
     ),
     var(--bg-image);
 }
@@ -668,11 +628,11 @@
   background: linear-gradient(180deg, rgba(255, 255, 255, 0.10) 0%, rgba(255, 255, 255, 0.02) 55%, rgba(255, 255, 255, 0) 100%);
 }
 :root[data-mode="night"][data-topbar-color="light"][data-theme="glass2"] .window-title-bar {
-  background-color: rgba(24, 30, 50, 0.62) !important;
+  background-color: rgba(38, 45, 72, 0.62) !important;
   color: #e7eaf6 !important;
 }
 :root[data-mode="night"][data-topbar-color="blue"][data-theme="glass2"] .window-title-bar {
-  background-color: rgba(34, 40, 86, 0.58) !important;
+  background-color: rgba(48, 56, 108, 0.58) !important;
   color: #eef1fb !important;
 }
 :root[data-mode="night"][data-topbar-color="light"][data-theme="glass2"] .window-controls .win-btn:hover {
@@ -684,13 +644,13 @@
   background: linear-gradient(180deg, rgba(255, 255, 255, 0.10) 0%, rgba(255, 255, 255, 0.02) 55%, rgba(255, 255, 255, 0) 100%);
 }
 :root[data-mode="night"][data-topbar-color="light"][data-theme="glass2"] .bg-sidebar {
-  background-color: rgba(24, 30, 50, 0.60) !important;
+  background-color: rgba(38, 45, 72, 0.60) !important;
   color: #e7eaf6 !important;
   border-right-color: var(--g2-line-soft) !important;
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3), var(--g2-hl);
 }
 :root[data-mode="night"][data-topbar-color="blue"][data-theme="glass2"] .bg-sidebar {
-  background-color: rgba(34, 40, 86, 0.56) !important;
+  background-color: rgba(48, 56, 108, 0.56) !important;
   color: #eef1fb !important;
 }
 /* 白色调侧栏：文字/hover/选中改浅色 */
@@ -743,7 +703,7 @@
 }
 :root[data-mode="night"][data-theme="glass2"] table input:focus,
 :root[data-mode="night"][data-theme="glass2"] table select:focus {
-  background-color: rgba(30, 36, 58, 0.7) !important;
+  background-color: rgba(44, 52, 80, 0.7) !important;
 }
 :root[data-mode="night"][data-theme="glass2"] .grid-view-container table td {
   background-color: rgba(255, 255, 255, 0.05) !important;
@@ -773,18 +733,18 @@
 :root[data-mode="night"][data-theme="glass2"] input[type="time"]:focus,
 :root[data-mode="night"][data-theme="glass2"] textarea:focus,
 :root[data-mode="night"][data-theme="glass2"] select:focus {
-  background-color: rgba(30, 36, 58, 0.88) !important;
+  background-color: rgba(44, 52, 80, 0.88) !important;
 }
 :root[data-mode="night"][data-theme="glass2"] select option {
-  background-color: #111827;
+  background-color: #1e263a;
   color: var(--color-text);
 }
 :root[data-mode="night"][data-theme="glass2"] button.bg-surface-hover:hover {
-  background-color: rgba(60, 70, 100, 0.9) !important;
+  background-color: rgba(72, 84, 122, 0.9) !important;
 }
 :root[data-mode="night"][data-theme="glass2"] .candidate-popup,
 :root[data-mode="night"][data-theme="glass2"] .context-menu-popup {
-  background-color: rgba(28, 34, 54, 0.86) !important;
+  background-color: rgba(42, 50, 76, 0.86) !important;
 }
 :root[data-mode="night"][data-theme="glass2"] .nt-title { color: #e7eaf6 !important; }
 :root[data-mode="night"][data-theme="glass2"] .nt-msg { color: #a9b1c9 !important; }
@@ -793,26 +753,26 @@
 
 /* B7. 视图切换（分段控件）轨道 */
 :root[data-mode="night"][data-topbar-color="light"][data-theme="glass2"] .view-switch {
-  background-color: rgba(24, 30, 50, 0.62) !important;
+  background-color: rgba(38, 45, 72, 0.62) !important;
 }
 :root[data-mode="night"][data-topbar-color="blue"][data-theme="glass2"] .view-switch {
-  background-color: rgba(34, 40, 86, 0.58) !important;
+  background-color: rgba(48, 56, 108, 0.58) !important;
 }
 
 /* B8. 登录页 */
 :root[data-mode="night"][data-theme="glass2"] .login-bg input:focus {
-  background-color: rgba(30, 36, 58, 0.88) !important;
+  background-color: rgba(44, 52, 80, 0.88) !important;
 }
 :root[data-mode="night"][data-theme="glass2"] .login-bg input:-webkit-autofill:not(:focus),
 :root[data-mode="night"][data-theme="glass2"] .login-bg input:-webkit-autofill:hover:not(:focus) {
   -webkit-text-fill-color: #e7eaf6;
-  -webkit-box-shadow: 0 0 0 1000px rgba(28, 34, 54, 0.82) inset;
-  box-shadow: 0 0 0 1000px rgba(28, 34, 54, 0.82) inset;
+  -webkit-box-shadow: 0 0 0 1000px rgba(42, 50, 76, 0.82) inset;
+  box-shadow: 0 0 0 1000px rgba(42, 50, 76, 0.82) inset;
 }
 :root[data-mode="night"][data-theme="glass2"] .login-bg input:-webkit-autofill:focus {
   -webkit-text-fill-color: #e7eaf6;
-  -webkit-box-shadow: 0 0 0 1000px rgba(28, 34, 54, 0.84) inset;
-  box-shadow: 0 0 0 1000px rgba(28, 34, 54, 0.84) inset;
+  -webkit-box-shadow: 0 0 0 1000px rgba(42, 50, 76, 0.84) inset;
+  box-shadow: 0 0 0 1000px rgba(42, 50, 76, 0.84) inset;
 }
 
 /* B9. 滚动条 */
@@ -827,4 +787,83 @@
 :root[data-mode="night"][data-theme="glass2"] ::-webkit-scrollbar-thumb:hover {
   background: rgba(255, 255, 255, 0.3);
   background-clip: content-box;
+}
+
+/* ============================================================
+   C. 页面级硬编码毛玻璃块（glass / glass2 通用）
+   以下两块用的是与主题无关的「硬编码浅色玻璃 + 深色文字」：
+   1) AiAssistant 的对话列表/聊天区/加载与未启用态（.ai-glass-panel）
+   2) DashboardView 的「班级信息大框」（时钟/班级信息/倒计时）
+   两者在 glass 与 glass2 下日间观感一致，故夜间用同一条 :is(...) 规则覆盖。
+   ============================================================ */
+
+/* C1. AI 助手面板：白玻璃改为深色玻璃（border 走 --color-border 自动适配，无需覆盖） */
+:root[data-mode="night"]:is([data-theme="glass"], [data-theme="glass2"]) .ai-glass-panel {
+  background-color: rgba(46, 64, 100, 0.55) !important;
+}
+
+/* C2. 班级概览「班级信息大框」：底色/描边/投影翻转
+   描边改透明：日间是白色描边叠在浅底上、看不出；夜间白色描边叠在深底上会显成一圈
+   亮线（圆角处即弧线），与 .bg-surface 同因，故同样去掉，改用投影区分层次。 */
+:root[data-mode="night"]:is([data-theme="glass"], [data-theme="glass2"]) .class-info-card {
+  background: rgba(46, 64, 100, 0.42);
+  border-color: transparent;
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.30);
+}
+:root[data-mode="night"]:is([data-theme="glass"], [data-theme="glass2"]) .info-divider {
+  background: rgba(255, 255, 255, 0.12);
+}
+/* 时钟取色变量下传（AnimatedClock 内以 var() 读取） */
+:root[data-mode="night"]:is([data-theme="glass"], [data-theme="glass2"]) .clock-part {
+  --ac-time-color: #e6ecf5;
+  --ac-date-color: #a7b4c9;
+}
+/* 文字层次：主文字提亮，次要降为低饱和灰蓝 */
+:root[data-mode="night"]:is([data-theme="glass"], [data-theme="glass2"]) .class-info-card .class-name,
+:root[data-mode="night"]:is([data-theme="glass"], [data-theme="glass2"]) .class-info-card .cd-top {
+  color: #e6ecf5;
+}
+:root[data-mode="night"]:is([data-theme="glass"], [data-theme="glass2"]) .class-info-card .class-line {
+  color: #c3ccdd;
+}
+:root[data-mode="night"]:is([data-theme="glass"], [data-theme="glass2"]) .class-info-card .line-label {
+  color: #8f9cb3;
+}
+:root[data-mode="night"]:is([data-theme="glass"], [data-theme="glass2"]) .class-info-card .class-placeholder,
+:root[data-mode="night"]:is([data-theme="glass"], [data-theme="glass2"]) .class-info-card .countdown-empty {
+  color: #6f7d95;
+}
+:root[data-mode="night"]:is([data-theme="glass"], [data-theme="glass2"]) .class-info-card .cd-bottom {
+  color: #a7b4c9;
+}
+:root[data-mode="night"]:is([data-theme="glass"], [data-theme="glass2"]) .class-info-card .cd-item-name,
+:root[data-mode="night"]:is([data-theme="glass"], [data-theme="glass2"]) .class-info-card .cd-num {
+  color: #60a5fa;
+}
+
+/* C3. 退出确认弹窗（ShutdownMenuDialog）
+   卡片本身（底/描边/投影/文字）已全走主题变量，glass / glass2 夜间自动跟随，
+   故此处只补两处写死的语义色：
+   1) 四个语义图标盒：日间是深色图标叠在 12% 淡色底上，夜间把底纹加浓、图标提亮，
+      色相不变（提亮值沿用 A5 卡片区既有口径：info→#7cb3fb / success→#4ade80 / danger→#f87171）。
+   2) 危险项 hover：日间的浅红底（#fef2f2）叠在深底上几乎看不见，改成更明显的暗红。 */
+:root[data-mode="night"]:is([data-theme="glass"], [data-theme="glass2"]) .opt-icon-blue {
+  background: rgba(59, 130, 246, 0.20);
+  color: #7cb3fb;
+}
+:root[data-mode="night"]:is([data-theme="glass"], [data-theme="glass2"]) .opt-icon-cyan {
+  background: rgba(6, 182, 212, 0.20);
+  color: #22d3ee;
+}
+:root[data-mode="night"]:is([data-theme="glass"], [data-theme="glass2"]) .opt-icon-green {
+  background: rgba(34, 197, 94, 0.20);
+  color: #4ade80;
+}
+:root[data-mode="night"]:is([data-theme="glass"], [data-theme="glass2"]) .opt-icon-red {
+  background: rgba(239, 68, 68, 0.20);
+  color: #f87171;
+}
+:root[data-mode="night"]:is([data-theme="glass"], [data-theme="glass2"]) .shutdown-opt.opt-danger:hover:not(:disabled) {
+  background: rgba(239, 68, 68, 0.16) !important;
+  border-color: rgba(239, 68, 68, 0.40) !important;
 }
