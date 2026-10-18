@@ -411,27 +411,42 @@ function onDutyModeChange() {
   reloadAll()
 }
 async function reloadAll() {
-  await fetchSettings()
   // 静默加载：切换模式时不清空 loading 层，避免下方表格出现"加载中→内容"的闪动
-  await Promise.all([loadActive(true), loadMaster(true), loadWeight()])
+  // 四项互不依赖，一并并发，省掉原先 fetchSettings 单独先跑的一个来回
+  await Promise.all([fetchSettings(), loadActive(true), loadMaster(true), loadWeight()])
 }
 
+// 学生名册是否已就绪。未就绪时同步值日人名会把已有学生误判为「新名字」逐个提交，
+// 故同步前必须先补齐；并发调用共用同一个请求
+let studentsLoaded = false
+let studentsPrime = null
 async function fetchAllStudents() {
   try {
     const res = await axios.get(`${API_BASE}/students`)
     allStudents.value = res.data.data || res.data
+    studentsLoaded = true
   } catch (e) { console.error(e) }
+}
+// 首次加载学生名册（并发调用共用同一请求）；返回后以 studentsLoaded 判断是否可用
+function primeStudentsOnce() {
+  if (studentsLoaded) return Promise.resolve()
+  if (!studentsPrime) studentsPrime = fetchAllStudents().finally(() => { studentsPrime = null })
+  return studentsPrime
 }
 
 // 值日 cells 是 {项目:{星期:[人名]}} 对象，扫描其中所有人名，同步给学生管理
-function syncCellsNames(cellsObj) {
+async function syncCellsNames(cellsObj) {
   const names = []
   Object.values(cellsObj || {}).forEach(dayObj =>
     Object.values(dayObj || {}).forEach(list =>
       (list || []).forEach(n => n && names.push(String(n).trim()))
     )
   )
-  syncStudentNames([...new Set(names)], {
+  const unique = [...new Set(names)]
+  if (!unique.length) return
+  if (!studentsLoaded) await primeStudentsOnce()
+  if (!studentsLoaded) return // 名册读取失败：本轮不同步，避免把已有学生误判为新名字
+  syncStudentNames(unique, {
     getKnown: () => allStudents.value,
     refresh: fetchAllStudents,
     notify: notifySuccess
@@ -1095,8 +1110,8 @@ async function silentBackfill() {
 }
 
 onMounted(async () => {
-  await fetchSettings()
-  await Promise.all([loadActive(), loadMaster(), fetchAllStudents(), loadWeight()])
+  // 学生名册与学生相关请求共用同一批：值日人名同步要先有学生名册才能判断「是否为新名字」
+  await Promise.all([fetchSettings(), loadActive(), loadMaster(), primeStudentsOnce(), loadWeight()])
   silentBackfill()
 })
 </script>

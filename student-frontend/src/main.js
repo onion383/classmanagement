@@ -57,10 +57,18 @@ axios.interceptors.response.use(
   async (error) => {
     const config = error.config
 
+    // 安全通道「会话过期」不是登录态失效：加密会话 15 分钟被动过期时，后端在请求解密阶段
+    // 直接回 401 且 body 为 { d:'session-expired' }（不是密文，也非登录 token 问题）。
+    // 这种 401 由 secureAxios 清会话、重新握手后重试，绝不能在这里当成登录过期把用户踢回登录页。
+    const secureExpired = (() => {
+      const d = error.response && error.response.data
+      return !!d && typeof d === 'object' && d.d === 'session-expired'
+    })()
+
     // token 失效（401，且非登录/注册/恢复等自身接口）：清除过期 token、
     // 弹出提示条并回到登录页。用时间戳锁去重：同一瞬间多个并发 401 只处理一次，
     // 但几秒后的再次过期仍能重新触发。
-    if (error.response && error.response.status === 401) {
+    if (error.response && error.response.status === 401 && !secureExpired) {
       const url = (config?.url || '')
       const isAuthReq = /(login|register|restore|recover)/i.test(url)
       if (!config?.__skipAuth && !isAuthReq && Date.now() - lastAuthPrompt > 2000) {

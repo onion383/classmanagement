@@ -36,6 +36,8 @@
   --radius-md: 10px;
   --radius-lg: 14px;
   --radius-card: 12px;
+  /* 卡片 / 弹窗（.bg-surface）实际渲染的圆角（见下方 .bg-surface 规则），供抽屉等复用保持同圆角 */
+  --radius-surface: 20px;
 }
 
 /* 全局背景（仅毛玻璃：win11 为透明背景，见 theme-win11.css） */
@@ -596,6 +598,33 @@
   pointer-events: none;
   z-index: -1;
 }
+/* ========== 弹窗卡片（.dialog-card）：glass 主题下单独加深投影 ==========
+   弹窗与普通卡片共用 .bg-surface，其 box-shadow 会被下方 .bg-surface 规则统一覆盖成
+   极淡的「白外光 + 顶部内高光」，导致弹窗缺少应有的层次。这里仅对 glass 主题的弹窗
+   追加外投影（保留原内高光），让弹窗更「浮」；不含 win11，不影响其它主题。 */
+:root[data-theme="glass"] .dialog-card {
+  box-shadow:
+    0 0 20px rgba(255, 255, 255, 0.03),
+    0 4px 18px rgba(15, 23, 42, 0.12),
+    0 18px 48px rgba(15, 23, 42, 0.14),
+    inset 0 1px 0 rgba(255, 255, 255, 0.15);
+}
+/* 夜间（glass）：弹窗阴影。
+   当前启用：原深色阴影（theme-night.css 的 .bg-surface 原值）。
+   下方注释备用：曾试过的「侧栏选中同款蓝光 + 蓝底」方案，保留供对比选用（未删）。 */
+:root[data-mode="night"][data-theme="glass"] .bg-surface.dialog-card {
+  box-shadow: 0 0 20px rgba(0, 0, 0, 0.25);
+}
+/* 备用：侧栏选中同款蓝光 + 蓝底
+:root[data-mode="night"][data-theme="glass"] .bg-surface.dialog-card {
+  background-color: rgba(49, 78, 124, calc(var(--glass-opacity, 0.4) + 0.16)) !important;
+  box-shadow:
+    inset 0 0 0 1px rgba(96, 165, 250, 0.35),
+    inset 0 1px 0 rgba(255, 255, 255, 0.10),
+    0 0 16px rgba(96, 165, 250, 0.25),
+    0 2px 8px rgba(0, 0, 0, 0.25);
+}
+*/
 :root:is([data-theme="glass"], [data-theme="win11"]) .bg-surface-hover {
   background-color: rgba(255, 255, 255, calc(var(--glass-opacity, 0.4) + 0.1)) !important;
 }

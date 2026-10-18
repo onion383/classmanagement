@@ -220,19 +220,29 @@ router.get('/models/:id/models', async (req, res) => {
   }
 });
 
-// PUT /api/ai/models/:id —— 切换该模型的 model（先用现有密钥验证连通，通过才保存）
+// PUT /api/ai/models/:id —— 编辑模型：可改 名称/服务商/模型名/Base URL/API Key，先验证连通再保存。
+//   仅传 model（卡片内下拉切换）时，其余字段沿用原值。API Key 留空表示不改动（优先沿用本条已有密钥）。
 router.put('/models/:id', async (req, res) => {
   try {
     const id = Number(req.params.id);
-    const { model, name } = req.body;
+    const existing = db.prepare('SELECT * FROM ai_models WHERE id = ?').get(id);
+    if (!existing) return res.status(404).json({ error: '模型不存在' });
+    const { provider, name, base_url, model, api_key } = req.body;
     if (!model) return res.status(400).json({ error: '请选择模型' });
-    const m = db.prepare('SELECT provider, base_url, api_key FROM ai_models WHERE id = ?').get(id);
-    if (!m) return res.status(404).json({ error: '模型不存在' });
-    const t = await testConnection({ provider: m.provider, base_url: m.base_url, model, api_key: m.api_key });
+    const nextProvider = provider || existing.provider;
+    const nextBaseUrl = base_url == null ? existing.base_url : base_url;
+    // 密钥：填了用新的；服务商未变且留空时沿用本条已有密钥（或同服务商其它条目的密钥）
+    let key = api_key || '';
+    if (!key && nextProvider === existing.provider) {
+      const reuse = db.prepare("SELECT api_key FROM ai_models WHERE provider = ? AND api_key != '' ORDER BY id LIMIT 1").get(nextProvider);
+      key = (reuse && reuse.api_key) || existing.api_key || '';
+    }
+    if (!key) return res.status(400).json({ error: '请填写 API Key' });
+    const t = await testConnection({ provider: nextProvider, base_url: nextBaseUrl, model, api_key: key });
     if (!t.ok) return res.status(400).json({ error: t.message });
-    db.prepare('UPDATE ai_models SET model = ?, name = COALESCE(?, name) WHERE id = ?')
-      .run(model, typeof name === 'string' && name.length ? name : null, id);
-    res.json({ success: true, message: t.message });
+    db.prepare('UPDATE ai_models SET name = ?, provider = ?, base_url = ?, model = ?, api_key = ? WHERE id = ?')
+      .run(typeof name === 'string' && name.length ? name : existing.name, nextProvider, nextBaseUrl, model, key, id);
+    res.json({ success: true, message: t.message + '，已保存' });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }

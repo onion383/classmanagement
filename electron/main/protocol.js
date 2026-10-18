@@ -50,6 +50,57 @@ const IMMUTABLE_ASSET_RE = /\.(js|css|wasm|png|jpe?g|gif|webp|svg|woff2?)$/i
 // 缓存条目按资源内容哈希命名，应用更新后旧条目永不命中，会随版本累积（实测可达 50MB+）。
 // 故按应用版本号做一次性清理：版本未变则零开销直接返回；版本变化时后台异步删除旧条目，
 // 不阻塞启动，删除失败（文件被占用）静默忽略，下次启动再试。
+// 缓存目录体积上限：超过就把最旧的条目删到只剩 70%。
+// 为什么需要：版本号清理只在「应用更新」时生效，同一版本内条目仍会累积
+// （开发模式下 Vite 的模块 URL 带 hash、每次改动都产生新条目，实测可达 240MB+）。
+// 代码缓存是可再生的（删掉只是下次启动多一次解析），因此按体积兜底清理不影响任何功能。
+const CC_MAX_BYTES = 64 * 1024 * 1024
+const CC_TARGET_RATIO = 0.7
+
+// 递归算目录体积（字节）。只用于体积兜底判断，失败一律当 0。
+async function dirSizeBytes(dir) {
+  let total = 0
+  let entries = []
+  try { entries = await fs.promises.readdir(dir, { withFileTypes: true }) } catch (_) { return 0 }
+  for (const e of entries) {
+    const p = path.join(dir, e.name)
+    try {
+      if (e.isDirectory()) total += await dirSizeBytes(p)
+      else total += (await fs.promises.stat(p)).size
+    } catch (_) { /* 单条失败忽略 */ }
+  }
+  return total
+}
+
+function pruneOversizeCodeCache(dir) {
+  fs.promises.readdir(dir, { withFileTypes: true })
+    .then(async (entries) => {
+      const items = []
+      let total = 0
+      for (const e of entries) {
+        if (e.name === '.cc-version') continue
+        const p = path.join(dir, e.name)
+        try {
+          const st = await fs.promises.stat(p)
+          const size = e.isDirectory() ? await dirSizeBytes(p) : st.size
+          total += size
+          items.push({ p, size, mtime: st.mtimeMs })
+        } catch (_) { /* 忽略单项 */ }
+      }
+      if (total <= CC_MAX_BYTES) return
+      const target = CC_MAX_BYTES * CC_TARGET_RATIO
+      items.sort((a, b) => a.mtime - b.mtime) // 最旧的先删
+      let cur = total
+      for (const it of items) {
+        if (cur <= target) break
+        await fs.promises.rm(it.p, { recursive: true, force: true }).catch(() => {})
+        cur -= it.size
+      }
+      console.log(`[main] 渲染代码缓存超限，已清理至约 ${Math.round(cur / 1048576)}MB`)
+    })
+    .catch(() => {})
+}
+
 function pruneStaleCodeCache(dir) {
   const marker = path.join(dir, '.cc-version')
   const cur = app.getVersion()
@@ -69,6 +120,9 @@ function setupRendererCodeCache() {
     const dir = path.join(app.getPath('userData'), 'renderer-code-cache')
     fs.mkdirSync(dir, { recursive: true })
     pruneStaleCodeCache(dir)
+    // 体积兜底：延后 8s 再跑。这一步要遍历整个缓存目录（可能上百 MB、上万个文件），
+    // 立刻跑会和首屏资源的读取抢线程池 IO；它只是磁盘维护，晚几秒做完全等价。
+    setTimeout(() => pruneOversizeCodeCache(dir), 8000)
     session.defaultSession.setCodeCachePath(dir)
   } catch (err) {
     console.error('[main] 渲染进程代码缓存不可用，跳过:', err?.message || err)

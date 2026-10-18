@@ -14,22 +14,22 @@
 
   <template v-for="(m, i) in messages" :key="i">
   <!-- 自动反馈消息（回答提问 / 执行或取消提案）不作为用户气泡展示：其内容已写入原助手消息的思维链 -->
-  <div v-if="!m._auto" class="flex content-visibility-auto" :class="m.role === 'user' ? 'justify-end' : 'justify-start'">
-    <div :class="m.role === 'user' ? 'max-w-[85%] text-right' : 'w-full min-w-0'">
+  <div v-if="!m._auto" class="flex" :class="m.role === 'user' ? 'justify-end' : 'justify-start'">
+    <div :class="m.role === 'user' ? 'max-w-[80%] text-right' : 'w-full min-w-0'">
       <!-- 头像 + 名字放在正文上方同一行，正文占满整行宽度 -->
-      <div v-if="m.role !== 'user'" class="mb-1 flex items-center gap-2 text-xs text-text-muted">
-        <span class="flex-shrink-0 w-6 h-6 rounded-full ai-glass-panel bg-white/55 backdrop-blur-md border border-border flex items-center justify-center text-primary">
-          <IconGlyph name="ai" :size="14" tint="current" />
+      <div v-if="m.role !== 'user'" class="mb-1.5 flex items-center gap-2.5 text-sm text-text">
+        <span class="flex-shrink-0 w-7 h-7 rounded-full ai-glass-panel bg-white/55 backdrop-blur-md border border-border flex items-center justify-center text-primary">
+          <IconGlyph name="ai" :size="16" tint="current" />
         </span>
         <span>AI小助手</span>
       </div>
-      <div v-else class="mb-1 flex items-center justify-end">
-        <span class="flex-shrink-0 w-6 h-6 rounded-full ai-glass-panel bg-white/55 backdrop-blur-md border border-border flex items-center justify-center text-text-muted">
-          <IconGlyph name="user" :size="14" tint="current" />
+      <div v-else class="mb-1.5 flex items-center justify-end">
+        <span class="flex-shrink-0 w-7 h-7 rounded-full ai-glass-panel bg-white/55 backdrop-blur-md border border-border flex items-center justify-center text-text-muted">
+          <IconGlyph name="user" :size="16" tint="current" />
         </span>
       </div>
       <!-- 用户消息中的图片 -->
-      <div v-if="m.role === 'user' && m.images && m.images.length" class="mb-1 flex flex-wrap gap-1 justify-end">
+      <div v-if="m.role === 'user' && m.images && m.images.length" class="mb-1.5 flex flex-wrap gap-1.5 justify-end">
         <img
           v-for="(img, idx) in m.images"
           :key="idx"
@@ -39,17 +39,17 @@
         />
       </div>
       <div
-        class="px-4 py-3 text-base border"
+        class="px-5 py-3.5 text-sm border"
         :class="m.role === 'user'
           ? 'user-bubble bg-primary text-text-inverse border-transparent whitespace-pre-wrap break-words'
           : 'assistant-bubble bg-surface text-text border-border whitespace-pre-wrap break-words'"
       >
         <!-- 处理过程（工具调用步骤 / 中间草稿 / 思维链）：流式展开，回答出现后自动收起 -->
-        <div v-if="hasProcess(m)" class="mb-2 rounded-md border border-border bg-surface-hover overflow-hidden">
+        <div v-if="hasProcess(m)" class="mb-2.5 rounded-md bg-black/5 overflow-hidden">
           <button
             type="button"
             @click="m.processOpen = !m.processOpen"
-            class="w-full flex items-center gap-2 px-2.5 py-1.5 text-sm text-text-muted hover:text-text cursor-pointer"
+            class="w-full flex items-center gap-2 px-2.5 py-1.5 text-[13px] text-text-muted hover:text-text cursor-pointer"
           >
             <span
               class="inline-block w-1.5 h-1.5 rounded-full flex-shrink-0"
@@ -59,8 +59,8 @@
             <span class="ml-auto flex-shrink-0 transition-transform duration-150" :class="m.processOpen ? 'rotate-180' : ''">▾</span>
           </button>
           <div v-if="m.processOpen" class="px-2.5 pb-2 space-y-1.5">
-            <div v-if="m.reasoning" class="text-sm text-text-secondary whitespace-pre-wrap break-words max-h-40 overflow-auto">{{ m.reasoning }}</div>
-            <div v-for="st in (m.steps || [])" :key="st.id" class="text-sm leading-6">
+            <div v-if="m.reasoning" class="text-[13px] text-text-secondary whitespace-pre-wrap break-words max-h-40 overflow-auto">{{ m.reasoning }}</div>
+            <div v-for="st in (m.steps || [])" :key="st.id" class="text-[13px] leading-6">
               <!-- 一级：思考 / 调用工具接口 的一行；带结果明细的工具步骤可点开做二级展开 -->
               <div
                 class="flex items-start gap-1.5"
@@ -117,7 +117,7 @@
         >未返回思考内容 · 当前模型可能不支持思考模式</p>
       </div>
       <!-- 回复操作：复制 / 重试 / 撤回数据更改；右侧统计用时与 token -->
-      <div v-if="m.role !== 'user' && !m.loading" class="mt-1.5 flex items-center gap-2 text-xs">
+      <div v-if="m.role !== 'user' && !m.loading" class="mt-2 flex items-center gap-2 text-xs">
         <button
           @click="$emit('copy', m)"
           :disabled="!m.content"
@@ -165,7 +165,7 @@
 .assistant-bubble { border-radius: 16px 16px 16px 6px !important; }
 
 /* 助手消息的 markdown 排版（加粗/斜体/表格/列表/代码） */
-.markdown-body :deep(p) { margin: 0 0 0.35em; }
+.markdown-body :deep(p) { margin: 0 0 0.5em; }
 .markdown-body :deep(p:last-child) { margin-bottom: 0; }
 .markdown-body :deep(strong) { font-weight: 700; }
 .markdown-body :deep(em) { font-style: italic; }

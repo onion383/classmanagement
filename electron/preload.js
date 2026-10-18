@@ -78,6 +78,7 @@ const validInvokeChannels = [
   'get-data-directories',
   'set-data-dir',
   'set-thumbs-dir',
+  'set-skills-dir',
   // 数据库加密：切换当前账号库的落盘加密方式（复用迁移进度窗口流程）
   'set-db-encryption',
   // 首次安装引导向导：写入初始数据/缓存目录（不重开窗口，仅重启后端）

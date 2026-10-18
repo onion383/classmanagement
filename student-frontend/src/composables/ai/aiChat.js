@@ -1,7 +1,7 @@
 import axios from 'axios'
 import { useNotification } from '../useNotification.js'
 import { useThemeStore } from '../../stores/theme.js'
-import { ASK_OTHER_KEY } from './aiConstants.js'
+import { ASK_OTHER_KEY, AI_PERMISSION_FULL } from './aiConstants.js'
 import { apiFetch } from '../../utils/apiUrl.js'
 import { encodeStreamRequest, decodeStreamEvent, clearSession, safe } from '../secureChannel.js'
 
@@ -23,9 +23,19 @@ export default {
         return // 多选需显式点「下一页 / 完成」才继续
       }
       q.picked = q.picked === option ? undefined : option
+      q.skipped = false // 重新选择后取消「跳过」标记
       // 选中「其他」需先填写补充内容；取消选中时不自动继续
       if (option === ASK_OTHER_KEY || q.picked === undefined) return
       // 单选：即点即走（分页前进 / 单题直接提交）
+      if (a.questions.length > 1 && this.askPage < a.questions.length - 1) this.askPage += 1
+      else this.submitAsk()
+    },
+    // 跳过当前「单选未作答」的题：标记 skipped（避免阻塞后续提交），分页前进，末题/单题直接提交
+    skipAsk() {
+      const a = this.pendingAsk
+      if (!a) return
+      const q = this.askCurrent || a.questions[0]
+      if (q) q.skipped = true
       if (a.questions.length > 1 && this.askPage < a.questions.length - 1) this.askPage += 1
       else this.submitAsk()
     },
@@ -35,21 +45,23 @@ export default {
       const q = a && a.questions[qi]
       if (q) q.other = String(text || '').slice(0, 200)
     },
-    // 单题作答是否已有效：无选项题（自由作答）视为可过；多选需至少勾 1 项；选中「其他」必须已填写
+    // 单题作答是否已有效：无选项题（自由作答）/ 已跳过 视为可过；多选需至少勾 1 项；选中「其他」必须已填写
     isAskQuestionReady(q) {
       if (!q || !q.options.length) return true
+      if (q.skipped) return true
       const arr = Array.isArray(q.picked) ? q.picked : (q.picked ? [q.picked] : [])
       if (!arr.length) return false
       if (arr.includes(ASK_OTHER_KEY) && !String(q.other || '').trim()) return false
       return true
     },
-    // 单题答案文本（多选用「、」连接；「其他」拼上补充内容）
+    // 单题答案文本（多选用「、」连接；「其他」拼上补充内容；跳过的单选记为「跳过」）
     askAnswerText(q) {
       const one = (v) => (v === ASK_OTHER_KEY
         ? (String(q.other || '').trim() ? `其他：${String(q.other).trim()}` : '其他')
         : v)
       const arr = Array.isArray(q.picked) ? q.picked : (q.picked ? [q.picked] : [])
-      return arr.length ? arr.map(one).join('、') : '（未选择）'
+      if (!arr.length) return q && q.skipped ? '跳过' : '（未选择）'
+      return arr.map(one).join('、')
     },
     // 多问题分页：翻到下一题
     askNext() {
@@ -248,7 +260,8 @@ export default {
           }
         }
         // 安全通道开启时整体加密请求体；关闭时原样明文（后端中间件透明兼容）
-        const payload = { messages: history, attachments, conversationId: this.conversationId || 0 }
+        // 本轮由用户在输入框按「/」启用的技能（md 指令文件名）：后端读取内容注入系统提示
+        const payload = { messages: history, attachments, conversationId: this.conversationId || 0, skills: this.selectedSkills || [], webSearch: this.webSearchOn !== false }
         const doSend = async () => apiFetch('/api/ai/chat/stream', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -379,6 +392,15 @@ export default {
         this.busy = false
         if (last) { last.reasoningStreaming = false; last.processDone = true }
         this.scrollBottom()
+        // 完全权限：写入提案不等用户确认，流一结束就自动执行。
+        // 放在 busy 复位之后，执行的收尾才能沿用既有链路（写回思维链 + 让 AI 续跑说明结果）；
+        // 用户主动中断的这一轮不自动执行，避免把没回复完的提案直接落库。
+        // 例外：技能（md 指令文件）变更即使在全权限下也须老师确认，故不自动执行（走浮窗确认）。
+        if (this.permissionMode === AI_PERMISSION_FULL
+          && last && last.proposal && last.proposal.kind !== 'skill'
+          && !last.proposal.executed && !last.proposal.dismissed && !last.interrupted) {
+          this.executeProposal(last)
+        }
         // 刷新会话列表（更新标题和消息数）
         await this.loadConversationList()
       }

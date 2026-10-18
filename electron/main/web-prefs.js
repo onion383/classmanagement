@@ -13,7 +13,9 @@ const { app } = require('electron')
 // 统一构造 webPreferences。
 // devTools：是否允许开发者工具（默认随环境：生产关闭、开发开启）。
 // backgroundThrottling：传入时写入该项（浮窗类传 false 以保持后台绘帧）。
-function buildWebPreferences({ devTools, backgroundThrottling } = {}) {
+// webviewTag：是否允许该窗口使用 <webview> 内嵌网页（仅主窗口的右侧网页抽屉需要，默认关闭，
+//             避免给其余窗口无谓地多开一项渲染能力）。
+function buildWebPreferences({ devTools, backgroundThrottling, webviewTag } = {}) {
   const isDev = !app.isPackaged
   const prefs = {
     preload: path.join(__dirname, '..', 'preload.js'),
@@ -32,6 +34,7 @@ function buildWebPreferences({ devTools, backgroundThrottling } = {}) {
     devTools: devTools === undefined ? isDev : devTools,
   }
   if (backgroundThrottling !== undefined) prefs.backgroundThrottling = backgroundThrottling
+  if (webviewTag !== undefined) prefs.webviewTag = webviewTag
   return prefs
 }
 

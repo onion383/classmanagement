@@ -42,13 +42,13 @@
     </div>
 
     <!-- 标题栏全局搜索弹窗（懒加载组件，自包含 Teleport/Transition） -->
-    <SearchDialog :visible="searchOpen" @close="searchOpen = false" />
+    <SearchDialog v-if="chromeReady" :visible="searchOpen" @close="searchOpen = false" />
 
     <!-- 标题栏「切换主题」弹窗：复用引导页的主题卡片 + 动画开关，点主题即时生效 -->
-    <ThemePickerDialog :visible="themeOpen" @close="themeOpen = false" />
+    <ThemePickerDialog v-if="chromeReady" :visible="themeOpen" @close="themeOpen = false" />
 
     <!-- 标题栏「账户」弹窗：用户名 / 权限 + 退出登录（带二次确认） -->
-    <AccountDialog :visible="accountOpen" @close="accountOpen = false" />
+    <AccountDialog v-if="chromeReady" :visible="accountOpen" @close="accountOpen = false" />
 
     <!-- 内容区：占满标题栏以下的剩余高度 -->
     <div class="flex-1 flex overflow-hidden">
@@ -100,6 +100,7 @@
 
   <!-- 关闭选择弹窗：点主窗口关闭按钮时居中弹出（复用 dialog-transition 动画） -->
   <ShutdownMenuDialog
+    v-if="chromeReady"
     :visible="shutdownMenuVisible"
     :has-toolbox="shutdownHasToolbox"
     :has-desktop="shutdownHasDesktop"
@@ -116,8 +117,8 @@
     @confirm="seatDraftPromptVisible = false"
   />
 
-  <!-- AI 助手：悬浮呼出按钮与浮窗（登录页不显示；AI 未启用时同样不显示悬浮按钮） -->
-  <template v-if="$route.path !== '/login' && aiEnabled">
+  <!-- AI 助手：悬浮呼出按钮与浮窗（登录页不显示；AI 助手页面本身已有完整对话界面，也不再渲染悬浮按钮；AI 未启用时同样不显示悬浮按钮） -->
+  <template v-if="$route.path !== '/login' && $route.path !== '/ai-assistant' && aiEnabled">
     <Teleport to="body">
       <button
         ref="aiIcon"
@@ -240,6 +241,10 @@ export default {
       themeOpen: false,
       // 标题栏「账户」弹窗开关
       accountOpen: false,
+      // 首屏可交互标志：这四个异步弹窗都是「关闭态也要先渲染 wrapper 才会去下载 chunk」，
+      // 挪到占位页移除后（app-visible，见下方 reportWidgetsOnce）再挂载，
+      // 把约 14KB JS + 5.7KB CSS 移出首屏窗口；关闭态不渲染，观感无任何变化。
+      chromeReady: false,
     }
   },
   computed: {
@@ -297,6 +302,9 @@ export default {
       widgetsReported = true
       if (widgetsFallback) clearTimeout(widgetsFallback)
       window.removeEventListener('app-visible', reportWidgetsOnce)
+      // 首屏已可见（或走 5s 兜底）：这时才挂载标题栏那几个异步弹窗，
+      // 让它们的 chunk 下载/解析落在首屏之后。
+      this.chromeReady = true
       reportWidgetsReady()
     }
     window.addEventListener('app-visible', reportWidgetsOnce)
@@ -540,6 +548,11 @@ export default {
           if (s.status === 'downloaded') {
             useNotification().success(`新版本 ${s.latestVersion ? 'v' + s.latestVersion : ''} 已下载，重启应用即可完成安装`, 0)
           }
+          return
+        }
+        // AI 网页抽屉里网页触发的下载被主进程拦截：提示改用本地浏览器打开
+        if (data.type === 'link-download-blocked') {
+          useNotification().info('下载文件请打开本地浏览器')
           return
         }
         // 运行期后端异常状态（心跳探测 / 进程退出后主进程发起的重连）

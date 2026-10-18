@@ -18,7 +18,11 @@ export default {
       const m = this._lastAssistant()
       if (!m || !m.proposal || m.proposal.executing || m.proposal.executed || m.proposal.dismissed || this.busy) return
       m.proposal.dismissed = true
-      this._sendFeedback(`已取消：${m.proposal.label}`, `已取消：${m.proposal.label}`, m)
+      this._sendFeedback(
+        `已取消：${m.proposal.label}。（数据未发生任何变更。请勿重复生成同一提案；如需调整方案，请先说明修改点或询问用户。）`,
+        `已取消：${m.proposal.label}`,
+        m
+      )
     },
     // 把「用户反馈」写回原助手消息的思维链，并作为用户消息发给模型续跑（不新增用户输入气泡）
     // 续写目标即这条原助手消息：本轮输出继续写回它，时间轴保持连续
@@ -42,7 +46,9 @@ export default {
       m.proposal.executed = false
       let executedLabel = ''
       // 本次执行产生的撤销记录统一打上同一批次标识，供 AI 的 undo_change 工具整批回退
-      const origin = 'ai-' + Date.now() + '-' + Math.random().toString(36).slice(2, 8)
+      // 若该提案出自 run_subagent 的核查结果，前缀标记为「子agent:名 · 任务」，便于 list_changes 区分来源
+      const note = m.proposal.originNote ? `子agent:${m.proposal.originNote}` : 'ai'
+      const origin = `${note}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
       try {
         if (m.proposal.kind === 'front') {
           // 前端设置提案：读旧值 → 经主题 store 立即应用 → 记下前后值供撤销
@@ -55,6 +61,23 @@ export default {
           m.proposal.executing = false
           m.proposal.executed = true
           notify(p.label + ' 已应用')
+          executedLabel = p.label
+        } else if (m.proposal.kind === 'skill') {
+          // 技能（md 指令文件）提案：新建 / 更新 / 删除，确认后落盘到技能库。
+          // 技能文件不在数据撤销体系内，故不登记 undo；执行后刷新输入框「/」候选列表。
+          const p = m.proposal
+          const name = String(p.name || '')
+          if (p.operation === 'delete') {
+            await axios.delete(`/api/ai/skills/${encodeURIComponent(name)}`)
+          } else if (p.operation === 'update') {
+            await axios.put(`/api/ai/skills/${encodeURIComponent(name)}`, { name, content: p.content })
+          } else {
+            await axios.post('/api/ai/skills', { name, content: p.content })
+          }
+          await this.loadSkillOptions()
+          m.proposal.executing = false
+          m.proposal.executed = true
+          notify(p.label + ' 已执行')
           executedLabel = p.label
         } else if (m.proposal.kind === 'json') {
           // 整块写入（课表/座位/权重/值日等「非行式」表）：按 id 覆盖指定列
@@ -187,7 +210,13 @@ export default {
         return
       }
       // 无论成功或失败都接着发起下一轮：把结果写入思维链并作为用户消息发回，让 AI 继续，工具不结束对话
-      await this._sendFeedback(`已执行：${executedLabel}`, `已执行：${executedLabel}`, m)
+      // 明确告诉模型「该项已落盘」：提案轮的助手正文与工具调用不会进入后续上下文，
+      // 若不点明已完成，模型会因看不到自己的提案记录而反复重复生成同一提案（尤其新建技能后再被报「已存在」）
+      await this._sendFeedback(
+        `已执行：${executedLabel}。（该项已由系统成功完成并落盘。请勿重复调用同一写入/提案工具，也不要重复生成同一提案；如无其它事项，用一两句话简短确认即可。）`,
+        `已执行：${executedLabel}`,
+        m
+      )
     },
     // 该回复的数据更改是否可撤回（提案已执行且尚未撤回）
     canUndoChange(m) {

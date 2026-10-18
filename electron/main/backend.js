@@ -21,7 +21,7 @@ const path = require('path')
 const fs = require('fs')
 const startupTimer = require('./startup-timer')
 const perf = require('./perf')
-const { getMasterKey, resolveDataDir, resolveThumbsDir, getDbMasterKey } = require('./config')
+const { getMasterKey, resolveDataDir, resolveThumbsDir, resolveSkillsDir, getDbMasterKey } = require('./config')
 
 const isDev = !app.isPackaged
 
@@ -64,6 +64,15 @@ function ensureBackendLogStream() {
   try {
     const logPath = getBackendLogPath()
     fs.mkdirSync(path.dirname(logPath), { recursive: true })
+    // 体积兜底：后端每次启动都追加一段、运行期还继续写，不设上限会无限增长。
+    // 它是排查后端崩溃用的，超过 2MB 就只保留最近 1MB（最新一次启动一定在末尾）。
+    try {
+      const st = fs.statSync(logPath)
+      if (st.size > 2 * 1024 * 1024) {
+        const tail = fs.readFileSync(logPath, 'utf8').slice(-1024 * 1024)
+        fs.writeFileSync(logPath, '（历史日志已截断，仅保留最近部分）\n' + tail)
+      }
+    } catch (_) { /* 首次启动文件不存在，忽略 */ }
     backendLogStream = fs.createWriteStream(logPath, { flags: 'a' })
     fs.appendFileSync(logPath, `\n===== Electron 启动后端 @ ${new Date().toISOString()} =====\n`)
   } catch (err) {
@@ -137,8 +146,10 @@ function compileBackendProcess() {
   const { backendDir, backendPath } = getBackendPaths()
   const dataDir = resolveDataDir()
   const thumbsDir = resolveThumbsDir()
+  const skillsDir = resolveSkillsDir()
   fs.mkdirSync(dataDir, { recursive: true })
   fs.mkdirSync(thumbsDir, { recursive: true })
+  fs.mkdirSync(skillsDir, { recursive: true })
   _profMark('【prof】后端路径/目录准备完成')
 
   // 统一的输出/退出处理
@@ -189,6 +200,7 @@ function compileBackendProcess() {
           ...process.env,
           DATA_DIR: dataDir,
           ALBUM_THUMBS_DIR: thumbsDir,
+          AI_SKILLS_DIR: skillsDir,
           SECURE_MASTER: getMasterKey(),
           DB_MASTER_KEY: getDbMasterKey(),
         },
@@ -244,6 +256,7 @@ function compileBackendProcess() {
       ...process.env,
       DATA_DIR: dataDir,
       ALBUM_THUMBS_DIR: thumbsDir,
+      AI_SKILLS_DIR: skillsDir,
       ELECTRON_RUN_AS_NODE: '1',
       SECURE_MASTER: getMasterKey(),
       DB_MASTER_KEY: getDbMasterKey(),

@@ -47,6 +47,7 @@ function saveAppConfig(patch) {
   const next = { ...resolveAppConfig(), ...patch }
   if (!next.dataDir) delete next.dataDir
   if (!next.thumbsDir) delete next.thumbsDir
+  if (!next.skillsDir) delete next.skillsDir
   // 写失败必须抛错：否则「切配置」这一步会静默失败，而调用方（如数据目录搬迁）
   // 会继续删掉旧目录，导致数据在新目录、配置却指向已删除的旧目录。
   try {
@@ -68,6 +69,12 @@ function resolveThumbsDir() {
   const cfg = resolveAppConfig()
   if (cfg.thumbsDir) return path.resolve(cfg.thumbsDir)
   return path.join(resolveDataDir(), 'album-thumbs')
+}
+// AI 技能 md 目录：默认位于数据目录下 ai-skills，可单独配置为独立目录
+function resolveSkillsDir() {
+  const cfg = resolveAppConfig()
+  if (cfg.skillsDir) return path.resolve(cfg.skillsDir)
+  return path.join(resolveDataDir(), 'ai-skills')
 }
 
 // DB 静态加密主密钥（方案 A：首启现场随机生成 + safeStorage/DPAPI 持久化）：
@@ -114,5 +121,6 @@ module.exports = {
   saveAppConfig,
   resolveDataDir,
   resolveThumbsDir,
+  resolveSkillsDir,
   getDbMasterKey,
 }

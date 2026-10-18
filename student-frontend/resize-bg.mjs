@@ -21,6 +21,9 @@ const jobs = [
   { src: 'origin/glass-bg.jpg', dst: 'public/glass-bg-opt.webp', long: 1920, quality: 80 },
   // 毛玻璃夜间底图：原图长边 1536，保持原尺寸
   { src: 'origin/glass-bg-night.jpg', dst: 'public/glass-bg-night.webp', long: 1536, quality: 80 },
+  // 打赏收款码：需保持清晰以利扫码，保持原分辨率不缩放，质量偏保守（二维码边缘有损易糊）
+  { src: 'origin/wechatpay.png', dst: 'public/wechatpay.webp', quality: 90 },
+  { src: 'origin/alipay.jpg', dst: 'public/alipay.webp', quality: 90 },
 ]
 
 const kb = (p) => (statSync(p).size / 1024).toFixed(1) + 'KB'

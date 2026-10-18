@@ -28,6 +28,8 @@ export function createRowReuseCache() {
       if (!(k in a)) return false
     }
     const ac = a.cells, bc = b.cells
+    // 没有 cells 字段的行（普通平铺表格，如学生/班费）：该维度无需比对，直接判等
+    if (ac === undefined && bc === undefined) return true
     if (!Array.isArray(ac) || !Array.isArray(bc) || ac.length !== bc.length) return false
     for (let i = 0; i < bc.length; i++) {
       const x = ac[i], y = bc[i]

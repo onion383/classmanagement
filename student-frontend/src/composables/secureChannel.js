@@ -122,16 +122,15 @@ export async function encodeStreamRequest(obj) {
 
 // 响应帧：SSE 每帧先按 JSON 解析；命中 { d } 密文信封（后端 encodeStreamEvent/responseEncrypt 同形）
 // 则解密还原为事件对象，明文帧直接返回。解析/解密失败返回 null，由调用方丢弃该帧。
+// 注意：这里不清会话——流是用「发送该请求时的会话」加密的，清掉只会让后续帧继续解不开、
+// 并把其它正常请求也在用的会话一起作废；真正过期的情况由请求层的 401 重握手兜底。
 export async function decodeStreamEvent(raw) {
   let obj
   try { obj = JSON.parse(raw) } catch (_) { return null }
   if (obj && typeof obj === 'object' && typeof obj.d === 'string') {
     try {
       return await decryptBody(obj.d)
-    } catch (_) {
-      clearSession()
-      return null
-    }
+    } catch (_) { return null }
   }
   return obj
 }

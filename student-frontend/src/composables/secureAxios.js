@@ -13,6 +13,9 @@ export function setupSecureAxios(axios) {
 
   // 请求加密
   axios.interceptors.request.use(async config => {
+    // 重试请求：错误/解密重试时已用新会话重新加密好 data，这里直接放行，
+    // 避免把已加密的 {session,d} 信封再加密一次（二次封装会让后端解出乱数据）。
+    if (config.__retrySecure === true) return config
     const d = config.data
     if (d == null) return config
     if (typeof FormData !== 'undefined' && d instanceof FormData) return config
@@ -48,6 +51,20 @@ export function setupSecureAxios(axios) {
     }
     return res
   }, async err => {
+    // 安全通道会话过期：后端在「请求解密」阶段直接回 401 且 body 为 { d:'session-expired' }，
+    // 不是密文、也不是登录态问题。此处清空旧会话、重新握手、把原请求体重新加密后原样重发一次，
+    // 避免用户被误判为「登录过期」踢回登录页（与 aiChat 流式请求的重试行为保持一致）。
+    const sd = err.response && err.response.data
+    const cfg = err.config
+    if (err.response && err.response.status === 401 && sd && typeof sd === 'object'
+      && sd.d === 'session-expired' && cfg && cfg.__origData && cfg.__retrySecure !== true) {
+      cfg.__retrySecure = true
+      clearSession()
+      try {
+        cfg.data = await encryptBody(cfg.__origData)
+        return axios(cfg)
+      } catch (_) { /* 重新握手仍失败：按原错误返回，由调用方兜底 */ }
+    }
     // 错误响应（4xx/5xx）在加密会话下同样被后端包成 { d: 'iv.tag.ct' }，
     // 这里也尝试解密，否则调用方拿到的 err.response.data 是密文，
     // 诸如后端返回的 needConfirm / error 等真实字段将无法读取。

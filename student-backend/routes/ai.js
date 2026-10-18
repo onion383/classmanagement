@@ -9,6 +9,7 @@ const express = require('express');
 const router = express.Router();
 const { READ_TABLES, WRITE_TABLES } = require('./ai/constants');
 router.use(require('./ai/memory'));
+router.use(require('./ai/skills'));
 router.use(require('./ai/config'));
 router.use(require('./ai/conversations'));
 router.use(require('./ai/dataRoutes'));

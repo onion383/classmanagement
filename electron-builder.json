@@ -8,6 +8,8 @@
   "files": [
     "electron/**/*",
     "!electron/afterPack.js",
+    "!electron/installer-assets/**",
+    "!electron/inno/**",
     "!**/.gitignore",
     "student-frontend/dist/**/*",
     "student-backend/**/*",
@@ -49,6 +51,8 @@
     "!**/node_modules/**/*.hpp",
     "!**/node_modules/**/*.hh",
     "!**/node_modules/**/*.md",
+    "!**/node_modules/**/test/**",
+    "!**/node_modules/**/tests/**",
     "!**/*.map",
     "!**/*.d.ts",
     "package.json"

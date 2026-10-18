@@ -7,6 +7,8 @@ const THEME_KEY = 'app-theme'
 // 全局日/夜模式：与「主题」正交，任何主题之上再叠一层夜间配色（见 styles/theme-night.css）。
 // 目前仅 glass / glass2 实现了夜间配色，其余主题保持日间外观（切换按钮禁用）。
 const MODE_KEY = 'app-mode'
+// 跟随系统：开启后按操作系统「深色/浅色」偏好自动切换日/夜（仅对已实现夜间配色的主题有意义）
+const FOLLOW_KEY = 'app-mode-follow-system'
 const NIGHT_THEMES = ['glass', 'glass2']
 const CUSTOM_KEY = 'app-theme-custom'
 const CUSTOM_THEMES_KEY = 'app-custom-themes'
@@ -42,6 +44,8 @@ export const useThemeStore = defineStore('theme', () => {
   // 全局日/夜模式：'day' | 'night'（默认日间，保持现有观感）
   const mode = ref(localStorage.getItem(MODE_KEY) === 'night' ? 'night' : 'day')
   const isNight = computed(() => mode.value === 'night')
+  // 是否跟随系统配色（true 时 mode 由系统偏好决定，手动切换会自动关闭它）
+  const followSystem = ref(localStorage.getItem(FOLLOW_KEY) === '1')
   // 当前主题是否已实现夜间配色（决定切换按钮是否可用）
   const nightSupported = computed(() => NIGHT_THEMES.includes(currentTheme.value))
   const customColors = ref(JSON.parse(localStorage.getItem(CUSTOM_KEY) || '{}'))
@@ -198,14 +202,37 @@ export const useThemeStore = defineStore('theme', () => {
     applyTheme()
   }
 
+  // 系统深浅色偏好：跟随系统开启时据此决定日/夜
+  const darkMedia = window.matchMedia('(prefers-color-scheme: dark)')
+  // 同步系统配色到 mode（仅在「跟随系统」开启时生效，避免被系统偏好误覆盖手动选择）
+  const syncSystemMode = () => {
+    if (!followSystem.value) return
+    const next = darkMedia.matches ? 'night' : 'day'
+    if (mode.value !== next) {
+      mode.value = next
+      applyTheme()
+    }
+  }
+  // 跟随系统开关：开启时立即按系统配色切换
+  const setFollowSystem = (value) => {
+    followSystem.value = !!value
+    localStorage.setItem(FOLLOW_KEY, followSystem.value ? '1' : '0')
+    syncSystemMode()
+  }
   // 全局日/夜模式：立即生效（写 localStorage + 重应用主题类）
+  // 手动切换视为用户显式指定，自动关闭「跟随系统」以免随后被系统偏好覆盖
   const setMode = (value) => {
+    setFollowSystem(false)
     mode.value = value === 'night' ? 'night' : 'day'
     localStorage.setItem(MODE_KEY, mode.value)
     applyTheme()
   }
 
   const toggleMode = () => setMode(mode.value === 'night' ? 'day' : 'night')
+
+  // 启动即同步一次系统配色（若已开启跟随），并监听系统深浅色变化
+  if (followSystem.value) syncSystemMode()
+  darkMedia.addEventListener('change', syncSystemMode)
 
   watch(currentTheme, applyTheme)
   watch(backgroundImage, (val) => {
@@ -217,6 +244,7 @@ export const useThemeStore = defineStore('theme', () => {
     mode,
     isNight,
     nightSupported,
+    followSystem,
     customColors,
     customThemes,
     backgroundImage,
@@ -243,5 +271,6 @@ export const useThemeStore = defineStore('theme', () => {
     setAnimationsEnabled,
     setMode,
     toggleMode,
+    setFollowSystem,
   }
 })

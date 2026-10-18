@@ -85,6 +85,8 @@
   --radius-md: 16px;
   --radius-lg: 22px;
   --radius-card: 22px;
+  /* 卡片 / 弹窗（.bg-surface）实际渲染的圆角（见下方 .bg-surface 规则用的 --radius-lg），供抽屉等复用 */
+  --radius-surface: var(--radius-lg);
   --radius-full: 999px;
 }
 

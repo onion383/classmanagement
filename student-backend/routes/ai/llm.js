@@ -5,7 +5,8 @@ const { resolveEndpoint, reasoningParams } = require('./config');
 // ---------------- 长期记忆（md 文档） ----------------
 // 记忆读写由 dbManager 统一实现（dataDir/ai-memory/<slug>.md），与备份/恢复共用；
 // 此处只负责把记忆注入系统提示、并提供界面读写接口。
-function buildSystemPrompt(slug, attachments, summary) {
+// skills：本轮由用户启用的技能（md 指令文件），[{ name, content }]，内容注入提示并要求模型遵循。
+function buildSystemPrompt(slug, attachments, summary, skills) {
   let prompt = SYSTEM_PROMPT;
   const mem = dbManager.readMemory(slug).trim();
   if (mem) {
@@ -14,6 +15,12 @@ function buildSystemPrompt(slug, attachments, summary) {
   // 更早对话已被压缩成摘要：作为「已经发生的上下文」注入，避免模型重复追问
   if (summary && String(summary).trim()) {
     prompt += `\n\n【此前对话摘要】以下是本次对话更早部分的要点摘要，请视为已经发生过的上下文，不要重复叙述，也不要让用户重新提供：\n<summary>\n${String(summary).trim()}\n</summary>`;
+  }
+  // 本轮启用的技能：用户明确要按该技能办事，要求模型严格遵循其中的指令
+  const skillList = (Array.isArray(skills) ? skills : []).filter((s) => s && String(s.content || '').trim());
+  if (skillList.length) {
+    prompt += `\n\n【本轮启用的技能】用户本轮启用了以下技能（md 指令文件），请严格按照其中的指令来完成本次任务：\n`
+      + skillList.map((s) => `<skill name="${String(s.name || '')}">\n${String(s.content).trim()}\n</skill>`).join('\n');
   }
   // 用户上传的文件：内容不直接塞进对话，明确告知模型可用 read_document 按需读取
   const names = (Array.isArray(attachments) ? attachments : [])
@@ -61,7 +68,13 @@ ${Object.entries(READ_TABLES).map(([k, v]) => `- ${k}：${v}`).join('\n')}
 27. 用户明确要求先备份、或你即将执行较大规模的写入（批量增删改、跨表操作）前，先调用 snapshot_create 存一份整库快照（不需要用户确认即可创建）；用户问「有哪些备份」时用 snapshot_list。注意：快照只能在写入之前创建，事后无法补救。
 28. 用户要用之前的备份恢复数据时，先用 snapshot_list 找到目标快照，再调用 snapshot_restore 生成提案——它只出提案，须老师确认后才还原；还原会覆盖当前全部数据（含快照之后老师手动编辑的内容），务必先向用户说明这一后果再让其确认。
 29. 用户要删除记录、尤其删除学生前，可先调用 delete_impact 查看它会牵连多少处（分组/班干部/加减分/请假/座位表/值日表），据结果提示后果，再决定是否生成删除提案。它只查看、不删除。
-30. 用户问「现在是第几周」「距期末考试还有几周」「开学多久了」这类学期进度问题时，调用 teaching_week 计算，不要凭记忆数；期末日优先取倒计时表里的「期末/考试」项，没有则用学期结束日。`;
+30. 用户问「现在是第几周」「距期末考试还有几周」「开学多久了」这类学期进度问题时，调用 teaching_week 计算，不要凭记忆数；期末日优先取倒计时表里的「期末/考试」项，没有则用学期结束日。
+31. 当你判断任务适合交给子助手时，调用 run_subagent 启动「只读子助手」并行处理。满足以下任一条才用，否则自己串行做完即可，不必为小而简单的任务开子助手：① 任务能拆成 3 个及以上互不依赖的子问题（如十几条校验规则各自扫全库）；② 单次需扫过超过 500 行（query 会被截断的阈值）；③ 需要对一个关键数字做独立复核（让不带你上下文的子助手用原始数据重算一遍）。入参 tasks 为 1~4 个子任务数组，每项含 name（角色名，如「数据体检员」）、task（一句话目标）、returns（期望字段/口径）、context（涉及的表名 + 口径，如「结余=收入-支出，不含未报销」）。子助手**只读、不能改数据、不会直接向老师提问**：它在返回结构的 needs_user_decision 字段里提出拿不定的事，你收到后**合并同类问题**，再用 ask_user 一次问全；每个子任务会返回 {result, basis, count, samples, error, needs_user_decision}，其中 basis（用了哪张表/什么过滤/命中多少行）与 count（参与计算总条数）是它自查范围的依据，务必据此核对它有没有把范围查窄，再下结论。若依据子助手结果要写数据，仍由你（主对话）走 propose_* 生成提案、由老师确认；这类提案请在对应写入工具里填上 source（子助手名 + 任务，如「数据体检员 · 清理重复项」），以便撤销记录里一眼看出来源。
+32. 用户可以让你把一个「技能」（可复用的处理办法，如「生成周报」「按某口径排座位」）存起来，方便以后在输入框打「/」随时调用。用户要你新建、修改或删除技能时，调用 propose_skill（operation: create/update/delete，name 为技能名，content 为技能正文）。content 要写成**给你自己看的可执行指令**（Markdown）：说明何时适用、具体步骤（该调哪些工具、参数怎么填）、输出格式与注意事项——而不是写给老师看的介绍文字；能写清规则就写清，让下次照做即可。写入会生成提案，需老师确认后才落盘；若同名技能已存在（create）或不存在（update/delete），你会收到错误与现有技能列表，请据此改用正确的 operation 或换名，不要凭记忆猜。注意：这只是保存「办法」，不是保存「偏好」——记个人偏好/长期设定仍用 save_memory。
+
+33. 当问题涉及实时信息或最新事实（新闻、政策、价格、赛事、人物近况，或你不确定、可能过时的内容），或需要站外资料时，调用 web_search 联网搜索（该工具仅在 DeepSeek 模式、且用户开启联网开关时提供）。收到结果后据此作答，并在正文附上来源链接；提炼要点即可，不要大段照抄摘要。若工具清单里没有 web_search，说明当前不可联网（模式不支持或用户已关闭），请直接依据已有知识回答，并说明该信息可能不是最新。
+
+【关于写提案的通用约定】任何 propose_* 工具（含 propose_skill）调用只在界面生成一份「待确认提案」，本轮随即结束、等待老师确认；老师确认或取消后，系统会用一条「已执行：…」或「已取消：…」的消息把结果告诉你。请注意：提案那一轮的正文与工具调用记录不会保留在后续上下文里——所以看到「已执行」即表示该项已成功落盘，**不要因为看不到自己先前的提案记录就重复调用同一工具或重复生成同一提案**（例如新建技能成功后不要再重复新建，也不要改用 update 再去覆盖一遍）；看到「已取消」则表示用户拒绝了该提案、数据未变，同样不要重复提出同一提案。`;
 
 // 工具 schema 整体惰性加载：只在真正要下发给模型的时刻才构造 TOOLS，
 // 避免启动/空闲期就解析 tools.js（2100+ 行）；require 有缓存，首次之后零成本
@@ -69,8 +82,56 @@ let _toolList = null;
 function getTools() {
   if (_toolList) return _toolList;
   const T = require('./tools');
-  _toolList = [T.queryTool, T.aggregateTool, T.resolveStudentTool, T.proposeWriteTool, T.batchAddTool, T.batchDeleteTool, T.batchUpdateTool, T.batchOpsTool, T.jsonWriteTool, T.frontSettingTool, T.chartTool, T.showRecordTool, T.askUserTool, T.readDocumentTool, T.ocrTool, T.exportTool, T.memoryTool, T.timeTool, T.undoTool, T.listChangesTool, T.searchAllTool, T.runChecksTool, T.conflictChecksTool, T.exportImageTool, T.scoreWeightsTool, T.describeTableTool, T.snapshotCreateTool, T.snapshotListTool, T.snapshotRestoreTool, T.deleteImpactTool, T.teachingWeekTool];
+  _toolList = [T.queryTool, T.aggregateTool, T.resolveStudentTool, T.proposeWriteTool, T.batchAddTool, T.batchDeleteTool, T.batchUpdateTool, T.batchOpsTool, T.jsonWriteTool, T.frontSettingTool, T.chartTool, T.showRecordTool, T.askUserTool, T.readDocumentTool, T.ocrTool, T.exportTool, T.memoryTool, T.skillTool, T.timeTool, T.undoTool, T.listChangesTool, T.searchAllTool, T.runChecksTool, T.conflictChecksTool, T.exportImageTool, T.scoreWeightsTool, T.describeTableTool, T.snapshotCreateTool, T.snapshotListTool, T.snapshotRestoreTool, T.deleteImpactTool, T.teachingWeekTool, T.subagentTool];
   return _toolList;
+}
+
+// 主对话工具清单：在基础工具之上，仅当使用 DeepSeek 模式、且未关闭联网搜索开关时附加 web_search。
+// 其余情况（非 DeepSeek 服务商，或用户在本轮关掉了开关）都不下发该工具，模型无从调用
+let _toolListDeepseek = null;
+function getMainTools(cfg, webSearchOn) {
+  if (cfg && cfg.provider === 'deepseek' && webSearchOn !== false) {
+    if (!_toolListDeepseek) {
+      const T = require('./tools');
+      _toolListDeepseek = [...getTools(), T.webSearchTool];
+    }
+    return _toolListDeepseek;
+  }
+  return getTools();
+}
+
+// 子助手（run_subagent）可用的「只读」工具白名单：
+// 只收录纯查询/统计/校验类工具，绝不含任何 propose_* / ask_user / 导出 / 记忆写入，
+// 「子助手不能改数据、不能直连用户提问」由工具白名单在机制上保证，而非仅靠提示词约束。
+const SUBAGENT_TOOL_NAMES = new Set([
+  'query', 'aggregate', 'resolve_student', 'search_all',
+  'run_checks', 'run_conflict_checks', 'score_weights',
+  'describe_table', 'teaching_week', 'get_time',
+]);
+function getSubagentTools() {
+  return getTools().filter((t) => SUBAGENT_TOOL_NAMES.has(t.function.name));
+}
+
+// 子助手 system prompt：角色名 + 一句话任务 + 期望字段 + 涉及表/口径，
+// 并强约束「只读、不提问、必须按契约返回 JSON」。
+function buildSubagentPrompt({ name, task, returns, context } = {}) {
+  const lines = [
+    `你是「${String(name || '数据核查员')}」，一名独立的数据核查子助手。`,
+    '你只做查询 / 统计 / 校验，**绝不修改任何数据**（你没有写权限，工具清单里也没有任何写入工具）。',
+    `本次任务：${String(task || '')}`,
+  ];
+  if (returns) lines.push(`期望返回的字段/口径：${String(returns)}`);
+  if (context) lines.push(`涉及的库表与口径：${String(context)}`);
+  lines.push(
+    '',
+    '规则：',
+    '1. 只能用提供的只读工具取数，不要凭空编造数据。',
+    '2. 你无法向用户提问：拿不准、需要老师定夺的事，一律写进返回结构的 needs_user_decision 字段，不要擅自假设。',
+    '3. 必须以**严格 JSON**（不要包裹 markdown 代码块、不要额外解释文字）返回，字段固定：',
+    '   { "task": 一句话任务名, "result": 结构化结果（不要自然语言长段落）, "basis": 依据（用了哪张表、什么过滤条件、命中多少行）, "count": 参与计算的总条数, "samples": 3~5 条原始记录片段, "error": 失败原因（可空）, "needs_user_decision": 需要老师定夺的问题（字符串数组，可空） }',
+    '4. basis 与 count 是硬性必填：没有它们，主助手无法判断你是否把范围查窄了。',
+  );
+  return lines.join('\n');
 }
 
 async function callLLM(cfg, messages, tools) {
@@ -94,9 +155,11 @@ async function callLLM(cfg, messages, tools) {
 // ---------------------------------------------------------------------------
 
 // 读取 OpenAI 兼容服务的 SSE 流，逐块累积并回调文本增量
-async function consumeStream(cfg, history, onDelta, onReasoning, clientSignal) {
+//   toolsOverride：可选，指定本次下发给模型的工具清单（子助手用受限只读子集）；
+//                  不传则用全局 getTools()（主对话行为不变）
+async function consumeStream(cfg, history, onDelta, onReasoning, clientSignal, toolsOverride) {
   const { url, model } = resolveEndpoint(cfg);
-  const body = { model, messages: history, tools: getTools(), tool_choice: 'auto', temperature: 0.2, stream: true, stream_options: { include_usage: true }, ...reasoningParams(cfg.provider, cfg.reasoning) };
+  const body = { model, messages: history, tools: toolsOverride || getTools(), tool_choice: 'auto', temperature: 0.2, stream: true, stream_options: { include_usage: true }, ...reasoningParams(cfg.provider, cfg.reasoning) };
   // 客户端中途「中断」时 clientSignal 会 abort，同步掐断上游模型请求，避免白跑；
   // 未传时只保留 120s 超时兜底
   const timeoutSignal = AbortSignal.timeout(120000);
@@ -162,4 +225,4 @@ async function consumeStream(cfg, history, onDelta, onReasoning, clientSignal) {
 }
 
 
-module.exports = { SYSTEM_PROMPT, getTools, callLLM, consumeStream, buildSystemPrompt };
+module.exports = { SYSTEM_PROMPT, getTools, getMainTools, getSubagentTools, SUBAGENT_TOOL_NAMES, buildSubagentPrompt, callLLM, consumeStream, buildSystemPrompt };

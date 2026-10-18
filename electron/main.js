@@ -7,6 +7,15 @@ const fs = require('fs')
 const crypto = require('crypto')
 const startupTimer = require('./main/startup-timer')
 
+// 异步 fs：主进程里凡是「可能慢」的磁盘操作（目录遍历、整目录复制/删除、大文件写盘）
+// 一律走它，避免同步 IO 把事件循环堵住（同步期间窗口、菜单、IPC 全部停摆）。
+const fsp = fs.promises
+
+// 路径是否存在（异步版 existsSync，语义一致：不区分文件/目录）
+async function pathExists(p) {
+  try { await fsp.access(p); return true } catch (_) { return false }
+}
+
 // 【启动剖析打点·仅开发模式】主进程模块 require 逐项计时。打点只在 dev 生效：
 // 打包版 _profMark 是空操作，既不写控制台也不写时间线。
 const _profOn = !app.isPackaged
@@ -22,7 +31,7 @@ const _profReq = (p) => {
 }
 
 // 内存采样与主密钥派生已分别迁至 perf.js / config.js 内部使用，main.js 不再直接引用
-const { resolveCompileCacheDir, getMasterKey, saveAppConfig, resolveDataDir, resolveThumbsDir } = _profReq('./main/config')
+const { resolveCompileCacheDir, getMasterKey, saveAppConfig, resolveDataDir, resolveThumbsDir, resolveSkillsDir } = _profReq('./main/config')
 const { setupRendererCodeCache, setupAppProtocol } = _profReq('./main/protocol')
 const { applyBackgroundMaterial } = _profReq('./main/window-material')
 const { buildWebPreferences } = _profReq('./main/web-prefs')
@@ -312,7 +321,7 @@ function createMainWindow() {
   mainWindowChrome = 'frameless'
   // webPreferences 提出对象字面量单独计时（仅 dev 打点用；打包版行为与内联写法完全一致）
   const _profWpT0 = Date.now()
-  const _webPrefs = buildWebPreferences({ devTools: true })
+  const _webPrefs = buildWebPreferences({ devTools: true, webviewTag: true })
   _profMark('【prof】buildWebPreferences 完成', _profWpT0)
   const win = new BrowserWindow({
     width: 1280,
@@ -583,6 +592,57 @@ ipcMain.handle('open-external', (event, url) => {
   }
 })
 
+// 右侧网页抽屉用 <webview> 内嵌外部网页的安全护栏（外部内容视为不可信）：
+// 只有 http/https 视为合法地址，其余协议（file:、data:、javascript: 等）一律拒绝。
+function isHttpUrl(url) {
+  return typeof url === 'string' && (url.startsWith('http://') || url.startsWith('https://'))
+}
+
+// 1) 创建 webview 前校验（will-attach-webview，绑定在宿主 webContents 上）：
+//    即使宿主渲染进程被注入恶意脚本，也无法构造出带 preload / nodeIntegration 的危险 webview。
+app.on('web-contents-created', (event, contents) => {
+  // 宿主窗口：拦截其内部将要挂载的 webview，强制安全配置
+  if (contents.getType && contents.getType() !== 'webview') {
+    contents.on('will-attach-webview', (e, webPreferences, params) => {
+      // 剥离任何自定义 preload：外部网页绝不加载本应用的 preload.js（不暴露 window.electron）
+      delete webPreferences.preload
+      // 强制关闭 Node 集成 / 强制开启隔离与沙箱（压掉任何来自渲染层的越权配置）
+      webPreferences.nodeIntegration = false
+      webPreferences.nodeIntegrationInSubFrames = false
+      webPreferences.contextIsolation = true
+      webPreferences.sandbox = true
+      webPreferences.webSecurity = true
+      // 只允许 http/https 地址进入 webview
+      if (!isHttpUrl(params.src)) e.preventDefault()
+    })
+    return
+  }
+
+  // 2) webview（访客页）自身：拦下 target=_blank 的新窗口请求，改为在同一 webview 内跳转，
+  //    内容始终留在抽屉里、不额外弹窗；并限制其内部导航协议白名单（阻断 file:/data: 等）。
+  contents.setWindowOpenHandler(({ url }) => {
+    if (isHttpUrl(url)) contents.loadURL(url)
+    return { action: 'deny' }
+  })
+  contents.on('will-navigate', (e, url) => {
+    if (!isHttpUrl(url)) e.preventDefault()
+  })
+
+  // 3) 禁止网页下载文件：拦截该会话（partition = ai-link-preview）的下载并取消，
+  //    再通知主窗口弹出提示「下载文件请打开本地浏览器」。同一 partition 的 session 会被
+  //    多个 webview 共享，用标记去重，避免重复绑定导致多次提示。
+  const ses = contents.session
+  if (ses && !ses.__aiLinkDownloadGuard) {
+    ses.__aiLinkDownloadGuard = true
+    ses.on('will-download', (e) => {
+      e.preventDefault()
+      if (mainWindow && !mainWindow.isDestroyed()) {
+        mainWindow.webContents.send('from-main', { type: 'link-download-blocked' })
+      }
+    })
+  }
+})
+
 // ========== 桌面小组件·常用软件 ==========
 // 见 apps.js：registerAppsIpc（apps-select-file / apps-launch）
 
@@ -719,7 +779,7 @@ ipcMain.on('migration-ready', (event) => {
 // 迁移失败后用户点击「返回主界面」/ 加密转换结束后进度窗口回报结果：
 //   - 数据目录搬迁：按用户选择决定是否清理目标目录，再重开主窗口
 //   - 数据库加密转换：由进度窗口回报 ok，主进程据此准备提示条后重开主窗口
-ipcMain.on('migration-dismiss', (event, data) => {
+ipcMain.on('migration-dismiss', async (event, data) => {
   if (!migrationWindow || migrationWindow.isDestroyed()) return
   if (event.sender !== migrationWindow.webContents) return
   const ctx = migrationContext
@@ -730,18 +790,21 @@ ipcMain.on('migration-dismiss', (event, data) => {
     reopenAfterMigration()
     return
   }
-  // 失败时不再自动清理：默认保留已复制内容，只有用户确认「确定」才清除
-  if (data && data.clean) cleanupMigrationTarget()
+  // 失败时不再自动清理：默认保留已复制内容，只有用户确认「确定」才清除。
+  // 清理改为异步并 await：既保持「先清理、再重开主窗口」的原顺序，
+  // 又不会像同步 rmSync 那样在删目录期间把主进程整条堵住。
+  if (data && data.clean) await cleanupMigrationTarget()
   reopenAfterMigration()
 })
 
 // 清理迁移目标目录：仅清掉本次复制写入的内容（用户选定的既有空目录保留目录本身）
-function cleanupMigrationTarget() {
+async function cleanupMigrationTarget() {
   const ctx = migrationContext
   if (!ctx) return
   try {
-    if (ctx.createdTarget) fs.rmSync(ctx.target, { recursive: true, force: true })
-    else clearDir(ctx.target)
+    // rm 带 force:true 时目标不存在也不报错，省掉一次 existsSync 同步探测
+    if (ctx.createdTarget) await fsp.rm(ctx.target, { recursive: true, force: true })
+    else await clearDir(ctx.target)
   } catch (err) {
     console.warn('[main] 清理迁移目标目录失败:', err?.message || err)
   }
@@ -1073,21 +1136,21 @@ ipcMain.handle('set-initial-data-dir', async (event, payload) => {
     if (rel && !rel.startsWith('..') && !path.isAbsolute(rel)) {
       throw new Error('新目录不能位于当前数据目录内部')
     }
-    if (fs.existsSync(path.join(currentData, 'index.db'))) {
+    if (await pathExists(path.join(currentData, 'index.db'))) {
       // 已建库：复用安全搬迁流程（预检非空 → 校验 → 复制 → 复检 → 写配置 → 删旧目录）
-      if (fs.existsSync(dataDir) && fs.readdirSync(dataDir).length > 0) {
+      if (await pathExists(dataDir) && (await fsp.readdir(dataDir)).length > 0) {
         throw new Error('目标目录非空，请选择空目录')
       }
-      if (!fs.existsSync(dataDir)) fs.mkdirSync(dataDir, { recursive: true })
+      if (!(await pathExists(dataDir))) await fsp.mkdir(dataDir, { recursive: true })
       await migrateDataDir(currentData, dataDir) // 内部已停止后端并写配置
     } else {
       // 尚未建库：直接创建目录并写配置，无需搬迁
-      fs.mkdirSync(dataDir, { recursive: true })
+      await fsp.mkdir(dataDir, { recursive: true })
       saveAppConfig({ dataDir })
     }
   }
   if (thumbsDir) {
-    fs.mkdirSync(thumbsDir, { recursive: true })
+    await fsp.mkdir(thumbsDir, { recursive: true })
     saveAppConfig({ thumbsDir })
   }
 
@@ -1098,17 +1161,19 @@ ipcMain.handle('set-initial-data-dir', async (event, payload) => {
 })
 
 // ========== 数据目录搬迁：带进度的校验 + 复制 ==========
-const fsp = fs.promises
 
-// 递归列出目录下所有文件（相对路径 + 绝对路径），顺序稳定
-function listFilesRecursive(dir, prefix = '') {
+// 递归列出目录下所有文件（相对路径 + 绝对路径），顺序稳定。
+// 【改为异步的原因】原来用 readdirSync 递归：搬迁时要把整个数据目录（含相册/缩略图，
+// 动辄上千个文件）扫一遍，全部同步跑在主进程 —— 扫描期间窗口卡死、进度条不动。
+// 异步版本把磁盘遍历交给 libuv 线程池，主进程只在每层目录之间让出事件循环。
+async function listFilesRecursive(dir, prefix = '') {
   const out = []
   let entries
-  try { entries = fs.readdirSync(dir, { withFileTypes: true }) } catch (_) { return out }
+  try { entries = await fsp.readdir(dir, { withFileTypes: true }) } catch (_) { return out }
   for (const ent of entries) {
     const rel = prefix ? `${prefix}/${ent.name}` : ent.name
     const full = path.join(dir, ent.name)
-    if (ent.isDirectory()) out.push(...listFilesRecursive(full, rel))
+    if (ent.isDirectory()) out.push(...(await listFilesRecursive(full, rel)))
     else if (ent.isFile()) out.push({ rel, full })
   }
   return out
@@ -1156,8 +1221,18 @@ async function copyFileAsync(src, dst, onBytes) {
 }
 
 // 建立目录清单：相对路径 → { size, hash }，并回报总文件数/总字节数（用于进度）
+// 取大小也改成异步 + 分批并发（每批 32 个）：既不阻塞主进程，
+// 也不会像 Promise.all(全部) 那样一次性把线程池队列灌满。
 async function buildInventory(dir, onProgress) {
-  const files = listFilesRecursive(dir).map((f) => ({ ...f, size: fs.statSync(f.full).size }))
+  const listed = await listFilesRecursive(dir)
+  const files = []
+  const STAT_CHUNK = 32
+  for (let i = 0; i < listed.length; i += STAT_CHUNK) {
+    const part = listed.slice(i, i + STAT_CHUNK)
+    // 保持原语义：stat 失败直接抛出（与之前 statSync 抛错一致），不静默当 0 字节
+    const stats = await Promise.all(part.map((f) => fsp.stat(f.full)))
+    for (let j = 0; j < part.length; j++) files.push({ ...part[j], size: stats[j].size })
+  }
   const totalFiles = files.length
   const totalBytes = files.reduce((s, f) => s + f.size, 0)
   const map = new Map()
@@ -1186,12 +1261,13 @@ function globalHashOf(inventory) {
   return hash.digest('hex')
 }
 
-// 清空目录内容但保留目录本身（用于回滚时优先保留用户选定的目录）
-function clearDir(dir) {
+// 清空目录内容但保留目录本身（用于回滚时优先保留用户选定的目录）。
+// 递归删除改为异步：目录里可能有上千个文件，同步 rm 会把主进程卡住。
+async function clearDir(dir) {
   let entries = []
-  try { entries = fs.readdirSync(dir) } catch (_) { return }
+  try { entries = await fsp.readdir(dir) } catch (_) { return }
   for (const name of entries) {
-    try { fs.rmSync(path.join(dir, name), { recursive: true, force: true }) } catch (_) {}
+    try { await fsp.rm(path.join(dir, name), { recursive: true, force: true }) } catch (_) {}
   }
 }
 
@@ -1235,7 +1311,7 @@ async function migrateDataDir(oldDir, target) {
   }
 
   // ---- 阶段「校验文件」：建立源目录清单（有效性预检已在进入迁移前完成） ----
-  if (!fs.existsSync(oldDir)) throw new Error('当前数据目录不存在')
+  if (!(await pathExists(oldDir))) throw new Error('当前数据目录不存在')
 
   // 停止后端，确保没有任何进程再读写这些数据库文件
   emit('校验文件', 0, 0, 0, '正在停止数据读写')
@@ -1307,8 +1383,8 @@ async function migrateDataDir(oldDir, target) {
       const src = path.join(oldDir, rel)
       const dst = path.join(target, rel)
       try {
-        if (fs.existsSync(src)) await copyFileAsync(src, dst)
-        else fs.rmSync(dst, { recursive: true, force: true }) // 源不存在 → 多余文件，删掉
+        if (await pathExists(src)) await copyFileAsync(src, dst)
+        else await fsp.rm(dst, { recursive: true, force: true }) // 源不存在 → 多余文件，删掉
       } catch (err) {
         console.warn('[main] 重拷失败:', rel, err?.message || err)
       }
@@ -1335,7 +1411,8 @@ async function migrateDataDir(oldDir, target) {
   // ---- 删除旧目录：删不掉仅记为残留，不算搬迁失败 ----
   let oldDirRemoved = true
   try {
-    fs.rmSync(oldDir, { recursive: true, force: true })
+    // 异步递归删除：旧数据目录可能上千个文件，同步删会让界面在最后一步僵住
+    await fsp.rm(oldDir, { recursive: true, force: true })
   } catch (err) {
     oldDirRemoved = false
     console.warn('[main] 旧数据目录删除失败（搬迁已完成，新目录可用，可手动清理）:', err?.message || err)
@@ -1363,16 +1440,16 @@ ipcMain.handle('set-data-dir', async (event, dir) => {
   }
   // 目标目录须为空（不存在则创建）；在开窗、停后端之前先快速失败
   let createdTarget = false
-  if (fs.existsSync(target)) {
-    if (fs.readdirSync(target).length > 0) throw new Error('目标目录非空，请选择空目录')
+  if (await pathExists(target)) {
+    if ((await fsp.readdir(target)).length > 0) throw new Error('目标目录非空，请选择空目录')
   } else {
-    fs.mkdirSync(target, { recursive: true })
+    await fsp.mkdir(target, { recursive: true })
     createdTarget = true
   }
   // 预检：当前目录必须是有效的班主任数据库（登记表 + 主密钥），否则不进入迁移流程
-  if (!fs.existsSync(oldDir)) throw new Error('当前数据目录不存在')
-  if (!fs.existsSync(path.join(oldDir, 'index.db'))) throw new Error('当前数据目录缺少 index.db，无法确认数据库有效')
-  if (!fs.existsSync(path.join(oldDir, 'db-master.key'))) throw new Error('当前数据目录缺少 db-master.key，无法确认数据库有效')
+  if (!(await pathExists(oldDir))) throw new Error('当前数据目录不存在')
+  if (!(await pathExists(path.join(oldDir, 'index.db')))) throw new Error('当前数据目录缺少 index.db，无法确认数据库有效')
+  if (!(await pathExists(path.join(oldDir, 'db-master.key')))) throw new Error('当前数据目录缺少 db-master.key，无法确认数据库有效')
 
   migrationRunning = true
   migrationContext = { target, createdTarget, oldDir }
@@ -1446,12 +1523,60 @@ ipcMain.handle('set-thumbs-dir', async (event, dir) => {
   if (!target || target.toLowerCase() === oldDir.toLowerCase()) {
     return { ok: true, thumbsDir: oldDir, changed: false }
   }
-  fs.mkdirSync(target, { recursive: true })
+  await fsp.mkdir(target, { recursive: true })
   // 配置写入失败必须中止，不能继续重启后端去用一个尚未生效的目录
   saveAppConfig({ thumbsDir: target })
   await backend.stopBackendProcess()
   backend.startBackend()
   return { ok: true, thumbsDir: target, changed: true, oldThumbsDir: oldDir }
+})
+
+// 变更「AI 技能 md 目录」：技能是文本文件，采用「复制 → 校验 → 切配置 → 删旧目录」，
+// 先复制保留旧目录，配置写失败则中止并保留旧目录，绝不产生「文件在新目录、配置却指向已删旧目录」的错位。
+ipcMain.handle('set-skills-dir', async (event, dir) => {
+  const target = path.resolve(String(dir || ''))
+  const oldDir = resolveSkillsDir()
+  if (!target || target.toLowerCase() === oldDir.toLowerCase()) {
+    return { ok: true, skillsDir: oldDir, changed: false }
+  }
+  // 防循环：新目录不能在当前技能目录内部，反之亦然
+  const rel = path.relative(oldDir, target)
+  if (rel && !rel.startsWith('..') && !path.isAbsolute(rel)) throw new Error('新目录不能位于当前技能目录内部')
+  const relBack = path.relative(target, oldDir)
+  if (relBack && !relBack.startsWith('..') && !path.isAbsolute(relBack)) throw new Error('当前技能目录不能位于新目录内部')
+  // 目标目录须为空（不存在则创建）
+  if (await pathExists(target)) {
+    if ((await fsp.readdir(target)).length > 0) throw new Error('目标目录非空，请选择空目录')
+  } else {
+    await fsp.mkdir(target, { recursive: true })
+  }
+  // 停后端，避免搬迁过程中仍读写技能文件
+  await backend.stopBackendProcess()
+  try {
+    if (await pathExists(oldDir)) {
+      const names = await fsp.readdir(oldDir)
+      for (const name of names) {
+        // 整目录复制同样是磁盘密集操作：异步版在复制期间主进程仍可响应
+        await fsp.cp(path.join(oldDir, name), path.join(target, name), { recursive: true })
+      }
+      // 校验：新目录顶层条目不少于旧目录，否则视为复制不完整
+      if ((await fsp.readdir(target)).length < names.length) throw new Error('复制结果不完整')
+    }
+    saveAppConfig({ skillsDir: target })
+  } catch (err) {
+    // 失败：配置未改，旧目录原样保留；重启后端恢复原状
+    backend.startBackend()
+    throw new Error('技能目录切换失败：' + (err?.message || err))
+  }
+  // 复制完成且配置已切换：清理旧目录（失败仅告警，可手动删除）
+  try {
+    // force:true 时目录不存在也不报错，等价于原来的 existsSync + rmSync
+    await fsp.rm(oldDir, { recursive: true, force: true })
+  } catch (err) {
+    console.warn('[main] 旧技能目录清理失败（新目录已生效，可手动删除）:', err?.message || err)
+  }
+  backend.startBackend()
+  return { ok: true, skillsDir: target, changed: true, oldSkillsDir: oldDir }
 })
 
 // 图片/文件对话框、截屏、注释保存：见 dialogs.js（registerDialogsIpc）

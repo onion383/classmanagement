@@ -1,7 +1,8 @@
 const express = require('express');
 const { db } = require('../../db');
+const dbManager = require('../../dbManager');
 const { currentSettings } = require('./config');
-const { buildSystemPrompt, callLLM, consumeStream, getTools } = require('./llm');
+const { buildSystemPrompt, callLLM, consumeStream, getMainTools } = require('./llm');
 // 工具执行器惰性加载：仅在执行工具/取工具信息时才 require
 const tools = () => require('./tools');
 const { loadConversationContext, compressConversation, CONTEXT_COMPRESS_AT, compressingConvs } = require('./memory');
@@ -22,15 +23,19 @@ router.post('/chat', async (req, res) => {
 
     // 本轮附件：前端上传时已解析成文本，随请求带给后端，供 read_document 按需读取
     const attachments = Array.isArray(req.body.attachments) ? req.body.attachments : [];
-    const history = [{ role: 'system', content: buildSystemPrompt(req.user && req.user.dbSlug, attachments) }, ...messages];
+    // 本轮启用的技能（md 指令文件）：前端按「/」选中的技能名，读取内容注入系统提示
+    const skills = dbManager.readSkills(req.user && req.user.dbSlug, req.body.skills);
+    const history = [{ role: 'system', content: buildSystemPrompt(req.user && req.user.dbSlug, attachments, undefined, skills) }, ...messages];
     let proposal = null;
     let exportFile = null;
     let exportImage = null;
     const blocks = [];
-    const ctx = { blocks, slug: req.user && req.user.dbSlug, images: tools().latestUserImages(messages), attachments };
+    const ctx = { blocks, slug: req.user && req.user.dbSlug, images: tools().latestUserImages(messages), attachments, cfg: s };
+    // 联网搜索开关：仅当请求未显式关闭（webSearch === false）时下发 web_search 工具
+    const webSearchOn = !!(req.body && req.body.webSearch !== false);
 
     for (let i = 0; i < 6; i++) {
-      const completion = await callLLM(s, history, getTools());
+      const completion = await callLLM(s, history, getMainTools(s, webSearchOn));
       const msg = completion.choices && completion.choices[0] && completion.choices[0].message;
       if (!msg) throw new Error('模型未返回内容');
 
@@ -120,32 +125,49 @@ router.delete('/conversations/:id', (req, res) => {
   }
 });
 
+// 消息行反序列化：过程块 / 附件按 JSON 字符串落库，返回前解析成对象
+function parseMessageRows(rows) {
+  return rows.map((r) => {
+    const { process_json: pj, attachments_json: aj, ...rest } = r;
+    let process = null;
+    if (pj) { try { process = JSON.parse(pj); } catch (_) { process = null; } }
+    let attachments = [];
+    if (aj) { try { const p = JSON.parse(aj); if (Array.isArray(p)) attachments = p; } catch (_) { /* 忽略损坏记录 */ } }
+    return { ...rest, process, attachments };
+  });
+}
+
 // GET /api/ai/conversations/:id/messages —— 读取某会话的历史消息
+// 取法：
+//   1) limit=N            —— 最近 N 条（升序返回），用于恢复/切换会话时快速呈现；
+//   2) limit=N&before_id=X —— id < X 的更早 N 条（升序返回），用于上翻补载更早的历史；
+//   3) 不传 limit         —— 返回全部（兼容旧调用）。
+// 响应附 hasMore：是否仍有更早的消息未返回，前端据此决定是否继续上翻加载。
 router.get('/conversations/:id/messages', (req, res) => {
   try {
-    // limit 存在时只取最近 N 条（升序返回），用于前端快速恢复会话，避免一次加载全部历史
     const limit = Number(req.query.limit);
-    const rows = (Number.isInteger(limit) && limit > 0)
-      ? db.prepare(`
-          SELECT id, role, content, process_json, attachments_json, created_at FROM (
-            SELECT id, role, content, process_json, attachments_json, created_at FROM ai_messages
-            WHERE conversation_id = ? ORDER BY id DESC LIMIT ?
-          ) ORDER BY id
-        `).all(req.params.id, limit)
-      : db.prepare(`
-          SELECT id, role, content, process_json, attachments_json, created_at FROM ai_messages
-          WHERE conversation_id = ? ORDER BY id
-        `).all(req.params.id);
-    // 过程块 / 附件按 JSON 字符串落库，返回前解析成对象
-    const data = rows.map((r) => {
-      const { process_json: pj, attachments_json: aj, ...rest } = r;
-      let process = null;
-      if (pj) { try { process = JSON.parse(pj); } catch (_) { process = null; } }
-      let attachments = [];
-      if (aj) { try { const p = JSON.parse(aj); if (Array.isArray(p)) attachments = p; } catch (_) { /* 忽略损坏记录 */ } }
-      return { ...rest, process, attachments };
-    });
-    res.json({ success: true, data });
+    const beforeId = Number(req.query.before_id);
+    const hasLimit = Number.isInteger(limit) && limit > 0;
+    const hasBefore = Number.isInteger(beforeId) && beforeId > 0;
+    if (!hasLimit) {
+      const all = db.prepare(`
+        SELECT id, role, content, process_json, attachments_json, created_at FROM ai_messages
+        WHERE conversation_id = ? ORDER BY id
+      `).all(req.params.id);
+      return res.json({ success: true, data: parseMessageRows(all), hasMore: false });
+    }
+    // 多取 1 条探测是否还有更早的：倒序里的第 limit+1 条即该批最早一条，升序后落在首位
+    const where = hasBefore ? 'conversation_id = ? AND id < ?' : 'conversation_id = ?';
+    const params = hasBefore ? [req.params.id, beforeId, limit + 1] : [req.params.id, limit + 1];
+    const rows = db.prepare(`
+      SELECT id, role, content, process_json, attachments_json, created_at FROM (
+        SELECT id, role, content, process_json, attachments_json, created_at FROM ai_messages
+        WHERE ${where} ORDER BY id DESC LIMIT ?
+      ) ORDER BY id
+    `).all(...params);
+    const hasMore = rows.length > limit;
+    const kept = hasMore ? rows.slice(1) : rows; // 丢弃多取的探测条（升序首位＝最早者）
+    res.json({ success: true, data: parseMessageRows(kept), hasMore });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -272,14 +294,18 @@ router.post('/chat/stream', async (req, res) => {
     finally { compressingConvs.delete(conversationId); }
   }
 
-  const history = [{ role: 'system', content: buildSystemPrompt(req.user && req.user.dbSlug, attachments, convCtx && convCtx.summary) }, ...messages];
+  // 本轮启用的技能（md 指令文件）：前端按「/」选中的技能名，读取内容注入系统提示
+  const skills = dbManager.readSkills(req.user && req.user.dbSlug, req.body.skills);
+  const history = [{ role: 'system', content: buildSystemPrompt(req.user && req.user.dbSlug, attachments, convCtx && convCtx.summary, skills) }, ...messages];
   let proposal = null;
   let ask = null;
   let exportFile = null;
   let exportImage = null;
   let answerText = ''; // 仅最终轮的正文；中间轮（调用工具那几轮）的草稿文本归入过程块
   const blocks = [];   // record 表格 / chart 图表数据块（拼到正文末尾，前端渲染）
-  const ctx = { blocks, slug: req.user && req.user.dbSlug, images: tools().latestUserImages(messages), attachments };
+  // 联网搜索开关：仅当请求未显式关闭（webSearch === false）时下发 web_search 工具
+  const webSearchOn = !!(req.body && req.body.webSearch !== false);
+  const ctx = { blocks, slug: req.user && req.user.dbSlug, images: tools().latestUserImages(messages), attachments, signal: clientGone.signal, cfg: s };
   const steps = [];    // 过程块：本轮所有步骤（过程文本 / 工具调用）
   let stepSeq = 0;
   const startedAt = Date.now();
@@ -321,7 +347,8 @@ router.post('/chat/stream', async (req, res) => {
         history,
         (d) => send({ type: 'delta', text: d }),
         (d) => send({ type: 'reasoning', text: d }),
-        clientGone.signal
+        clientGone.signal,
+        getMainTools(s, webSearchOn)
       );
       if (usage) {
         maxPromptTokens = Math.max(maxPromptTokens, usage.prompt_tokens || 0);

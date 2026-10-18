@@ -1,0 +1,262 @@
+<template>
+  <!-- 导出聊天记录：选择消息（可展开/勾选/按角色筛选）→ 导出范围 → 格式 + 文件名（外观沿用导出表格弹窗） -->
+  <Teleport to="body">
+  <Transition name="dialog">
+  <div v-if="visible" class="fixed inset-0 bg-black/50 flex items-center justify-center z-[10001]" @click.self="cancel">
+    <div class="bg-surface p-5 rounded-lg shadow-card border border-border dialog-card chat-card flex flex-col">
+      <h3 class="text-lg font-bold mb-3">导出聊天记录</h3>
+
+      <div class="mb-4 flex flex-col min-h-0">
+        <div class="flex items-center justify-between mb-2">
+          <p class="font-semibold">选择聊天记录：</p>
+          <div class="flex items-center gap-1">
+            <button
+              v-for="f in FILTERS" :key="f.value"
+              @click="filter = f.value"
+              class="text-xs px-2.5 py-1 rounded-md border transition-theme cursor-pointer"
+              :class="filter === f.value ? 'border-primary text-primary' : 'border-border text-text-muted hover:text-text'"
+            >{{ f.label }}</button>
+          </div>
+        </div>
+
+        <div v-if="loading" class="text-sm text-text-muted py-6 text-center">正在加载聊天记录…</div>
+        <div v-else-if="!visibleMsgs.length" class="text-sm text-text-muted py-6 text-center">没有可导出的聊天记录</div>
+        <div v-else class="msg-list border border-border rounded-lg overflow-y-auto">
+          <div
+            v-for="m in visibleMsgs" :key="m.id"
+            class="msg-row flex items-start gap-2 px-2.5 py-2 border-b border-border last:border-b-0"
+          >
+            <input type="checkbox" class="mt-1 shrink-0" :checked="isSelected(m.id)" @change="toggle(m.id)" />
+            <span
+              class="shrink-0 text-[11px] leading-5 px-1.5 rounded mt-0.5"
+              :class="m.role === 'user' ? 'role-user' : 'role-ai'"
+            >{{ m.role === 'user' ? '用户' : 'AI回复' }}</span>
+            <div class="flex-1 min-w-0">
+              <div v-if="!isExpanded(m.id)" class="text-sm text-text truncate">{{ m.content || '（无内容）' }}</div>
+              <div v-else class="text-sm text-text whitespace-pre-wrap break-words">{{ m.content || '（无内容）' }}</div>
+            </div>
+            <button
+              v-if="isLong(m)"
+              @click="toggleExpand(m.id)"
+              class="shrink-0 text-xs text-primary hover:underline cursor-pointer mt-0.5"
+            >{{ isExpanded(m.id) ? '收起' : '展开' }}</button>
+          </div>
+        </div>
+        <div v-if="!loading && visibleMsgs.length" class="flex items-center justify-between mt-1.5 text-xs text-text-muted">
+          <label class="flex items-center gap-1 cursor-pointer">
+            <input type="checkbox" :checked="allSelected" @change="toggleAll" /> 全选（当前筛选）
+          </label>
+          <span>已选 {{ selectedIds.length }} / {{ msgs.length }} 条</span>
+        </div>
+      </div>
+
+      <div class="mb-4">
+        <p class="font-semibold mb-2">导出范围：</p>
+        <AppSelect v-model="range" class="w-full" :options="RANGES" />
+      </div>
+
+      <div class="mb-4">
+        <p class="font-semibold mb-2">导出格式：</p>
+        <AppSelect v-model="exportFormat" class="w-full" :options="FORMAT_OPTIONS" />
+      </div>
+
+      <div class="mb-4">
+        <label class="font-semibold block mb-1">文件名</label>
+        <input v-model="filename" class="filename-input border border-border bg-surface text-text p-2 w-full !rounded-[12px]" />
+      </div>
+
+      <div class="text-right">
+        <button @click="cancel" class="bg-surface-hover text-text border border-border px-4 py-1.5 rounded-lg mr-2 cursor-pointer">取消</button>
+        <button @click="doExport" :disabled="exporting || !selectedIds.length" class="bg-info text-text-inverse border-none px-4 py-1.5 rounded-lg cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed">{{ exporting ? '导出中…' : '导出' }}</button>
+      </div>
+    </div>
+  </div>
+  </Transition>
+  </Teleport>
+</template>
+
+<script>
+import axios from 'axios'
+import AppSelect from '../base/AppSelect.vue'
+import { useNotification } from '../../composables/useNotification'
+import { parseMessages } from '../../composables/ai/aiMessages.js'
+import { runTableExport, FORMAT_OPTIONS, FORMAT_LABELS } from '../../composables/exportFormats.js'
+import '../../styles/dialog-transition.css'
+
+// 单条消息正文超过该长度即提供「展开」按钮（预览只显示一行，展开看全文）
+const PREVIEW_MAX = 60
+
+export default {
+  name: 'ExportChatDialog',
+  components: { AppSelect },
+  props: {
+    visible: { type: Boolean, default: false },
+    conversationId: { type: [Number, String], default: null },
+    conversationName: { type: String, default: '' },
+  },
+  emits: ['update:visible'],
+  setup() {
+    const { success, error, info } = useNotification()
+    return { notifySuccess: success, notifyError: error, notifyInfo: info }
+  },
+  data() {
+    return {
+      FORMAT_OPTIONS,
+      FILTERS: [
+        { value: 'all', label: '全部' },
+        { value: 'user', label: '仅用户' },
+        { value: 'ai', label: '仅AI回复' },
+      ],
+      RANGES: [
+        { value: 'content', label: '仅最后输出内容' },
+        { value: 'reasoning', label: '仅思维链' },
+        { value: 'all', label: '全部' },
+      ],
+      loading: false,
+      msgs: [],
+      selectedIds: [],
+      expandedIds: [],
+      filter: 'all',
+      range: 'content',
+      exportFormat: 'md',
+      filename: '',
+      exporting: false,
+    }
+  },
+  computed: {
+    visibleMsgs() {
+      if (this.filter === 'user') return this.msgs.filter((m) => m.role === 'user')
+      if (this.filter === 'ai') return this.msgs.filter((m) => m.role === 'assistant')
+      return this.msgs
+    },
+    allSelected() {
+      const vis = this.visibleMsgs
+      return !!vis.length && vis.every((m) => this.selectedIds.includes(m.id))
+    },
+  },
+  watch: {
+    visible: {
+      immediate: true,
+      handler(v) { if (v) this.onOpen() },
+    },
+  },
+  methods: {
+    isSelected(id) { return this.selectedIds.includes(id) },
+    isExpanded(id) { return this.expandedIds.includes(id) },
+    isLong(m) { return (m.content || '').length > PREVIEW_MAX || /[\r\n]/.test(m.content || '') },
+    toggle(id) {
+      const i = this.selectedIds.indexOf(id)
+      if (i >= 0) this.selectedIds.splice(i, 1)
+      else this.selectedIds.push(id)
+    },
+    toggleExpand(id) {
+      const i = this.expandedIds.indexOf(id)
+      if (i >= 0) this.expandedIds.splice(i, 1)
+      else this.expandedIds.push(id)
+    },
+    toggleAll() {
+      const vis = this.visibleMsgs
+      if (this.allSelected) {
+        this.selectedIds = this.selectedIds.filter((id) => !vis.some((m) => m.id === id))
+      } else {
+        for (const m of vis) { if (!this.selectedIds.includes(m.id)) this.selectedIds.push(m.id) }
+      }
+    },
+    // 消息里承载的思维链：优先取 process.reasoning，其次从「思考」步骤拼接
+    reasoningOf(m) {
+      if (m.reasoning && String(m.reasoning).trim()) return String(m.reasoning).trim()
+      const steps = Array.isArray(m.steps) ? m.steps : []
+      return steps.filter((s) => s.kind === 'reason' && s.text).map((s) => s.text).join('\n\n').trim()
+    },
+    onOpen() {
+      this.filter = 'all'
+      this.range = 'content'
+      this.exportFormat = 'md'
+      this.filename = this.conversationName || '聊天记录'
+      this.expandedIds = []
+      this.selectedIds = []
+      this.exporting = false
+      this.loadMessages()
+    },
+    async loadMessages() {
+      this.msgs = []
+      if (this.conversationId == null) return
+      this.loading = true
+      try {
+        const { data } = await axios.get(`/api/ai/conversations/${this.conversationId}/messages`)
+        let seq = 0
+        this.msgs = parseMessages(data.data)
+          .map((m) => ({
+            id: m._id != null ? m._id : `x${seq++}`,
+            role: m.role,
+            content: (m.content || '').trim(),
+            reasoning: this.reasoningOf(m),
+          }))
+          .filter((m) => m.content || m.reasoning)
+        this.selectedIds = this.msgs.map((m) => m.id)
+      } catch (_) { this.msgs = [] }
+      finally { this.loading = false }
+    },
+    // 依据导出范围拼出二维数据（列 + 行）
+    buildTable() {
+      const sel = this.msgs.filter((m) => this.selectedIds.includes(m.id))
+      const role = (m) => (m.role === 'user' ? '用户' : 'AI回复')
+      if (this.range === 'reasoning') return { columns: ['角色', '思维链'], rows: sel.map((m) => [role(m), m.reasoning]) }
+      if (this.range === 'all') return { columns: ['角色', '内容', '思维链'], rows: sel.map((m) => [role(m), m.content, m.reasoning]) }
+      return { columns: ['角色', '内容'], rows: sel.map((m) => [role(m), m.content]) }
+    },
+    cancel() { this.$emit('update:visible', false) },
+    async doExport() {
+      if (this.exporting) return
+      const sel = this.msgs.filter((m) => this.selectedIds.includes(m.id))
+      if (!sel.length) { this.notifyInfo('请至少选择一条聊天记录'); return }
+      if (this.range === 'reasoning' && !sel.some((m) => m.reasoning)) {
+        this.notifyInfo('所选聊天记录中没有思维链内容'); return
+      }
+      const name = (this.filename || '').trim() || '聊天记录'
+      this.exporting = true
+      try {
+        const { columns, rows } = this.buildTable()
+        const saved = await runTableExport({ format: this.exportFormat, columns, rows, filename: name, title: name })
+        if (saved) this.notifySuccess(`已成功导出 ${FORMAT_LABELS[this.exportFormat] || '文件'}`)
+      } catch (err) {
+        console.error('导出失败:', err)
+        this.notifyError('导出失败，请重试')
+      } finally {
+        this.exporting = false
+        this.$emit('update:visible', false)
+      }
+    },
+  },
+}
+</script>
+
+<style scoped>
+.chat-card {
+  width: 640px;
+  max-width: 92vw;
+}
+.msg-list {
+  max-height: 40vh;
+}
+.msg-row:hover {
+  background: var(--color-surface-hover, rgba(0, 0, 0, 0.04));
+}
+.role-user {
+  background: color-mix(in srgb, var(--color-primary) 16%, transparent);
+  color: var(--color-primary);
+}
+.role-ai {
+  background: color-mix(in srgb, var(--color-success, #10b981) 18%, transparent);
+  color: var(--color-success, #10b981);
+}
+.filename-input {
+  transition: background-color 0.2s ease, border-color 0.2s ease, box-shadow 0.2s ease;
+}
+.filename-input:focus {
+  border-color: #3b82f6 !important;
+  box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.28) !important;
+  outline: none;
+  background-color: rgba(255, 255, 255, 0.98) !important;
+}
+</style>

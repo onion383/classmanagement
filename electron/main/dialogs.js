@@ -15,7 +15,9 @@
 const { app, BrowserWindow, ipcMain, desktopCapturer, screen, dialog, shell } = require('electron')
 const path = require('path')
 const fs = require('fs')
-const { resolveDataDir, resolveThumbsDir } = require('./config')
+const { resolveDataDir, resolveThumbsDir, resolveSkillsDir } = require('./config')
+
+const fsp = fs.promises
 
 const isDev = !app.isPackaged
 
@@ -67,6 +69,7 @@ function registerDialogsIpc(opts = {}) {
     return {
       dataDir: resolveDataDir(),
       thumbsDir: resolveThumbsDir(),
+      skillsDir: resolveSkillsDir(),
       defaultDataDir: path.join(app.getPath('userData'), 'data'),
       screenshotDir: path.join(app.getPath('pictures'), 'screenshots'),
     }
@@ -88,7 +91,7 @@ function registerDialogsIpc(opts = {}) {
       lastDialogDir = path.dirname(result.filePaths[0])
       const filePath = result.filePaths[0]
       // 检查文件大小（限制 50MB）
-      const fileStat = fs.statSync(filePath)
+      const fileStat = await fsp.stat(filePath)
       const maxSize = 50 * 1024 * 1024 // 50MB
       if (fileStat.size > maxSize) {
         return { canceled: true, error: '图片大小超过 50MB，请选择更小的图片' }
@@ -96,12 +99,12 @@ function registerDialogsIpc(opts = {}) {
       // 将文件复制到后端 uploads/background 目录
       // 打包后 __dirname 位于只读 asar 内，必须写到 userData/data/uploads/background（与后端 DATA_DIR 一致）
       const bgDir = path.join(app.getPath('userData'), 'data', 'uploads', 'background')
-      if (!fs.existsSync(bgDir)) {
-        fs.mkdirSync(bgDir, { recursive: true })
-      }
+      // mkdir recursive 在目录已存在时不报错，省掉一次 existsSync 同步探测
+      await fsp.mkdir(bgDir, { recursive: true })
       const fileName = `bg_${Date.now()}${path.extname(filePath)}`
       const destPath = path.join(bgDir, fileName)
-      fs.copyFileSync(filePath, destPath)
+      // 异步复制：最大允许 50MB，同步复制会让主进程在复制期间完全无响应
+      await fsp.copyFile(filePath, destPath)
       // 根据环境返回不同的 URL
       let imageUrl
       if (isDev) {
@@ -117,19 +120,19 @@ function registerDialogsIpc(opts = {}) {
   })
 
   // 保存背景图片（用于大图片，前端传入 base64）
+  // 写盘改成异步：背景图动辄几 MB，writeFileSync 会把主进程阻塞到写完为止。
   ipcMain.handle('save-background-image', async (event, { name, base64 }) => {
     try {
       const bgDir = path.join(app.getPath('userData'), 'data', 'uploads', 'background')
-      if (!fs.existsSync(bgDir)) {
-        fs.mkdirSync(bgDir, { recursive: true })
-      }
+      // mkdir recursive 在目录已存在时不报错，省掉一次 existsSync 同步探测
+      await fsp.mkdir(bgDir, { recursive: true })
       // 从原始文件名获取扩展名
       const ext = name ? path.extname(name) || '.png' : '.png'
       const fileName = `bg_${Date.now()}${ext}`
       const destPath = path.join(bgDir, fileName)
       // 将 base64 写入文件
       const buffer = Buffer.from(base64, 'base64')
-      fs.writeFileSync(destPath, buffer)
+      await fsp.writeFile(destPath, buffer)
       // 根据环境返回不同的 URL
       let imageUrl
       if (isDev) {
@@ -156,7 +159,8 @@ function registerDialogsIpc(opts = {}) {
     if (result.canceled || !result.filePath) return { canceled: true }
     try {
       const buffer = Buffer.from(data)
-      fs.writeFileSync(result.filePath, buffer)
+      // 异步写：导出的 xlsx/pdf 可能几十 MB，同步写会让窗口在写盘期间完全无响应
+      await fsp.writeFile(result.filePath, buffer)
       lastDialogDir = path.dirname(result.filePath)
       return { canceled: false, filePath: result.filePath }
     } catch (err) {
@@ -202,13 +206,12 @@ function registerDialogsIpc(opts = {}) {
       const image = primarySource.thumbnail.toPNG()
 
       const saveDir = options?.saveDir || path.join(app.getPath('pictures'), 'screenshots')
-      if (!fs.existsSync(saveDir)) {
-        fs.mkdirSync(saveDir, { recursive: true })
-      }
+      // 整屏 PNG 常有几 MB～十几 MB，写盘走异步，避免截图瞬间主进程冻结
+      await fsp.mkdir(saveDir, { recursive: true })
 
       const timestamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19)
       const filePath = path.join(saveDir, `screenshot_${timestamp}.png`)
-      fs.writeFileSync(filePath, image)
+      await fsp.writeFile(filePath, image)
 
       // dataUrl 仅按需生成：整屏 PNG base64 在主进程/IPC/渲染进程各持一份，
       // 内存开销大。默认生成以兼容旧调用；调用方（Screenshot.vue）不需要时可关闭。
@@ -324,12 +327,10 @@ function registerDialogsIpc(opts = {}) {
   ipcMain.handle('note-save', async (event, uint8Array, options) => {
     const buffer = Buffer.from(uint8Array)
     const saveDir = options?.saveDir || path.join(app.getPath('pictures'), 'screenshots')
-    if (!fs.existsSync(saveDir)) {
-      fs.mkdirSync(saveDir, { recursive: true })
-    }
+    await fsp.mkdir(saveDir, { recursive: true })
     const timestamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19)
     const filePath = path.join(saveDir, `note_${timestamp}.png`)
-    fs.writeFileSync(filePath, buffer)
+    await fsp.writeFile(filePath, buffer)
     return { success: true, filePath }
   })
 }

@@ -69,7 +69,7 @@
               <td class="px-3 py-2 text-center text-text-muted">{{ idx + 1 }}</td>
               <td class="px-3 py-2 text-center text-text">{{ item.姓名 }}</td>
               <td class="px-3 py-2 text-center"><span class="px-2 py-0.5 rounded text-xs bg-danger/10 text-danger">{{ item.类型 }}</span></td>
-              <td class="px-3 py-2 text-center text-text whitespace-nowrap">{{ formatRange(item.开始时间, item.结束时间) }}</td>
+              <td class="px-3 py-2 text-center text-text whitespace-nowrap">{{ rangeOf(item) }}</td>
               <td class="px-3 py-2 text-center text-text">{{ item.家长联系电话 || '—' }}</td>
               <td class="px-3 py-2 text-center text-text">{{ item.学生联系电话 || '—' }}</td>
               <td class="px-3 py-2 text-center text-text">{{ item.备注 || '—' }}</td>
@@ -111,7 +111,7 @@
             >
               <td class="px-3 py-2 text-center text-text-muted">{{ idx + 1 }}</td>
               <td class="px-3 py-2 text-center text-text">{{ item.姓名 }}</td>
-              <td class="px-3 py-2 text-center text-text whitespace-nowrap">{{ formatRange(item.开始时间, item.结束时间) }}</td>
+              <td class="px-3 py-2 text-center text-text whitespace-nowrap">{{ rangeOf(item) }}</td>
               <td class="px-3 py-2 text-center text-text">{{ item.家长联系电话 || '—' }}</td>
               <td class="px-3 py-2 text-center text-text">{{ item.学生联系电话 || '—' }}</td>
               <td class="px-3 py-2 text-center"><span class="px-2 py-0.5 rounded text-xs bg-info/10 text-info">{{ item.类型 }}</span></td>
@@ -418,6 +418,18 @@ export default {
         return `${short(s).split(' ')[0]} ${s.split(' ')[1]}~${e.split(' ')[1]}`
       }
       return `${short(s)} ~ ${short(e)}`
+    },
+    // 请假时段展示：按行对象缓存结果，避免每次重渲染都重做一遍字符串切分。
+    // 缓存挂在行对象上（WeakMap），行对象随每次加载重建，缓存自然失效；起止时间变了也会重算。
+    rangeOf(item) {
+      if (!this._rangeCache) this._rangeCache = new WeakMap()
+      const s = item.开始时间 || ''
+      const e = item.结束时间 || ''
+      const hit = this._rangeCache.get(item)
+      if (hit && hit.s === s && hit.e === e) return hit.text
+      const text = this.formatRange(s, e)
+      this._rangeCache.set(item, { s, e, text })
+      return text
     },
     async loadAll() {
       this.loading = true

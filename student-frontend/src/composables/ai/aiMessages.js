@@ -148,6 +148,10 @@ export function frontProposalHint(p) {
   if (p && p.kind === 'front') return `将修改「${FRONT_LABELS[p.key] || p.key || '设置'}」`
   if (p && p.kind === 'batch_ops') return `将执行 ${Array.isArray(p.ops) ? p.ops.length : 0} 项跨表操作（全部成功或全部失败）`
   if (p && p.kind === 'snapshot_restore') return `将把整个数据库还原到快照 ${p.snapshot}（覆盖当前全部数据，无法撤销）`
+  if (p && p.kind === 'skill') {
+    const verb = { create: '新建', update: '更新', delete: '删除' }[p.operation] || '修改'
+    return `将${verb}技能「${p.name || ''}」（保存到技能库）`
+  }
   if (p && p.operation === 'update' && p.batch) return `将批量修改「${tableLabel(p.table)}」的 ${Array.isArray(p.diffs) ? p.diffs.length : 0} 条记录`
   return `将写入「${tableLabel(p && p.table)}」`
 }

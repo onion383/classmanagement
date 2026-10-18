@@ -10,7 +10,7 @@
 </template>
 
 <script setup>
-import { ref, onMounted, onUnmounted } from 'vue'
+import { ref, onMounted, onUnmounted, onActivated, onDeactivated } from 'vue'
 import { pad2 } from '../utils/dateTime.js'
 
 const props = defineProps({
@@ -94,13 +94,32 @@ function tick() {
   applyDate(d)
 }
 
+// 走时定时器的启停。页面被 <KeepAlive> 缓存时只会 deactivate、不会 unmount，
+// 若只在 onUnmounted 里清理，切到别的页面后这个时钟仍会每秒 tick 并触发一次重渲染
+// （看不见却在持续占 CPU / 产生垃圾），所以在 deactivated 停、activated 恢复。
+function startTicking() {
+  stopTicking()
+  timer = setInterval(tick, 1000)
+}
+function stopTicking() {
+  if (timer) { clearInterval(timer); timer = null }
+}
+
 onMounted(() => {
   tick()
-  timer = setInterval(tick, 1000)
+  startTicking()
 })
 
+// 从缓存回来：先立即对齐时间，再恢复走时（避免显示停在离开那一刻）
+onActivated(() => {
+  tick()
+  startTicking()
+})
+
+onDeactivated(stopTicking)
+
 onUnmounted(() => {
-  if (timer) clearInterval(timer)
+  stopTicking()
   if (timeAnimTimer) clearTimeout(timeAnimTimer)
   if (dateAnimTimer) clearTimeout(dateAnimTimer)
 })

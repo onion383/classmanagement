@@ -171,11 +171,11 @@
             <div class="grid grid-cols-2 gap-4">
               <div class="space-y-2">
                 <div class="text-text font-medium">微信</div>
-                <img src="/wechatpay.png" alt="微信收款码" class="w-full h-auto rounded-lg border border-border" />
+                <img src="/wechatpay.webp" alt="微信收款码" class="w-full h-auto rounded-lg border border-border" />
               </div>
               <div class="space-y-2">
                 <div class="text-text font-medium">支付宝</div>
-                <img src="/alipay.jpg" alt="支付宝收款码" class="w-full h-auto rounded-lg border border-border" />
+                <img src="/alipay.webp" alt="支付宝收款码" class="w-full h-auto rounded-lg border border-border" />
               </div>
             </div>
           </div>
@@ -383,14 +383,17 @@ const libGroups = [
     category: '前端',
     items: [
       { desc: '前端框架', name: 'Vue 3', url: 'https://github.com/vuejs/core', license: 'MIT' },
-      { desc: '前端路由', name: 'Vue Router', url: 'https://github.com/vuejs/vue-router', license: 'MIT' },
+      { desc: '前端路由', name: 'Vue Router', url: 'https://github.com/vuejs/router', license: 'MIT' },
       { desc: '状态管理', name: 'Pinia', url: 'https://github.com/vuejs/pinia', license: 'MIT' },
       { desc: '构建工具', name: 'Vite', url: 'https://github.com/vitejs/vite', license: 'MIT' },
       { desc: 'CSS 框架', name: 'Tailwind CSS', url: 'https://github.com/tailwindlabs/tailwindcss', license: 'MIT' },
       { desc: 'HTTP 请求', name: 'Axios', url: 'https://github.com/axios/axios', license: 'MIT' },
       { desc: '图标库', name: '@lucide/vue', url: 'https://github.com/lucide-icons/lucide', license: 'ISC' },
-      { desc: 'XSS 过滤', name: 'DOMPurify', url: 'https://github.com/cure53/DOMPurify', license: 'Apache-2.0' },
-      { desc: 'Markdown 解析', name: 'marked', url: 'https://github.com/markedjs/marked', license: 'MIT' },
+      { desc: 'XSS 过滤', name: 'DOMPurify', url: 'https://github.com/cure53/DOMPurify', license: 'MPL-2.0 OR Apache-2.0' },
+      { desc: 'Markdown 解析', name: 'marked', url: 'https://github.com/markedjs/marked', license: 'MIT / BSD-3-Clause' },
+      { desc: 'DevTools 接口', name: '@vue/devtools-api', url: 'https://github.com/vuejs/devtools', license: 'MIT' },
+      { desc: 'Vue 编译插件', name: '@vitejs/plugin-vue', url: 'https://github.com/vitejs/vite-plugin-vue', license: 'MIT' },
+      { desc: 'Tailwind 插件', name: '@tailwindcss/vite', url: 'https://github.com/tailwindlabs/tailwindcss', license: 'MIT' },
     ],
   },
   {
@@ -402,9 +405,9 @@ const libGroups = [
       { desc: '跨域支持', name: 'cors', url: 'https://github.com/expressjs/cors', license: 'MIT' },
       { desc: '文件上传', name: 'Multer', url: 'https://github.com/expressjs/multer', license: 'MIT' },
       { desc: '视频抽帧', name: 'FFmpeg（LGPL 构建）', url: 'https://ffmpeg.org', license: 'LGPL-2.1-or-later' },
-      { desc: '压缩包解压', name: 'extract-zip', url: 'https://github.com/inchingorg/extract-zip', license: 'MIT' },
+      { desc: '压缩包解压', name: 'extract-zip', url: 'https://github.com/maxogden/extract-zip', license: 'BSD-2-Clause' },
       { desc: 'Word 转换', name: 'Mammoth', url: 'https://github.com/mwilliamson/mammoth.js', license: 'BSD-2-Clause' },
-      { desc: 'PDF 解析', name: 'pdf-parse', url: 'https://github.com/PhilippKurz30/node-pdf-parse', license: 'MIT' },
+      { desc: 'PDF 解析', name: 'pdf-parse', url: 'https://github.com/mehmet-kozan/pdf-parse', license: 'Apache-2.0' },
       { desc: '回收站删除', name: 'trash', url: 'https://github.com/sindresorhus/trash', license: 'MIT' },
     ],
   },
@@ -412,18 +415,27 @@ const libGroups = [
     category: '安全支持',
     items: [
       { desc: 'JWT 鉴权', name: 'jsonwebtoken', url: 'https://github.com/auth0/node-jsonwebtoken', license: 'MIT' },
-      { desc: '密码加密', name: 'bcryptjs', url: 'https://github.com/dcodeIO/bcrypt.js', license: 'MIT' },
+      { desc: '密码加密', name: 'bcryptjs', url: 'https://github.com/dcodeIO/bcrypt.js', license: 'BSD-3-Clause' },
     ],
   },
   {
     category: '数据处理',
     items: [
       { desc: '表格导出', name: 'ExcelJS', url: 'https://github.com/exceljs/exceljs', license: 'MIT' },
-      { desc: '电子表格', name: 'SheetJS (xlsx)', url: 'https://github.com/SheetJS/sheetjs', license: 'Apache-2.0' },
+      { desc: '电子表格', name: 'SheetJS (xlsx)', url: 'https://git.sheetjs.com/SheetJS/sheetjs', license: 'Apache-2.0' },
       { desc: 'PDF 生成', name: 'jsPDF', url: 'https://github.com/parallax/jsPDF', license: 'MIT' },
       { desc: 'PDF 表格', name: 'jsPDF-AutoTable', url: 'https://github.com/simonbengtsson/jsPDF-AutoTable', license: 'MIT' },
       { desc: '截图渲染', name: 'html2canvas', url: 'https://github.com/niklasvh/html2canvas', license: 'MIT' },
       { desc: '拖拽排序', name: 'SortableJS', url: 'https://github.com/SortableJS/Sortable', license: 'MIT' },
+      { desc: '拼音匹配', name: 'pinyin-match', url: 'https://github.com/xmflswood/pinyin-match', license: 'MIT' },
+    ],
+  },
+  {
+    category: '开发工具',
+    items: [
+      { desc: '并行启动', name: 'concurrently', url: 'https://github.com/open-cli-tools/concurrently', license: 'MIT' },
+      { desc: '端口就绪等待', name: 'wait-on', url: 'https://github.com/jeffbski/wait-on', license: 'MIT' },
+      { desc: '原生模块重编译', name: '@electron/rebuild', url: 'https://github.com/electron/rebuild', license: 'MIT' },
     ],
   },
 ]

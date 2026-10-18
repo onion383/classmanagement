@@ -19,6 +19,24 @@
       </div>
     </div>
   </div>
+  <!-- 技能提案（kind=skill）：展示技能名与正文；更新/删除时先展示原正文作对照 -->
+  <div v-else-if="isSkill" class="rounded-lg border border-border overflow-hidden divide-y divide-border">
+    <div class="flex gap-3 px-3 py-2 text-xs">
+      <span class="text-text-muted flex-shrink-0 w-20 truncate">技能名</span>
+      <span class="text-text min-w-0 break-all">{{ proposal.name }}</span>
+    </div>
+    <div v-if="skillBefore" class="px-3 py-2">
+      <div class="text-text-muted text-xs mb-1">原正文（将被覆盖）</div>
+      <pre class="text-xs text-text-muted whitespace-pre-wrap break-words max-h-60 overflow-auto m-0 font-mono">{{ skillBefore }}</pre>
+    </div>
+    <div v-if="skillContent" class="px-3 py-2">
+      <div class="text-text-muted text-xs mb-1">新正文</div>
+      <pre class="text-xs text-text whitespace-pre-wrap break-words max-h-60 overflow-auto m-0 font-mono">{{ skillContent }}</pre>
+    </div>
+    <div v-if="proposal.operation === 'delete'" class="px-3 py-2 text-xs text-danger leading-relaxed">
+      删除后该技能文件将从技能库移除，无法撤销。
+    </div>
+  </div>
   <!-- 删除：展示库里现有记录，让用户看清将被删掉的是什么 -->
   <AiRecordTable v-else-if="isDelete" :table="proposal.table" :ids="deleteIds" />
   <!-- 前端设置提案：展示「设置项 → 新值」 -->
@@ -130,6 +148,12 @@ export default {
       return order.map((t) => ({ table: t, tableLabel: TABLE_LABELS[t] || t, items: groups.get(t) }))
     },
     isDelete() { return this.proposal.operation === 'delete' },
+    // 技能提案（kind=skill）：新建/更新/删除技能库里的 md 指令文件
+    isSkill() { return this.proposal.kind === 'skill' },
+    // 将要写入的新正文（删除无正文）
+    skillContent() { return this.isSkill && this.proposal.operation !== 'delete' ? String(this.proposal.content || '') : '' },
+    // 原正文（更新/删除时后端附带 before）
+    skillBefore() { return this.isSkill && this.proposal.before ? String(this.proposal.before) : '' },
     // 前端设置提案（主题/日夜模式等）
     isFront() { return this.proposal.kind === 'front' },
     frontLabel() { return FRONT_LABELS[this.proposal.key] || this.proposal.key || '设置' },

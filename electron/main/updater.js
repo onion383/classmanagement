@@ -188,9 +188,31 @@ async function runUpdateFlow() {
   }
 }
 
+// 启动时清理 update-cache：安装包下载完就交给 Inno 安装器并退出本进程，退出前没机会删它，
+// 于是每次更新都会在 userData 里留下一个上百 MB 的安装包（文件名带版本号，会逐版本累积）。
+// 更新状态只存在内存里（重启后必然重新检查并按需重下），故启动时清空整个目录是安全的。
+function pruneUpdateCache() {
+  try {
+    const dir = path.join(app.getPath('userData'), 'update-cache')
+    if (!fs.existsSync(dir)) return
+    let freed = 0
+    for (const name of fs.readdirSync(dir)) {
+      const p = path.join(dir, name)
+      try {
+        const st = fs.statSync(p)
+        if (st.isFile()) freed += st.size
+        fs.rmSync(p, { recursive: true, force: true })
+      } catch (_) { /* 单个条目失败忽略 */ }
+    }
+    if (freed > 0) console.log(`[updater] 已清理上次遗留的更新安装包，释放 ${(freed / 1048576).toFixed(1)} MB`)
+  } catch (_) { /* 清理失败不影响更新功能 */ }
+}
+
 // 注册版本更新相关的 IPC 通道。send(payload) 由 main.js 提供，用于向主窗口推 update-state。
 function registerUpdateIpc(send) {
   if (typeof send === 'function') sendToMain = send
+
+  pruneUpdateCache()
 
   ipcMain.handle('get-app-version', () => app.getVersion())
 

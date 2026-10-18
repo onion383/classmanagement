@@ -6,6 +6,10 @@ const dbManager = require('../../dbManager');
 const { READ_TABLES, WRITE_TABLES, JSON_WRITE_TABLES, DOC_UNDO_KEY } = require('./constants');
 const { tableColumns, normColVal } = require('./helpers');
 
+// 各 propose_* 工具通用的可选参数说明：来源标记（供撤销记录区分「哪批是子助手带来的」）
+const SOURCE_DESC = '可选：若本次写入依据了 run_subagent 某子助手的核查结果，填「子助手名 · 任务」，如「数据体检员 · 清理重复项」；撤销记录里会据此标识来源。非子助手来源不要填。';
+
+
 // ---------------- 工具定义 ----------------
 const queryTool = {
   type: 'function',
@@ -40,6 +44,7 @@ const proposeWriteTool = {
           type: 'object',
           description: 'add: 完整新行对象；update: { id, changes }；delete: { id }',
         },
+        source: { type: 'string', description: SOURCE_DESC },
       },
       required: ['operation', 'table', 'data'],
     },
@@ -101,6 +106,7 @@ const batchAddTool = {
       properties: {
         table: { type: 'string', enum: Object.keys(WRITE_TABLES), description: '目标表（仅支持可写表）' },
         rows: { type: 'array', items: { type: 'object' }, description: '每行一个对象，字段与单条 add 相同；各行字段可以不同' },
+        source: { type: 'string', description: SOURCE_DESC },
       },
       required: ['table', 'rows'],
     },
@@ -141,6 +147,7 @@ const batchDeleteTool = {
         table: { type: 'string', enum: Object.keys(WRITE_TABLES), description: '目标表（仅支持可写表）' },
         ids: { type: 'array', items: { type: 'number' }, description: '要删除的记录 id 列表（取自 query 结果的 id 字段），最多 50 条' },
         label: { type: 'string', description: '本次删除的简短说明，如「删除 3 条重复的请假记录」' },
+        source: { type: 'string', description: SOURCE_DESC },
       },
       required: ['table', 'ids'],
     },
@@ -185,6 +192,7 @@ const jsonWriteTool = {
         id: { type: 'number', description: '要修改的行 id，一般为 1' },
         values: { type: 'object', description: '要覆盖的列：{ 列名: 该列完整新值 }，值为对象/数组时整体替换（如 seats / cells / weights / settings / days / items）' },
         label: { type: 'string', description: '本次修改的简短说明，如「座位表：第 3 行调换」' },
+        source: { type: 'string', description: SOURCE_DESC },
       },
       required: ['table', 'values'],
     },
@@ -358,6 +366,61 @@ const memoryTool = {
   },
 };
 
+// propose_skill 工具：新建 / 更新 / 删除技能（md 指令文件），生成提案，老师确认后才落盘。
+// 技能本身就是「给模型看的指令」，故正文由模型自己按 Markdown 写；这里只校验名字与存在性。
+function skillNamesText(slug) {
+  const names = dbManager.listSkills(slug).map((s) => s.name);
+  if (!names.length) return '（当前还没有任何技能）';
+  return names.length > 30 ? `${names.slice(0, 30).join('、')}…等 ${names.length} 个` : names.join('、');
+}
+
+function runProposeSkill(args, ctx) {
+  const op = String((args && args.operation) || '');
+  if (!['create', 'update', 'delete'].includes(op)) return { error: 'operation 必须是 create / update / delete' };
+  const name = dbManager.normalizeSkillName(args && args.name);
+  if (!name) return { error: '技能名不合法：不能为空，不能含 \\ / : * ? " < > | 等字符，最长 60 字' };
+  const slug = ctx && ctx.slug;
+  const exists = dbManager.skillExists(slug, name);
+  if (op === 'delete') {
+    if (!exists) return { error: `技能「${name}」不存在。现有技能：${skillNamesText(slug)}` };
+    return {
+      proposal: {
+        kind: 'skill', operation: 'delete', name,
+        before: dbManager.readSkill(slug, name).slice(0, 4000),
+        label: `删除技能「${name}」`,
+      },
+    };
+  }
+  const content = String((args && args.content) == null ? '' : args.content);
+  if (!content.trim()) return { error: `${op === 'create' ? '新建' : '更新'}技能必须给出 content（技能正文，Markdown 格式）` };
+  if (op === 'create' && exists) return { error: `技能「${name}」已存在，请改用 operation=update 覆盖内容，或换一个名字` };
+  if (op === 'update' && !exists) return { error: `技能「${name}」不存在。现有技能：${skillNamesText(slug)}` };
+  return {
+    proposal: {
+      kind: 'skill', operation: op, name, content,
+      ...(op === 'update' ? { before: dbManager.readSkill(slug, name).slice(0, 4000) } : {}),
+      label: `${op === 'create' ? '新建' : '更新'}技能「${name}」`,
+    },
+  };
+}
+
+const skillTool = {
+  type: 'function',
+  function: {
+    name: 'propose_skill',
+    description: '生成一条「技能（Markdown 指令文件）」的变更提案：新建 / 更新 / 删除。此调用不会真的写入，需老师确认后才执行。技能会出现在老师聊天输入框打「/」的候选里，选中后其内容随本轮注入系统提示。',
+    parameters: {
+      type: 'object',
+      properties: {
+        operation: { type: 'string', enum: ['create', 'update', 'delete'], description: 'create=新建, update=用新正文覆盖已有技能, delete=删除技能' },
+        name: { type: 'string', description: '技能名（即 md 文件名，不含 .md），简短好记，如「周报生成」' },
+        content: { type: 'string', description: '技能正文（Markdown）。create / update 必填。要写成对你自己可执行的指令（何时适用、具体步骤、输出要求），而不是写给老师看的介绍。' },
+      },
+      required: ['operation', 'name'],
+    },
+  },
+};
+
 // read_document 工具：读取用户在本轮上传的附件内容（前端上传时已解析成文本并随请求带给后端）。
 // 无界面交互：模型调用即直接返回文字，用于「文件内容不在对话里、按需再读」的场景。
 const readDocumentTool = {
@@ -442,7 +505,9 @@ const TOOL_INFO = {
   ocr_image: { running: '正在识别图片文字…', done: '识别图片文字' },
   export_file: { running: '正在准备导出文件…', done: '导出文件' },
   save_memory: { running: '正在记下…', done: '保存记忆' },
+  propose_skill: { running: '正在整理技能变更…', done: '生成技能变更提案' },
   get_time: { running: '正在获取时间…', done: '获取时间' },
+  web_search: { running: '正在联网搜索…', done: '联网搜索' },
   undo_change: { running: '正在回退更改…', done: '回退更改' },
   search_all: { running: '正在跨表搜索…', done: '跨表搜索' },
   run_checks: { running: '正在体检数据…', done: '数据体检' },
@@ -457,6 +522,7 @@ const TOOL_INFO = {
   snapshot_restore: { running: '正在整理还原提案…', done: '生成还原提案' },
   delete_impact: { running: '正在预估删除影响…', done: '预估删除影响' },
   teaching_week: { running: '正在计算教学周次…', done: '计算教学周次' },
+  run_subagent: { running: '子助手核查中…', done: '子助手核查' },
 };
 
 // 工具执行结果 → 过程块里的一行摘要
@@ -484,8 +550,12 @@ function toolSummary(name, result) {
       return result.message || '等待确认';
     case 'propose_frontend_setting':
       return result.message || '等待确认';
+    case 'propose_skill':
+      return result.message || '等待确认';
     case 'get_time':
       return result.datetime || '';
+    case 'web_search':
+      return result.empty ? '未搜索到结果' : (result.count ? `搜索到 ${result.count} 条网页` : '联网搜索');
     case 'undo_change':
       return result.count ? `已回退 ${result.count} 项更改` : '无可回退的更改';
     case 'search_all':
@@ -514,6 +584,11 @@ function toolSummary(name, result) {
       return result.total ? `共 ${result.total} 处引用` : '未被引用';
     case 'teaching_week':
       return result.week_label || result.date || '';
+    case 'run_subagent': {
+      const list = result.results || [];
+      const failed = list.filter((r) => r && r.error).length;
+      return failed ? `已核查 ${list.length} 个子任务（${failed} 个失败）` : `已核查 ${list.length} 个子任务`;
+    }
     case 'ask_user':
       // 把问题文本带进过程块步骤（呈现为「向你提问 · <问题>」），气泡正文不再重复罗列
       return result.questions && result.questions.length ? result.questions.join('；') : '已向你提问';
@@ -569,6 +644,68 @@ const timeTool = {
     parameters: { type: 'object', properties: {} },
   },
 };
+
+// web_search 工具：调用 DeepSeek 官方搜索接口联网检索最新网页（仅 DeepSeek 模式下发）
+const webSearchTool = {
+  type: 'function',
+  function: {
+    name: 'web_search',
+    description: '联网搜索网页（调用 DeepSeek 官方搜索接口）。当问题涉及实时信息、最新新闻/政策、你不确定或可能过时的事实、需要外部资料（如教程、价格、赛事、人物近况）时使用。仅 DeepSeek 模式下可用；返回若干网页的标题、链接与摘要，请据此作答并注明来源链接，不要编造结果。',
+    parameters: {
+      type: 'object',
+      properties: {
+        query: { type: 'string', description: '搜索词，1～128 个字符。支持搜索语法：site:、-site:、-关键词、-"短语"、"精确短语"、lang:zh,en、after:2025、before:2026 等，可组合使用' },
+        count: { type: 'number', description: '返回条数，1～10，默认 5' },
+      },
+      required: ['query'],
+    },
+  },
+};
+
+// 执行 web_search：POST https://api.deepseek.com/v1/tools/search
+//   鉴权用当前 DeepSeek 模型的 API Key；need_content 传 false（仅取标题/摘要，更快更省）
+async function runWebSearch(args, ctx) {
+  const { currentSettings } = require('./config');
+  const cfg = (ctx && ctx.cfg) || currentSettings();
+  if (!cfg || cfg.provider !== 'deepseek' || !cfg.api_key) {
+    return { ok: false, error: '联网搜索仅在 DeepSeek 模式下可用' };
+  }
+  const query = String((args && args.query) || '').trim();
+  if (!query) return { ok: false, error: '缺少搜索词 query' };
+  const count = Math.min(Math.max(parseInt(args && args.count, 10) || 5, 1), 10);
+  try {
+    const r = await fetch('https://api.deepseek.com/v1/tools/search', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${cfg.api_key}` },
+      body: JSON.stringify({ query, count, need_content: false }),
+      signal: AbortSignal.timeout(30000),
+    });
+    if (!r.ok) {
+      let msg = '';
+      try { msg = ((await r.json()).error || {}).message || ''; } catch (_) { msg = (await r.text().catch(() => '')).slice(0, 200); }
+      return { ok: false, error: `搜索服务返回 ${r.status}${msg ? `：${msg}` : ''}` };
+    }
+    const j = await r.json();
+    const results = (Array.isArray(j.results) ? j.results : []).slice(0, count).map((x) => ({
+      title: String((x && x.title) || ''),
+      url: String((x && x.url) || ''),
+      snippet: String((x && x.snippet) || ''),
+      summary: String((x && x.summary) || '').slice(0, 1200),
+      site_name: (x && x.site_name) || null,
+      date: (x && x.date) || null,
+    }));
+    if (!results.length) return { ok: true, count: 0, query, empty: true, note: '未搜索到相关网页，请据已有知识作答并说明可能不是最新' };
+    return {
+      ok: true,
+      count: results.length,
+      query,
+      results,
+      note: '以上是联网搜索结果，请据此作答并附上来源链接；若信息仍不充分，可换关键词再搜一次，但不要重复相同搜索',
+    };
+  } catch (err) {
+    return { ok: false, error: `联网搜索失败：${(err && err.message) || '网络错误'}` };
+  }
+}
 
 // undo_change 工具：让 AI 回退自己此前通过写入提案做出的数据更改（复用 undo_history 撤销系统）
 const undoTool = {
@@ -845,6 +982,7 @@ const batchUpdateTool = {
         ids: { type: 'array', items: { type: 'number' }, description: '要统一修改的记录 id 列表（与 changes 搭配使用）' },
         changes: { type: 'object', description: '对 ids 里所有记录套用的同一处改动：{ 字段名: 新值 }' },
         label: { type: 'string', description: '本次修改的简短说明，如「统一标记为已返校」' },
+        source: { type: 'string', description: SOURCE_DESC },
       },
       required: ['table'],
     },
@@ -935,6 +1073,7 @@ const batchOpsTool = {
           },
         },
         label: { type: 'string', description: '本次批量操作的简短说明，如「新增转学生王小明」' },
+        source: { type: 'string', description: SOURCE_DESC },
       },
       required: ['ops'],
     },
@@ -2034,6 +2173,114 @@ function latestUserImages(messages) {
   return [];
 }
 
+// ===== run_subagent 工具：启动「只读子助手」并行处理独立子任务 =====
+// 子助手在受限上下文（角色名 + 一句话任务 + 期望字段 + 口径）与受限工具子集
+// （llm.js 的 SUBAGENT_TOOL_NAMES：只有查询/统计/校验类，无任何写入与提问工具）里跑，
+// 只读、不改数据、不直连用户提问，按固定契约返回结构化结果。
+const subagentTool = {
+  type: 'function',
+  function: {
+    name: 'run_subagent',
+    description: '启动 1~4 个「只读子助手」并行处理相互独立的核查子任务。适用：① 任务可拆成 3 个以上互不依赖的子问题（并行体检）；② 单次需扫过超过 500 行；③ 对关键数字做独立复核（让不带主上下文的子助手用原始数据重算）。子助手只读、不改数据、不会直接向老师提问（拿不准的事写入其返回的 needs_user_decision）。每个子任务返回 {task, result, basis, count, samples, error, needs_user_decision}，其中 basis/count 用于核对其查询范围。此调用不会改数据。',
+    parameters: {
+      type: 'object',
+      properties: {
+        tasks: {
+          type: 'array',
+          description: '要并行跑的子任务列表（1~4 个）',
+          items: {
+            type: 'object',
+            properties: {
+              name: { type: 'string', description: '子助手角色名，如「数据体检员」' },
+              task: { type: 'string', description: '一句话目标' },
+              returns: { type: 'string', description: '期望返回的字段/口径（可选）' },
+              context: { type: 'string', description: '涉及的表名 + 口径（可选），如「结余=收入-支出，不含未报销」' },
+            },
+            required: ['name', 'task'],
+          },
+        },
+      },
+      required: ['tasks'],
+    },
+  },
+};
+
+const MAX_SUBAGENT_TASKS = 4;      // 一次最多并行几个子任务（控制成本与延迟）
+const MAX_SUBAGENT_ROUNDS = 6;     // 单个子任务最多几轮推理（防死循环，与主循环口径一致）
+
+// 解析子助手返回的正文为契约对象：容错剥离 ```json 围栏，取首个 '{' 到最后一个 '}' 的片段；
+// 解析失败则兜底成「未按契约返回」，避免把整段自然语言当成结果结构。
+function parseSubagentResult(text, task) {
+  const raw = String(text || '').trim();
+  let body = raw;
+  const fence = raw.match(/```(?:json)?\s*([\s\S]*?)```/i);
+  if (fence) body = fence[1].trim();
+  const start = body.indexOf('{');
+  const end = body.lastIndexOf('}');
+  if (start !== -1 && end > start) body = body.slice(start, end + 1);
+  try {
+    const obj = JSON.parse(body);
+    if (obj && typeof obj === 'object' && !Array.isArray(obj)) return obj;
+  } catch (_) { /* 落到兜底 */ }
+  return { task, result: raw, basis: '', count: 0, samples: [], error: '子助手未按契约返回 JSON', needs_user_decision: [] };
+}
+
+// 单个子任务：独立上下文 + 受限只读工具子集，循环取数直至子助手给出最终 JSON
+async function runOneSubagent(cfg, item, ctx) {
+  const { consumeStream, buildSubagentPrompt, getSubagentTools } = require('./llm');
+  const name = String((item && item.name) || '数据核查员').slice(0, 40);
+  const task = String((item && item.task) || '').trim();
+  if (!task) {
+    return { task: '', result: null, basis: '', count: 0, samples: [], error: '子任务缺少 task（目标）', needs_user_decision: [] };
+  }
+  const subTools = getSubagentTools();
+  const history = [
+    { role: 'system', content: buildSubagentPrompt({ name, task, returns: item.returns, context: item.context }) },
+    { role: 'user', content: task },
+  ];
+  // 独立 blocks：子助手即便用到块类工具也不污染主对话正文
+  const subCtx = { ...ctx, blocks: [] };
+  for (let i = 0; i < MAX_SUBAGENT_ROUNDS; i++) {
+    const { text, toolCalls, reasoning } = await consumeStream(cfg, history, null, null, ctx && ctx.signal, subTools);
+    if (!toolCalls || !toolCalls.length) return parseSubagentResult(text, task);
+    history.push({
+      role: 'assistant',
+      content: text || '',
+      // 带 tools 的思考模式要求把思维链原样回传，否则后续轮次可能报错
+      ...(reasoning ? { reasoning_content: reasoning } : {}),
+      tool_calls: toolCalls.map((t) => ({ id: t.id, type: 'function', function: { name: t.name, arguments: t.arguments } })),
+    });
+    for (const tc of toolCalls) {
+      let targs = {};
+      try { targs = JSON.parse(tc.arguments || '{}'); } catch (_) {}
+      let result;
+      try { result = (await runTool(tc.name, targs, subCtx)).result; }
+      catch (e) { result = { error: e.message || '子助手工具执行失败' }; }
+      history.push({ role: 'tool', tool_call_id: tc.id, content: JSON.stringify(result) });
+    }
+  }
+  return { task, result: null, basis: '', count: 0, samples: [], error: '子助手超过最大轮数仍未给出结论', needs_user_decision: [] };
+}
+
+// run_subagent：并行启动若干只读子助手，各自返回契约对象
+async function runSubagent(args, ctx) {
+  const { currentSettings } = require('./config');
+  const list = Array.isArray(args && args.tasks)
+    ? args.tasks.filter((t) => t && typeof t === 'object' && !Array.isArray(t))
+    : [];
+  if (!list.length) return { results: [], error: '缺少子任务（tasks 不能为空，每项含 name/task）' };
+  const cfg = currentSettings();
+  if (!cfg || !cfg.api_key) return { results: [], error: '尚未启用 / 配置 AI，子助手无法运行' };
+  const tasks = list.slice(0, MAX_SUBAGENT_TASKS);
+  const results = await Promise.all(tasks.map((t) =>
+    runOneSubagent(cfg, t, ctx).catch((e) => ({
+      task: String((t && t.task) || ''), result: null, basis: '', count: 0, samples: [],
+      error: e.message || '子助手运行失败', needs_user_decision: [],
+    }))
+  ));
+  return { results, count: results.length };
+}
+
 // 统一的工具执行入口：流式 / 非流式共用
 //   ctx.blocks 收集 record / chart 数据块；返回 { result, proposal?, ask? }
 //   async：OCR 等工具需要等待外部进程，故统一 await 调用
@@ -2073,7 +2320,7 @@ async function runTool(name, args, ctx) {
       const p = normalizeProposal(args);
       if (!p.ok) return { result: { ok: false, error: p.error } };
       return {
-        proposal: { operation: p.operation, table: p.table, data: p.data, label: p.label, ...(p.diff ? { diff: p.diff } : {}) },
+        proposal: { operation: p.operation, table: p.table, data: p.data, label: p.label, ...(p.diff ? { diff: p.diff } : {}), ...(args.source ? { originNote: String(args.source).slice(0, 80) } : {}) },
         result: {
           ok: true, message: p.label, pending_user_confirmation: true,
           ...(p.diff && p.diff.length ? { diff: p.diff } : {}),
@@ -2084,7 +2331,7 @@ async function runTool(name, args, ctx) {
       const b = normalizeBatchProposal(args);
       if (!b.ok) return { result: { ok: false, error: b.error } };
       return {
-        proposal: { operation: 'add', batch: true, table: b.table, data: { rows: b.rows }, label: b.label },
+        proposal: { operation: 'add', batch: true, table: b.table, data: { rows: b.rows }, label: b.label, ...(args.source ? { originNote: String(args.source).slice(0, 80) } : {}) },
         result: { ok: true, message: b.label, count: b.count, pending_user_confirmation: true },
       };
     }
@@ -2092,7 +2339,7 @@ async function runTool(name, args, ctx) {
       const d = normalizeBatchDelete(args);
       if (!d.ok) return { result: { ok: false, error: d.error } };
       return {
-        proposal: { operation: 'delete', batch: true, table: d.table, data: { ids: d.ids }, label: d.label },
+        proposal: { operation: 'delete', batch: true, table: d.table, data: { ids: d.ids }, label: d.label, ...(args.source ? { originNote: String(args.source).slice(0, 80) } : {}) },
         result: {
           ok: true, message: d.label, count: d.count, pending_user_confirmation: true,
           ...(d.missing.length ? { note: `已忽略不存在的 id：${d.missing.join('、')}` } : {}),
@@ -2103,7 +2350,7 @@ async function runTool(name, args, ctx) {
       const j = normalizeJsonProposal(args);
       if (!j.ok) return { result: { ok: false, error: j.error } };
       return {
-        proposal: { kind: 'json', table: j.table, id: j.id, values: j.values, before: j.before, label: j.label },
+        proposal: { kind: 'json', table: j.table, id: j.id, values: j.values, before: j.before, label: j.label, ...(args.source ? { originNote: String(args.source).slice(0, 80) } : {}) },
         result: { ok: true, message: j.label, pending_user_confirmation: true },
       };
     }
@@ -2115,11 +2362,19 @@ async function runTool(name, args, ctx) {
         result: { ok: true, message: f.label, pending_user_confirmation: true },
       };
     }
+    case 'propose_skill': {
+      const s = runProposeSkill(args, ctx);
+      if (s.error) return { result: { ok: false, error: s.error } };
+      return {
+        proposal: s.proposal,
+        result: { ok: true, message: s.proposal.label, pending_user_confirmation: true },
+      };
+    }
     case 'propose_update_many': {
       const u = normalizeBatchUpdate(args || {});
       if (!u.ok) return { result: { ok: false, error: u.error } };
       return {
-        proposal: { operation: 'update', batch: true, table: u.table, data: { updates: u.updates }, diffs: u.diffs, label: u.label },
+        proposal: { operation: 'update', batch: true, table: u.table, data: { updates: u.updates }, diffs: u.diffs, label: u.label, ...(args.source ? { originNote: String(args.source).slice(0, 80) } : {}) },
         result: { ok: true, message: u.label, count: u.count, diffs: u.diffs, pending_user_confirmation: true },
       };
     }
@@ -2127,7 +2382,7 @@ async function runTool(name, args, ctx) {
       const b = normalizeBatchOps(args || {});
       if (!b.ok) return { result: { ok: false, error: b.error } };
       return {
-        proposal: { kind: 'batch_ops', ops: b.ops, label: b.label },
+        proposal: { kind: 'batch_ops', ops: b.ops, label: b.label, ...(args.source ? { originNote: String(args.source).slice(0, 80) } : {}) },
         result: { ok: true, message: b.label, count: b.count, pending_user_confirmation: true },
       };
     }
@@ -2149,6 +2404,8 @@ async function runTool(name, args, ctx) {
       return { result: runDeleteImpact(args || {}) };
     case 'teaching_week':
       return { result: runTeachingWeek(args || {}) };
+    case 'run_subagent':
+      return { result: await runSubagent(args || {}, ctx) };
     case 'show_record': {
       const sr = runShowRecord(args);
       if (!sr.block) return { result: { ok: false, error: sr.error } };
@@ -2163,6 +2420,8 @@ async function runTool(name, args, ctx) {
     }
     case 'get_time':
       return { result: currentTimeInfo() };
+    case 'web_search':
+      return { result: await runWebSearch(args, ctx) };
     case 'undo_change':
       return { result: await runUndoChange(args) };
     case 'save_memory': {
@@ -2230,5 +2489,5 @@ async function runTool(name, args, ctx) {
 
 
 module.exports = {
-  runTool, appendBlocks, latestUserImages, toolSummary, toolDetailText, TOOL_INFO, MAX_BATCH_OPS, BATCH_ROW_TABLES, SNAPSHOT_NAME_RE, runSnapshotCreate, runSnapshotList, queryTool, proposeWriteTool, showRecordTool, batchAddTool, batchDeleteTool, jsonWriteTool, frontSettingTool, chartTool, askUserTool, memoryTool, readDocumentTool, ocrTool, exportTool, timeTool, undoTool, aggregateTool, resolveStudentTool, listChangesTool, searchAllTool, runChecksTool, conflictChecksTool, exportImageTool, scoreWeightsTool, batchUpdateTool, batchOpsTool, describeTableTool, snapshotCreateTool, snapshotListTool, snapshotRestoreTool, deleteImpactTool, teachingWeekTool,
+  runTool, appendBlocks, latestUserImages, toolSummary, toolDetailText, TOOL_INFO, MAX_BATCH_OPS, BATCH_ROW_TABLES, SNAPSHOT_NAME_RE, runSnapshotCreate, runSnapshotList, queryTool, proposeWriteTool, showRecordTool, batchAddTool, batchDeleteTool, jsonWriteTool, frontSettingTool, chartTool, askUserTool, memoryTool, readDocumentTool, ocrTool, exportTool, timeTool, webSearchTool, undoTool, aggregateTool, resolveStudentTool, listChangesTool, searchAllTool, runChecksTool, conflictChecksTool, exportImageTool, scoreWeightsTool, batchUpdateTool, batchOpsTool, describeTableTool, snapshotCreateTool, snapshotListTool, snapshotRestoreTool, deleteImpactTool, teachingWeekTool, skillTool, subagentTool, runSubagent,
 };

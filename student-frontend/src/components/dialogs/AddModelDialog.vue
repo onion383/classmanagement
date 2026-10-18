@@ -4,7 +4,7 @@
     <div v-if="show" class="fixed inset-0 bg-black/50 flex items-center justify-center z-[10070]" @click.self="close">
       <div class="dialog-card bg-surface rounded-lg p-6 w-[28rem] max-w-[calc(100vw-2rem)] border border-border shadow-lg">
         <div class="flex items-center justify-between mb-5 flex-shrink-0">
-          <h3 class="text-lg font-bold text-text">添加模型</h3>
+          <h3 class="text-lg font-bold text-text">{{ isEdit ? '编辑模型' : '添加模型' }}</h3>
           <button @click="close" class="dlg-close" title="关闭">✕</button>
         </div>
 
@@ -18,6 +18,7 @@
               target="_blank"
               rel="noopener"
               class="text-xs text-info hover:underline flex-shrink-0 whitespace-nowrap"
+              @click="openDocs($event)"
             >获取 API Key</a>
           </div>
           <div class="flex items-center gap-4">
@@ -49,11 +50,11 @@
           </div>
           <div class="flex items-center gap-4">
             <label class="text-sm font-medium text-text w-20 flex-shrink-0">API Key</label>
-            <input v-model="form.api_key" type="password" placeholder="同一服务商已配置过可留空自动复用" class="flex-1 border border-border bg-surface text-text px-3 py-2 rounded" autocomplete="off" />
+            <input v-model="form.api_key" type="password" :placeholder="isEdit ? '留空表示不修改密钥' : '同一服务商已配置过可留空自动复用'" class="flex-1 border border-border bg-surface text-text px-3 py-2 rounded" autocomplete="off" />
           </div>
 
           <p v-if="error" class="text-xs text-danger">{{ error }}</p>
-          <p class="text-xs text-text-muted">点击「确定」将自动检测模型连通性，通过后才保存；密钥仅存本机数据库，同一服务商可留空复用已有密钥。</p>
+          <p class="text-xs text-text-muted">{{ isEdit ? '点击「确定」将自动检测模型连通性，通过后才保存；API Key 留空表示保持不变。' : '点击「确定」将自动检测模型连通性，通过后才保存；密钥仅存本机数据库，同一服务商可留空复用已有密钥。' }}</p>
 
           <div class="flex items-center justify-end gap-3 pt-1">
             <button @click="close" class="border border-border text-text px-4 py-2 rounded hover:bg-surface-hover cursor-pointer">取消</button>
@@ -80,6 +81,8 @@ export default {
   components: { AppSelect },
   props: {
     show: { type: Boolean, default: false },
+    // 传入已有模型对象即为「编辑」模式：标题改为「编辑模型」并回填数据，保存时走更新接口
+    editModel: { type: Object, default: null },
   },
   emits: ['close', 'saved'],
   data() {
@@ -117,6 +120,10 @@ export default {
     }
   },
   computed: {
+    // 是否编辑模式（有传入已有模型对象且带 id）
+    isEdit() {
+      return !!(this.editModel && this.editModel.id)
+    },
     providerOptions() {
       return [
         { value: 'deepseek', label: 'DeepSeek（推荐）' },
@@ -133,13 +140,24 @@ export default {
   },
   watch: {
     show(val) {
-      // 每次打开时重置表单
+      // 每次打开时重置表单：编辑模式回填已有数据，否则回到默认值
       if (val) {
         this.error = ''
         this.mode = 'input'
         this.discovered = []
         this.discoverError = ''
-        this.form = { name: '', provider: 'deepseek', base_url: this.providerPresets.deepseek.base_url, model: this.providerPresets.deepseek.model, api_key: '' }
+        if (this.isEdit) {
+          const m = this.editModel
+          this.form = {
+            name: m.name || '',
+            provider: m.provider || 'deepseek',
+            base_url: m.base_url || '',
+            model: m.model || '',
+            api_key: '', // 留空表示不修改密钥
+          }
+        } else {
+          this.form = { name: '', provider: 'deepseek', base_url: this.providerPresets.deepseek.base_url, model: this.providerPresets.deepseek.model, api_key: '' }
+        }
       }
     },
   },
@@ -154,6 +172,16 @@ export default {
       this.mode = 'input'
       this.discovered = []
       this.discoverError = ''
+    },
+    // 「获取 API Key」：在系统默认浏览器打开服务商页面，不要用 Electron 内置窗口。
+    // Electron 内阻止默认跳转、改走主进程 open-external；非 Electron 环境保留 href 默认行为。
+    openDocs(event) {
+      const url = this.providerDocs[this.form.provider]
+      if (!url) return
+      if (window.electron && window.electron.invoke) {
+        event.preventDefault()
+        window.electron.invoke('open-external', url)
+      }
     },
     // 点击「识别」：调用服务商 /models 接口获取可用模型，切换为下拉选择
     async discover() {
@@ -185,7 +213,9 @@ export default {
       if (!this.form.model.trim()) { this.error = '请填写模型名'; return }
       this.testing = true
       try {
-        const res = await axios.post('/api/ai/models', this.form)
+        const res = this.isEdit
+          ? await axios.put(`/api/ai/models/${this.editModel.id}`, this.form)
+          : await axios.post('/api/ai/models', this.form)
         if (res.data && res.data.success) {
           this.close()
           this.$emit('saved')

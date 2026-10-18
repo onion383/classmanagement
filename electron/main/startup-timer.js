@@ -124,6 +124,15 @@ function saveLog(filePath) {
   try {
     const dir = path.dirname(filePath)
     if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true })
+    // 体积兜底：这份日志每次启动都追加，正式版里也没有门控，长期用下去会无限增长。
+    // 它只用于排查启动耗时，超过 512KB 就只保留最近一半（保留末尾，最新一次启动总在）。
+    try {
+      const st = fs.statSync(filePath)
+      if (st.size > 512 * 1024) {
+        const tail = fs.readFileSync(filePath, 'utf8').slice(-256 * 1024)
+        fs.writeFileSync(filePath, '（历史日志已截断，仅保留最近部分）\n' + tail)
+      }
+    } catch (_) { /* 首次启动文件不存在，忽略 */ }
     const lines = marks.map((m, i) => {
       const gap = i === 0 ? 0 : m.elapsed - marks[i - 1].elapsed
       return `+${String(m.elapsed).padStart(5)}ms  ${m.name}  (间隔 ${gap}ms)`

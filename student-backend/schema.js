@@ -369,6 +369,11 @@ function initSchema(conn) {
   conn.exec(`CREATE INDEX IF NOT EXISTS idx_score_student_time ON score_records (student_id, 加分时间);`);
   // 优化：学生按姓名搜索（搜索栏/下拉候选）
   conn.exec(`CREATE INDEX IF NOT EXISTS idx_students_name ON students (姓名);`);
+  // 优化：分组/班干部列表是「先查父级，再按父级 id 逐个查成员」的形态，
+  // 没索引时每个父级一次全表扫。按外键列建索引（幂等，存量库下次打开自动补建）。
+  // 注：cadre_members 的表在本文件末尾才创建，它的索引放在建表处（见下方）。
+  conn.exec(`CREATE INDEX IF NOT EXISTS idx_groups_dimension ON groups (dimension_id, sort_order, id);`);
+  conn.exec(`CREATE INDEX IF NOT EXISTS idx_group_members_group ON group_members (group_id, sort_order, id);`);
   // 存量库迁移：为相册表补充 sort_order 列
   {
     const albumCols = conn.prepare('PRAGMA table_info(albums)').all().map(c => c.name);
@@ -698,6 +703,8 @@ function initSchema(conn) {
       student_name TEXT NOT NULL,
       sort_order INTEGER NOT NULL DEFAULT 0
     );
+    -- 优化：按职务 id 取成员（列表接口每个职务一条查询），外键列建索引，幂等
+    CREATE INDEX IF NOT EXISTS idx_cadre_members_cadre ON cadre_members (cadre_id, sort_order, id);
   `);
 }
 

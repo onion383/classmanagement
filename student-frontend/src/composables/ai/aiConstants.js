@@ -1,6 +1,3 @@
-// 会话列表折叠状态记忆键
-export const CONV_COLLAPSE_KEY = 'app-ai-conv-collapsed'
-
 // AI 提问里内置「其他」补充项的哨兵值与标签：选中它即展开输入框，
 // 用户填写的自由文本随答案一起回传给 AI（单选/多选均支持）
 export const ASK_OTHER_KEY = '__other__'
@@ -35,3 +32,13 @@ export const FRONT_LABELS = {
   animations: '动画效果', bgMaskOpacity: '背景遮罩不透明度', glassOpacity: '毛玻璃不透明度',
   mergeNotifications: '提示合并',
 }
+
+// AI 写入权限挡位（localStorage 持久化的用户偏好）：
+// 'approve' 全部审批（默认）：每次写入提案都要用户点确认才执行；
+// 'full'    完全权限：写入提案不再弹确认，流结束后直接执行。
+export const AI_PERMISSION_KEY = 'ai_permission_mode'
+export const AI_PERMISSION_FULL = 'full'
+
+// 联网搜索开关（localStorage 持久化）：仅 DeepSeek 模式下可用，默认开启。
+// 存 '0' 表示关闭，其它值（含未设置）均视为开启。
+export const AI_WEB_SEARCH_KEY = 'ai_web_search_enabled'

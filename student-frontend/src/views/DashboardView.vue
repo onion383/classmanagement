@@ -192,7 +192,7 @@
 </template>
 
 <script setup>
-import { ref, computed, onMounted, onBeforeUnmount, onActivated } from 'vue'
+import { ref, computed, onMounted, onBeforeUnmount, onActivated, onDeactivated } from 'vue'
 import { useRouter } from 'vue-router'
 import axios from 'axios'
 import { ensureDashboardData } from '../composables/useDashboardData'
@@ -422,8 +422,18 @@ function formatMoney(n) {
   return Number(n).toFixed(2)
 }
 // 随机相册照片：找第一个有照片的相册，随机取一张，用 thumb 接口（走鉴权）转 dataURL 展示
-async function loadRandomPhoto(albums) {
+// 释放上一张的 blob URL：每次刷新首页都会换一张，不 revoke 的话旧 blob 会一直被文档持有
+// （首页被 KeepAlive 缓存着，长久使用会累积成内存泄漏）。
+function revokeAlbumPhoto() {
+  const cur = albumPhoto.value
+  if (cur && String(cur).startsWith('blob:')) {
+    try { URL.revokeObjectURL(cur) } catch (_) { /* 忽略 */ }
+  }
   albumPhoto.value = ''
+}
+
+async function loadRandomPhoto(albums) {
+  revokeAlbumPhoto()
   const list = Array.isArray(albums) ? albums : []
   for (const album of list) {
     try {
@@ -433,6 +443,7 @@ async function loadRandomPhoto(albums) {
       if (photos.length === 0) continue
       const pick = photos[Math.floor(Math.random() * photos.length)]
       const thumbRes = await axios.get(`/api/album/photo/${pick.id}/thumb`, { responseType: 'blob' })
+      revokeAlbumPhoto()
       albumPhoto.value = URL.createObjectURL(thumbRes.data)
       return
     } catch (_) { /* 试下一个相册 */ }
@@ -476,22 +487,31 @@ async function loadData(force = false) {
 let timer = null
 // 首帧标记：onActivated 首次随挂载触发，跳过避免与 onMounted 重复加载
 let firstActivate = true
+const refreshNow = () => { now.value = new Date() }
 
 onMounted(() => {
   loadData()
   loadClassInfo()
   // 每分钟刷新当前时间，让今日名单、窗口时间等随时间变化
-  timer = setInterval(() => { now.value = new Date() }, 60000)
+  timer = setInterval(refreshNow, 60000)
 })
 
 // 每次从其他页面切回首页时强制重新拉取，保证「修改过数据回来自动更新」为最新
 onActivated(() => {
   if (firstActivate) { firstActivate = false; return }
   loadData(true)
+  // 被 <KeepAlive> 缓存期间定时器是停的（见 onDeactivated），切回时恢复
+  if (!timer) timer = setInterval(refreshNow, 60000)
+})
+
+// 被缓存但不可见时停掉每分钟的时间刷新，避免看不见的页面持续触发布局/渲染
+onDeactivated(() => {
+  if (timer) { clearInterval(timer); timer = null }
 })
 
 onBeforeUnmount(() => {
   if (timer) clearInterval(timer)
+  revokeAlbumPhoto()
 })
 </script>
 

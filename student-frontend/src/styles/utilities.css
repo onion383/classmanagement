@@ -33,7 +33,7 @@
 /* 内容可见性优化：仅渲染视口内的元素，降低长列表的 DOM 开销 */
 @utility content-visibility-auto {
   content-visibility: auto;
-  contain-intrinsic-size: 1px 120px;
+  contain-intrinsic-size: auto 1px 120px;
 }
 
 /* 弹窗右上角关闭按钮：方形毛玻璃小块（× / ✕）。
@@ -69,6 +69,17 @@
 .dlg-close:hover {
   background: color-mix(in srgb, var(--color-text) 14%, transparent);
   color: var(--color-text);
+}
+
+/* ==================== 页面标题栏提亮 ====================
+   各页顶部标题卡（标题栏 / 首页 welcome-card）在既有玻璃底上再叠一层 30% 白，
+   与 AI 聊天区顶部工具条一致。
+   深色模式（html[data-mode="night"]）不加这层白：夜间卡片底本是深蓝，
+   叠白会把卡片冲淡发白，与夜间配色冲突。
+   选择器按标题卡共有的类组合匹配，避免波及其它 bg-surface 卡片（如座位等）。 */
+:root:not([data-mode="night"]) .bg-surface[class*="min-h-[4.5rem]"],
+:root:not([data-mode="night"]) .bg-surface.welcome-card {
+  background-image: linear-gradient(rgba(255, 255, 255, 0.3), rgba(255, 255, 255, 0.3));
 }
 
 /* AI 回复里的「深色框」：AI 生成的图表、思考过程块都套这一层。
@@ -120,4 +131,34 @@
 :root .bg-sidebar .mode-toggle-btn:disabled {
   opacity: 0.4;
   cursor: not-allowed;
+}
+
+/* ==================== AI 聊天列表的滚动同步 ====================
+   现象：滚动时「用户自己发的消息」气泡和文字先停一下、过一会儿才跟上，
+   而助手的气泡很顺。
+   原因不在毛玻璃本身，而在「谁在合成层上」：
+     · 助手气泡是 .bg-surface → glass 主题给它挂了 backdrop-filter → 自成合成层 → 由合成器平移，很顺；
+     · 用户气泡是 bg-primary 纯色 div（glass 主题的模糊规则只命中 button，不含 div）
+       → 没有任何合成层 → 只能等主线程重绘 → 晚一拍。
+   所以这里不再去动毛玻璃（列表内气泡/头像/按钮的模糊全部保留原样），
+   改为把「每条消息」整体提成一个合成层：气泡、文字、头像、操作按钮一起平移，
+   滚动时不会再出现「框到了、字晚一拍」的错位。
+   代价：每条消息一个合成层，消息极多（几百条）时显存会涨；
+   若真出现长列表反而更卡的情况，把下面这条换成「列表内关闭 backdrop-filter」的降开销方案。 */
+.ai-msg-list > * {
+  will-change: transform;
+}
+
+/* ==================== 表格页面小节标题的滚动卡顿 ====================
+   现象：座位表 / 座位位置权重表这类页面滚动时，只有小节标题（文字 + 图标）慢半拍，
+   旁边的按钮、下方的表格都很顺。
+   原因：那一屏里只有标题是「主线程普通绘制」——表格容器有 will-change: transform、
+   .opbar 按钮和 .view-switch 有 backdrop-filter、页面标题卡是 .bg-surface（同样带模糊），
+   它们各自都在独立合成层上，滚动时由合成器直接平移；
+   而纯文字要等主线程重新栅格化，合成器一忙就晚一拍。
+   这里给小节标题也建一个独立合成层，让它的位移与邻居走同一套节拍。
+   只统一滚动节拍，不改任何外观（不含弹窗内的标题，弹窗本身不滚动）。 */
+main h2.text-xl,
+main h3.text-xl {
+  will-change: transform;
 }

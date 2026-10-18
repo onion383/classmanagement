@@ -58,7 +58,9 @@ export default {
   },
   emits: ['update:modelValue', 'change'],
   data() {
-    return { open: false, hoverIdx: -1, menuPos: { left: 0, top: 0, width: 0 } }
+    // menuZ：下拉菜单的层级。菜单 Teleport 到 body 后自成一层，必须压过"包住触发器的浮层"，
+    // 否则会被弹窗遮罩/AI 悬浮窗盖住（点开看不到或只看到一角）。
+    return { open: false, hoverIdx: -1, menuPos: { left: 0, top: 0, width: 0 }, menuZ: 10010 }
   },
   computed: {
     list() {
@@ -85,7 +87,7 @@ export default {
         top: this.menuPos.top + 'px',
         width: this.menuPos.width + 'px',
         minWidth: '120px',
-        zIndex: 10010,
+        zIndex: this.menuZ,
       }
       if (fs) style.fontSize = fs
       return style
@@ -101,7 +103,21 @@ export default {
         if (rect) {
           this.menuPos = { left: rect.left, top: rect.bottom + 4, width: rect.width }
         }
+        this.menuZ = this._layerZ()
       }
+    },
+    // 菜单层级：从触发器往上取祖先里最大的 z-index 再叠一层，保证压过包住它的浮层。
+    // 这样同一个下拉放在普通页面（无浮层，用 10010 兜底）、z-[10070] 的「添加模型」弹窗、
+    // z-[20001] 的 AI 悬浮窗里都能正常显示，不用每处浮层各写一个魔法数字。
+    _layerZ() {
+      let max = 0
+      let el = this.$refs.rootRef
+      while (el && el !== document.body && el !== document.documentElement) {
+        const z = parseInt(window.getComputedStyle(el).zIndex, 10)
+        if (!Number.isNaN(z) && z > max) max = z
+        el = el.parentElement
+      }
+      return Math.max(10010, max + 10)
     },
     move(step) {
       if (!this.open) { this.open = true; return }

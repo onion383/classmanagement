@@ -1,6 +1,7 @@
 import { ref, computed, watch, onMounted, onBeforeUnmount } from 'vue'
 import axios from 'axios'
 import { useNotification } from './useNotification'
+import { createRowReuseCache } from '../utils/rowReuse.js'
 
 export function useTableCRUD(apiBase, defaultFields, options = {}) {
   const { error: notifyError } = useNotification()
@@ -17,6 +18,9 @@ export function useTableCRUD(apiBase, defaultFields, options = {}) {
   const fields = ref([...defaultFields])
   // 撤销专用：最近一次加载的全表快照，作为单元格"旧值"来源
   const rowsSnapshot = ref([])
+  // 全量刷新时按行内容复用行对象：内容没变的行沿用旧引用，
+  // 让 Vue 只重渲染真正变化的行（普通表格无 cells 字段，比对退化到浅比较字段）
+  const reuseRows = createRowReuseCache()
   const newRow = ref(null)
   const editingCell = ref(null)
   const contextMenu = ref({ visible: false, x: 0, y: 0, items: [] })
@@ -155,7 +159,8 @@ export function useTableCRUD(apiBase, defaultFields, options = {}) {
       if (Array.isArray(result.data)) {
         // 行对象自带展示字段（_rowKey/_isNew）：字段随行对象长期存在，
         // 使派生列表可以复用行对象引用，单行变化时只重渲染那一行。
-        rows.value = result.data.map(r => ({ ...r, _rowKey: r.id, _isNew: false }))
+        // 再经复用缓存：整表刷新时内容不变的行沿用旧对象，避免整表重画。
+        rows.value = reuseRows(result.data.map(r => ({ ...r, _rowKey: r.id, _isNew: false })))
         // 撤销用快照：独立浅拷贝，避免被后续 v-model 编辑污染
         rowsSnapshot.value = result.data.map(r => ({ ...r }))
         if (result.fields && result.fields.length > 0) {
@@ -227,7 +232,12 @@ export function useTableCRUD(apiBase, defaultFields, options = {}) {
     const oldVal = snap ? snap[field.name] : undefined
     try {
       await axios.put(`${apiBase}/${row.id}`, { [field.name]: val })
-      await fetchRows()
+      // 单格保存成功后只就地更新这一行 + 同步快照，不再整表重拉：
+      // 全量重拉会为所有行重建对象、触发整表重画，而这次写入只影响本行本字段。
+      const live = rows.value.find(r => r.id === row.id)
+      if (live) live[field.name] = val
+      const s = rowsSnapshot.value.find(r => r.id === row.id)
+      if (s) s[field.name] = val
       // 值确实发生变化才记录撤销
       if (undoTableKey && oldVal !== val) {
         recordUndo(row.id, field.name, oldVal, val)

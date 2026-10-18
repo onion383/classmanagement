@@ -17,16 +17,19 @@
       :class="{ on: modelValue === opt.value }"
       :aria-selected="modelValue === opt.value"
       @click="$emit('update:modelValue', opt.value)"
-    >{{ opt.label }}</button>
+    >
+      <component v-if="opt.icon" :is="opt.icon" :size="15" :stroke-width="1.8" />
+      <span v-if="opt.label">{{ opt.label }}</span>
+    </button>
   </div>
 </template>
 
 <script setup>
-import { ref, watch, onMounted, nextTick } from 'vue'
+import { ref, watch, onMounted, onUnmounted, nextTick } from 'vue'
 
 const props = defineProps({
   modelValue: { type: [String, Number], default: '' },
-  // 分段项：[{ value, label }]
+  // 分段项：[{ value, label, icon? }]（icon 为可选的图标组件，如 lucide 图标）
   options: { type: Array, default: () => [] },
   // 选中色块所套用的类，默认与工具栏彩色按钮一致（暖色主色），命中同一批主题按钮规则
   thumbClass: { type: String, default: 'bg-primary text-text-inverse' }
@@ -61,12 +64,22 @@ function syncThumb() {
 watch(() => props.modelValue, () => nextTick(syncThumb))
 watch(() => props.options, () => nextTick(syncThumb), { deep: true })
 
+// 尺寸监听器：必须存下来并在卸载时 disconnect。
+// 原先直接 `new ResizeObserver(...).observe(...)` 不保留引用——组件卸载后观察器仍持有
+// 回调闭包与 DOM 节点，整棵组件无法回收（每挂载一次泄漏一个观察器）。
+let ro = null
+
 onMounted(() => {
   nextTick(syncThumb)
   // 侧边栏折叠、窗口缩放、字体加载等导致的尺寸变化都重新定位
   if (typeof ResizeObserver !== 'undefined' && root.value) {
-    new ResizeObserver(syncThumb).observe(root.value)
+    ro = new ResizeObserver(syncThumb)
+    ro.observe(root.value)
   }
+})
+
+onUnmounted(() => {
+  if (ro) { ro.disconnect(); ro = null }
 })
 </script>
 
@@ -135,6 +148,7 @@ onMounted(() => {
   display: inline-flex;
   align-items: center;
   justify-content: center;
+  gap: 4px;
   /* 各段等宽：内嵌块尺寸恒定，切换时不会忽大忽小；
      宽度即文字与边框之间的留白，加大一点让文字不贴边 */
   width: 4.5rem;

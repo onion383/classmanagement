@@ -262,6 +262,23 @@
             <span class="text-xs text-text-muted">标题栏与侧边栏的毛玻璃底色（深蓝 / 白色调）</span>
           </div>
 
+          <!-- 日夜模式 + 跟随系统（同一组：组内紧凑，上下留白更大，与相邻设置分开；仅支持夜间配色的主题显示） -->
+          <div v-if="nightSupported" class="py-6 my-8 space-y-4">
+            <div class="flex items-center gap-4">
+              <label class="text-sm font-medium text-text w-16 flex-shrink-0">日夜模式</label>
+              <ViewSwitch :modelValue="mode" :options="modeSwitchOptions" @update:modelValue="onSelectMode" />
+              <span class="text-xs text-text-muted">当前主题支持夜间配色</span>
+            </div>
+            <div class="flex items-center gap-4">
+              <label class="text-sm font-medium text-text w-16 flex-shrink-0">跟随系统</label>
+              <label class="inline-flex items-center cursor-pointer">
+                <input type="checkbox" :checked="followSystem" @change="onFollowSystemChange" class="w-4 h-4 rounded border-border text-primary focus:ring-primary cursor-pointer" />
+                <span class="ml-2 text-sm text-text-secondary">{{ followSystem ? '随系统深色/浅色自动切换' : '手动指定' }}</span>
+              </label>
+              <span class="text-xs text-text-muted">开启后按操作系统的深色/浅色偏好自动切换</span>
+            </div>
+          </div>
+
           <!-- 提示合并 -->
           <div class="flex items-center gap-4 mb-6">
             <label class="text-sm font-medium text-text w-16 flex-shrink-0">提示合并</label>
@@ -523,6 +540,21 @@
         </div>
         <div>
           <div class="flex items-center gap-4 mb-2">
+            <label class="text-sm font-medium text-text w-40 flex-shrink-0">技能文件目录</label>
+            <div class="flex-1 min-w-0">
+              <div class="truncate text-sm text-text-secondary border border-border bg-bg px-3 py-2 rounded-lg" :title="skillsDir">
+                {{ skillsDir || '加载中…' }}
+              </div>
+            </div>
+            <button @click="changeSkillsDir" :disabled="busySkillsDir" class="bg-info hover:bg-info-hover text-text-inverse px-4 py-2 rounded transition-theme disabled:opacity-50 whitespace-nowrap">
+              {{ busySkillsDir ? '搬迁中…' : '修改' }}
+            </button>
+            <button @click="openDir(skillsDir)" :disabled="busySkillsDir" class="bg-success hover:bg-success-hover text-text-inverse px-4 py-2 rounded transition-theme disabled:opacity-50 whitespace-nowrap">打开文件夹</button>
+          </div>
+          <p class="text-xs text-text-muted ml-40">AI 技能 md 文件的存放目录（按老师分文件夹）。修改会把现有技能文件搬迁到新目录并重启应用服务；AI 记忆文件不在此目录，不受影响。</p>
+        </div>
+        <div>
+          <div class="flex items-center gap-4 mb-2">
             <label class="text-sm font-medium text-text w-40 flex-shrink-0">数据库加密</label>
             <div class="flex-1 min-w-0">
               <div class="truncate text-sm text-text-secondary border border-border bg-bg px-3 py-2 rounded-lg" :title="dbEncrypted ? '已加密（推荐）' : '未加密（明文存储）'">
@@ -632,6 +664,8 @@
 import axios from 'axios'
 import { defineAsyncComponent } from 'vue'
 import AppSelect from '../components/base/AppSelect.vue'
+import { Sun, Moon } from '@lucide/vue'
+import ViewSwitch from '../components/base/ViewSwitch.vue'
 import { useThemeStore } from '../stores/theme'
 import { storeToRefs } from 'pinia'
 import { resourceUrl } from '../utils/apiUrl'
@@ -643,7 +677,7 @@ import { useNotification } from '../composables/useNotification'
 const ConfirmDialog = defineAsyncComponent(() => import('../components/base/ConfirmDialog.vue'))
 
 export default {
-  components: { AppSelect, ConfirmDialog },
+  components: { AppSelect, ConfirmDialog, ViewSwitch },
   // 懒加载弹窗保活：首次打开后保持挂载，关闭只降 visible，保留退出动画
   watch: {
     'dialog.visible'(n) { if (n) this.dialogMounted = true },
@@ -654,7 +688,7 @@ export default {
   },
   data() {
     const themeStore = useThemeStore()
-    const { currentTheme, bgMaskOpacity, glassOpacity, iconStyle, topbarColor, animationsEnabled } = storeToRefs(themeStore)
+    const { currentTheme, bgMaskOpacity, glassOpacity, iconStyle, topbarColor, animationsEnabled, mode, nightSupported, followSystem } = storeToRefs(themeStore)
 
     return {
       themeStore,
@@ -663,6 +697,9 @@ export default {
       glassOpacity,
       iconStyle,
       topbarColor,
+      mode,
+      nightSupported,
+      followSystem,
       // 设置项搜索：输入即匹配，结果以悬浮弹窗显示在搜索框下方，点击滚动到对应设置区
       settingsSearch: '',
       settingsSearchOpen: false,
@@ -692,6 +729,8 @@ export default {
         { label: '主题',                     section: 'theme',    py: 'zt' },
         { label: '图标样式',                 section: 'theme',    py: 'tbys' },
         { label: '顶栏配色',                 section: 'theme',    py: 'dlps' },
+        { label: '日夜模式',                 section: 'theme',    py: 'ryms' },
+        { label: '跟随系统',                 section: 'theme',    py: 'gsxt' },
         { label: '提示合并',                 section: 'theme',    py: 'tshb' },
         { label: '动画效果',                 section: 'theme',    py: 'dhxg' },
         { label: '背景遮罩层（有自定义背景图时）', section: 'theme', py: 'bjzzc' },
@@ -704,6 +743,7 @@ export default {
         { label: '一键截屏保存位置',         section: 'savepath', py: 'yjjpbcwz' },
         { label: '数据库目录',               section: 'datadir',  py: 'sjkml' },
         { label: '相册缩略图缓存',           section: 'datadir',  py: 'xcsltch' },
+        { label: '技能文件目录',             section: 'datadir',  py: 'jnwjml' },
         { label: '数据库加密',               section: 'datadir',  py: 'sjkjm' },
       ],
       // 图标样式选项：彩色图标 / Emoji
@@ -715,6 +755,11 @@ export default {
       topbarColorOptions: [
         { value: 'blue', label: '深蓝' },
         { value: 'light', label: '白色调' },
+      ],
+      // 日夜模式切换：日间 / 夜间（图标为标题栏同款太阳 / 月亮）
+      modeSwitchOptions: [
+        { value: 'day', label: '日间', icon: Sun },
+        { value: 'night', label: '夜间', icon: Moon },
       ],
       // Modal
       modalType: '',
@@ -764,8 +809,10 @@ export default {
       // 数据目录 / 缓存目录
       dataDir: '',
       thumbsDir: '',
+      skillsDir: '',
       busyDataDir: false,
       busyThumbsDir: false,
+      busySkillsDir: false,
       // 数据库加密（仅当前账号）
       dbEncrypted: true,
       dbEncryptionLoading: true,
@@ -1388,6 +1435,14 @@ export default {
     onTopbarColorChange() {
       this.themeStore.setTopbarColor(this.topbarColor)
     },
+    // 日夜模式（仅支持夜间配色的主题）：手动切换即视为放弃「跟随系统」
+    onSelectMode(value) {
+      this.themeStore.setMode(value)
+    },
+    // 跟随系统开关：立即生效，开启时按系统深色/浅色偏好切换
+    onFollowSystemChange(e) {
+      this.themeStore.setFollowSystem(e.target.checked)
+    },
     // 动画效果总开关：立即生效，无需保存
     onAnimationsChange(e) {
       this.themeStore.setAnimationsEnabled(e.target.checked)
@@ -1520,6 +1575,7 @@ export default {
         if (res) {
           this.dataDir = res.dataDir
           this.thumbsDir = res.thumbsDir
+          this.skillsDir = res.skillsDir
           this.screenshotDir = res.screenshotDir || ''
         }
       } catch (_) {}
@@ -1557,6 +1613,24 @@ export default {
           this.showAlert(err?.message || '缓存目录切换失败')
         } finally {
           this.busyThumbsDir = false
+        }
+      })
+    },
+    async changeSkillsDir() {
+      const picked = await this.pickDir()
+      if (!picked) return
+      this.showConfirm(`确定把技能文件目录搬迁到「${picked}」吗？将把现有技能文件移动到该目录并重启应用服务。`, async () => {
+        this.busySkillsDir = true
+        try {
+          const res = await window.electron.invoke('set-skills-dir', picked)
+          if (res?.ok) {
+            this.skillsDir = res.skillsDir
+            this.showAlert(res.changed ? '技能目录搬迁成功，应用服务已重启。' : '目录未变化。')
+          }
+        } catch (err) {
+          this.showAlert(err?.message || '技能目录搬迁失败')
+        } finally {
+          this.busySkillsDir = false
         }
       })
     },
