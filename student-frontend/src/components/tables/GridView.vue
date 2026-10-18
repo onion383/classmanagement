@@ -91,7 +91,7 @@
 
                 <!-- 数据单元格 -->
                 <template v-for="(cell, colIdx) in row.cells" :key="colIdx">
-                  <td v-if="cell._isAisle && cell._aisleRowSpan" :rowspan="cell._aisleRowSpan" class="border border-border bg-text-muted text-center align-middle" style="width: 60px; vertical-align: middle; font-size: 1.125rem; line-height: 1.2;">
+                  <td v-if="cell._isAisle && cell._aisleRowSpan" :rowspan="cell._aisleRowSpan" :data-col-idx="colIdx" class="border border-border bg-text-muted text-center align-middle" style="width: 60px; vertical-align: middle; font-size: 1.125rem; line-height: 1.2;">
                      <div style="writing-mode: vertical-lr; text-orientation: upright; display: inline-block;">走廊</div></td>
                   <td v-else-if="cell._isAisleHidden" style="display: none;"></td>
                   <td
@@ -488,9 +488,11 @@ export default {
         const colIdx = i - off;
         if (colIdx < 0) continue; // 元数据列（时段/节次/时间/行号）不参与落点
         const col = this.colHeaders[colIdx];
-        if (col === undefined || col === '走廊') { arr[colIdx] = null; continue; }
+        if (col === undefined) { arr[colIdx] = null; continue; }
         const r = ths[i].getBoundingClientRect();
-        arr[colIdx] = { left: r.left, right: r.right };
+        // 走廊列（同桌模式下的间隔列）不是落点目标，但它的几何要参与「逐列补偿」，
+        // 否则跨越走廊拖动时相邻列会让错位置。
+        arr[colIdx] = { left: r.left, right: r.right, aisle: col === '走廊' };
       }
       this._colGeom = arr;
       this._colGeomHeaderTop = ths.length ? ths[0].parentElement.getBoundingClientRect().top : null;
@@ -514,10 +516,9 @@ export default {
     updateRowDropBox() {
       const box = this._rowDropBox;
       if (!box) return;
-      const ghost = this._rowSlotGhost;
       const hide = () => {
         box.style.display = 'none';
-        if (ghost) ghost.style.display = 'none';
+        if (this._rowSlotGhost) this._rowSlotGhost.style.display = 'none';
         this._rowDropSig = null;
       };
       const geom = this._rowGeom;
@@ -533,6 +534,15 @@ export default {
       }
       const w = right - left, h = bottom - top;
       if (w <= 0 || h <= 0) { hide(); return; }
+      // 每帧都会走到这里；几何没变就别再写样式
+      const sig = `${left}|${top}|${w}|${h}`;
+      if (this._rowDropSig === sig) return;
+      this._rowDropSig = sig;
+      // 落点虚影延迟到「确实要显示」时才克隆（避免按下瞬间多克隆一份整表）
+      if (!this._rowSlotGhost && this._rowGhost) {
+        this._rowSlotGhost = this._cloneGhostForSlot(this._rowGhost, 0.22);
+      }
+      const ghost = this._rowSlotGhost;
       box.style.display = 'block';
       box.style.transform = `translate(${left}px, ${top}px)`;
       box.style.width = w + 'px';
@@ -548,10 +558,9 @@ export default {
     updateColDropBox() {
       const box = this._colDropBox;
       if (!box) return;
-      const ghost = this._colSlotGhost;
       const hide = () => {
         box.style.display = 'none';
-        if (ghost) ghost.style.display = 'none';
+        if (this._colSlotGhost) this._colSlotGhost.style.display = 'none';
         this._colDropSig = null;
       };
       const geom = this._colGeom;
@@ -570,6 +579,15 @@ export default {
       }
       const w = right - left, h = bottom - top;
       if (w <= 0 || h <= 0) { hide(); return; }
+      // 每帧都会走到这里；几何没变就别再写样式
+      const sig = `${left}|${top}|${w}|${h}`;
+      if (this._colDropSig === sig) return;
+      this._colDropSig = sig;
+      // 落点虚影延迟创建（避免按下瞬间多克隆一份）
+      if (!this._colSlotGhost && this._colGhost) {
+        this._colSlotGhost = this._cloneGhostForSlot(this._colGhost, 0.22);
+      }
+      const ghost = this._colSlotGhost;
       box.style.display = 'block';
       box.style.transform = `translate(${left}px, ${top}px)`;
       box.style.width = w + 'px';
@@ -737,7 +755,7 @@ export default {
       this.rowDragIdx = rowIdx;
       this.rowDragOverIdx = rowIdx;
       this._rowGhost = ghost;
-      this._rowSlotGhost = this._cloneGhostForSlot(ghost, 0.22);
+      // 落点虚影在 updateRowDropBox 里延迟创建
       this._rowGrab = { grabX: event.clientX - tblRect.left, grabY: event.clientY - trRect.top };
       // 跟手虚影：自由跟随指针
       this.placeGhost(ghost, this._rowGrab, event.clientX, event.clientY);
@@ -767,8 +785,9 @@ export default {
       const up = () => this.finishRowDrag();
       this._rowMove = move;
       this._rowUp = up;
-      window.addEventListener('mousemove', move);
-      window.addEventListener('mouseup', up);
+      // passive：这两个监听不阻止默认行为，声明后不阻塞滚动/合成的路径
+      window.addEventListener('mousemove', move, { passive: true });
+      window.addEventListener('mouseup', up, { passive: true });
     },
     resolveRowIndexAt(clientY) {
       // 优先用拖拽开始时缓存的几何信息（无布局读取）
@@ -802,16 +821,18 @@ export default {
       // 跟手虚影自由跟随指针
       this.placeGhost(this._rowGhost, this._rowGrab, ev.clientX, ev.clientY);
       const idx = this.resolveRowIndexAt(ev.clientY);
-      if (idx !== this.rowDragOverIdx) this.rowDragOverIdx = idx;
-      this._syncRowShift();
-      this.updateRowDropBox();
+      // 只有目标行变了才重算让位与落点（每帧无条件全量遍历是拖拽卡顿的主因）
+      if (idx !== this.rowDragOverIdx) {
+        this.rowDragOverIdx = idx;
+        this._syncRowShift();
+        this.updateRowDropBox();
+      }
       // 边缘自动滚动（上下左右）：滚动后由 _onRowScrolled 同步几何缓存
       if (this._rowAutoScroll) this._rowAutoScroll.update(ev.clientX, ev.clientY);
     },
-    // 行让位（移动语义）：源与目标之间的行整体挪一格，把「空槽」让出来。
-    // 例：把第 3 行拖到第 1 行 → 原第 1、2 行各下移一格。
+    // 行让位（移动语义）：按几何逐行补偿，行高不等（讲台/分隔/合并行）也不会错位
     _syncRowShift() {
-      applyRowShift(this._rowEls, this.rowDragIdx, this.rowDragOverIdx, this._rowSlotH);
+      applyRowShift(this._rowEls, this.rowDragIdx, this.rowDragOverIdx, this._rowGeom, this._rowSlotH);
     },
     _clearRowShiftFx() {
       const tbody = this.$el ? this.$el.querySelector('tbody') : null;
@@ -924,7 +945,7 @@ export default {
       this.colDragIdx = colIndex;
       this.colDragOverIdx = colIndex;
       this._colGhost = ghost;
-      this._colSlotGhost = this._cloneGhostForSlot(ghost, 0.22);
+      // 落点虚影在 updateColDropBox 里延迟创建
       this._colGrab = { grabX: event.clientX - thRect.left, grabY: event.clientY - ghostTop };
       // 跟手虚影：自由跟随指针
       this.placeGhost(ghost, this._colGrab, event.clientX, event.clientY);
@@ -942,6 +963,7 @@ export default {
           if (refs[key]) colEls[k].push(refs[key]);
         }
       }
+      // 走廊列是固定的分隔列，永远不参与让位（既不移动也不作为落点）
       this._colEls = colEls;
       const cg0 = this._colGeom ? this._colGeom[colIndex] : null;
       this._colSlotW = cg0 ? Math.round(cg0.right - cg0.left) : 0;
@@ -965,8 +987,9 @@ export default {
       const up = () => this.finishColDrag();
       this._colMove = move;
       this._colUp = up;
-      window.addEventListener('mousemove', move);
-      window.addEventListener('mouseup', up);
+      // passive：这两个监听不阻止默认行为，声明后不阻塞滚动/合成的路径
+      window.addEventListener('mousemove', move, { passive: true });
+      window.addEventListener('mouseup', up, { passive: true });
     },
     // 应用最近一次待处理的列拖拽位置（rAF 帧内执行；松手前也会强制冲刷一次）
     _applyColMove() {
@@ -974,16 +997,20 @@ export default {
       const ev = this._colPending;
       // 跟手虚影自由跟随指针
       this.placeGhost(this._colGhost, this._colGrab, ev.clientX, ev.clientY);
-      this.colDragOverIdx = this.resolveColIndexAt(ev.clientX);
-      this._syncColShift();
-      this.updateColDropBox();
+      const hov = this.resolveColIndexAt(ev.clientX);
+      // 目标列变了才重算让位与落点（每帧无条件全量遍历是拖拽卡顿的主因）
+      if (hov !== this.colDragOverIdx) {
+        this.colDragOverIdx = hov;
+        this._syncColShift();
+        this.updateColDropBox();
+      }
       // 边缘自动滚动（上下左右）
       if (this._colAutoScroll) this._colAutoScroll.update(ev.clientX, ev.clientY);
     },
     // 列让位（移动语义）：只平移「数据单元格」，表头保持不动（座位/课表/值日表头固定）。
-    // 中间列整体挪一格，把源列要落进来的空槽让出来。
+    // 位移按几何逐列补偿：同桌列 + 走廊列导致列宽不等，统一宽度会让中间列错位。
     _syncColShift() {
-      applyColShift(this._colEls, this.colDragIdx, this.colDragOverIdx, this._colSlotW);
+      applyColShift(this._colEls, this.colDragIdx, this.colDragOverIdx, this._colGeom, this._colSlotW);
     },
     _clearColShiftFx() {
       clearShift(this.$el);
@@ -1010,7 +1037,7 @@ export default {
         let best = null, min = Infinity;
         for (let k = 0; k < geom.length; k++) {
           const r = geom[k];
-          if (!r) continue; // 走廊/空列不参与落点
+          if (!r || r.aisle) continue; // 走廊列/空列不是落点目标（但几何仍参与让位补偿）
           if (clientX >= r.left && clientX <= r.right) return k; // 命中直接返回，避免被相邻列覆盖
           const d = Math.abs(clientX - (r.left + r.right) / 2);
           if (d < min) { min = d; best = k; }

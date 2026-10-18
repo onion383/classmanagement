@@ -586,7 +586,8 @@
 :root[data-theme="glass2"] .grid-view-container {
   position: relative;
   background-color: var(--g2-glass) !important;
-  backdrop-filter: blur(var(--g2-blur)) saturate(var(--g2-saturate));
+  /* 单层整表模糊（唯一一层），半径 30px */
+  backdrop-filter: blur(30px) saturate(var(--g2-saturate));
   border-radius: var(--radius-lg);
   /* 与 .table-scroll-wrapper 同法：重绘收窄到容器内，且常驻合成层 */
   contain: layout paint style;

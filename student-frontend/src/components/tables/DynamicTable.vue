@@ -609,10 +609,9 @@ export default {
     updateRowDropBox() {
       const box = this._rowDropBox;
       if (!box) return;
-      const ghost = this._rowSlotGhost;
       const hide = () => {
         box.style.display = 'none';
-        if (ghost) ghost.style.display = 'none';
+        if (this._rowSlotGhost) this._rowSlotGhost.style.display = 'none';
         this._rowDropSig = null;
       };
       const geom = this._rowGeom;
@@ -632,6 +631,11 @@ export default {
       const sig = `${left}|${top}|${w}|${h}`;
       if (this._rowDropSig === sig) return;
       this._rowDropSig = sig;
+      // 落点虚影延迟到「确实要显示」时才克隆
+      if (!this._rowSlotGhost && this._rowGhost) {
+        this._rowSlotGhost = this._cloneGhostForSlot(this._rowGhost, 0.22);
+      }
+      const ghost = this._rowSlotGhost;
       box.style.display = 'block';
       box.style.transform = `translate(${left}px, ${top}px)`;
       box.style.width = w + 'px';
@@ -649,10 +653,9 @@ export default {
     updateColDropBox() {
       const box = this._colDropBox;
       if (!box) return;
-      const ghost = this._colSlotGhost;
       const hide = () => {
         box.style.display = 'none';
-        if (ghost) ghost.style.display = 'none';
+        if (this._colSlotGhost) this._colSlotGhost.style.display = 'none';
         this._colDropSig = null;
       };
       const geom = this._colGeom;
@@ -675,6 +678,11 @@ export default {
       const sig = `${left}|${top}|${w}|${h}`;
       if (this._colDropSig === sig) return;
       this._colDropSig = sig;
+      // 落点虚影延迟创建
+      if (!this._colSlotGhost && this._colGhost) {
+        this._colSlotGhost = this._cloneGhostForSlot(this._colGhost, 0.22);
+      }
+      const ghost = this._colSlotGhost;
       box.style.display = 'block';
       box.style.transform = `translate(${left}px, ${top}px)`;
       box.style.width = w + 'px';
@@ -745,7 +753,7 @@ export default {
       }
       document.body.appendChild(wrapper);
       this._rowGhost = wrapper;
-      this._rowSlotGhost = this._cloneGhostForSlot(wrapper, 0.22);
+      // 落点虚影在 updateRowDropBox 里延迟创建
       this._rowGrab = { grabX, grabY };
       // 跟手的虚影：自由跟随指针（不吸附、不锁位置）
       wrapper.style.transform = `translate(${event.clientX - grabX}px, ${event.clientY - grabY}px)`;
@@ -775,8 +783,9 @@ export default {
       const up = () => this.finishRowDrag();
       this._rowMove = move;
       this._rowUp = up;
-      window.addEventListener('mousemove', move);
-      window.addEventListener('mouseup', up);
+      // passive：这两个监听不阻止默认行为，声明后不阻塞滚动/合成的路径
+      window.addEventListener('mousemove', move, { passive: true });
+      window.addEventListener('mouseup', up, { passive: true });
     },
     resolveRowIndexAt(clientY) {
       // 优先用拖拽开始时缓存的几何信息（无布局读取）
@@ -809,16 +818,18 @@ export default {
       const g = this._rowGrab || { grabX: 0, grabY: 0 };
       this._rowGhost.style.transform = `translate(${ev.clientX - g.grabX}px, ${ev.clientY - g.grabY}px)`;
       const idx = this.resolveRowIndexAt(ev.clientY);
-      if (idx !== this.dragOverIndex) this.dragOverIndex = idx;
-      this._syncRowShift();
-      this.updateRowDropBox();
+      // 只有目标行变了才重算让位与落点（每帧无条件全量遍历是拖拽卡顿的主因）
+      if (idx !== this.dragOverIndex) {
+        this.dragOverIndex = idx;
+        this._syncRowShift();
+        this.updateRowDropBox();
+      }
       // 边缘自动滚动（上下左右）：滚起来后由 _onRowScrolled 同步几何缓存，保持跟手
       if (this._rowAutoScroll) this._rowAutoScroll.update(ev.clientX, ev.clientY);
     },
-    // 让位：源与目标之间的行整体挪一格，腾出目标处的空槽（纯 transform，不动数据顺序）
-    // 行让位（移动语义）：源与目标之间的行整体挪一格，把「空槽」让出来
+    // 行让位（移动语义）：按几何逐行补偿，行高不等也不会错位
     _syncRowShift() {
-      applyRowShift(this._rowEls, this.dragIndex, this.dragOverIndex, this._rowSlotH);
+      applyRowShift(this._rowEls, this.dragIndex, this.dragOverIndex, this._rowGeom, this._rowSlotH);
     },
     // 清让位位移（拖拽结束/取消）：transform 与 transition 一起清掉，避免出现回弹动画
     _clearRowShiftFx() {
@@ -972,7 +983,7 @@ export default {
           wrap.appendChild(ghostTable);
           document.body.appendChild(wrap);
           this._colGhost = wrap;
-          this._colSlotGhost = this._cloneGhostForSlot(wrap, 0.22);
+          // 落点虚影在 updateColDropBox 里延迟创建
           // 跟手虚影：按抓取点跟随指针（自由移动，不吸附格子）
           const thRect0 = srcTh.getBoundingClientRect();
           this._colGrab = { grabX: event.clientX - thRect0.left, grabY: event.clientY - thRect0.top };
@@ -1020,8 +1031,9 @@ export default {
       const up = () => this.finishColDrag();
       this._colMove = move;
       this._colUp = up;
-      window.addEventListener('mousemove', move);
-      window.addEventListener('mouseup', up);
+      // passive：这两个监听不阻止默认行为，声明后不阻塞滚动/合成的路径
+      window.addEventListener('mousemove', move, { passive: true });
+      window.addEventListener('mouseup', up, { passive: true });
     },
     // 应用最近一次待处理的列拖拽位置（rAF 帧内执行；松手前也会强制冲刷一次）
     _applyColMove() {
@@ -1033,16 +1045,18 @@ export default {
         this._colGhost.style.transform = `translate(${ev.clientX - g.grabX}px, ${ev.clientY - g.grabY}px)`;
       }
       const hov = this.resolveColIndexAt(ev.clientX);
-      if (hov !== null) this.colDragOverIndex = hov;
-      this._syncColShift();
-      this.updateColDropBox();
+      // 只有目标列变了才重算让位与落点
+      if (hov !== null && hov !== this.colDragOverIndex) {
+        this.colDragOverIndex = hov;
+        this._syncColShift();
+        this.updateColDropBox();
+      }
       // 边缘自动滚动（上下左右）
       if (this._colAutoScroll) this._colAutoScroll.update(ev.clientX, ev.clientY);
     },
-    // 列让位：中间列整体挪一格（表头 + 该列所有数据格一起平移，保持整列视觉一致）
-    // 列让位（移动语义）：中间列整体挪一格，把源列的空槽让出来（表头与数据列一起动）
+    // 列让位（移动语义）：按几何逐列补偿（列宽不等时也能精确让位）
     _syncColShift() {
-      applyColShift(this._colEls, this.colDragIndex, this.colDragOverIndex, this._colSlotW);
+      applyColShift(this._colEls, this.colDragIndex, this.colDragOverIndex, this._colGeom, this._colSlotW);
     },
     _clearColShiftFx() {
       clearShift(this.$el);

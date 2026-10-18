@@ -98,6 +98,14 @@
   position: relative;
   z-index: 1;
 }
+/* 统一受光描边（只在白天）：与网格表格 / 卡片 / 弹窗 / 侧边栏同一套参数。
+   标题栏 ::before 已被顶部受光占用，故用 ::after 画 1px 环。
+   深色模式下不出现亮边，交给 theme-night.css 自己的夜间描边。 */
+/* 注意：标题栏不能加 ::after 描边覆盖层。
+   标题栏是 -webkit-app-region: drag 的可拖动区域，覆盖层会落在最上层，
+   让最小化/最大化/关闭三个按钮变成"拖动窗口"区域而点不动（pointer-events:none 对
+   Electron 的拖动区判定无效）。标题栏的亮边改由它自己的 inset box-shadow 提供
+   （inset 0 1px 0 白 0.35 + inset 0 -1px 0 白 0.4），视觉基本一致且不影响点击。 */
 /* 白色调：控制按钮 hover 用深色遮罩 */
 :root[data-topbar-color="light"]:is([data-theme="glass"], [data-theme="win11"]) .window-controls .win-btn:hover {
   background: rgba(15, 23, 42, 0.08);
@@ -145,6 +153,29 @@
   position: relative;
 }
 
+/* ==================== 统一玻璃配方：以侧边栏为准，参数一字不改 ====================
+   侧边栏的观感 = 底色(随顶栏配色) + blur(24px) saturate(1.4) + 内高光 + 顶部受光渐变。
+   这里把「底色 / 模糊」抽成变量，标题栏、卡片、弹窗、班费表容器、网格表格全部引用同一组值。
+   只在白天生效：深色模式沿用各块自己的夜间配色与阴影，
+   并且除侧边栏外不出现亮边（见 theme-night.css）。 */
+:root:is([data-theme="glass"], [data-theme="win11"]) {
+  --sidebar-glass-bg: rgba(255, 255, 255, 0.35);
+  --sidebar-glass-blur: blur(24px) saturate(1.4);
+}
+:root[data-topbar-color="blue"]:is([data-theme="glass"], [data-theme="win11"]) {
+  --sidebar-glass-bg: rgba(30, 64, 175, 0.55);
+}
+:root:not([data-mode="night"]):is([data-theme="glass"], [data-theme="win11"]) :is(
+  .window-title-bar,
+  .table-scroll-wrapper,
+  .grid-view-container,
+  main .bg-surface,
+  .dialog-card
+) {
+  background-color: var(--sidebar-glass-bg) !important;
+  backdrop-filter: var(--sidebar-glass-blur) !important;
+}
+
 /* ========== 侧边栏：毛玻璃（配色随 data-topbar-color） ========== */
 :root:is([data-theme="glass"], [data-theme="win11"]) .bg-sidebar {
   backdrop-filter: blur(24px) saturate(1.4);
@@ -189,6 +220,31 @@
   background: linear-gradient(180deg, rgba(255, 255, 255, 0.22) 0%, rgba(255, 255, 255, 0.06) 55%, rgba(255, 255, 255, 0) 100%);
   pointer-events: none;
   z-index: -1;
+}
+/* 侧边栏的受光描边（白天用统一参数；夜间保留侧栏自己的夜间高光）。
+   ::before 已被顶部受光占用，故用 ::after 画这圈 1px 环。 */
+:root:not([data-mode="night"]):is([data-theme="glass"], [data-theme="win11"]) .bg-sidebar::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  padding: 1px;
+  background: linear-gradient(
+    180deg,
+    rgba(255, 255, 255, 0.3) 0%,
+    rgba(255, 255, 255, 0.08) 50%,
+    rgba(255, 255, 255, 0.12) 100%
+  );
+  -webkit-mask:
+    linear-gradient(#fff 0 0) content-box,
+    linear-gradient(#fff 0 0);
+  mask:
+    linear-gradient(#fff 0 0) content-box,
+    linear-gradient(#fff 0 0);
+  -webkit-mask-composite: xor;
+  mask-composite: exclude;
+  pointer-events: none;
+  z-index: 3;
 }
 /* 链接项圆角增大 */
 :root:is([data-theme="glass"], [data-theme="win11"]) .bg-sidebar a,
@@ -598,6 +654,32 @@
   pointer-events: none;
   z-index: -1;
 }
+/* 内容卡片也采用同一圈受光描边（只在白天；参数与网格表格完全一致）。
+   弹窗 Teleport 到 body 不在 main 内，单独在 .dialog-card 上补一条同样的规则。 */
+:root:not([data-mode="night"]):is([data-theme="glass"], [data-theme="win11"]) main .bg-surface:not(.shadow-md):not(.grid.grid-cols-3 > div)::after,
+:root:not([data-mode="night"]):is([data-theme="glass"], [data-theme="win11"]) .dialog-card::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  padding: 1px;
+  background: linear-gradient(
+    180deg,
+    rgba(255, 255, 255, 0.3) 0%,
+    rgba(255, 255, 255, 0.08) 50%,
+    rgba(255, 255, 255, 0.12) 100%
+  );
+  -webkit-mask:
+    linear-gradient(#fff 0 0) content-box,
+    linear-gradient(#fff 0 0);
+  mask:
+    linear-gradient(#fff 0 0) content-box,
+    linear-gradient(#fff 0 0);
+  -webkit-mask-composite: xor;
+  mask-composite: exclude;
+  pointer-events: none;
+  z-index: 1;
+}
 /* ========== 弹窗卡片（.dialog-card）：glass 主题下单独加深投影 ==========
    弹窗与普通卡片共用 .bg-surface，其 box-shadow 会被下方 .bg-surface 规则统一覆盖成
    极淡的「白外光 + 顶部内高光」，导致弹窗缺少应有的层次。这里仅对 glass 主题的弹窗
@@ -646,10 +728,35 @@
     inset 0 1px 0 rgba(255, 255, 255, 0.15);
 }
 
-/* 底角边框补绘：容器 contain:paint 会把子元素裁切到 16px 圆角，导致最后一行单元格的
-   border-bottom 在左下/右下圆角处被切掉。用与外框同圆角的 1px 描边环补回四周边线，
-   使最后一行底边线在圆角处连续不缺失（边线比容器圆角小 1px，避免被同半径裁切）。 */
-:root:is([data-theme="glass"], [data-theme="win11"]) .table-scroll-wrapper::before {
+/* 底角边框补绘（白天换成统一的受光描边）：
+   容器 contain:paint 会把子元素裁切到 16px 圆角，导致最后一行单元格的 border-bottom
+   在圆角处被切掉 —— 这圈描边同时承担「补回边线」和「统一受光」两个作用。
+   白天用与网格表格 / 卡片完全相同的渐变环（0.30 → 0.08 → 0.12）；
+   深色模式不出现亮边，回到原来那条极淡的深色细线。 */
+:root:not([data-mode="night"]):is([data-theme="glass"], [data-theme="win11"]) .table-scroll-wrapper::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: 15px;
+  padding: 1px;
+  background: linear-gradient(
+    180deg,
+    rgba(255, 255, 255, 0.3) 0%,
+    rgba(255, 255, 255, 0.08) 50%,
+    rgba(255, 255, 255, 0.12) 100%
+  );
+  -webkit-mask:
+    linear-gradient(#fff 0 0) content-box,
+    linear-gradient(#fff 0 0);
+  mask:
+    linear-gradient(#fff 0 0) content-box,
+    linear-gradient(#fff 0 0);
+  -webkit-mask-composite: xor;
+  mask-composite: exclude;
+  pointer-events: none;
+  z-index: 7;
+}
+:root[data-mode="night"]:is([data-theme="glass"], [data-theme="win11"]) .table-scroll-wrapper::before {
   content: '';
   position: absolute;
   inset: 0;
@@ -745,7 +852,9 @@
   position: relative;
   border-radius: 16px;
   background-color: rgba(255, 255, 255, 0.30) !important;
-  backdrop-filter: blur(16px);
+  /* 单层整表模糊：原来每个 th/td 各有一层 blur(12px)，一张 8×10 的表就是 80 层，
+     页面滚动时逐帧重采样导致掉帧。这里收敛成容器这 1 层，半径提到 30px 补厚度。 */
+  backdrop-filter: blur(30px) saturate(1.3);
   /* 与 .table-scroll-wrapper 同法：布局/绘制/样式影响不出容器，内部重绘不再重采样毛玻璃 */
   contain: layout paint style;
   will-change: transform;
@@ -757,6 +866,12 @@
 /* 网格表内部滚动容器：滚动/编辑引起的重绘收窄在容器内 */
 :root:is([data-theme="glass"], [data-theme="win11"]) .grid-view-container > .overflow-auto {
   contain: layout paint style;
+}
+/* 单元格自身的模糊全部取消（否则又回到逐格 80 层）。
+   想对比原版：把下面这条注释掉即可（会明显变卡）。 */
+:root:is([data-theme="glass"], [data-theme="win11"]) .grid-view-container table th,
+:root:is([data-theme="glass"], [data-theme="win11"]) .grid-view-container table td {
+  backdrop-filter: none !important;
 }
 :root:is([data-theme="glass"], [data-theme="win11"]) .grid-view-container::before {
   content: '';
