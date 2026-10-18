@@ -70,6 +70,8 @@
               @retry="retryMessage"
               @undo="undoChange"
               @rollback="askRollback"
+              @open-changes="openChangeDrawer"
+              @goto="gotoTable"
             />
           </div>
 
@@ -172,6 +174,18 @@
               :url="linkDrawerUrl"
               @close="linkDrawerOpen = false"
               @open-external="openLinkExternal"
+            />
+          </div>
+        </Transition>
+
+        <!-- 改动明细抽屉：与网页抽屉同为聊天卡片「兄弟」，从右侧滑入。
+             同样「面板以外可穿透点击」+ document 监听点外部关闭，动画只作用在 .change-panel。 -->
+        <Transition name="change-drawer" :duration="{ enter: 220, leave: 160 }">
+          <div v-if="changeDrawerOpen" class="absolute inset-0 z-30 chat-surface overflow-hidden pointer-events-none">
+            <AiChangePanel
+              :proposal="changeDrawerProposal"
+              @close="changeDrawerOpen = false"
+              @goto="gotoTable"
             />
           </div>
         </Transition>
@@ -353,6 +367,20 @@
   transform: translateX(calc(100% + 12px)); /* 从右侧完全滑出（含右上角 12px 内边距） */
 }
 
+/* ==================== 改动明细抽屉（右侧） ====================
+   与网页抽屉同款：从右向左滑入/滑出，transform 只作用在承载 backdrop-filter 的 .change-panel，
+   无遮罩层（面板以外可穿透点击），「点外部关闭」由 document 监听处理。 */
+.change-drawer-enter-active .change-panel {
+  transition: transform 0.22s cubic-bezier(0.16, 1, 0.3, 1);
+}
+.change-drawer-leave-active .change-panel {
+  transition: transform 0.16s cubic-bezier(0.4, 0, 0.7, 0.2);
+}
+.change-drawer-enter-from .change-panel,
+.change-drawer-leave-to .change-panel {
+  transform: translateX(calc(100% + 12px));
+}
+
 /* 标题下方的大框（聊天区 / 加载态 / 未启用态）统一到主题卡片圆角，
    与抽屉、弹窗一致：glass / win11 = 20px，glass2 = 22px，其余主题回落 --radius-card。 */
 .chat-surface {
@@ -401,6 +429,7 @@ import { useNotification } from '../composables/useNotification.js'
 import ConfirmDialog from '../components/base/ConfirmDialog.vue'
 import AiConversationPanel from '../components/ai/AiConversationPanel.vue'
 import AiLinkPanel from '../components/ai/AiLinkPanel.vue'
+import AiChangePanel from '../components/ai/AiChangePanel.vue'
 import AiChatMessages from '../components/ai/AiChatMessages.vue'
 import AiComposer from '../components/ai/AiComposer.vue'
 import { ensureMarkdown, buildBlocks, updateLiveRender } from '../composables/ai/aiMarkdown.js'
@@ -409,7 +438,7 @@ import {
   isRetryable as isRetryableInList, isRollbackable as isRollbackableInList,
 } from '../composables/ai/aiMessages.js'
 import { triggerPendingExport as runPendingExport, triggerPendingImage as runPendingImage } from '../composables/ai/aiFiles.js'
-import { AI_PERMISSION_KEY, AI_PERMISSION_FULL, AI_WEB_SEARCH_KEY } from '../composables/ai/aiConstants.js'
+import { AI_PERMISSION_KEY, AI_PERMISSION_FULL, AI_WEB_SEARCH_KEY, tableJumpTarget } from '../composables/ai/aiConstants.js'
 import aiConversations from '../composables/ai/aiConversations.js'
 import aiChat from '../composables/ai/aiChat.js'
 import aiExec from '../composables/ai/aiExec.js'
@@ -449,7 +478,7 @@ const DataManageDialog = lazyDialog(() => import('../components/data-manage/Data
 
 export default {
   name: 'AiAssistant',
-  components: { AiSettingsDialog, DataManageDialog, ConfirmDialog, AiConversationPanel, AiLinkPanel, AiChatMessages, AiComposer, PanelLeft, Plus, Database },
+  components: { AiSettingsDialog, DataManageDialog, ConfirmDialog, AiConversationPanel, AiLinkPanel, AiChangePanel, AiChatMessages, AiComposer, PanelLeft, Plus, Database },
   // 逻辑模块以 mixin 合并为实例方法/computed，方法体保留 this.xxx 写法（不搬 data/watch/mounted/unmounted）
   mixins: [aiConversations, aiChat, aiExec],
   props: {
@@ -486,6 +515,8 @@ export default {
       convDrawerOpen: false, // 对话列表抽屉是否展开
       linkDrawerOpen: false, // 网页抽屉是否展开（点击消息里的链接时打开）
       linkDrawerUrl: '',     // 网页抽屉当前打开的地址
+      changeDrawerOpen: false, // 改动明细抽屉是否展开（点击改动总结条的「↗」时打开）
+      changeDrawerProposal: null, // 改动明细抽屉展示的提案
       visibleConvCount: 3, // 会话列表默认只渲染最近 3 条，其余点「加载更多」再显示
       askPage: 0, // 多问题提问的分页索引（一页一题，从 0 开始）
       // AI 写入权限挡位：'approve' 全部审批（每次写入都要确认）/ 'full' 完全权限（写入提案自动执行）
@@ -532,10 +563,8 @@ export default {
     // 网页抽屉打开时挂 document 级监听：点击「抽屉面板以外、且不是消息链接」的地方即收起。
     // 之所以不在模板里放遮罩层：遮罩会盖住消息区，导致抽屉已打开时再点其它链接被遮罩吃掉，
     // 变成「先关抽屉、还要再点一次」；改用面板穿透 + document 监听后，点链接直达 onMsgClick 直接切换。
-    linkDrawerOpen(open) {
-      if (open) document.addEventListener('mousedown', this.onDocMouseDown, true)
-      else document.removeEventListener('mousedown', this.onDocMouseDown, true)
-    },
+    linkDrawerOpen() { this.updateOutsideListener() },
+    changeDrawerOpen() { this.updateOutsideListener() },
   },
   mounted() {
     // 后台预加载 markdown 库（不阻塞首次渲染）
@@ -751,12 +780,40 @@ export default {
       if (!a) return false
       return /^https?:\/\//i.test(a.getAttribute('href') || '')
     },
-    // 点网页抽屉外部关闭：命中面板内、或点击的是消息链接时都不关闭
-    // （后者交给 onMsgClick 直接切换地址，实现「抽屉已打开时再点链接无需先关掉」）
+    // 任一侧抽屉打开时挂 document 级监听，两扇都收起后摘除（同一函数引用，重复 add 为幂等）
+    updateOutsideListener() {
+      if (this.linkDrawerOpen || this.changeDrawerOpen) {
+        document.addEventListener('mousedown', this.onDocMouseDown, true)
+      } else {
+        document.removeEventListener('mousedown', this.onDocMouseDown, true)
+      }
+    },
+    // 点抽屉外部关闭：命中面板内、或点击的是消息链接 / 改动总结条上的「↗」时都不关闭
+    // （后两者分别交给 onMsgClick / openChangeDrawer 直接切换，实现「抽屉已打开时无需先关掉」）
     onDocMouseDown(e) {
       const t = e.target
-      if (t && t.closest && (t.closest('.link-panel') || this.isHttpLink(t))) return
-      this.linkDrawerOpen = false
+      const inLink = t && t.closest && (t.closest('.link-panel') || this.isHttpLink(t))
+      if (!inLink) this.linkDrawerOpen = false
+      const inChange = t && t.closest && (t.closest('.change-panel') || t.closest('.open-changes-btn'))
+      if (!inChange) this.changeDrawerOpen = false
+    },
+    // 打开改动明细抽屉（已有抽屉则复用，仅切换展示的提案；同一提案重复点则收起，避免无反应）
+    openChangeDrawer(m) {
+      const p = m && m.proposal
+      if (!p) return
+      if (this.changeDrawerOpen && this.changeDrawerProposal === p) { this.changeDrawerOpen = false; return }
+      this.changeDrawerProposal = p
+      this.changeDrawerOpen = true
+    },
+    // 从改动明细抽屉跳转到对应业务表：带 ?focus=<id> 时目标页会滚动到该行并闪动高亮
+    // （复用 useRowFocus），跳转前先收起抽屉。
+    gotoTable({ table, id, focus }) {
+      const target = tableJumpTarget(table, id)
+      if (!target) return
+      this.changeDrawerOpen = false
+      // focus 优先：网格表（课表/座位/权重）改动明细可带「精确到格子」的定位串
+      const query = focus ? { focus } : target.query
+      this.$router.push(query ? { path: target.path, query } : { path: target.path })
     },
     // 在右侧抽屉里打开某个地址（已有抽屉则复用，仅切换地址）
     openLinkInDrawer(url) {

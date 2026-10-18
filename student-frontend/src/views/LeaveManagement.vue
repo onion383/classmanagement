@@ -395,9 +395,16 @@ export default {
   mounted() { this._applyRowFocus() },
   activated() { this._applyRowFocus() },
   methods: {
-    // 跨页定位：切到「请假记录」页签后滚动到目标行并高亮闪动
+    // 跨页定位：切到「请假记录」页签后滚动到目标并高亮闪动。
+    // 裸 id 定位请假记录表格的整行；`tl:<节点key>` 定位请假时间轴上的那一项（如 tl:12-leave）。
     _applyRowFocus() {
-      applyRouteRowFocus(this, { parse: (key) => { this.activeTab = 'records'; return key } })
+      applyRouteRowFocus(this, {
+        parse: (key) => {
+          this.activeTab = 'records'
+          if (key.startsWith('tl:')) return key.slice('tl:'.length)
+          return key
+        }
+      })
     },
     // 时间段展示：同日显示 "M-D H:mm~H:mm"，跨天显示完整起止
     formatRange(s, e) {

@@ -82,8 +82,10 @@ export default {
         } else if (m.proposal.kind === 'json') {
           // 整块写入（课表/座位/权重/值日等「非行式」表）：按 id 覆盖指定列
           const p = m.proposal
-          const res = await axios.post('/api/ai/doc', { table: p.table, id: p.id, values: p.values })
-          const d = res.data || {}
+          const resp = await axios.post('/api/ai/doc', { table: p.table, id: p.id, values: p.values })
+          const d = resp.data || {}
+          // 存下写入前的原始行：供「改动总结」统计被覆盖掉的原有非空格数，并在明细抽屉里对照
+          m.proposal.gridBefore = d.before == null ? null : d.before
           const uid = await this._pushUndo('doc_update', DOC_UNDO_KEY[p.table] || p.table, p.label, { table: p.table, id: p.id, before: d.before, after: d.after, label: p.label }, origin)
           m.proposal.undoIds = uid != null ? [uid] : []
           m.proposal.executing = false
@@ -145,15 +147,19 @@ export default {
           // 批量删除：逐条先取整条记录再删除，撤销时可整条恢复（任一条失败即中断）
           const ids = Array.isArray(data && data.ids) ? data.ids : []
           let ok = 0
+          // 删除后记录在库里就查不到了，这里把原始行一并存下供「改动明细」展示
+          const deletedRows = []
           for (const id of ids) {
             const oldRow = await this._fetchRow(end.undoKey, id)
             await axios.delete(`${end.url}/${id}`)
             if (oldRow) {
+              deletedRows.push(oldRow)
               const uid = await this._pushUndo('row_delete', end.undoKey, this._rowName(oldRow), { table: end.undoKey, row: oldRow }, origin)
               if (uid != null) undoIds.push(uid)
             }
             ok++
           }
+          m.proposal.deletedRows = deletedRows
           m.proposal.undoIds = undoIds
           m.proposal.executing = false
           m.proposal.executed = true
@@ -181,6 +187,7 @@ export default {
             // 先取整条记录，再删除，撤销时可整条恢复
             const oldRow = await this._fetchRow(end.undoKey, data.id)
             await axios.delete(`${end.url}/${data.id}`)
+            m.proposal.deletedRows = oldRow ? [oldRow] : []
             if (oldRow) {
               const uid = await this._pushUndo('row_delete', end.undoKey, this._rowName(oldRow), { table: end.undoKey, row: oldRow }, origin)
               if (uid != null) undoIds.push(uid)

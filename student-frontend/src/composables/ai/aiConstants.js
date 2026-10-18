@@ -33,6 +33,35 @@ export const FRONT_LABELS = {
   mergeNotifications: '提示合并',
 }
 
+// AI 表 key → 业务页路由（与后端 routes/search.js 的 route 保持一致），
+// 供「改动明细 → 跳转到该表」使用。只有目标页实现了 useRowFocus（[data-row-id] + ?focus=）
+// 的行状表才带 focus: true；网格表（课表/座位/值日）与班干部暂无行级定位，只做页面跳转。
+// focusPrefix：把行 id 拼成目标页 useRowFocus 需要的 focus 值（如倒计时页要 'countdown:<id>'）。
+export const TABLE_ROUTE = {
+  students: { path: '/students', focus: true },
+  leave_records: { path: '/leaves', focus: true },
+  score_records: { path: '/scores', focus: true },
+  fee_records: { path: '/fee', focus: true },
+  activities: { path: '/activities', focus: true },
+  countdowns: { path: '/activities', focus: true, focusPrefix: 'countdown:' },
+  cadres: { path: '/group-manage' },
+  schedule: { path: '/schedule' },
+  master_schedule: { path: '/schedule' },
+  seat_layout: { path: '/seats' }, seat_template: { path: '/seats' }, seat_weight: { path: '/seats' },
+  duty_settings: { path: '/duty' }, duty_layout: { path: '/duty' }, duty_template: { path: '/duty' }, duty_weight: { path: '/duty' },
+}
+
+// 生成「跳转到该表」的路由目标：{ path, query }；表无对应页面时返回 null。
+// id 为空或该表不支持行级定位时只返回 { path }（跳到页面、不定位到行）。
+export function tableJumpTarget(table, id) {
+  const r = TABLE_ROUTE[table]
+  if (!r) return null
+  if (r.focus && id != null && id !== '') {
+    return { path: r.path, query: { focus: (r.focusPrefix || '') + id } }
+  }
+  return { path: r.path }
+}
+
 // AI 写入权限挡位（localStorage 持久化的用户偏好）：
 // 'approve' 全部审批（默认）：每次写入提案都要用户点确认才执行；
 // 'full'    完全权限：写入提案不再弹确认，流结束后直接执行。

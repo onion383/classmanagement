@@ -29,6 +29,7 @@
               <GridView
                 v-else
                 ref="activeGridRef"
+                :anchorPrefix="'seat'"
                 :colHeaders="activeColHeaders"
                 :rows="activeDisplayRows"
                 :hideMetaColumns="true"
@@ -53,6 +54,7 @@
               <GridView
                 v-else
                 ref="masterGridRef"
+                :anchorPrefix="'seatt'"
                 :colHeaders="masterColHeaders"
                 :rows="masterDisplayRows"
                 :hideMetaColumns="true"
@@ -86,6 +88,7 @@
             <div v-if="!weightLoaded" class="skeleton-block"></div>
             <GridView
               v-else
+              :anchorPrefix="'seatw'"
               :colHeaders="weightColHeaders"
               :rows="weightDisplayRows"
               :hideMetaColumns="true"
@@ -271,7 +274,7 @@
 </template>
 
 <script setup>
-import { ref, computed, watch, onMounted, defineAsyncComponent } from 'vue'
+import { ref, computed, watch, onMounted, onActivated, getCurrentInstance, defineAsyncComponent } from 'vue'
 import axios from 'axios'
 import GridView from '../components/tables/GridView.vue'
 import EmptySnapshot from '../components/base/EmptySnapshot.vue'
@@ -283,6 +286,7 @@ import { createRowReuseCache } from '../utils/rowReuse.js'
 import { useUndoShortcut, recordGridSnapshotUndo } from '../composables/useUndo.js'
 import { useNotification } from '../composables/useNotification.js'
 import { syncStudentNamesFromRows } from '../composables/useSyncStudentNames.js'
+import { applyRouteRowFocus } from '../composables/useRowFocus.js'
 
 // 弹窗类组件懒加载：打开时才加载对应 chunk。loader 抽出为命名函数，
 // 可用 v-preload="loadXxx" 在悬停按钮时预取，点击时即时弹出。
@@ -301,6 +305,8 @@ const SeatBackfillDialog = defineAsyncComponent(loadSeatBackfillDialog)
 
 const API_BASE = '/api'
 
+const inst = getCurrentInstance()
+
 const activeTab = ref('seat')
 const tabItems = [
   { label: '座位管理', value: 'seat' },
@@ -313,6 +319,47 @@ const seatViewOptions = [
   { value: 'active', label: '临时表' },
   { value: 'master', label: '模板表' }
 ]
+
+// 真实列（不含走廊列）→ GridView 单元格的显示列（含走廊列）：定位串统一用真实列，
+// 目标页按自身几何（mode/是否显示走廊）换算成显示列，与单元格 data-row-id 对齐。
+function displayColOfReal(realCol, cols, mode, showAisle) {
+  const total = getDisplayColCount(cols, mode, showAisle)
+  let real = 0
+  for (let d = 0; d < total; d++) {
+    if (isAisleCol(d, cols, mode, showAisle)) continue
+    if (real === realCol) return d
+    real++
+  }
+  return realCol
+}
+
+// 跨页定位：标题栏全局搜索 / AI 改动明细点「座位」结果跳转 /seats?focus=seat:<行>:<真实列>
+// （seat=当前座位 / seatt=座位模板 / seatw=权重表）→ 先切到座位页签并选中对应视图，
+// 再把真实列换算成显示列，滚动到该格子并闪动高亮。
+function _applyRowFocus() {
+  applyRouteRowFocus(inst.proxy, {
+    parse: (key) => {
+      const m = /^(seat|seatt|seatw):(\d+):(\d+)$/.exec(key)
+      if (!m) return null
+      activeTab.value = 'seat'
+      if (m[1] === 'seatt') seatView.value = 'master'
+      else if (m[1] === 'seat') seatView.value = 'active'
+      // 数据/视图尚未就绪时返回空值，交由 useRowFocus 内部重试
+      if (m[1] === 'seat' && !activeLoaded.value) return null
+      if (m[1] === 'seatt' && !masterLoaded.value) return null
+      if (m[1] === 'seatw' && !weightLoaded.value) return null
+      const isTpl = m[1] === 'seatt'
+      const isWeight = m[1] === 'seatw'
+      const cols = isTpl ? masterCols.value : (isWeight ? weightCols.value : activeCols.value)
+      const mode = isTpl ? masterMode.value : (isWeight ? weightMode.value : activeMode.value)
+      const showAisle = isTpl ? masterShowAisle.value : (isWeight ? weightShowAisle.value : activeShowAisle.value)
+      const dc = displayColOfReal(Number(m[3]), cols, mode, showAisle)
+      return `${m[1]}:${m[2]}:${dc}`
+    }
+  })
+}
+watch(() => inst.proxy.$route.query.focus, _applyRowFocus)
+onActivated(_applyRowFocus)
 
 // ==================== 学生数据 ====================
 const allStudents = ref([])
@@ -694,13 +741,16 @@ function onWeightCellsUpdate(newRows) {
 
 function onWeightSwapRows(fromIdx, toIdx) {
   if (fromIdx === 0 || toIdx === 0) return
+  if (fromIdx === toIdx) return
   const from = fromIdx - 1, to = toIdx - 1
   if (from < 0 || to < 0 || from >= weightWeights.value.length || to >= weightWeights.value.length) return
   const prev = weightWeights.value.map(r => [...r])
   const next = weightWeights.value.map(r => [...r])
-  ;[next[from], next[to]] = [next[to], next[from]]
+  // 移动语义：取出源行插入目标位置
+  const [moved] = next.splice(from, 1)
+  next.splice(to, 0, moved)
   weightWeights.value = next
-  recordGridSnapshotUndo('座位表', 'seat_weight', prev, next, '交换行')
+  recordGridSnapshotUndo('座位表', 'seat_weight', prev, next, '移动行')
   saveWeight()
 }
 
@@ -713,13 +763,15 @@ function onWeightSwapColumns(fromDisplayIdx, toDisplayIdx) {
   const from = map[fromDisplayIdx], to = map[toDisplayIdx]
   if (from === -1 || to === -1 || from == null || to == null || from === to) return
   const prev = weightWeights.value.map(r => [...r])
+  // 移动语义：取出源列插入目标位置（表头固定不动）
   const next = weightWeights.value.map(r => {
     const nr = [...r]
-    ;[nr[from], nr[to]] = [nr[to], nr[from]]
+    const [moved] = nr.splice(from, 1)
+    nr.splice(to, 0, moved)
     return nr
   })
   weightWeights.value = next
-  recordGridSnapshotUndo('座位表', 'seat_weight', prev, next, '交换列')
+  recordGridSnapshotUndo('座位表', 'seat_weight', prev, next, '移动列')
   saveWeight()
 }
 
@@ -1060,6 +1112,8 @@ onMounted(async () => {
   fetchAllStudents()
   // 启动时静默补全历史快照（今天及之前），失败不打扰用户
   axios.post(`${API_BASE}/seats/snapshot/backfill`, { includeToday: true }).catch(() => {})
+  // 跨页定位：带 ?focus= 进入本页时定位到目标格子
+  _applyRowFocus()
 })
 </script>
 

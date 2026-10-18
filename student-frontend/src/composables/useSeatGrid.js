@@ -203,11 +203,14 @@ export function useSeatGrid(apiBase, options = {}) {
 
   function onSwapRows(fromIdx, toIdx) {
     if (fromIdx === 0 || toIdx === 0) return
+    if (fromIdx === toIdx) return
     const seatFrom = fromIdx - 1, seatTo = toIdx - 1
     if (seatFrom < 0 || seatTo < 0 || seatFrom >= seats.value.length || seatTo >= seats.value.length) return
     const prev = seats.value.map(r => [...r])
     const s = [...seats.value]
-    ;[s[seatFrom], s[seatTo]] = [s[seatTo], s[seatFrom]]
+    // 移动语义：取出源行后插入目标位置，中间行顺移（与拖动时的让位预览一致）
+    const [moved] = s.splice(seatFrom, 1)
+    s.splice(seatTo, 0, moved)
     seats.value = s
     if (undo) recordGridSnapshotUndo(undo.key, undo.table, prev, s)
     save()
@@ -224,9 +227,11 @@ export function useSeatGrid(apiBase, options = {}) {
     const from = map[fromDisplayIdx], to = map[toDisplayIdx]
     if (from === -1 || to === -1) return
     const prev = seats.value.map(r => [...r])
+    // 移动语义：源列取出后插入目标位置，中间列的数据顺移（表头固定不动）
     const newSeats = seats.value.map(r => {
       const nr = [...r]
-      ;[nr[from], nr[to]] = [nr[to], nr[from]]
+      const [moved] = nr.splice(from, 1)
+      nr.splice(to, 0, moved)
       return nr
     })
     seats.value = newSeats

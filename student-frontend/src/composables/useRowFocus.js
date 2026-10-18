@@ -11,7 +11,14 @@
 // 需要先切页签/展开等预处理时，通过 options.parse(key) 返回定位 id
 // （返回 null/undefined 表示时机未到，跳过本次，等待下次触发）。
 
-const FLASH_MS = 1400
+// 闪动样式：沿用设置页搜索跳转的「圆角荧光边框呼吸」（内描边 + 内发光）。
+// 用 box-shadow 实现：主题对 <td> 底色是 !important，会盖掉 background 动画，
+// 而 box-shadow 未被强制，且内阴影绘制在底色之上、文字之下；内描边也不会像外阴影那样
+// 被相邻单元格的背景遮住。节奏放慢为 3 次 × 1s 的呼吸。
+const BLINK_COUNT = 3
+const BLINK_MS = 1000
+const BLINK_ON = 'inset 0 0 0 3px rgba(37, 99, 235, 0.7), inset 0 0 16px 2px rgba(37, 99, 235, 0.5)'
+const BLINK_OFF = 'inset 0 0 0 3px rgba(37, 99, 235, 0), inset 0 0 16px 2px rgba(37, 99, 235, 0)'
 
 // 每个宿主组件已处理过的 focus 签名（去重，防 watch 与 activated 重复触发）。
 // 用 WeakMap 挂在模块内，避免往组件实例上写额外属性。
@@ -27,7 +34,7 @@ function cssQuote(v) {
   return String(v).replace(/["\\]/g, '\\$&')
 }
 
-// 在容器内按 [data-row-id] 找到目标行，滚动到可视区并播放一次高亮闪动。
+// 在容器内按 [data-row-id] 找到目标行，滚动到可视区，等滚动停下后再播放高亮闪动。
 // 命中返回 true；容器/元素缺失返回 false。
 export function flashRowById(container, id) {
   if (!container || id == null || id === '') return false
@@ -38,19 +45,90 @@ export function flashRowById(container, id) {
     return false
   }
   if (!el) return false
+  // 闪动用 box-shadow 而非 background-color：主题对 <td> 底色是 !important，会盖过 WAAPI 的
+  // background 动画；box-shadow 未被强制，且内阴影绘制在底色之上、文字之下，能稳定显示。
+  // 先滚到位置，等滚动停下后再闪动：否则闪动会被滚动过程消耗掉，滚到时已经闪完了。
   el.scrollIntoView({ behavior: 'smooth', block: 'center' })
-  // 用 WAAPI 播放一次性背景闪动，不改动行自身样式，动画结束自动复位
-  if (typeof el.animate === 'function') {
-    el.animate(
-      [
-        { backgroundColor: 'rgba(59,130,246,0.30)' },
-        { backgroundColor: 'rgba(59,130,246,0.08)', offset: 0.55 },
-        { backgroundColor: 'rgba(59,130,246,0)' },
-      ],
-      { duration: FLASH_MS, easing: 'ease-out' }
-    )
-  }
+  runAfterScroll(el, () => playBlink(el))
   return true
+}
+
+// 播放闪动：圆角荧光边框呼吸 BLINK_COUNT 次
+function playBlink(el) {
+  if (typeof el.animate !== 'function') return
+  // 行（DynamicTable 等普通表格）：整行只让「最外圈」变色——每个单元格只贡献上/下两条边，
+  // 首格补左边、末格补右边，合起来就是包住整行的一圈荧光边框，单元格内部不变色。
+  // 不能直接对 <tr> 加 box-shadow：外阴影会被相邻行/格的背景盖住，内阴影又被自身 <td> 底色盖住。
+  if (el.tagName === 'TR') {
+    const cells = Array.from(el.children)
+    for (let i = 0; i < cells.length; i++) {
+      const cell = cells[i]
+      if (typeof cell.animate === 'function') {
+        cell.animate(cellEdgeFrames(i === 0, i === cells.length - 1), ANIM_OPTS)
+      }
+    }
+    return
+  }
+  // 网格单元格 / 时间轴节点等独立元素：自身一圈内描边
+  el.animate([
+    { boxShadow: BLINK_OFF, offset: 0 },
+    { boxShadow: BLINK_ON, offset: 0.5 },
+    { boxShadow: BLINK_OFF, offset: 1 },
+  ], ANIM_OPTS)
+}
+
+const ANIM_OPTS = { duration: BLINK_MS, iterations: BLINK_COUNT, easing: 'ease-in-out' }
+
+// 单元格边框关键帧：上下边始终有；首格多一条左边、末格多一条右边，拼成整行的一圈边框
+function cellEdgeFrames(isFirst, isLast) {
+  const band = (a) => {
+    const c = `rgba(37, 99, 235, ${a})`
+    const parts = [`inset 0 3px 0 0 ${c}`, `inset 0 -3px 0 0 ${c}`]
+    if (isFirst) parts.push(`inset 3px 0 0 0 ${c}`)
+    if (isLast) parts.push(`inset -3px 0 0 0 ${c}`)
+    return parts.join(', ')
+  }
+  return [
+    { boxShadow: band(0), offset: 0 },
+    { boxShadow: band(0.7), offset: 0.5 },
+    { boxShadow: band(0), offset: 1 },
+  ]
+}
+
+// 等目标元素滚动到位后再回调（避免闪动被平滑滚动过程吃掉）。
+// 优先用 scrollend；不支持时用「scroll 事件静止 120ms」兜底；元素本就可见时立即回调。
+function runAfterScroll(el, cb) {
+  const win = (el.ownerDocument && el.ownerDocument.defaultView) ||
+    (typeof window !== 'undefined' ? window : null)
+  if (!win) { cb(); return }
+  let started = false
+  let settleTimer = null
+  let noScrollTimer = null
+  let maxTimer = null
+  const cleanup = () => {
+    if (settleTimer) clearTimeout(settleTimer)
+    if (noScrollTimer) clearTimeout(noScrollTimer)
+    if (maxTimer) clearTimeout(maxTimer)
+    win.removeEventListener('scrollend', start, true)
+    win.removeEventListener('scroll', onScroll, true)
+  }
+  function start() {
+    if (started) return
+    started = true
+    cleanup()
+    cb()
+  }
+  function onScroll() {
+    if (noScrollTimer) { clearTimeout(noScrollTimer); noScrollTimer = null }
+    if (settleTimer) clearTimeout(settleTimer)
+    settleTimer = setTimeout(start, 120)
+  }
+  win.addEventListener('scrollend', start, true)
+  win.addEventListener('scroll', onScroll, true)
+  // 无需滚动（元素已在视口内）时，尽快开始
+  noScrollTimer = setTimeout(start, 100)
+  // 兜底：无论如何 1s 后开始
+  maxTimer = setTimeout(start, 1000)
 }
 
 // 目标行可能因数据异步加载/页签切换而尚未渲染：按固定间隔重试，直到命中或超时。

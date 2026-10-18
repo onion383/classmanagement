@@ -45,7 +45,9 @@ const SOURCES = [
     match: ['姓名', '类型', '开始时间', '结束时间', '家长联系电话', '学生联系电话', '状态', '返校时间', '备注'],
     label: r => [r['姓名'], r['类型']].filter(Boolean).join(' ') || ('请假#' + r.id),
     sub: r => [r['开始时间'], r['结束时间']].filter(Boolean).join(' ~ '),
-    focus: r => String(r.id),
+    // 请假记录对应时间轴上的「离开校园」节点（无开始时间则退回「已申请」）：focus 加 tl: 前缀，
+    // 目标页据此定位到时间轴那一项。时间轴渲染了全部记录，比分页表格更可靠地命中目标。
+    focus: r => 'tl:' + r.id + (r['开始时间'] ? '-leave' : '-apply'),
   },
   {
     table: 'score_records',
@@ -119,6 +121,34 @@ const SCHEDULE_TABLES = [
   { table: 'master_schedule', group: '课程 · 一般课表', anchor: 'm' },
 ]
 const DEFAULT_DAYS = ['周一', '周二', '周三', '周四', '周五']
+
+// 座位表：seats 是二维 JSON（seats[行][真实列] = 学生 id 或姓名）。focus 形如 `seat:行:真实列`
+// （真实列不含走廊列），由目标页按自身几何换算成显示列后定位到对应单元格。
+const SEAT_TABLES = [
+  { table: 'seat_layout', group: '座位 · 当前座位', anchor: 'seat' },
+  { table: 'seat_template', group: '座位 · 座位模板', anchor: 'seatt' },
+]
+
+// 值日表：cells 是 {项目:{星期:[人名]}}，页面按项目人数把每个项目展开成多行；
+// items/cells 有日常(daily)/大扫除(big) 两套（可能按模式分键打包），需按模式解包。
+// focus 形如 `duty:<mode>:行:列`（dutyt 为值日模板）。
+const DUTY_TABLES = [
+  { table: 'duty_layout', group: '值日 · 当前值日', anchor: 'duty' },
+  { table: 'duty_template', group: '值日 · 值日模板', anchor: 'dutyt' },
+]
+
+// 模式解包：与 routes/duty.js 的 fieldToModeMap 保持一致（顶层键全是 daily/big 视为新模式结构，
+// 否则整块归入日常）。
+function toModeMap(field) {
+  let obj = {}
+  try { obj = (typeof field === 'object' && field !== null) ? field : JSON.parse(field || '{}') } catch (_) { obj = {} }
+  if (!obj || typeof obj !== 'object') return { daily: {}, big: {} }
+  const keys = Object.keys(obj)
+  const isModeMap = keys.length > 0 && keys.every(k => k === 'daily' || k === 'big')
+  if (isModeMap) return { daily: obj.daily || {}, big: obj.big || {} }
+  return { daily: obj, big: {} }
+}
+const unpackMode = (field, mode) => toModeMap(field)[mode] || {}
 
 // LIKE 元字符转义：把用户输入里的 % _ \ 当作普通字符，避免被当成通配符。
 function likePattern(q) {
@@ -209,6 +239,79 @@ router.get('/', (req, res) => {
       }
       if (items.length) groups.push({ table: sc.table, group: sc.group, emoji: '📖', route: '/schedule', items })
     }
+
+    // 座位表（cells 存学生 id 或姓名，需 id→姓名映射后再按姓名匹配；focus 用页面显示列）
+    let idNameMap = null
+    const nameOfSeat = (v) => {
+      if (v === null || v === undefined || v === '') return ''
+      if (typeof v === 'number') {
+        if (!idNameMap) {
+          idNameMap = {}
+          try { for (const s of db.prepare('SELECT id, 姓名 FROM students').all()) idNameMap[s.id] = s['姓名'] || '' } catch (_) {}
+        }
+        return idNameMap[v] || ''
+      }
+      return String(v)
+    }
+    for (const st of SEAT_TABLES) {
+      let row = null
+      try { row = db.prepare(`SELECT seats FROM ${st.table} WHERE id = 1`).get() } catch (_) { continue }
+      if (!row) continue
+      let seats = []
+      try { seats = JSON.parse(row.seats || '[]') } catch (_) { continue }
+      if (!Array.isArray(seats) || !seats.length) continue
+      const items = []
+      for (let r = 0; r < seats.length && items.length < PER_GROUP; r++) {
+        const line = Array.isArray(seats[r]) ? seats[r] : []
+        for (let c = 0; c < line.length && items.length < PER_GROUP; c++) {
+          const name = nameOfSeat(line[c]).trim()
+          if (!name || !nameHit(name, q, pm)) continue
+          // focus 用真实列（不含走廊列），目标页据此换算显示列
+          items.push({ id: r + ':' + c, label: name, sub: `第${r + 1}行 · 列${c + 1}`, focus: st.anchor + ':' + r + ':' + c })
+        }
+      }
+      if (items.length) groups.push({ table: st.table, group: st.group, emoji: '🪑', route: '/seats', items })
+    }
+
+    // 值日表（项目×星期；行按项目人数展开，与页面 buildGridRows 的行号一致）
+    let dutyDays = DEFAULT_DAYS, dutyItemsField = null
+    try {
+      const g = db.prepare('SELECT days, items FROM duty_settings WHERE id = 1').get()
+      if (g) {
+        try { const d = JSON.parse(g.days || '[]'); if (Array.isArray(d) && d.length) dutyDays = d } catch (_) {}
+        dutyItemsField = g.items
+      }
+    } catch (_) {}
+    for (const dt of DUTY_TABLES) {
+      let row = null
+      try { row = db.prepare(`SELECT cells FROM ${dt.table} WHERE id = 1`).get() } catch (_) { continue }
+      if (!row) continue
+      for (const mode of ['daily', 'big']) {
+        const cells = unpackMode(row.cells, mode)
+        const items = dutyItemsField ? unpackMode(dutyItemsField, mode) : []
+        if (!Array.isArray(items) || !items.length) continue
+        if (!cells || !Object.keys(cells).length) continue
+        const out = []
+        let rowIdx = 0
+        for (const it of items) {
+          const n = Math.max(1, Number(it.count) || 1)
+          for (let k = 0; k < n; k++) {
+            if (out.length >= PER_GROUP) break
+            const byDay = cells[it.name] || {}
+            for (let di = 0; di < dutyDays.length && out.length < PER_GROUP; di++) {
+              const raw = byDay[dutyDays[di]]
+              const name = Array.isArray(raw) ? String(raw[k] || '').trim() : String(raw || '').trim()
+              if (!name || !nameHit(name, q, pm)) continue
+              out.push({ id: mode + ':' + rowIdx + ':' + di, label: name, sub: `${it.name} · ${dutyDays[di]}`, focus: dt.anchor + ':' + mode + ':' + rowIdx + ':' + di })
+            }
+            rowIdx++
+          }
+          if (out.length >= PER_GROUP) break
+        }
+        if (out.length) groups.push({ table: dt.table, group: dt.group + (mode === 'big' ? '（大扫除）' : ''), emoji: '🧹', route: '/duty', items: out })
+      }
+    }
+
     res.json({ groups })
   } catch (err) {
     res.status(500).json({ error: err.message })

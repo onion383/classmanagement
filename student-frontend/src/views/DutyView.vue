@@ -32,6 +32,7 @@
               <div v-if="!activeLoaded" class="skeleton-block"></div>
               <GridView
                 v-else
+                :anchor-prefix="'duty:' + dutyMode"
                 :col-headers="settingsDays"
                 :rows="dutyActiveRows"
                 :hide-meta-columns="true"
@@ -56,6 +57,7 @@
               <div v-if="!masterLoaded" class="skeleton-block"></div>
               <GridView
                 v-else
+                :anchor-prefix="'dutyt:' + dutyMode"
                 :col-headers="settingsDays"
                 :rows="dutyMasterRows"
                 :hide-meta-columns="true"
@@ -89,6 +91,7 @@
             <div v-if="!weightLoaded" class="skeleton-block"></div>
             <GridView
               v-else
+              :anchor-prefix="'dutyw:' + dutyMode"
               :col-headers="settingsDays"
               :rows="weightDisplayRows"
               :hide-meta-columns="true"
@@ -251,7 +254,7 @@
 </template>
 
 <script setup>
-import { ref, computed, watch, onMounted, defineAsyncComponent } from 'vue'
+import { ref, computed, watch, onMounted, onActivated, getCurrentInstance, defineAsyncComponent } from 'vue'
 import axios from 'axios'
 import Tabs from '../components/base/Tabs.vue'
 import ViewSwitch from '../components/base/ViewSwitch.vue'
@@ -263,6 +266,7 @@ import { useNotification } from '../composables/useNotification.js'
 import { useUndoShortcut, recordGridSnapshotUndo } from '../composables/useUndo.js'
 import { syncStudentNamesFromRows, syncStudentNames } from '../composables/useSyncStudentNames.js'
 import { createRowReuseCache } from '../utils/rowReuse.js'
+import { applyRouteRowFocus } from '../composables/useRowFocus.js'
 
 // 弹窗类组件懒加载：打开时才加载对应 chunk。loader 抽出为命名函数，
 // 可用 v-preload="loadXxx" 在悬停按钮时预取，点击时即时弹出。
@@ -280,6 +284,7 @@ const loadDutyBackfillDialog = () => import('../components/dialogs/DutyBackfillD
 const DutyBackfillDialog = defineAsyncComponent(loadDutyBackfillDialog)
 
 const API_BASE = '/api'
+const inst = getCurrentInstance()
 const { success: notifySuccess, error: notifyError } = useNotification()
 
 const activeTab = ref('manage')
@@ -362,6 +367,7 @@ function buildGridRows(cells, items, days, readonly = false) {
     const n = Math.max(1, Number(it.count) || 1)
     for (let k = 0; k < n; k++) {
       rows.push({
+        _lessonIdx: rows.length,
         _rowKey: `it_${it.name}_${k}`,
         label: it.name,
         _isReadonly: readonly,
@@ -415,6 +421,40 @@ async function reloadAll() {
   // 四项互不依赖，一并并发，省掉原先 fetchSettings 单独先跑的一个来回
   await Promise.all([fetchSettings(), loadActive(true), loadMaster(true), loadWeight()])
 }
+
+// 跨页定位：标题栏全局搜索 / AI 改动明细点「值日」结果跳转 /duty?focus=duty:<mode>:<行>:<列>
+// 前缀：duty=当前值日 / dutyt=值日模板 / dutyw=权重表；mode=日常值日(daily)/大扫除(big)。
+// 目标模式与当前模式不符时先切模式并重载数据（本次返回空值交由 useRowFocus 重试），
+// 再等对应表格数据就绪，最后滚动到该格子并闪动高亮。
+function _applyRowFocus() {
+  applyRouteRowFocus(inst.proxy, {
+    parse: (key) => {
+      const m = /^(duty|dutyt|dutyw):(daily|big):\d+:\d+$/.exec(key)
+      if (!m) return null
+      activeTab.value = 'manage'
+      if (dutyMode.value !== m[2]) {
+        dutyMode.value = m[2]
+        localStorage.setItem('class-duty-mode', dutyMode.value)
+        // 置为未加载，避免用旧模式数据误判就绪；reloadAll 完成后各自置回 true
+        activeLoaded.value = false
+        masterLoaded.value = false
+        weightLoaded.value = false
+        reloadAll()
+        return null
+      }
+      if (m[1] === 'duty') {
+        dutyView.value = 'active'
+        if (!activeLoaded.value) return null
+      } else if (m[1] === 'dutyt') {
+        dutyView.value = 'master'
+        if (!masterLoaded.value) return null
+      } else if (!weightLoaded.value) return null
+      return key
+    }
+  })
+}
+watch(() => inst.proxy.$route.query.focus, _applyRowFocus)
+onActivated(_applyRowFocus)
 
 // 学生名册是否已就绪。未就绪时同步值日人名会把已有学生误判为「新名字」逐个提交，
 // 故同步前必须先补齐；并发调用共用同一个请求
@@ -567,18 +607,41 @@ function persistSettings(extra) {
 }
 
 function swapItems(oldIndex, newIndex) {
+  if (oldIndex === newIndex) return
   const arr = [...settingsItems.value]
+  if (!arr[oldIndex]) return
+  // 移动语义（与拖动预览一致）：取出源项目插入目标位置，中间项目顺移
   const [moved] = arr.splice(oldIndex, 1)
   arr.splice(newIndex, 0, moved)
   settingsItems.value = arr
   persistSettings()
 }
 
+// 把「按 keys 顺序排好的值」从 from 移到 to（移动语义），键（表头）保持不动。
+// 值日的数据是按星期名做 key 的（cells[项目][星期]），所以只能挪值、不能改键。
+function moveDataInKeyedCells(cells, keys, from, to) {
+  const src = cells || {}
+  const next = {}
+  for (const item of Object.keys(src)) {
+    const row = src[item] || {}
+    const vals = keys.map(k => row[k])
+    const [moved] = vals.splice(from, 1)
+    vals.splice(to, 0, moved)
+    const nr = {}
+    keys.forEach((k, i) => { nr[k] = vals[i] })
+    next[item] = nr
+  }
+  return next
+}
+
 function swapDays(oldIndex, newIndex) {
-  const arr = [...settingsDays.value]
-  const [tmp] = [arr[oldIndex]]; arr[oldIndex] = arr[newIndex]; arr[newIndex] = tmp
-  settingsDays.value = arr
-  persistSettings()
+  if (oldIndex === newIndex) return
+  const keys = settingsDays.value
+  if (oldIndex < 0 || newIndex < 0 || oldIndex >= keys.length || newIndex >= keys.length) return
+  // 表头固定：不重排 settingsDays，只把这两天的值日名单按「移动」重排
+  activeCells.value = moveDataInKeyedCells(activeCells.value, keys, oldIndex, newIndex)
+  masterCells.value = moveDataInKeyedCells(masterCells.value, keys, oldIndex, newIndex)
+  persistSettings({ active: true, master: true })
 }
 
 function deleteItem(itemName) {
@@ -787,6 +850,7 @@ const weightDisplayRows = computed(() => {
         return { course: val, extra: { _bg: `rgb(${weightHeatRgb(t).join(', ')})`, _fg: weightHeatFg(t) } }
       })
       rows.push({
+        _lessonIdx: rows.length,
         _rowKey: `w_${it.name}_${k}`,
         label: it.name,
         _isReadonly: false,
@@ -825,7 +889,10 @@ function onWeightCellsUpdate(newRows) {
   saveWeight()
 }
 function onWeightSwapRows(oldIndex, newIndex) {
+  if (oldIndex === newIndex) return
   const arr = [...settingsItems.value]
+  if (!arr[oldIndex]) return
+  // 移动语义（与拖动预览一致）：取出源项目插入目标位置
   const [moved] = arr.splice(oldIndex, 1)
   arr.splice(newIndex, 0, moved)
   settingsItems.value = arr
@@ -838,20 +905,11 @@ function onWeightSwapRows(oldIndex, newIndex) {
   saveWeight()
 }
 function onWeightSwapColumns(oldIndex, newIndex) {
-  const arr = [...settingsDays.value]
-  const [tmp] = [arr[oldIndex]]; arr[oldIndex] = arr[newIndex]; arr[newIndex] = tmp
-  settingsDays.value = arr
-  // 同步交换所有权重项中的列
-  const prev = JSON.parse(JSON.stringify(dutyWeights.value))
-  const next = {}
-  for (const item of Object.keys(prev)) {
-    next[item] = {}
-    for (let i = 0; i < arr.length; i++) {
-      next[item][arr[i]] = prev[item][arr[i]]
-    }
-  }
-  dutyWeights.value = next
-  persistSettings({ active: true, master: true })
+  if (oldIndex === newIndex) return
+  const keys = settingsDays.value
+  if (oldIndex < 0 || newIndex < 0 || oldIndex >= keys.length || newIndex >= keys.length) return
+  // 表头固定：只按「移动」重排这几天各项目的权重值，settingsDays 顺序不动
+  dutyWeights.value = moveDataInKeyedCells(dutyWeights.value, keys, oldIndex, newIndex)
   saveWeight()
 }
 
@@ -1113,6 +1171,8 @@ onMounted(async () => {
   // 学生名册与学生相关请求共用同一批：值日人名同步要先有学生名册才能判断「是否为新名字」
   await Promise.all([fetchSettings(), loadActive(), loadMaster(), primeStudentsOnce(), loadWeight()])
   silentBackfill()
+  // 跨页定位：带 ?focus= 进入本页时定位到目标格子
+  _applyRowFocus()
 })
 </script>
 

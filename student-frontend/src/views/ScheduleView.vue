@@ -715,15 +715,19 @@ export default {
       const fromLessonIdx = fromRow._lessonIdx, toLessonIdx = toRow._lessonIdx;
       if (fromLessonIdx === undefined || toLessonIdx === undefined) return;
       const prev = JSON.parse(JSON.stringify(this.masterCells));
+      // 移动语义：同上
       const newCells = [...this.masterCells];
-      [newCells[fromLessonIdx], newCells[toLessonIdx]] = [newCells[toLessonIdx], newCells[fromLessonIdx]];
+      const [movedRow] = newCells.splice(fromLessonIdx, 1);
+      newCells.splice(toLessonIdx, 0, movedRow);
       this.masterCells = newCells;
       recordGridSnapshotUndo('课程表', 'master_schedule', prev, JSON.parse(JSON.stringify(newCells)), `交换行：${fromRow.label} ↔ ${toRow.label}`);
       this.saveMaster();
     },
     onMasterSwapColumns(fromIdx, toIdx) {
+      if (fromIdx === toIdx) return;
       const fromHeader = this.masterColHeaders[fromIdx] ?? `列${fromIdx + 1}`, toHeader = this.masterColHeaders[toIdx] ?? `列${toIdx + 1}`;
       const prev = JSON.parse(JSON.stringify(this.masterCells));
+      // 移动语义：同 active 表（表头固定，只移动数据列）
       const newCells = this.masterCells.map(row => {
         const r = [...row];
         const [m] = r.splice(fromIdx, 1);
@@ -862,15 +866,19 @@ export default {
       const fromLessonIdx = fromRow._lessonIdx, toLessonIdx = toRow._lessonIdx;
       if (fromLessonIdx === undefined || toLessonIdx === undefined) return;
       const prev = JSON.parse(JSON.stringify(this.activeCells));
+      // 移动语义：与拖动时的让位预览一致（取出源行插入目标位置，中间行顺移）
       const newCells = [...this.activeCells];
-      [newCells[fromLessonIdx], newCells[toLessonIdx]] = [newCells[toLessonIdx], newCells[fromLessonIdx]];
+      const [movedRow] = newCells.splice(fromLessonIdx, 1);
+      newCells.splice(toLessonIdx, 0, movedRow);
       this.activeCells = newCells;
       recordGridSnapshotUndo('课程表', 'schedule', prev, JSON.parse(JSON.stringify(newCells)), `交换行：${fromRow.label} ↔ ${toRow.label}`);
       this.saveActive();
     },
     onActiveSwapColumns(fromIdx, toIdx) {
+      if (fromIdx === toIdx) return;
       const fromHeader = this.activeColHeaders[fromIdx] ?? `列${fromIdx + 1}`, toHeader = this.activeColHeaders[toIdx] ?? `列${toIdx + 1}`;
       const prev = JSON.parse(JSON.stringify(this.activeCells));
+      // 移动语义：取出源列插入目标位置，中间列的数据顺移（表头固定）
       const newCells = this.activeCells.map(row => {
         const r = [...row];
         const [m] = r.splice(fromIdx, 1);

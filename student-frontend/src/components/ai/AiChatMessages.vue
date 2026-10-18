@@ -116,6 +116,40 @@
           class="mt-1 text-[10px] text-text-muted"
         >未返回思考内容 · 当前模型可能不支持思考模式</p>
       </div>
+      <!-- 本轮数据/文件改动总结：折叠显示「改动了 N 个文件 +A -R」，点开逐项列出各表/各 md；
+           右侧「↗」进右侧抽屉看明细（表格 / 网格 / 行级 diff）。撤回后整条消失。 -->
+      <div v-if="changeSummary(m)" class="mt-2 rounded-lg border border-border overflow-hidden">
+        <div
+          class="flex items-center gap-2 px-2.5 py-1.5 text-xs cursor-pointer select-none transition-theme hover:bg-surface-hover"
+          :title="m._changeOpen ? '收起明细' : '展开明细'"
+          @click="toggleChangeOpen(m)"
+        >
+          <IconGlyph name="folder" :size="12" tint="current" class="text-text-muted flex-shrink-0" />
+          <span class="text-text whitespace-nowrap">改动了 {{ changeSummary(m).total }} 个文件</span>
+          <span class="text-success whitespace-nowrap">+{{ changeSummary(m).added }}</span>
+          <span class="text-danger whitespace-nowrap">-{{ changeSummary(m).removed }}</span>
+          <span class="ml-auto flex-shrink-0 text-text-muted transition-transform duration-150" :class="m._changeOpen ? 'rotate-180' : ''">▾</span>
+          <button
+            class="open-changes-btn ai-glass-panel bg-white/55 backdrop-blur-md border border-border rounded-sm px-2 py-1 text-text-muted hover:text-primary transition-theme cursor-pointer flex-shrink-0 leading-none"
+            title="在右侧查看改动明细"
+            @click.stop="$emit('open-changes', m)"
+          >↗</button>
+        </div>
+        <div v-if="m._changeOpen" class="border-t border-border divide-y divide-border">
+          <div v-for="it in changeSummary(m).items" :key="it.key" class="flex items-center gap-2 px-2.5 py-1.5 text-xs">
+            <IconGlyph name="folder" :size="11" tint="current" class="text-text-muted flex-shrink-0" />
+            <span class="text-text min-w-0 truncate" :title="it.label">{{ it.label }}</span>
+            <span class="ml-auto text-success flex-shrink-0">+{{ it.added }}</span>
+            <span class="text-danger flex-shrink-0">-{{ it.removed }}</span>
+            <button
+              v-if="canJumpItem(it)"
+              class="text-[11px] leading-none px-2 py-1 flex-shrink-0 border border-border rounded-sm cursor-pointer text-text-muted hover:text-primary hover:border-primary transition-theme"
+              title="跳转到该表"
+              @click="$emit('goto', { table: tableOfItem(it), id: null })"
+            >跳转</button>
+          </div>
+        </div>
+      </div>
       <!-- 回复操作：复制 / 重试 / 撤回数据更改；右侧统计用时与 token -->
       <div v-if="m.role !== 'user' && !m.loading" class="mt-2 flex items-center gap-2 text-xs">
         <button
@@ -227,8 +261,9 @@ import AiChart from '../AiChart.vue'
 import AiRecordTable from '../tables/AiRecordTable.vue'
 import {
   hasProcess, processTitle, stepIcon, stepClass, stepSeconds, toggleStepDetail,
-  hasReasonStep, tokenSpeed, extractFileName, extractUserText,
+  hasReasonStep, tokenSpeed, extractFileName, extractUserText, summarizeProposalChanges,
 } from '../../composables/ai/aiMessages.js'
+import { TABLE_ROUTE } from '../../composables/ai/aiConstants.js'
 
 export default {
   name: 'AiChatMessages',
@@ -242,7 +277,7 @@ export default {
     isRollbackable: { type: Function, required: true },
     canUndo: { type: Function, required: true },
   },
-  emits: ['new', 'copy', 'retry', 'undo', 'rollback'],
+  emits: ['new', 'copy', 'retry', 'undo', 'rollback', 'open-changes', 'goto'],
   methods: {
     hasProcess,
     processTitle,
@@ -254,6 +289,18 @@ export default {
     tokenSpeed,
     extractFileName,
     extractUserText,
+    // 本轮数据/文件改动的汇总：仅在提案已执行且未撤回时返回非空（空则整条不渲染）。
+    // 结果缓存到消息上，避免长列表滚动时每帧重算；撤回后由 reverted 判断直接返回 null。
+    changeSummary(m) {
+      const p = m && m.proposal
+      if (!p || !p.executed || p.reverted) return null
+      if (!m._changeSummary) m._changeSummary = summarizeProposalChanges(p)
+      return m._changeSummary.total ? m._changeSummary : null
+    },
+    toggleChangeOpen(m) { m._changeOpen = !m._changeOpen },
+    // 项的 key 形如 grid:schedule / table:students / skill:xxx，取回原始表名（技能 md 无对应表）
+    tableOfItem(it) { return (it.key || '').split(':')[1] || '' },
+    canJumpItem(it) { return !!TABLE_ROUTE[this.tableOfItem(it)] },
   },
 }
 </script>

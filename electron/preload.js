@@ -1,5 +1,18 @@
 const { contextBridge, ipcRenderer } = require('electron')
 
+// 阻止把页面内的链接/图片拖出窗口（拖到桌面/浏览器会生成快捷方式或交给外部程序打开）。
+// 仅在拖拽源为 <a> 或 <img>（含其子元素）时取消 dragstart；不影响表格排序等
+// 由 mousedown/mousemove 自实现的拖拽交互。
+window.addEventListener(
+  'dragstart',
+  (e) => {
+    const t = e.target
+    if (!t || typeof t.closest !== 'function') return
+    if (t.closest('a, img')) e.preventDefault()
+  },
+  true
+)
+
 // 白名单：仅允许以下单向发送通道
 const validSendChannels = [
   'widget-resize',

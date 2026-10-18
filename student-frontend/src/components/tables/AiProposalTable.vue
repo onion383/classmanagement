@@ -19,23 +19,43 @@
       </div>
     </div>
   </div>
-  <!-- 技能提案（kind=skill）：展示技能名与正文；更新/删除时先展示原正文作对照 -->
+  <!-- 技能提案（kind=skill）：新建/删除展示正文；更新改为按行级 diff，只列变更行 -->
   <div v-else-if="isSkill" class="rounded-lg border border-border overflow-hidden divide-y divide-border">
     <div class="flex gap-3 px-3 py-2 text-xs">
       <span class="text-text-muted flex-shrink-0 w-20 truncate">技能名</span>
       <span class="text-text min-w-0 break-all">{{ proposal.name }}</span>
     </div>
-    <div v-if="skillBefore" class="px-3 py-2">
-      <div class="text-text-muted text-xs mb-1">原正文（将被覆盖）</div>
-      <pre class="text-xs text-text-muted whitespace-pre-wrap break-words max-h-60 overflow-auto m-0 font-mono">{{ skillBefore }}</pre>
-    </div>
-    <div v-if="skillContent" class="px-3 py-2">
-      <div class="text-text-muted text-xs mb-1">新正文</div>
-      <pre class="text-xs text-text whitespace-pre-wrap break-words max-h-60 overflow-auto m-0 font-mono">{{ skillContent }}</pre>
-    </div>
-    <div v-if="proposal.operation === 'delete'" class="px-3 py-2 text-xs text-danger leading-relaxed">
-      删除后该技能文件将从技能库移除，无法撤销。
-    </div>
+    <!-- 更新：行级 diff。按「行」计算改动量，只展示新增（+）/删除（-）的行，
+         未改动的上下文行不铺开，避免把整篇正文再贴一遍 -->
+    <template v-if="isSkillUpdate">
+      <div class="flex items-center gap-4 px-3 py-1.5 text-xs">
+        <span class="text-success">新增 {{ skillDiff.added }} 行</span>
+        <span class="text-danger">删除 {{ skillDiff.removed }} 行</span>
+      </div>
+      <div v-if="skillDiffLines.length" class="px-3 py-2 max-h-60 overflow-auto font-mono text-xs leading-5">
+        <div
+          v-for="(l, i) in skillDiffLines"
+          :key="i"
+          class="whitespace-pre-wrap break-words"
+          :class="l.type === 'add' ? 'text-success' : 'text-danger'"
+        >{{ l.type === 'add' ? '+ ' : '- ' }}{{ l.text }}</div>
+      </div>
+      <div v-else class="px-3 py-2 text-xs text-text-muted">正文无变化</div>
+    </template>
+    <!-- 新建/删除：仍按原样展示正文 -->
+    <template v-else>
+      <div v-if="skillBefore" class="px-3 py-2">
+        <div class="text-text-muted text-xs mb-1">原正文（将被覆盖）</div>
+        <pre class="text-xs text-text-muted whitespace-pre-wrap break-words max-h-60 overflow-auto m-0 font-mono">{{ skillBefore }}</pre>
+      </div>
+      <div v-if="skillContent" class="px-3 py-2">
+        <div class="text-text-muted text-xs mb-1">新正文</div>
+        <pre class="text-xs text-text whitespace-pre-wrap break-words max-h-60 overflow-auto m-0 font-mono">{{ skillContent }}</pre>
+      </div>
+      <div v-if="proposal.operation === 'delete'" class="px-3 py-2 text-xs text-danger leading-relaxed">
+        删除后该技能文件将从技能库移除，无法撤销。
+      </div>
+    </template>
   </div>
   <!-- 删除：展示库里现有记录，让用户看清将被删掉的是什么 -->
   <AiRecordTable v-else-if="isDelete" :table="proposal.table" :ids="deleteIds" />
@@ -101,6 +121,7 @@
 import DynamicTable from './DynamicTable.vue'
 import AiRecordTable from './AiRecordTable.vue'
 import AiGridPreview, { GRID_TABLES } from './AiGridPreview.vue'
+import { lineDiff } from '../../composables/ai/aiMessages.js'
 
 // 前端设置项：key → 展示名 + 枚举值的中文说明（供设置提案预览可读）
 const FRONT_LABELS = {
@@ -154,6 +175,14 @@ export default {
     skillContent() { return this.isSkill && this.proposal.operation !== 'delete' ? String(this.proposal.content || '') : '' },
     // 原正文（更新/删除时后端附带 before）
     skillBefore() { return this.isSkill && this.proposal.before ? String(this.proposal.before) : '' },
+    // 更新技能（markdown）：原正文与新正文都存在，改为按行计算的行级 diff 展示
+    isSkillUpdate() {
+      return this.isSkill && this.proposal.operation === 'update' && !!this.skillBefore && !!this.skillContent
+    },
+    // 行级 diff 结果：{ added, removed, lines:[{type,text}] }
+    skillDiff() { return this.isSkillUpdate ? lineDiff(this.skillBefore, this.skillContent) : null },
+    // 只展示「变更的行」（新增/删除），未改动的上下文行不再铺开，避免又贴一遍全文
+    skillDiffLines() { return this.skillDiff ? this.skillDiff.lines.filter((l) => l.type !== 'ctx') : [] },
     // 前端设置提案（主题/日夜模式等）
     isFront() { return this.proposal.kind === 'front' },
     frontLabel() { return FRONT_LABELS[this.proposal.key] || this.proposal.key || '设置' },

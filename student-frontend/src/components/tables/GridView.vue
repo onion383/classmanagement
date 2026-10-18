@@ -172,6 +172,7 @@
 
 <script>
 import { TransitionGroup } from 'vue';
+import { applyRowShift, applyColShift, clearShift, createEdgeAutoScroll } from '../../composables/tableDragFx';
 
 // 无动画时的「透明包裹」组件：只把默认插槽原样渲染成 Fragment，不产生任何真实 DOM 元素，
 // 保证 <tr> 仍是 <tbody> 的直接子节点。
@@ -498,12 +499,30 @@ export default {
       const c = this.$refs.gridTable;
       this._colGeomContainer = c ? c.getBoundingClientRect() : null;
     },
+    // 复制一份跟手虚影作为「落点虚影」：更淡、无阴影、初始隐藏，
+    // 位置由 update*DropBox 贴在目标格上。两个虚影同时存在：手上跟手，落点提示位置。
+    _cloneGhostForSlot(src, opacity) {
+      if (!src) return null;
+      const el = src.cloneNode(true);
+      el.style.opacity = String(opacity);
+      el.style.boxShadow = 'none';
+      el.style.display = 'none';
+      el.style.zIndex = '99997';
+      document.body.appendChild(el);
+      return el;
+    },
     updateRowDropBox() {
       const box = this._rowDropBox;
       if (!box) return;
+      const ghost = this._rowSlotGhost;
+      const hide = () => {
+        box.style.display = 'none';
+        if (ghost) ghost.style.display = 'none';
+        this._rowDropSig = null;
+      };
       const geom = this._rowGeom;
       const g = (geom && this.rowDragOverIdx !== null) ? geom[this.rowDragOverIdx] : null;
-      if (!g) { box.style.display = 'none'; return; }
+      if (!g) { hide(); return; }
       let { left, top, right, bottom } = g;
       const c = this._rowGeomContainer;
       if (c) {
@@ -513,18 +532,31 @@ export default {
         bottom = Math.min(bottom, c.bottom);
       }
       const w = right - left, h = bottom - top;
-      if (w <= 0 || h <= 0) { box.style.display = 'none'; return; }
+      if (w <= 0 || h <= 0) { hide(); return; }
       box.style.display = 'block';
       box.style.transform = `translate(${left}px, ${top}px)`;
       box.style.width = w + 'px';
       box.style.height = h + 'px';
+      // 落点虚影：被拖行的半透明副本固定在落点上（不跟随鼠标）
+      if (ghost) {
+        ghost.style.display = 'block';
+        ghost.style.transform = `translate(${left}px, ${top}px)`;
+        ghost.style.width = w + 'px';
+        ghost.style.height = h + 'px';
+      }
     },
     updateColDropBox() {
       const box = this._colDropBox;
       if (!box) return;
+      const ghost = this._colSlotGhost;
+      const hide = () => {
+        box.style.display = 'none';
+        if (ghost) ghost.style.display = 'none';
+        this._colDropSig = null;
+      };
       const geom = this._colGeom;
       const g = (geom && this.colDragOverIdx !== null) ? geom[this.colDragOverIdx] : null;
-      if (!g || this._colGeomHeaderTop == null) { box.style.display = 'none'; return; }
+      if (!g || this._colGeomHeaderTop == null) { hide(); return; }
       // 用按下时缓存的几何，拖动过程中不再读取布局
       let { left, right } = g;
       let top = this._colGeomHeaderTop;
@@ -537,11 +569,18 @@ export default {
         bottom = Math.min(bottom, c.bottom);
       }
       const w = right - left, h = bottom - top;
-      if (w <= 0 || h <= 0) { box.style.display = 'none'; return; }
+      if (w <= 0 || h <= 0) { hide(); return; }
       box.style.display = 'block';
       box.style.transform = `translate(${left}px, ${top}px)`;
       box.style.width = w + 'px';
       box.style.height = h + 'px';
+      // 落点虚影：半透明列副本贴在目标格上（表头不动，所以虚影从表头下沿开始）
+      if (ghost) {
+        ghost.style.display = 'block';
+        ghost.style.transform = `translate(${left}px, ${top}px)`;
+        ghost.style.width = w + 'px';
+        ghost.style.height = h + 'px';
+      }
     },
     // ==================== 交换动画（内容互换型 FLIP） ====================
     // 网格表格的交换是「同一批 DOM 节点换内容」，不是节点重排，TransitionGroup 的 move 不会触发，
@@ -604,6 +643,14 @@ export default {
     // ==================== 行过渡容器开关（见模板说明） ====================
     // 开窗：行集合刚发生结构性变化，短窗口内保留 Enter/Leave 动画能力
     openRowsAnimWindow() {
+      // 拖拽落位：行已经让位到最终位置，这里不要再开整表 FLIP（否则观感是"弹两下"）。
+      // 落位动画统一由松手后的 _playRowSlideIn 负责。
+      if (this._noRowFlipOnce) {
+        this._noRowFlipOnce = false;
+        if (this._rowsAnimTimer) { clearTimeout(this._rowsAnimTimer); this._rowsAnimTimer = null; }
+        this.rowsAnimEnabled = false;
+        return;
+      }
       if (this._rowsAnimTimer) clearTimeout(this._rowsAnimTimer);
       if (!this.rowsAnimEnabled) this.rowsAnimEnabled = true;
       this._rowsAnimTimer = setTimeout(this.closeRowsAnimWindow, 800);
@@ -690,10 +737,20 @@ export default {
       this.rowDragIdx = rowIdx;
       this.rowDragOverIdx = rowIdx;
       this._rowGhost = ghost;
+      this._rowSlotGhost = this._cloneGhostForSlot(ghost, 0.22);
       this._rowGrab = { grabX: event.clientX - tblRect.left, grabY: event.clientY - trRect.top };
+      // 跟手虚影：自由跟随指针
       this.placeGhost(ghost, this._rowGrab, event.clientX, event.clientY);
       // 落点高亮框：包住即将落位的那一行（几何信息在此一次性缓存）
       this._cacheRowGeom();
+      // 让位与自动滚动的初始状态
+      this._rowEls = Array.from(this.$el.querySelectorAll('tbody tr'));
+      const rg0 = this._rowGeom ? this._rowGeom[rowIdx] : null;
+      this._rowSlotH = rg0 ? Math.round(rg0.bottom - rg0.top) : 0;
+      this._rowAutoScroll = createEdgeAutoScroll(
+        () => this.$refs.gridTable,
+        (mx, my) => this._onRowScrolled(mx, my)
+      );
       this._rowDropBox = this.createDropBox();
       this.updateRowDropBox();
 
@@ -742,9 +799,35 @@ export default {
     _applyRowMove() {
       if (!this._rowGhost || !this._rowPending) return;
       const ev = this._rowPending;
+      // 跟手虚影自由跟随指针
       this.placeGhost(this._rowGhost, this._rowGrab, ev.clientX, ev.clientY);
       const idx = this.resolveRowIndexAt(ev.clientY);
       if (idx !== this.rowDragOverIdx) this.rowDragOverIdx = idx;
+      this._syncRowShift();
+      this.updateRowDropBox();
+      // 边缘自动滚动（上下左右）：滚动后由 _onRowScrolled 同步几何缓存
+      if (this._rowAutoScroll) this._rowAutoScroll.update(ev.clientX, ev.clientY);
+    },
+    // 行让位（移动语义）：源与目标之间的行整体挪一格，把「空槽」让出来。
+    // 例：把第 3 行拖到第 1 行 → 原第 1、2 行各下移一格。
+    _syncRowShift() {
+      applyRowShift(this._rowEls, this.rowDragIdx, this.rowDragOverIdx, this._rowSlotH);
+    },
+    _clearRowShiftFx() {
+      const tbody = this.$el ? this.$el.querySelector('tbody') : null;
+      if (tbody) clearShift(tbody);
+      this._rowEls = null;
+      this._rowSlotH = 0;
+    },
+    // 容器滚动后同步行几何，保证命中判定与落点框跟手
+    _onRowScrolled(mx, my) {
+      const geom = this._rowGeom;
+      if (geom) {
+        for (const r of geom) {
+          if (!r) continue;
+          r.left -= mx; r.right -= mx; r.top -= my; r.bottom -= my;
+        }
+      }
       this.updateRowDropBox();
     },
     finishRowDrag() {
@@ -754,25 +837,68 @@ export default {
       this._rowUp = null;
       if (this._rowRaf) { cancelAnimationFrame(this._rowRaf); this._rowRaf = null; }
       this._applyRowMove(); // 冲刷最后一帧
+      // 松手位置：落位动画的起点
+      const relRow = this._rowPending ? { x: this._rowPending.clientX, y: this._rowPending.clientY } : null;
       this._rowPending = null;
       this._rowGeom = null;
       this._rowGeomContainer = null;
+      if (this._rowAutoScroll) { this._rowAutoScroll.stop(); this._rowAutoScroll = null; }
       if (this._rowGhost) { this._rowGhost.remove(); this._rowGhost = null; }
+      if (this._rowSlotGhost) { this._rowSlotGhost.remove(); this._rowSlotGhost = null; }
       if (this._rowDropBox) { this._rowDropBox.remove(); this._rowDropBox = null; }
       const from = this.rowDragIdx, to = this.rowDragOverIdx;
       this.rowDragIdx = null;
       this.rowDragOverIdx = null;
+      // 先清让位位移再重排：清位与重排在同一 tick，不会出现"先弹回原位"
+      this._clearRowShiftFx();
       if (from === null || to === null || from === to) return;
       if (!this.isRowDropTarget(this.rows[to])) return;
-      const sigBefore = this.rowSig(from) + '|' + this.rowSig(to);
+      // 落位：抑制整表 FLIP（见 openRowsAnimWindow），松手只做一段从指针滑入落点的收尾
+      this._noRowFlipOnce = true;
       this.$emit('swapRows', from, to);
-      this.$nextTick(() => {
-        // 数据真的换了才播动画（无监听方时数据不变，避免空放动画）
-        if (this.rowSig(from) + '|' + this.rowSig(to) === sigBefore) return;
-        this.animateRowSwap(from, to);
-      });
+      if (relRow) this.$nextTick(() => this._slideInRow(to, relRow));
     },
-
+    // 松手滑入：被移动的这一行从「松手时的指针位置」滑到落点（X/Y 两个方向）
+    _slideInRow(to, rel) {
+      if (!rel) return;
+      const trs = this.$el ? this.$el.querySelectorAll('tbody tr') : [];
+      const tr = trs[to];
+      if (!tr || typeof tr.animate !== 'function') return;
+      const r = tr.getBoundingClientRect();
+      if (!r.width && !r.height) return;
+      const dx = Math.round(rel.x - (r.left + r.width / 2));
+      const dy = Math.round(rel.y - (r.top + r.height / 2));
+      if (!dx && !dy) return;
+      tr.animate(
+        [{ transform: `translate(${dx}px, ${dy}px)` }, { transform: 'translate(0, 0)' }],
+        { duration: 200, easing: 'cubic-bezier(0.22, 0.61, 0.36, 1)' }
+      );
+    },
+    // 松手滑入：被移动的这一列（只数据格，表头不动）从指针位置滑到落点（X/Y 两个方向）
+    _slideInCol(to, rel) {
+      if (!rel) return;
+      let base = null;
+      for (let r = 0; r < this.rows.length; r++) {
+        const refs = this.cellRefs[r];
+        const el = refs ? refs[to] : null;
+        if (el && el.isConnected) { base = el; break; }
+      }
+      if (!base) return;
+      const br = base.getBoundingClientRect();
+      const dx = Math.round(rel.x - (br.left + br.width / 2));
+      const dy = Math.round(rel.y - (br.top + br.height / 2));
+      if (!dx && !dy) return;
+      for (let r = 0; r < this.rows.length; r++) {
+        const refs = this.cellRefs[r];
+        if (!refs) continue;
+        const el = refs[to];
+        if (!el || !el.isConnected || typeof el.animate !== 'function') continue;
+        el.animate(
+          [{ transform: `translate(${dx}px, ${dy}px)` }, { transform: 'translate(0, 0)' }],
+          { duration: 200, easing: 'cubic-bezier(0.22, 0.61, 0.36, 1)' }
+        );
+      }
+    },
     // ---------- 列拖拽 ----------
     onColHandleDown(event, colIndex) {
       if (this.editingCell || this.editingMeta) return;
@@ -785,17 +911,44 @@ export default {
       const thRect = th.getBoundingClientRect();
       const rowRect = th.parentElement.getBoundingClientRect();
       const tblRect = table.getBoundingClientRect();
+      // 虚影只取「数据区」，不含表头：本类表格拖动列时只移动数据，表头必须固定不动。
+      // 数据区高度过小（空表）时退回整列区域，保证拖拽仍能发起。
+      const dataTop = rowRect.bottom;
+      const dataH = Math.max(0, tblRect.bottom - dataTop);
+      const useDataOnly = dataH > 4;
+      const ghostTop = useDataOnly ? dataTop : rowRect.top;
       const ghost = this.createSliceGhost(
-        { left: thRect.left, top: rowRect.top, width: thRect.width, height: tblRect.bottom - rowRect.top }, 0.7
+        { left: thRect.left, top: ghostTop, width: thRect.width, height: Math.max(0, tblRect.bottom - ghostTop) }, 0.85
       );
       if (!ghost) return;
       this.colDragIdx = colIndex;
       this.colDragOverIdx = colIndex;
       this._colGhost = ghost;
-      this._colGrab = { grabX: event.clientX - thRect.left, grabY: event.clientY - rowRect.top };
+      this._colSlotGhost = this._cloneGhostForSlot(ghost, 0.22);
+      this._colGrab = { grabX: event.clientX - thRect.left, grabY: event.clientY - ghostTop };
+      // 跟手虚影：自由跟随指针
       this.placeGhost(ghost, this._colGrab, event.clientX, event.clientY);
       // 落点高亮框：包住即将落位的那一列（几何信息在此一次性缓存）
       this._cacheColGeom();
+      // 让位：从 cellRefs 收集每列的数据单元格（只平移 td，表头 th 保持固定）
+      const colEls = [];
+      for (let r = 0; r < this.rows.length; r++) {
+        const refs = this.cellRefs[r];
+        if (!refs) continue;
+        for (const key of Object.keys(refs)) {
+          const k = Number(key);
+          if (!Number.isInteger(k) || k < 0) continue;
+          if (!colEls[k]) colEls[k] = [];
+          if (refs[key]) colEls[k].push(refs[key]);
+        }
+      }
+      this._colEls = colEls;
+      const cg0 = this._colGeom ? this._colGeom[colIndex] : null;
+      this._colSlotW = cg0 ? Math.round(cg0.right - cg0.left) : 0;
+      this._colAutoScroll = createEdgeAutoScroll(
+        () => this.$refs.gridTable,
+        (mx, my) => this._onColScrolled(mx, my)
+      );
       this._colDropBox = this.createDropBox();
       this.updateColDropBox();
 
@@ -819,8 +972,35 @@ export default {
     _applyColMove() {
       if (!this._colGhost || !this._colPending) return;
       const ev = this._colPending;
+      // 跟手虚影自由跟随指针
       this.placeGhost(this._colGhost, this._colGrab, ev.clientX, ev.clientY);
       this.colDragOverIdx = this.resolveColIndexAt(ev.clientX);
+      this._syncColShift();
+      this.updateColDropBox();
+      // 边缘自动滚动（上下左右）
+      if (this._colAutoScroll) this._colAutoScroll.update(ev.clientX, ev.clientY);
+    },
+    // 列让位（移动语义）：只平移「数据单元格」，表头保持不动（座位/课表/值日表头固定）。
+    // 中间列整体挪一格，把源列要落进来的空槽让出来。
+    _syncColShift() {
+      applyColShift(this._colEls, this.colDragIdx, this.colDragOverIdx, this._colSlotW);
+    },
+    _clearColShiftFx() {
+      clearShift(this.$el);
+      this._colEls = null;
+      this._colSlotW = 0;
+    },
+    // 容器滚动后同步列几何（左右按 mx、表头/表底按 my）
+    _onColScrolled(mx, my) {
+      const geom = this._colGeom;
+      if (geom) {
+        for (const r of geom) {
+          if (!r) continue;
+          r.left -= mx; r.right -= mx;
+        }
+      }
+      if (this._colGeomHeaderTop != null) this._colGeomHeaderTop -= my;
+      if (this._colGeomTblBottom != null) this._colGeomTblBottom -= my;
       this.updateColDropBox();
     },
     resolveColIndexAt(clientX) {
@@ -858,22 +1038,25 @@ export default {
       this._colUp = null;
       if (this._colRaf) { cancelAnimationFrame(this._colRaf); this._colRaf = null; }
       this._applyColMove(); // 冲刷最后一帧
+      // 松手位置：列滑入动画的起点
+      const relCol = this._colPending ? { x: this._colPending.clientX, y: this._colPending.clientY } : null;
       this._colPending = null;
+      const from = this.colDragIdx, to = this.colDragOverIdx;
       this._colGeom = null;
       this._colGeomContainer = null;
       this._colGrab = null;
+      if (this._colAutoScroll) { this._colAutoScroll.stop(); this._colAutoScroll = null; }
       if (this._colGhost) { this._colGhost.remove(); this._colGhost = null; }
+      if (this._colSlotGhost) { this._colSlotGhost.remove(); this._colSlotGhost = null; }
       if (this._colDropBox) { this._colDropBox.remove(); this._colDropBox = null; }
-      const from = this.colDragIdx, to = this.colDragOverIdx;
       this.colDragIdx = null;
       this.colDragOverIdx = null;
+      // 先清让位位移再重排（清位与重排同一 tick，不会先弹回原位）
+      this._clearColShiftFx();
       if (from === null || to === null || from === to) return;
-      const sigBefore = this.colSig(from) + '|' + this.colSig(to);
+      // 落位：只给这一列的数据格播「从松手位置滑入」（表头不动）
       this.$emit('swapColumns', from, to);
-      this.$nextTick(() => {
-        if (this.colSig(from) + '|' + this.colSig(to) === sigBefore) return;
-        this.animateColSwap(from, to);
-      });
+      if (relCol) this.$nextTick(() => this._slideInCol(to, relCol));
     },
     // 单元格底色：走廊固定灰；若调用方在 cell 上给了 _bg（热力图等）则优先；否则按课程名配色
     getCellColor(cell) { if (cell._isAisle) return '#d1d5db'; if (cell._bg != null) return cell._bg; return COURSE_COLORS[cell.course] || '#FFFFFF'; },
@@ -898,11 +1081,18 @@ export default {
     document.removeEventListener('mouseup', this.handleGlobalMouseUp);
     this.clearLongPress();
     this.removeCellGhost();
+    // 拖拽中途被卸载：停掉自动滚动并清掉让位位移
+    if (this._rowAutoScroll) { this._rowAutoScroll.stop(); this._rowAutoScroll = null; }
+    if (this._colAutoScroll) { this._colAutoScroll.stop(); this._colAutoScroll = null; }
+    this._clearRowShiftFx();
+    this._clearColShiftFx();
     if (this._rowGhost) this._rowGhost.remove();
+    if (this._rowSlotGhost) this._rowSlotGhost.remove();
     if (this._rowMove) window.removeEventListener('mousemove', this._rowMove);
     if (this._rowUp) window.removeEventListener('mouseup', this._rowUp);
     if (this._rowRaf) cancelAnimationFrame(this._rowRaf);
     if (this._colGhost) this._colGhost.remove();
+    if (this._colSlotGhost) this._colSlotGhost.remove();
     if (this._colMove) window.removeEventListener('mousemove', this._colMove);
     if (this._colUp) window.removeEventListener('mouseup', this._colUp);
     if (this._colRaf) cancelAnimationFrame(this._colRaf);

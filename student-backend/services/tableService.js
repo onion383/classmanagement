@@ -190,7 +190,10 @@ function moveColumn(tableName, columnName, targetColumnName, position) {
   }
 
   const stmt = db.prepare('UPDATE table_meta SET sort_order = ? WHERE table_name = ? AND column_name = ?');
-  newOrder.forEach((m, i) => stmt.run(i + 1, tableName, m.column_name));
+  // 整表重排一次事务写完（原来是逐行提交，列多时会有 N 次提交）
+  db.transaction(() => {
+    newOrder.forEach((m, i) => stmt.run(i + 1, tableName, m.column_name));
+  })();
 }
 
 function importRows(tableName, fields, rows) {

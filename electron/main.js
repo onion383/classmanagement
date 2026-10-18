@@ -601,6 +601,15 @@ function isHttpUrl(url) {
 // 1) 创建 webview 前校验（will-attach-webview，绑定在宿主 webContents 上）：
 //    即使宿主渲染进程被注入恶意脚本，也无法构造出带 preload / nodeIntegration 的危险 webview。
 app.on('web-contents-created', (event, contents) => {
+  // 禁用刷新快捷键：拦截 Ctrl/Cmd+R、Ctrl/Cmd+Shift+R（硬刷新）、F5、Ctrl+F5，
+  // 避免用户误触导致整个界面重载、丢失当前操作状态。覆盖所有窗口（含 webview）。
+  contents.on('before-input-event', (e, input) => {
+    if (input.type !== 'keyDown') return
+    const mod = input.control || input.meta
+    const key = (input.key || '').toLowerCase()
+    if ((mod && key === 'r') || key === 'f5') e.preventDefault()
+  })
+
   // 宿主窗口：拦截其内部将要挂载的 webview，强制安全配置
   if (contents.getType && contents.getType() !== 'webview') {
     contents.on('will-attach-webview', (e, webPreferences, params) => {

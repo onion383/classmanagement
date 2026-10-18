@@ -594,10 +594,12 @@ export function useTableCRUD(apiBase, defaultFields, options = {}) {
     })
   }
 
-  // ==================== 行/列拖拽 ====================
+  // ==================== 行/列拖拽（移动语义：插入到目标位置，中间项顺移） ====================
   async function onSwapRows(fromIndex, toIndex) {
+    if (fromIndex === toIndex) return
     const records = [...rows.value]
     const [moved] = records.splice(fromIndex, 1)
+    if (moved === undefined) return
     records.splice(toIndex, 0, moved)
     rows.value = records
     const ids = records.map(r => r.id)
@@ -610,8 +612,10 @@ export function useTableCRUD(apiBase, defaultFields, options = {}) {
   }
 
   async function onSwapColumns(fromIndex, toIndex) {
+    if (fromIndex === toIndex) return
     const vFields = visibleFields.value
     const moved = vFields[fromIndex]
+    if (!moved) return
     const reordered = [...vFields]
     reordered.splice(fromIndex, 1)
     reordered.splice(toIndex, 0, moved)
@@ -629,7 +633,7 @@ export function useTableCRUD(apiBase, defaultFields, options = {}) {
         targetColumnName: position === 'first' ? null : targetName,
         position
       })
-      // 移动列不改变行数据，不需要重新拉取，避免行的 FLIP 交换动画被误触发
+      // 移动列不改变行数据，不需要重新拉取
     } catch (err) {
       fields.value = originalFields
       showAlert('列移动失败')
