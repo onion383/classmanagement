@@ -449,11 +449,13 @@
 
 <script>
 import { ShieldAlert, ShieldCheck, Globe } from '@lucide/vue'
-import AiProposalTable from '../tables/AiProposalTable.vue'
-import AppSelect from '../base/AppSelect.vue'
-import { readFile, readAsDataURL } from '../../composables/ai/aiFiles.js'
-import { frontProposalHint } from '../../composables/ai/aiMessages.js'
-import { ASK_OTHER_KEY, ASK_OTHER_LABEL, AI_PERMISSION_FULL } from '../../composables/ai/aiConstants.js'
+import AiProposalTable from '../../tables/AiProposalTable.vue'
+import AppSelect from '../../base/AppSelect.vue'
+import { readFile, readAsDataURL } from '../../../composables/ai/aiFiles.js'
+import { frontProposalHint } from '../../../composables/ai/aiMessages.js'
+import { ASK_OTHER_KEY, ASK_OTHER_LABEL, AI_PERMISSION_FULL } from '../../../composables/ai/aiConstants.js'
+import { _slashToken } from './AiComposer.skill.js'
+import { isPicked, _isSingleUnpicked } from './AiComposer.ask.js'
 
 export default {
   name: 'AiComposer',
@@ -604,18 +606,9 @@ export default {
       this.permMenuOpen = false
       this.$emit('pick-permission', mode)
     },
-    // 解析输入框「光标前」的技能触发词：取光标前最后一个「/」，其后到光标之间不含空白即算触发词。
-    // 「/」出现在任意位置都能触发（不再要求行首或空格后）；全角「／」按半角处理（两串等长，下标对齐）。
-    // 仅排除紧挨着的「//」「:/」这类网址/路径写法，避免误弹。
-    _slashToken(value, caret) {
-      const before = String(value || '').slice(0, caret).replace(/／/g, '/')
-      const slash = before.lastIndexOf('/')
-      if (slash < 0) return null
-      if (slash > 0 && /[/:]/.test(before[slash - 1])) return null
-      const query = before.slice(slash + 1)
-      if (/\s/.test(query)) return null
-      return { start: slash, query }
-    },
+    // 纯逻辑函数已抽到同目录 ./AiComposer.skill.js（原样搬运，命名与逻辑不变）；
+    // 本组件是选项式 API，仍挂到 methods，保证 this._slashToken 的调用点不变。
+    _slashToken,
     // 输入变化：命中「/触发词」则展开技能候选菜单，否则收起
     onComposerInput(e) {
       const el = e.target
@@ -660,14 +653,10 @@ export default {
       }
       this.$emit('select-skill', name)
     },
-    // 选项是否已选中（多选为数组包含，单选为相等）
-    isPicked(q, o) {
-      return Array.isArray(q && q.picked) ? q.picked.includes(o) : !!(q && q.picked === o)
-    },
-    // 该题是否为「单选 + 有选项 + 尚未选择」：用于把按钮显示成「跳过」
-    _isSingleUnpicked(q) {
-      return !!q && !q.multiple && q.options.length > 0 && (q.picked === undefined || q.picked === null)
-    },
+    // 纯逻辑函数已抽到同目录 ./AiComposer.ask.js（原样搬运，命名与逻辑不变）；
+    // 仍挂到 methods，保证模板 isPicked(...) 与 this._isSingleUnpicked(...) 的调用点不变。
+    isPicked,
+    _isSingleUnpicked,
     // 「其他」输入框回车：分页分支按当前位置前进，单题分支直接提交
     onOtherEnter() {
       const a = this.pendingAsk

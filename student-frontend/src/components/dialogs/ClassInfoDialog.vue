@@ -1,7 +1,5 @@
 <template>
-  <Teleport to="body">
-  <Transition name="dialog">
-  <div v-if="visible" class="fixed inset-0 bg-black/50 flex items-center justify-center z-[10001] pointer-events-auto" @click.self="$emit('cancel')">
+  <DialogShell :visible="visible" :z-index="10001" @overlay="$emit('cancel')">
     <div class="bg-surface p-5 rounded-xl w-[440px] max-w-full shadow-lg dialog-card" @keydown="onKeydown">
       <h3 class="text-lg font-bold mb-4 text-text">班级信息设置</h3>
 
@@ -33,16 +31,16 @@
         <button type="button" @click="submit" class="px-4 py-2 rounded-lg bg-primary text-text-inverse hover:bg-primary-hover">保存</button>
       </div>
     </div>
-  </div>
-  </Transition>
-  </Teleport>
+  </DialogShell>
 </template>
 
 <script>
 import '../../styles/dialog-transition.css'
+import DialogShell from '../base/DialogShell.vue'
 
 export default {
   name: 'ClassInfoDialog',
+  components: { DialogShell },
   props: {
     visible: { type: Boolean, default: false },
     classData: { type: Object, default: () => ({}) }

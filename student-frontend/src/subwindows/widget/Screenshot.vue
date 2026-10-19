@@ -27,6 +27,7 @@
 import { ref, computed, onMounted, onUnmounted } from 'vue'
 import axios from 'axios'
 import IconGlyph from '../../components/base/IconGlyph.vue'
+import { INVOKE } from '../../electronChannels.js'
 
 const emit = defineEmits(['close'])
 
@@ -64,7 +65,7 @@ async function capture() {
     } catch (_) { /* 读取设置失败则使用默认路径 */ }
 
     // 只保存文件，不回传整屏 base64（本组件只用 filePath，省掉一大块内存）
-    const res = await window.electron.invoke('screenshot-capture', { hideWidget: false, saveDir, withDataUrl: false })
+    const res = await window.electron.invoke(INVOKE.SCREENSHOT_CAPTURE, { hideWidget: false, saveDir, withDataUrl: false })
     if (res.success) {
       result.value = res
     } else {

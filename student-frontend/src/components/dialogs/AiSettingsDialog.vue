@@ -1,7 +1,5 @@
 <template>
-  <Teleport to="body">
-  <Transition name="dialog">
-    <div v-if="show" class="fixed inset-0 bg-black/50 flex items-center justify-center z-[10005]" @click.self="close">
+  <DialogShell :visible="show" :z-index="10005" overlay-class="bg-black/50" @overlay="close">
       <div class="dialog-card bg-surface rounded-lg p-6 min-w-[32rem] w-auto min-h-[32rem] max-w-[calc(100vw-2rem)] border border-border shadow-lg flex flex-col" style="max-height: 90vh; overflow: visible;">
         <div class="flex items-center justify-between mb-5 flex-shrink-0">
           <h3 class="text-lg font-extrabold text-text tracking-wide">🧠 AI 助手设置</h3>
@@ -78,9 +76,7 @@
 
         </div>
       </div>
-    </div>
-  </Transition>
-  </Teleport>
+  </DialogShell>
 
   <!-- 添加 / 编辑模型二次弹窗（同一实例复用：传 edit-model 即切换为编辑态） -->
   <AddModelDialog :show="modelDialog || editDialog" :edit-model="editTarget" @close="closeModelDialog" @saved="onModelSaved" />
@@ -101,10 +97,11 @@ import AppSelect from '../base/AppSelect.vue'
 import AddModelDialog from './AddModelDialog.vue'
 import ConfirmDialog from '../base/ConfirmDialog.vue'
 import '../../styles/dialog-transition.css'
+import DialogShell from '../base/DialogShell.vue'
 
 export default {
   name: 'AiSettingsDialog',
-  components: { AppSelect, AddModelDialog, ConfirmDialog },
+  components: { AppSelect, AddModelDialog, ConfirmDialog, DialogShell },
   props: {
     show: { type: Boolean, default: false },
   },

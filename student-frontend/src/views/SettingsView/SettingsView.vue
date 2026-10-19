@@ -676,6 +676,7 @@ import { useNotification } from '../../composables/useNotification'
 import { useSettingsSearch } from './SettingsView.search.js'
 import { useSettingsData } from './SettingsView.data.js'
 import { useSettingsAppearance } from './SettingsView.appearance.js'
+import { RECEIVE } from '../../electronChannels.js'
 
 // 弹窗类组件懒加载：打开时才加载对应 chunk
 const ConfirmDialog = defineAsyncComponent(() => import('../../components/base/ConfirmDialog.vue'))
@@ -962,7 +963,7 @@ export default {
     // 性能面板：先取一次启动耗时，轮询由 _startPerfPolling 负责
     this.loadStartup()
     this._startPerfPolling()
-    this._fromMainHandler = window.electron?.on('from-main', (data) => {
+    this._fromMainHandler = window.electron?.on(RECEIVE.FROM_MAIN, (data) => {
       if (data && data.type === 'session-widget-changed') this.loadSession()
     })
   },
@@ -988,7 +989,7 @@ export default {
     clearTimeout(this._flashTimer)
     cancelAnimationFrame(this._flashRaf)
     if (this._fromMainHandler) {
-      window.electron?.off('from-main', this._fromMainHandler)
+      window.electron?.off(RECEIVE.FROM_MAIN, this._fromMainHandler)
     }
   },
   methods: {

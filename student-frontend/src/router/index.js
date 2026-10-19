@@ -9,7 +9,7 @@ const routes = [
   { path: '/login', name: 'login', component: () => import('../views/Login.vue') },
   { path: '/settings', name: 'settings', component: () => import('../views/SettingsView/SettingsView.vue'), meta: { requiresAuth: true } },
   { path: '/account', redirect: '/settings' },
-  { path: '/schedule', name: 'schedule', component: () => import('../views/ScheduleView.vue'), meta: { requiresAuth: true } },
+  { path: '/schedule', name: 'schedule', component: () => import('../views/ScheduleView/ScheduleView.vue'), meta: { requiresAuth: true } },
   { path: '/seats', name: 'SeatView', component: () => import('../views/SeatView.vue') },
   { path: '/leaves', name: 'leaves', component: () => import('../views/LeaveManagement.vue'), meta: { requiresAuth: true } },
   { path: '/album', name: 'album', component: () => import('../views/AlbumView.vue'), meta: { requiresAuth: true } },

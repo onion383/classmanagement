@@ -1,7 +1,5 @@
 <template>
-  <Teleport to="body">
-  <Transition name="dialog">
-  <div v-if="visible" class="fixed inset-0 bg-black/30 z-50 flex items-center justify-center">
+  <DialogShell :visible="visible" :z-index="50" overlay-class="bg-black/30">
     <div class="bg-surface rounded-lg p-5 shadow-card dialog-card flex flex-col overflow-hidden" style="width: 960px; height: 800px; max-width: 90vw; max-height: 90vh;">
       <h3 class="text-lg font-bold mb-4">🧠 智能排表</h3>
 
@@ -114,9 +112,7 @@
         <button @click="confirm" class="bg-info text-text-inverse px-4 py-2 rounded border-none">确定</button>
       </div>
     </div>
-  </div>
-  </Transition>
-  </Teleport>
+  </DialogShell>
 </template>
 
 <script>
@@ -130,6 +126,7 @@ import { useSmartArrangementPipeline } from './SmartArrangementDialog.pipeline.j
 import { useSmartArrangementBlocks } from './SmartArrangementDialog.blocks.js'
 import { useSmartArrangementOptions } from './SmartArrangementDialog.options.js'
 import '../../../styles/dialog-transition.css'
+import DialogShell from '../../base/DialogShell.vue'
 
 // 条件注册表：每类条件在此登记 —— 执行函数名(apply) + 语义句段(segments) + 初始参数(defaults)。
 // 模板里的条件行 UI 与流水线的条件分发都由本表驱动：
@@ -216,7 +213,7 @@ const CONDITION_ORDER = ['relation', 'group', 'random', 'lock-deskmate', 'gender
 
 export default {
   name: 'SmartArrangementDialog',
-  components: { GridView, NewComerConfirm, ConfirmDialog, AppSelect },
+  components: { GridView, NewComerConfirm, ConfirmDialog, AppSelect, DialogShell },
   props: {
     visible: Boolean,
     rows: { type: Number, default: 6 },

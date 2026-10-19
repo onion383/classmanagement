@@ -55,6 +55,7 @@ import RollCall from './RollCall.vue'
 import Screenshot from './Screenshot.vue'
 import Note from './Note.vue'
 import IconGlyph from '../../components/base/IconGlyph.vue'
+import { SEND, INVOKE, RECEIVE } from '../../electronChannels.js'
 
 const state = ref('icon') // 'icon' | 'menu' | 'tool'
 const activeTool = ref('')
@@ -76,12 +77,12 @@ function afterWidgetResized(cb, fallbackMs = 250) {
   function finish() {
     if (finished) return
     finished = true
-    if (handler) window.electron.off('from-main', handler)
+    if (handler) window.electron.off(RECEIVE.FROM_MAIN, handler)
     clearTimeout(timer)
     // 等一帧，确保渲染层已按新尺寸完成布局后再显示
     requestAnimationFrame(cb)
   }
-  handler = window.electron.on('from-main', (data) => {
+  handler = window.electron.on(RECEIVE.FROM_MAIN, (data) => {
     if (data && data.type === 'widget-resized') finish()
   })
 }
@@ -131,13 +132,13 @@ function openTool(id) {
 
 function onNoteReady() {
   noteFullscreen.value = true
-  window.electron.send('widget-fullscreen')
+  window.electron.send(SEND.WIDGET_FULLSCREEN)
 }
 
 function onNoteShrink() {
   noteFullscreen.value = false
-  window.electron.send('widget-restore')
-  window.electron.send('widget-resize', [240, 220])
+  window.electron.send(SEND.WIDGET_RESTORE)
+  window.electron.send(SEND.WIDGET_RESIZE, [240, 220])
 }
 
 function closeToIcon() {
@@ -170,16 +171,16 @@ function onDragMouseDown(e) {
   e.preventDefault()
   const startScreenX = e.screenX
   const startScreenY = e.screenY
-  window.electron.send('widget-drag-start', { screenX: startScreenX, screenY: startScreenY })
+  window.electron.send(SEND.WIDGET_DRAG_START, { screenX: startScreenX, screenY: startScreenY })
 
   const onMouseMove = (e) => {
-    window.electron.send('widget-drag-move', { screenX: e.screenX, screenY: e.screenY })
+    window.electron.send(SEND.WIDGET_DRAG_MOVE, { screenX: e.screenX, screenY: e.screenY })
   }
 
   const onMouseUp = () => {
     document.removeEventListener('mousemove', onMouseMove)
     document.removeEventListener('mouseup', onMouseUp)
-    window.electron.send('widget-drag-end')
+    window.electron.send(SEND.WIDGET_DRAG_END)
   }
 
   document.addEventListener('mousemove', onMouseMove)
@@ -195,19 +196,19 @@ function onFabMouseDown(e) {
   const startScreenY = e.screenY
   const startClientX = e.clientX
   const startClientY = e.clientY
-  window.electron.send('widget-drag-start', { screenX: startScreenX, screenY: startScreenY })
+  window.electron.send(SEND.WIDGET_DRAG_START, { screenX: startScreenX, screenY: startScreenY })
 
   const onMouseMove = (e) => {
     if (Math.abs(e.clientX - startClientX) > 3 || Math.abs(e.clientY - startClientY) > 3) {
       hasMoved = true
     }
-    window.electron.send('widget-drag-move', { screenX: e.screenX, screenY: e.screenY })
+    window.electron.send(SEND.WIDGET_DRAG_MOVE, { screenX: e.screenX, screenY: e.screenY })
   }
 
   const onMouseUp = () => {
     document.removeEventListener('mousemove', onMouseMove)
     document.removeEventListener('mouseup', onMouseUp)
-    window.electron.send('widget-drag-end')
+    window.electron.send(SEND.WIDGET_DRAG_END)
     if (!hasMoved) {
       cancelPendingToolOpen()
       if (state.value === 'menu') {
@@ -226,7 +227,7 @@ function onFabMouseDown(e) {
 
 // 右键浮窗图标：呼出原生右键菜单（当前含「本次退出」）
 function onFabContextMenu() {
-  window.electron.send('widget-context-menu')
+  window.electron.send(SEND.WIDGET_CONTEXT_MENU)
 }
 
 // 点击菜单外部区域自动收起菜单
@@ -248,12 +249,12 @@ async function checkToolboxEnabled() {
     if (!res.data.success) return
     // 持久「是否启用工具箱」作为本次会话的默认值，注入一次后即由会话开关独立控制
     const persistent = res.data.data.toolboxEnabled
-    let session = await window.electron.invoke('get-session-widget-visible')
+    let session = await window.electron.invoke(INVOKE.GET_SESSION_WIDGET_VISIBLE)
     if (session === null) {
       session = persistent
-      window.electron.send('widget-set-session-visible', session)
+      window.electron.send(SEND.WIDGET_SET_SESSION_VISIBLE, session)
     }
-    window.electron.send('widget-set-visible', session)
+    window.electron.send(SEND.WIDGET_SET_VISIBLE, session)
   } catch (_) {
     // 读取失败则保持默认可见
   }
@@ -262,7 +263,7 @@ async function checkToolboxEnabled() {
 onMounted(() => {
   document.addEventListener('mousedown', onDocMouseDown)
   checkToolboxEnabled()
-  blurHandler = window.electron.on('from-main', (data) => {
+  blurHandler = window.electron.on(RECEIVE.FROM_MAIN, (data) => {
     if (data && data.type === 'blur' && state.value === 'menu') {
       cancelPendingToolOpen()
       state.value = 'icon'
@@ -278,7 +279,7 @@ onUnmounted(() => {
   if (toolOpenTimer) clearTimeout(toolOpenTimer)
   if (toolCloseTimer) clearTimeout(toolCloseTimer)
   if (blurHandler) {
-    window.electron.off('from-main', blurHandler)
+    window.electron.off(RECEIVE.FROM_MAIN, blurHandler)
   }
 })
 
@@ -300,7 +301,7 @@ watch(
         // 收起工具箱：先让面板播完收起动画，再收缩窗口，否则窗口提前变小会瞬间裁掉面板
         iconShrinkTimer = setTimeout(() => {
           iconShrinkTimer = null
-          window.electron.send('widget-resize', [48, 48])
+          window.electron.send(SEND.WIDGET_RESIZE, [48, 48])
         }, 120)
         return
       }
@@ -308,9 +309,9 @@ watch(
       if (oldState === 'tool') {
         // 如果之前是全屏注释工具，先恢复窗口大小
         if (oldTool === 'note') {
-          window.electron.send('widget-restore')
+          window.electron.send(SEND.WIDGET_RESTORE)
         }
-        window.electron.send('widget-restore-position')
+        window.electron.send(SEND.WIDGET_RESTORE_POSITION)
       }
     } else if (newState === 'menu') {
       fabReady.value = true
@@ -319,8 +320,8 @@ watch(
       if (newTool === 'note') {
         // 注释工具：先居中显示小窗口加载，等 Note 准备好再全屏
         size = [220, 200]
-        window.electron.send('widget-center')
-        window.electron.send('widget-resize', size)
+        window.electron.send(SEND.WIDGET_CENTER)
+        window.electron.send(SEND.WIDGET_RESIZE, size)
         return
       }
       const toolSizes = {
@@ -329,10 +330,10 @@ watch(
         screenshot: [250, 450],
       }
       size = toolSizes[newTool] || [200, 300]
-      window.electron.send('widget-center')
+      window.electron.send(SEND.WIDGET_CENTER)
     }
 
-    window.electron.send('widget-resize', size)
+    window.electron.send(SEND.WIDGET_RESIZE, size)
     // 收起工具：等窗口收缩并归位到位后再让图标淡入，避免图标先出现在旧位置再跳位
     if (newState === 'icon' && oldState === 'tool') {
       afterWidgetResized(() => {

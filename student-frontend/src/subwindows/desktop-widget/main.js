@@ -2,6 +2,7 @@ import { createApp } from 'vue'
 import DesktopWidget from './DesktopWidget.vue'
 import '../../styles/index.css'
 import { setupApiClient, backendBaseUrl } from '../../utils/httpClient'
+import { INVOKE } from '../../electronChannels.js'
 
 // 桌面组件在桌面常驻，不依赖主窗口的登录态同步。
 // 通过 IPC 从主进程获取当前 token（主窗口保存的），避免 cookie 跨域读取问题。
@@ -13,7 +14,7 @@ function getToken() {
     tokenPromise = (async () => {
       try {
         if (window.electron && window.electron.invoke) {
-          const t = await window.electron.invoke('get-main-token')
+          const t = await window.electron.invoke(INVOKE.GET_MAIN_TOKEN)
           if (t) return t
         }
       } catch (_) {}

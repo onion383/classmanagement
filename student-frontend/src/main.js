@@ -9,6 +9,7 @@ import { setupApiClient, backendBaseUrl } from './utils/httpClient'
 import { useNotification } from './composables/useNotification'
 import { ensureDashboardData } from './composables/useDashboardData'
 import { installInpProbe } from './utils/inpProbe'
+import { SEND, INVOKE, RECEIVE } from './electronChannels.js'
 
 // 401 提示条去重：记录最近一次已处理的 401 时间，避免同一瞬间并发 401 重复弹提示
 let lastAuthPrompt = 0
@@ -18,7 +19,7 @@ let lastAuthPrompt = 0
 // 此时重发写请求，一旦原请求其实已经落库，就会产生重复数据（点名/成绩尤其敏感）。
 // 只由运行期重连广播置位，启动阶段的等待重试不受影响。
 let backendReconnecting = false
-window.electron?.on?.('from-main', (msg) => {
+window.electron?.on?.(RECEIVE.FROM_MAIN, (msg) => {
   if (!msg) return
   if (msg.type === 'backend-reconnecting') backendReconnecting = !!msg.active
   else if (msg.type === 'backend-failed') backendReconnecting = !!msg.failed
@@ -45,7 +46,7 @@ setupApiClient({
   },
   onUnreachable: () => {
     // 没拿到任何响应 = 后端可能已不可达。让主进程立刻探测一次，不必等下一个心跳周期。
-    window.electron?.invoke?.('probe-backend').catch(() => {})
+    window.electron?.invoke?.(INVOKE.PROBE_BACKEND).catch(() => {})
   },
   writeRetryGuard: (config) => {
     // 读请求本身幂等，重试没有副作用；只有写请求在重连期间不能自动重发
@@ -164,7 +165,7 @@ window.addEventListener('contextmenu', (e) => {
   const linkURL = anchor ? anchor.href : ''
   if (!isEditable && !hasSelection && !linkURL) return
   e.preventDefault()
-  window.electron?.send('show-native-context-menu', {
+  window.electron?.send(SEND.SHOW_NATIVE_CONTEXT_MENU, {
     isEditable,
     readOnly: !!(el && (el.readOnly === true || el.disabled === true)),
     hasSelection,
@@ -263,11 +264,11 @@ if (splashEl) {
       retryBtn.disabled = true
       quitBtn.disabled = true
       retryBtn.textContent = '重启中…'
-      try { await window.electron?.invoke('restart-backend') } catch (_) {}
+      try { await window.electron?.invoke(INVOKE.RESTART_BACKEND) } catch (_) {}
       // 后端已重新 fork：整页重载重走一遍启动流程（若仍起不来会再次显示本提示）
       setTimeout(() => location.reload(), 400)
     }
-    quitBtn.onclick = () => window.electron?.send('quit-app')
+    quitBtn.onclick = () => window.electron?.send(SEND.QUIT_APP)
     row.appendChild(retryBtn)
     row.appendChild(quitBtn)
     box.appendChild(msg)
@@ -299,14 +300,14 @@ if (splashEl) {
     if (splashReady) dropSplash()
   }
 
-  window.electron?.on('from-main', (msg) => {
+  window.electron?.on(RECEIVE.FROM_MAIN, (msg) => {
     if (!msg) return
     if (msg.type === 'backend-ready') markBackendOk()
     else if (msg.type === 'backend-failed') setBackendFailed(msg.failed)
   })
   // 兜住「先就绪/先失败、后加载」的竞态
-  window.electron?.invoke('backend-status').then((ok) => { if (ok) markBackendOk() }).catch(() => {})
-  window.electron?.invoke('backend-failure').then((f) => { if (f) setBackendFailed(true) }).catch(() => {})
+  window.electron?.invoke(INVOKE.BACKEND_STATUS).then((ok) => { if (ok) markBackendOk() }).catch(() => {})
+  window.electron?.invoke(INVOKE.BACKEND_FAILURE).then((f) => { if (f) setBackendFailed(true) }).catch(() => {})
 
   // 骨架屏方案开关（可回退）：
   //   true  = 只在首页(Dashboard)做骨架屏。占位页不再等首页数据，首次导航一就绪即移除，

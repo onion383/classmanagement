@@ -191,13 +191,14 @@
 
 <script setup>
 import { ref, computed, watch, onMounted, onUnmounted } from 'vue'
+import { SEND, INVOKE, RECEIVE } from '../electronChannels.js'
 import '../styles/dialog-transition.css'
 
 // Electron 内用系统浏览器打开外链，非 Electron 环境让浏览器默认行为处理
 function openExternal(event, url) {
   if (window.electron && window.electron.invoke) {
     event.preventDefault()
-    window.electron.invoke('open-external', url)
+    window.electron.invoke(INVOKE.OPEN_EXTERNAL, url)
   }
   // 非 Electron：不阻止默认行为，让 href 直接在新标签页打开
 }
@@ -260,31 +261,31 @@ function applyUpdateState(s) {
 
 async function fetchAppVersion() {
   try {
-    const v = await window.electron?.invoke('get-app-version')
+    const v = await window.electron?.invoke(INVOKE.GET_APP_VERSION)
     if (v) currentVersion.value = v
   } catch (_) { /* 非 Electron 环境忽略 */ }
 }
 
 async function checkUpdate() {
   try {
-    const s = await window.electron?.invoke('update-check')
+    const s = await window.electron?.invoke(INVOKE.UPDATE_CHECK)
     applyUpdateState(s)
   } catch (_) { /* 忽略 */ }
 }
 
 function installUpdate() {
-  window.electron?.send('update-install')
+  window.electron?.send(SEND.UPDATE_INSTALL)
 }
 
 onMounted(() => {
   fetchAppVersion()
-  updateListener = window.electron?.on('from-main', (data) => {
+  updateListener = window.electron?.on(RECEIVE.FROM_MAIN, (data) => {
     if (data && data.type === 'update-state') applyUpdateState(data.state)
   })
 })
 
 onUnmounted(() => {
-  if (updateListener) window.electron?.off('from-main', updateListener)
+  if (updateListener) window.electron?.off(RECEIVE.FROM_MAIN, updateListener)
 })
 
 // 打开弹窗时刷新一次版本号并触发检查

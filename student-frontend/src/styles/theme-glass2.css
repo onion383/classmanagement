@@ -26,13 +26,13 @@
   --g2-glass: rgba(255, 255, 255, calc(var(--g2-a) + 0.15)); /* 内容卡基准 0.55 */
   --g2-glass-strong: rgba(255, 255, 255, calc(var(--g2-a) + 0.34)); /* 0.74 */
   --g2-glass-soft: rgba(255, 255, 255, calc(var(--g2-a) - 0.1)); /* 0.30 */
-  --g2-line: rgba(255, 255, 255, 0.7); /* 玻璃外描边 */
-  --g2-line-soft: rgba(255, 255, 255, 0.45);
+  --g2-line: var(--alpha-white-70); /* 玻璃外描边 */
+  --g2-line-soft: var(--alpha-white-45);
   --g2-hair: rgba(84, 94, 120, 0.16); /* 表格网格 / 分隔细线 */
   --g2-hair-strong: rgba(84, 94, 120, 0.3);
   --g2-blur: 18px;
   --g2-saturate: 175%;
-  --g2-hl: inset 0 1px 0 rgba(255, 255, 255, 0.85); /* 顶部内高光 */
+  --g2-hl: inset 0 1px 0 var(--alpha-white-85); /* 顶部内高光 */
 
   /* ---- 阴影（分层柔和，色调偏冷） ---- */
   --g2-shadow-1: 0 1px 2px rgba(23, 30, 54, 0.05), 0 2px 8px rgba(23, 30, 54, 0.05);
@@ -64,9 +64,9 @@
   --color-bg: #eef1f8;
   --color-surface: var(--g2-glass);
   --color-surface-hover: var(--g2-glass-strong);
-  --color-sidebar: rgba(255, 255, 255, 0.58);
-  --color-sidebar-hover: rgba(255, 255, 255, 0.78);
-  --color-sidebar-active: rgba(255, 255, 255, 0.92);
+  --color-sidebar: var(--alpha-white-58);
+  --color-sidebar-hover: var(--alpha-white-78);
+  --color-sidebar-active: var(--alpha-white-92);
 
   --color-text: #191f2e;
   --color-text-secondary: #545e78;
@@ -189,7 +189,7 @@
   overflow: hidden;
 }
 :root[data-topbar-color="light"][data-theme="glass2"] .window-title-bar {
-  background-color: rgba(255, 255, 255, 0.62) !important;
+  background-color: var(--alpha-white-62) !important;
   color: #191f2e !important;
 }
 :root[data-topbar-color="blue"][data-theme="glass2"] .window-title-bar {
@@ -204,7 +204,7 @@
   left: 0;
   right: 0;
   height: 40%;
-  background: linear-gradient(180deg, rgba(255, 255, 255, 0.28) 0%, var(--alpha-white-06) 55%, rgba(255, 255, 255, 0) 100%);
+  background: linear-gradient(180deg, var(--alpha-white-28) 0%, var(--alpha-white-06) 55%, var(--alpha-white-00) 100%);
   pointer-events: none;
   z-index: -1;
 }
@@ -217,7 +217,7 @@
   background: rgba(84, 94, 120, 0.12);
 }
 :root[data-topbar-color="blue"][data-theme="glass2"] .window-controls .win-btn:hover {
-  background: rgba(255, 255, 255, 0.16);
+  background: var(--alpha-white-16);
 }
 :root[data-theme="glass2"] .window-controls .win-btn-close:hover {
   background: #e81123;
@@ -237,7 +237,7 @@
   overflow: hidden;
 }
 :root[data-topbar-color="light"][data-theme="glass2"] .bg-sidebar {
-  background-color: rgba(255, 255, 255, 0.58) !important;
+  background-color: var(--alpha-white-58) !important;
   /* 侧栏本体挂着 text-text-inverse（白字），浅玻璃底上必须改成深字 */
   color: #191f2e !important;
   border-right-color: var(--g2-line-soft) !important;
@@ -247,7 +247,7 @@
   background-color: rgba(74, 88, 179, 0.55) !important;
   color: #eef1fb !important;
   border-right-color: transparent !important;
-  box-shadow: 0 4px 24px rgba(23, 30, 54, 0.18), inset 0 1px 0 rgba(255, 255, 255, 0.16);
+  box-shadow: 0 4px 24px rgba(23, 30, 54, 0.18), inset 0 1px 0 var(--alpha-white-16);
 }
 :root[data-theme="glass2"] .bg-sidebar::before {
   content: '';
@@ -256,7 +256,7 @@
   left: 0;
   right: 0;
   height: 40%;
-  background: linear-gradient(180deg, rgba(255, 255, 255, 0.28) 0%, var(--alpha-white-06) 55%, rgba(255, 255, 255, 0) 100%);
+  background: linear-gradient(180deg, var(--alpha-white-28) 0%, var(--alpha-white-06) 55%, var(--alpha-white-00) 100%);
   pointer-events: none;
   z-index: -1;
 }
@@ -277,7 +277,7 @@
 /* hover：浅色底压一层更亮的玻璃 */
 :root[data-topbar-color="light"][data-theme="glass2"] .bg-sidebar-hover,
 :root[data-topbar-color="light"][data-theme="glass2"] .bg-sidebar a:hover:not(.bg-sidebar-active) {
-  background-color: rgba(255, 255, 255, 0.78) !important;
+  background-color: var(--alpha-white-78) !important;
   color: #191f2e !important;
 }
 /* 选中：强调色淡底 + 内描边 + 柔光，不用荧光描边 */
@@ -288,7 +288,7 @@
   font-weight: 600;
   box-shadow:
     inset 0 0 0 1px rgba(91, 124, 250, 0.28),
-    inset 0 1px 0 rgba(255, 255, 255, 0.6),
+    inset 0 1px 0 var(--alpha-white-60),
     0 2px 10px rgba(91, 124, 250, 0.18);
 }
 :root[data-topbar-color="blue"][data-theme="glass2"] .bg-sidebar a,
@@ -303,24 +303,24 @@
 }
 :root[data-topbar-color="blue"][data-theme="glass2"] .bg-sidebar-hover,
 :root[data-topbar-color="blue"][data-theme="glass2"] .bg-sidebar a:hover:not(.bg-sidebar-active) {
-  background-color: rgba(255, 255, 255, 0.14) !important;
+  background-color: var(--alpha-white-14) !important;
   color: #ffffff !important;
 }
 :root[data-topbar-color="blue"][data-theme="glass2"] .bg-sidebar-active,
 :root[data-topbar-color="blue"][data-theme="glass2"] .bg-sidebar-active.rounded {
-  background-color: rgba(255, 255, 255, 0.2) !important;
+  background-color: var(--alpha-white-20) !important;
   color: #ffffff !important;
   font-weight: 600;
   box-shadow:
-    inset 0 0 0 1px rgba(255, 255, 255, 0.22),
-    inset 0 1px 0 rgba(255, 255, 255, 0.2),
+    inset 0 0 0 1px var(--alpha-white-22),
+    inset 0 1px 0 var(--alpha-white-20),
     0 2px 10px rgba(23, 30, 54, 0.16);
 }
 :root[data-topbar-color="blue"][data-theme="glass2"] .sidebar-scroll::-webkit-scrollbar-thumb {
-  background: rgba(255, 255, 255, 0.34);
+  background: var(--alpha-white-34);
 }
 :root[data-topbar-color="blue"][data-theme="glass2"] .sidebar-scroll::-webkit-scrollbar-thumb:hover {
-  background: rgba(255, 255, 255, 0.5);
+  background: var(--alpha-white-50);
 }
 
 /* ------------------------------------------------------------
@@ -382,7 +382,7 @@
   border-color: var(--g2-line-soft);
 }
 :root[data-theme="glass2"] button.bg-surface-hover:hover {
-  background-color: rgba(255, 255, 255, 0.9) !important;
+  background-color: var(--alpha-white-90) !important;
 }
 /* 搜索按钮：沿用暖橙点缀（与搜索面板同排按钮区分） */
 :root[data-theme="glass2"] .btn-search {
@@ -437,7 +437,7 @@
 :root[data-theme="glass2"] textarea:focus,
 :root[data-theme="glass2"] select:focus {
   border-color: var(--g2-accent) !important;
-  background-color: rgba(255, 255, 255, 0.88) !important;
+  background-color: var(--alpha-white-88) !important;
   box-shadow: 0 0 0 3px var(--g2-accent-ring);
   outline: none;
 }
@@ -563,7 +563,7 @@
 }
 :root[data-theme="glass2"] table input:focus,
 :root[data-theme="glass2"] table select:focus {
-  background-color: rgba(255, 255, 255, 0.6) !important;
+  background-color: var(--alpha-white-60) !important;
   border-color: var(--g2-accent) !important;
 }
 /* 表格内的辅助元素（拖拽把手、操作列容器等）不要带边框/投影 */
@@ -609,7 +609,7 @@
 :root[data-theme="glass2"] .grid-view-container table .bg-warning\/30,
 :root[data-theme="glass2"] .grid-view-container table .bg-warning\/20,
 :root[data-theme="glass2"] .grid-view-container table .bg-info\/10 {
-  background-color: rgba(255, 255, 255, 0.5) !important;
+  background-color: var(--alpha-white-50) !important;
 }
 :root[data-theme="glass2"] .grid-view-container [class*="border"]:not(th):not(td) {
   border: none !important;
@@ -643,7 +643,7 @@
    ------------------------------------------------------------ */
 :root[data-theme="glass2"] .candidate-popup,
 :root[data-theme="glass2"] .context-menu-popup {
-  background-color: rgba(255, 255, 255, 0.92) !important;
+  background-color: var(--alpha-white-92) !important;
   backdrop-filter: blur(14px) saturate(1.2);
   border: 1px solid var(--g2-line) !important;
   border-radius: var(--radius-sm) !important;
@@ -674,7 +674,7 @@
   box-shadow: var(--g2-hl);
 }
 :root[data-topbar-color="light"][data-theme="glass2"] .view-switch {
-  background-color: rgba(255, 255, 255, 0.62) !important;
+  background-color: var(--alpha-white-62) !important;
 }
 :root[data-topbar-color="blue"][data-theme="glass2"] .view-switch {
   background-color: rgba(74, 88, 179, 0.58) !important;
@@ -710,7 +710,7 @@
 }
 :root[data-theme="glass2"] .login-bg input:focus {
   border-color: var(--g2-accent) !important;
-  background-color: rgba(255, 255, 255, 0.88) !important;
+  background-color: var(--alpha-white-88) !important;
   box-shadow: 0 0 0 3px var(--g2-accent-ring);
   outline: none;
 }
@@ -718,15 +718,15 @@
 :root[data-theme="glass2"] .login-bg input:-webkit-autofill:not(:focus),
 :root[data-theme="glass2"] .login-bg input:-webkit-autofill:hover:not(:focus) {
   -webkit-text-fill-color: #191f2e;
-  -webkit-box-shadow: 0 0 0 1000px rgba(255, 255, 255, 0.85) inset;
-  box-shadow: 0 0 0 1000px rgba(255, 255, 255, 0.85) inset;
+  -webkit-box-shadow: 0 0 0 1000px var(--alpha-white-85) inset;
+  box-shadow: 0 0 0 1000px var(--alpha-white-85) inset;
   border-color: var(--g2-hair-strong) !important;
   transition: background-color 9999s ease-out;
 }
 :root[data-theme="glass2"] .login-bg input:-webkit-autofill:focus {
   -webkit-text-fill-color: #191f2e;
-  -webkit-box-shadow: 0 0 0 1000px rgba(255, 255, 255, 0.9) inset;
-  box-shadow: 0 0 0 1000px rgba(255, 255, 255, 0.9) inset;
+  -webkit-box-shadow: 0 0 0 1000px var(--alpha-white-90) inset;
+  box-shadow: 0 0 0 1000px var(--alpha-white-90) inset;
   border-color: var(--g2-accent) !important;
 }
 :root[data-theme="glass2"] .login-glow {

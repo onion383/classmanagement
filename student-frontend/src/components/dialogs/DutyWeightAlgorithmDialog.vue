@@ -1,7 +1,5 @@
 <template>
-  <Teleport to="body">
-  <Transition name="dialog">
-  <div v-if="visible" class="fixed inset-0 bg-black/30 z-50 flex items-center justify-center">
+  <DialogShell :visible="visible" :z-index="50" overlay-class="bg-black/30">
     <div class="bg-surface rounded-lg p-6 w-[36rem] max-w-[92vw] max-h-[88vh] shadow-card dialog-card flex flex-col overflow-hidden">
       <h3 class="text-lg font-bold mb-4 flex-shrink-0">值日项目权重算法</h3>
 
@@ -99,18 +97,17 @@
         <button @click="apply" class="bg-primary hover:bg-primary-hover text-text-inverse px-4 py-2 rounded">生成并应用</button>
       </div>
     </div>
-  </div>
-  </Transition>
-  </Teleport>
+  </DialogShell>
 </template>
 
 <script>
 import '../../styles/dialog-transition.css'
+import DialogShell from '../base/DialogShell.vue'
 import AppSelect from '../base/AppSelect.vue'
 
 export default {
   name: 'DutyWeightAlgorithmDialog',
-  components: { AppSelect },
+  components: { AppSelect, DialogShell },
   props: {
     visible: Boolean,
     days: { type: Array, default: () => [] },

@@ -273,7 +273,7 @@ import { weightHeatRgb, weightHeatFg } from '../utils/heatColor.js'
 // 可用 v-preload="loadXxx" 在悬停按钮时预取，点击时即时弹出。
 const loadSettingsDialog = () => import('../components/dialogs/DutySettingsDialog.vue')
 const DutySettingsDialog = defineAsyncComponent(loadSettingsDialog)
-const loadArrangementDialog = () => import('../components/dialogs/DutyArrangementDialog.vue')
+const loadArrangementDialog = () => import('../components/dialogs/DutyArrangementDialog/DutyArrangementDialog.vue')
 const DutyArrangementDialog = defineAsyncComponent(loadArrangementDialog)
 const loadWeightAlgoDialog = () => import('../components/dialogs/DutyWeightAlgorithmDialog.vue')
 const DutyWeightAlgorithmDialog = defineAsyncComponent(loadWeightAlgoDialog)

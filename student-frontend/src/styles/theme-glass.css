@@ -9,11 +9,11 @@
 
   /* 背景色 */
   --color-bg: #f0f4f8;
-  --color-surface: rgba(255, 255, 255, 0.92);
-  --color-surface-hover: rgba(255, 255, 255, 0.98);
-  --color-sidebar: rgba(255, 255, 255, 0.7);
-  --color-sidebar-hover: rgba(255, 255, 255, 0.85);
-  --color-sidebar-active: rgba(255, 255, 255, 0.95);
+  --color-surface: var(--alpha-white-92);
+  --color-surface-hover: var(--alpha-white-98);
+  --color-sidebar: var(--alpha-white-70);
+  --color-sidebar-hover: var(--alpha-white-85);
+  --color-sidebar-active: var(--alpha-white-95);
 
   /* 文字色 */
   --color-text: #1e293b;
@@ -22,8 +22,8 @@
   --color-text-inverse: #ffffff;
 
   /* 边框 */
-  --color-border: rgba(0, 0, 0, 0.06);
-  --color-border-strong: rgba(0, 0, 0, 0.12);
+  --color-border: var(--alpha-black-06);
+  --color-border-strong: var(--alpha-black-12);
 
   /* 阴影 */
   --shadow-sm: 0 1px 2px rgba(15, 23, 42, 0.04);
@@ -66,9 +66,9 @@
   contain: paint;
   overflow: hidden;
   box-shadow:
-    inset 0 1px 0 rgba(255, 255, 255, 0.35),
+    inset 0 1px 0 var(--alpha-white-35),
     0 4px 32px rgba(15, 23, 42, 0.12),
-    inset 0 -1px 0 rgba(255, 255, 255, 0.4);
+    inset 0 -1px 0 var(--alpha-white-40);
   z-index: 1;
 }
 /* 白色调（默认） */
@@ -89,7 +89,7 @@
   left: 0;
   right: 0;
   height: 40%;
-  background: linear-gradient(180deg, rgba(255, 255, 255, 0.22) 0%, var(--alpha-white-06) 55%, rgba(255, 255, 255, 0) 100%);
+  background: linear-gradient(180deg, var(--alpha-white-22) 0%, var(--alpha-white-06) 55%, var(--alpha-white-00) 100%);
   pointer-events: none;
   z-index: -1;
 }
@@ -159,7 +159,7 @@
    只在白天生效：深色模式沿用各块自己的夜间配色与阴影，
    并且除侧边栏外不出现亮边（见 theme-night.css）。 */
 :root:is([data-theme="glass"], [data-theme="win11"]) {
-  --sidebar-glass-bg: rgba(255, 255, 255, 0.35);
+  --sidebar-glass-bg: var(--alpha-white-35);
   --sidebar-glass-blur: blur(24px) saturate(1.4);
 }
 :root[data-topbar-color="blue"]:is([data-theme="glass"], [data-theme="win11"]) {
@@ -188,15 +188,15 @@
 }
 /* 白色调（默认） */
 :root[data-topbar-color="light"]:is([data-theme="glass"], [data-theme="win11"]) .bg-sidebar {
-  background-color: rgba(255, 255, 255, 0.35) !important;
+  background-color: var(--alpha-white-35) !important;
   color: #1e293b !important;
   /* 只去掉外侧扩散投影 4px 0 32px rgba(15,23,42,0.12)：它会向右铺出一条约 32px 的暗带，
      正好压在网格表格左列背后，被表格单元格/容器的 backdrop-filter 再次采样后
      抹成"越往右越深的蓝色渐变"（悬停侧边栏触发重绘时才显形）。
      背景色与顶部/右侧内侧高光保持原样不变。 */
   box-shadow:
-    inset 0 1px 0 rgba(255, 255, 255, 0.35),
-    inset -1px 0 0 rgba(255, 255, 255, 0.4);
+    inset 0 1px 0 var(--alpha-white-35),
+    inset -1px 0 0 var(--alpha-white-40);
 }
 /* 深蓝（旧款，还原最后一次提交前的原版配方：右侧圆角 + 浅色边框 + 原投影） */
 :root[data-topbar-color="blue"]:is([data-theme="glass"], [data-theme="win11"]) .bg-sidebar {
@@ -217,7 +217,7 @@
   left: 0;
   right: 0;
   height: 40%;
-  background: linear-gradient(180deg, rgba(255, 255, 255, 0.22) 0%, var(--alpha-white-06) 55%, rgba(255, 255, 255, 0) 100%);
+  background: linear-gradient(180deg, var(--alpha-white-22) 0%, var(--alpha-white-06) 55%, var(--alpha-white-00) 100%);
   pointer-events: none;
   z-index: -1;
 }
@@ -270,7 +270,7 @@
   font-weight: 600;
   box-shadow:
     inset 0 0 0 1px rgba(59, 130, 246, 0.3),
-    inset 0 1px 0 rgba(255, 255, 255, 0.4),
+    inset 0 1px 0 var(--alpha-white-40),
     0 0 16px rgba(59, 130, 246, 0.25),
     0 2px 8px rgba(15, 23, 42, 0.06);
 }
@@ -290,7 +290,7 @@
 }
 /* 标题栏应用名：白底深灰 / 深蓝底浅色 */
 :root[data-topbar-color="light"]:is([data-theme="glass"], [data-theme="win11"]) .win-app-title {
-  color: rgba(0, 0, 0, 0.62) !important;
+  color: var(--alpha-black-62) !important;
 }
 :root[data-topbar-color="blue"]:is([data-theme="glass"], [data-theme="win11"]) .win-app-title {
   color: rgba(241, 245, 249, 0.85) !important;
@@ -317,12 +317,12 @@
 }
 :root[data-topbar-color="blue"]:is([data-theme="glass"], [data-theme="win11"]) .bg-sidebar-active,
 :root[data-topbar-color="blue"]:is([data-theme="glass"], [data-theme="win11"]) .bg-sidebar-active.rounded {
-  background-color: rgba(255, 255, 255, 0.16) !important;
+  background-color: var(--alpha-white-16) !important;
   color: #bfdbfe !important;
   font-weight: 600;
   box-shadow:
-    inset 0 0 0 1px rgba(255, 255, 255, 0.18),
-    inset 0 1px 0 rgba(255, 255, 255, 0.18),
+    inset 0 0 0 1px var(--alpha-white-18),
+    inset 0 1px 0 var(--alpha-white-18),
     0 0 16px rgba(59, 130, 246, 0.2),
     0 2px 8px rgba(15, 23, 42, 0.1);
 }
@@ -340,7 +340,7 @@
   position: relative;
   box-shadow:
     0 0 0 1px var(--alpha-white-12),
-    0 0 12px rgba(255, 255, 255, 0.04),
+    0 0 12px var(--alpha-white-04),
     inset 0 1px 0 var(--alpha-white-15);
 }
 :root:is([data-theme="glass"], [data-theme="win11"]) button::before {
@@ -351,8 +351,8 @@
   padding: 1px;
   background: linear-gradient(
     180deg,
-    rgba(255, 255, 255, 0.25) 0%,
-    rgba(255, 255, 255, 0.05) 50%,
+    var(--alpha-white-25) 0%,
+    var(--alpha-white-05) 50%,
     var(--alpha-white-10) 100%
   );
   -webkit-mask:
@@ -376,13 +376,13 @@
   box-shadow:
     0 0 0 1px var(--alpha-white-15),
     0 0 12px rgba(34, 197, 94, 0.15),
-    inset 0 1px 0 rgba(255, 255, 255, 0.2);
+    inset 0 1px 0 var(--alpha-white-20);
 }
 :root:is([data-theme="glass"], [data-theme="win11"]) button.bg-primary.text-text-inverse:hover,
 :root:is([data-theme="glass"], [data-theme="win11"]) button.bg-success.text-text-inverse:hover {
   background: rgba(34, 197, 94, 0.44) !important;
   box-shadow:
-    0 0 0 1px rgba(255, 255, 255, 0.25),
+    0 0 0 1px var(--alpha-white-25),
     0 0 20px rgba(34, 197, 94, 0.25),
     inset 0 1px 0 var(--alpha-white-30);
 }
@@ -393,12 +393,12 @@
   box-shadow:
     0 0 0 1px var(--alpha-white-15),
     0 0 12px rgba(245, 158, 11, 0.15),
-    inset 0 1px 0 rgba(255, 255, 255, 0.2);
+    inset 0 1px 0 var(--alpha-white-20);
 }
 :root:is([data-theme="glass"], [data-theme="win11"]) button.bg-warning.text-text-inverse:hover {
   background: rgba(245, 158, 11, 0.44) !important;
   box-shadow:
-    0 0 0 1px rgba(255, 255, 255, 0.25),
+    0 0 0 1px var(--alpha-white-25),
     0 0 20px rgba(245, 158, 11, 0.25),
     inset 0 1px 0 var(--alpha-white-30);
 }
@@ -409,12 +409,12 @@
   box-shadow:
     0 0 0 1px var(--alpha-white-15),
     0 0 12px rgba(239, 68, 68, 0.15),
-    inset 0 1px 0 rgba(255, 255, 255, 0.2);
+    inset 0 1px 0 var(--alpha-white-20);
 }
 :root:is([data-theme="glass"], [data-theme="win11"]) button.bg-danger.text-text-inverse:hover {
   background: rgba(239, 68, 68, 0.44) !important;
   box-shadow:
-    0 0 0 1px rgba(255, 255, 255, 0.25),
+    0 0 0 1px var(--alpha-white-25),
     0 0 20px rgba(239, 68, 68, 0.25),
     inset 0 1px 0 var(--alpha-white-30);
 }
@@ -425,12 +425,12 @@
   box-shadow:
     0 0 0 1px var(--alpha-white-15),
     0 0 12px rgba(59, 130, 246, 0.15),
-    inset 0 1px 0 rgba(255, 255, 255, 0.2);
+    inset 0 1px 0 var(--alpha-white-20);
 }
 :root:is([data-theme="glass"], [data-theme="win11"]) button.bg-info.text-text-inverse:hover {
   background: rgba(59, 130, 246, 0.44) !important;
   box-shadow:
-    0 0 0 1px rgba(255, 255, 255, 0.25),
+    0 0 0 1px var(--alpha-white-25),
     0 0 20px rgba(59, 130, 246, 0.25),
     inset 0 1px 0 var(--alpha-white-30);
 }
@@ -440,12 +440,12 @@
   color: #ffffff !important;
 }
 :root:is([data-theme="glass"], [data-theme="win11"]) button.bg-surface-hover {
-  background-color: rgba(255, 255, 255, 0.75) !important;
-  border-color: rgba(0, 0, 0, 0.08);
+  background-color: var(--alpha-white-75) !important;
+  border-color: var(--alpha-black-08);
   color: var(--color-text) !important;
 }
 :root:is([data-theme="glass"], [data-theme="win11"]) button.bg-surface-hover:hover {
-  background-color: rgba(255, 255, 255, 0.95) !important;
+  background-color: var(--alpha-white-95) !important;
 }
 /* ========== 刷新按钮：与其它彩色玻璃按钮同款质感（白遮罩 + blur，透出暖橙底色） ========== */
 :root:is([data-theme="glass"], [data-theme="win11"]) button.btn-refresh {
@@ -454,13 +454,13 @@
   color: #9a3412 !important;
   border: none;
   box-shadow:
-    inset 0 0 0 40px rgba(255, 255, 255, 0.50),
+    inset 0 0 0 40px var(--alpha-white-50),
     0 0 14px rgba(251, 146, 60, 0.18) !important;
 }
 :root:is([data-theme="glass"], [data-theme="win11"]) button.btn-refresh:hover {
   color: #7c2d12 !important;
   box-shadow:
-    inset 0 0 0 40px rgba(255, 255, 255, 0.56),
+    inset 0 0 0 40px var(--alpha-white-56),
     0 0 20px rgba(251, 146, 60, 0.3) !important;
 }
 
@@ -470,13 +470,13 @@
   border: none;
   backdrop-filter: blur(12px) saturate(1.3);
   box-shadow:
-    inset 0 0 0 40px rgba(255, 255, 255, 0.50),
+    inset 0 0 0 40px var(--alpha-white-50),
     0 0 14px var(--alpha-white-12) !important;
 }
 :root:is([data-theme="glass"], [data-theme="win11"]) .opbar button:hover:not(.view-switch-btn) {
   box-shadow:
-    inset 0 0 0 40px rgba(255, 255, 255, 0.56),
-    0 0 18px rgba(255, 255, 255, 0.18) !important;
+    inset 0 0 0 40px var(--alpha-white-56),
+    0 0 18px var(--alpha-white-18) !important;
 }
 /* ========== 所有彩色玻璃按钮统一新风格（去边框 + 模糊 + 白遮罩；排除切换栏选中态） ========== */
 :root:is([data-theme="glass"], [data-theme="win11"]) button.bg-primary.text-text-inverse:not(.tab-active),
@@ -487,7 +487,7 @@
   border: none;
   backdrop-filter: blur(12px) saturate(1.3);
   box-shadow:
-    inset 0 0 0 40px rgba(255, 255, 255, 0.50),
+    inset 0 0 0 40px var(--alpha-white-50),
     0 0 14px var(--alpha-white-12) !important;
 }
 :root:is([data-theme="glass"], [data-theme="win11"]) button.bg-primary.text-text-inverse:not(.tab-active):hover,
@@ -496,8 +496,8 @@
 :root:is([data-theme="glass"], [data-theme="win11"]) button.bg-danger.text-text-inverse:not(.tab-active):hover,
 :root:is([data-theme="glass"], [data-theme="win11"]) button.bg-info.text-text-inverse:not(.tab-active):hover {
   box-shadow:
-    inset 0 0 0 40px rgba(255, 255, 255, 0.56),
-    0 0 18px rgba(255, 255, 255, 0.18) !important;
+    inset 0 0 0 40px var(--alpha-white-56),
+    0 0 18px var(--alpha-white-18) !important;
 }
 
 /* ========== 视图切换（分段控件）：滑块与两个标签不套用上面的「荧光边框」按钮皮肤 ==========
@@ -542,7 +542,7 @@
 :root:is([data-theme="glass"], [data-theme="win11"]) textarea,
 :root:is([data-theme="glass"], [data-theme="win11"]) select {
   background-color: rgba(255, 255, 255, var(--glass-opacity, 0.4)) !important;
-  border: 1px solid rgba(0, 0, 0, 0.12) !important;
+  border: 1px solid var(--alpha-black-12) !important;
   border-radius: 12px;
   backdrop-filter: blur(10px) saturate(1.1);
   transition: border-color 0.2s, box-shadow 0.2s, background-color 0.2s;
@@ -562,7 +562,7 @@
 :root:is([data-theme="glass"], [data-theme="win11"]) textarea:focus,
 :root:is([data-theme="glass"], [data-theme="win11"]) select:focus {
   border-color: #3b82f6 !important;
-  background-color: rgba(255, 255, 255, 0.85) !important;
+  background-color: var(--alpha-white-85) !important;
   box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.28);
   outline: none;
 }
@@ -576,7 +576,7 @@
 }
 :root:is([data-theme="glass"], [data-theme="win11"]) input:disabled,
 :root:is([data-theme="glass"], [data-theme="win11"]) textarea:disabled {
-  background-color: rgba(0, 0, 0, 0.03) !important;
+  background-color: var(--alpha-black-03) !important;
   opacity: 0.6;
 }
 :root:is([data-theme="glass"], [data-theme="win11"]) select option {
@@ -592,13 +592,13 @@
 /* ========== 登录页账号/密码输入框：毛玻璃适配（半透明磨砂，与卡片一致） ========== */
 :root:is([data-theme="glass"], [data-theme="win11"]) .login-bg input {
   background-color: rgba(255, 255, 255, var(--glass-opacity, 0.4)) !important;
-  border: 1px solid rgba(0, 0, 0, 0.12);
+  border: 1px solid var(--alpha-black-12);
   backdrop-filter: blur(10px) saturate(1.1);
 }
 /* 聚焦：账号与密码统一 内部变白高亮 + 蓝色边框高亮 */
 :root:is([data-theme="glass"], [data-theme="win11"]) .login-bg input:focus {
   border-color: #3b82f6 !important;
-  background-color: rgba(255, 255, 255, 0.85) !important;
+  background-color: var(--alpha-white-85) !important;
   box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.28);
   outline: none;
 }
@@ -606,17 +606,17 @@
 :root:is([data-theme="glass"], [data-theme="win11"]) .login-bg input:-webkit-autofill:not(:focus),
 :root:is([data-theme="glass"], [data-theme="win11"]) .login-bg input:-webkit-autofill:hover:not(:focus) {
   -webkit-text-fill-color: #1e293b;
-  -webkit-box-shadow: 0 0 0 1000px rgba(255, 255, 255, 0.85) inset;
-  box-shadow: 0 0 0 1000px rgba(255, 255, 255, 0.85) inset;
-  border-color: rgba(0, 0, 0, 0.12) !important;
+  -webkit-box-shadow: 0 0 0 1000px var(--alpha-white-85) inset;
+  box-shadow: 0 0 0 1000px var(--alpha-white-85) inset;
+  border-color: var(--alpha-black-12) !important;
   backdrop-filter: blur(10px) saturate(1.1);
   transition: background-color 9999s ease-out;
 }
 /* autofill 聚焦：统一为蓝色边框，保证账号/密码聚焦高亮一致 */
 :root:is([data-theme="glass"], [data-theme="win11"]) .login-bg input:-webkit-autofill:focus {
   -webkit-text-fill-color: #1e293b;
-  -webkit-box-shadow: 0 0 0 1000px rgba(255, 255, 255, 0.9) inset;
-  box-shadow: 0 0 0 1000px rgba(255, 255, 255, 0.9) inset;
+  -webkit-box-shadow: 0 0 0 1000px var(--alpha-white-90) inset;
+  box-shadow: 0 0 0 1000px var(--alpha-white-90) inset;
   border-color: #3b82f6 !important;
 }
 
@@ -630,14 +630,14 @@
   background-color: rgba(255, 255, 255, var(--glass-opacity, 0.4)) !important;
   backdrop-filter: blur(20px) saturate(1.1);
   /* 四周 1px 发光白边：与侧边栏的白线同强度（0.35），去掉原来叠加的外圈 0 0 0 1px 阴影，避免出现双重边 */
-  border: 1px solid rgba(255, 255, 255, 0.35);
+  border: 1px solid var(--alpha-white-35);
   border-radius: 20px;
   position: relative;
   /* contain: paint 限制绘制边界，告诉浏览器子元素不超出父容器绘制，
      减少 backdrop-filter 无效区域的 GPU 合成计算，且不影响外观 */
   contain: paint;
   box-shadow:
-    0 0 20px rgba(255, 255, 255, 0.03),
+    0 0 20px var(--alpha-white-03),
     inset 0 1px 0 var(--alpha-white-15);
 }
 /* 顶部玻璃受光渐变高光：与侧边栏 / 标题栏统一（自上而下 0.22→0.06→0，占高度 40%），
@@ -650,7 +650,7 @@
   right: 0;
   height: 40%;
   border-radius: inherit;
-  background: linear-gradient(180deg, rgba(255, 255, 255, 0.22) 0%, var(--alpha-white-06) 55%, rgba(255, 255, 255, 0) 100%);
+  background: linear-gradient(180deg, var(--alpha-white-22) 0%, var(--alpha-white-06) 55%, var(--alpha-white-00) 100%);
   pointer-events: none;
   z-index: -1;
 }
@@ -686,7 +686,7 @@
    追加外投影（保留原内高光），让弹窗更「浮」；不含 win11，不影响其它主题。 */
 :root[data-theme="glass"] .dialog-card {
   box-shadow:
-    0 0 20px rgba(255, 255, 255, 0.03),
+    0 0 20px var(--alpha-white-03),
     0 4px 18px rgba(15, 23, 42, 0.12),
     0 18px 48px rgba(15, 23, 42, 0.14),
     inset 0 1px 0 var(--alpha-white-15);
@@ -724,7 +724,7 @@
   will-change: transform;
   box-shadow:
     0 0 0 1px var(--alpha-white-12),
-    0 0 16px rgba(255, 255, 255, 0.04),
+    0 0 16px var(--alpha-white-04),
     inset 0 1px 0 var(--alpha-white-15);
 }
 
@@ -772,7 +772,7 @@
   backdrop-filter: blur(16px);
   /* 限制绘制边界，减少 backdrop-filter 无效区域的 GPU 合成（外观不变，与 .bg-surface 同法） */
   contain: paint;
-  border: 1px solid rgba(255, 255, 255, 0.14);
+  border: 1px solid var(--alpha-white-14);
   box-shadow:
     0 1px 6px rgba(15, 23, 42, 0.05),
     inset 0 1px 0 var(--alpha-white-15);
@@ -860,7 +860,7 @@
   will-change: transform;
   box-shadow:
     0 0 0 1px var(--alpha-white-12),
-    0 0 16px rgba(255, 255, 255, 0.04),
+    0 0 16px var(--alpha-white-04),
     inset 0 1px 0 var(--alpha-white-15);
 }
 /* 网格表内部滚动容器：滚动/编辑引起的重绘收窄在容器内 */
@@ -909,7 +909,7 @@
   overflow: hidden;
 }
 :root:is([data-theme="glass"], [data-theme="win11"]) .grid-view-container table th {
-  background-color: rgba(255, 255, 255, 0.55) !important;
+  background-color: var(--alpha-white-55) !important;
   color: #1e293b !important;
   font-weight: 600;
   backdrop-filter: blur(12px) saturate(1.3);
@@ -919,7 +919,7 @@
   border-top: none !important;
 }
 :root:is([data-theme="glass"], [data-theme="win11"]) .grid-view-container table td {
-  background-color: rgba(255, 255, 255, 0.4);
+  background-color: var(--alpha-white-40);
   color: #1e293b !important;
   backdrop-filter: blur(12px) saturate(1.3);
   border-right: 1px solid rgba(15, 23, 42, 0.22) !important;
@@ -953,7 +953,7 @@
 :root:is([data-theme="glass"], [data-theme="win11"]) .grid-view-container table .bg-warning\/30,
 :root:is([data-theme="glass"], [data-theme="win11"]) .grid-view-container table .bg-warning\/20,
 :root:is([data-theme="glass"], [data-theme="win11"]) .grid-view-container table .bg-info\/10 {
-  background-color: rgba(255, 255, 255, 0.45) !important;
+  background-color: var(--alpha-white-45) !important;
 }
 :root:is([data-theme="glass"], [data-theme="win11"]) .grid-view-container table .bg-primary {
   background-color: rgba(59, 130, 246, 0.25) !important;
@@ -966,11 +966,11 @@
 :root:is([data-theme="glass"], [data-theme="win11"]) .nt-toast {
   background-color: rgba(255, 255, 255, calc(var(--glass-opacity, 0.4) - 0.15)) !important;
   backdrop-filter: blur(20px) saturate(1.2);
-  border: 1px solid rgba(255, 255, 255, 0.2) !important;
+  border: 1px solid var(--alpha-white-20) !important;
   contain: paint;
   box-shadow:
-    0 4px 24px rgba(0, 0, 0, 0.08),
-    0 1px 4px rgba(0, 0, 0, 0.04),
+    0 4px 24px var(--alpha-black-08),
+    0 1px 4px var(--alpha-black-04),
     inset 0 1px 0 var(--alpha-white-30);
   position: relative;
 }
@@ -982,7 +982,7 @@
   padding: 1px !important;
   background: linear-gradient(
     180deg,
-    rgba(255, 255, 255, 0.4) 0%,
+    var(--alpha-white-40) 0%,
     var(--alpha-white-10) 50%,
     var(--alpha-white-15) 100%
   ) !important;
@@ -1001,7 +1001,7 @@
 :root:is([data-theme="glass"], [data-theme="win11"]) .nt-title { color: #1e293b !important; }
 :root:is([data-theme="glass"], [data-theme="win11"]) .nt-msg { color: #475569 !important; }
 :root:is([data-theme="glass"], [data-theme="win11"]) .nt-close { color: #64748b !important; }
-:root:is([data-theme="glass"], [data-theme="win11"]) .nt-close:hover { background-color: rgba(0, 0, 0, 0.05) !important; color: #1e293b !important; }
+:root:is([data-theme="glass"], [data-theme="win11"]) .nt-close:hover { background-color: var(--alpha-black-05) !important; color: #1e293b !important; }
 /* 进度条加深 */
 :root:is([data-theme="glass"], [data-theme="win11"]) .nt-success .nt-bar { background: rgba(34, 197, 94, 0.7) !important; }
 :root:is([data-theme="glass"], [data-theme="win11"]) .nt-error   .nt-bar { background: rgba(239, 68, 68, 0.7) !important; }
@@ -1010,7 +1010,7 @@
 
 /* ========== 看板（SeatView 座位管理）毛玻璃 ========== */
 :root:is([data-theme="glass"], [data-theme="win11"]) .bg-surface.shadow-md {
-  background-color: rgba(255, 255, 255, 0.50) !important;
+  background-color: var(--alpha-white-50) !important;
   backdrop-filter: blur(16px);
   border: none !important;
   box-shadow: 0 2px 10px rgba(15, 23, 42, 0.05);
@@ -1059,13 +1059,13 @@
 /* ========== 看板（FeeManagement 班费统计卡片）毛玻璃 ========== */
 :root:is([data-theme="glass"], [data-theme="win11"]) .grid.grid-cols-3 > div {
   position: relative;
-  background-color: rgba(255, 255, 255, 0.50) !important;
+  background-color: var(--alpha-white-50) !important;
   backdrop-filter: blur(16px);
   border: none !important;
   border-radius: 16px !important;
   box-shadow:
     0 0 0 1px var(--alpha-white-12),
-    0 0 16px rgba(255, 255, 255, 0.04),
+    0 0 16px var(--alpha-white-04),
     inset 0 1px 0 var(--alpha-white-15);
 }
 :root:is([data-theme="glass"], [data-theme="win11"]) .grid.grid-cols-3 > div::before {
@@ -1111,12 +1111,12 @@
 :root:is([data-theme="glass"], [data-theme="win11"]) .login-glow {
   position: relative;
   box-shadow:
-    0 0 0 1px rgba(255, 255, 255, 0.25),
+    0 0 0 1px var(--alpha-white-25),
     0 0 30px var(--alpha-white-10),
-    0 0 60px rgba(255, 255, 255, 0.05),
-    0 4px 20px rgba(0, 0, 0, 0.15),
-    inset 0 1px 0 rgba(255, 255, 255, 0.35),
-    inset 1px 0 0 rgba(255, 255, 255, 0.2),
+    0 0 60px var(--alpha-white-05),
+    0 4px 20px var(--alpha-black-15),
+    inset 0 1px 0 var(--alpha-white-35),
+    inset 1px 0 0 var(--alpha-white-20),
     inset 0 -1px 0 var(--alpha-white-10),
     inset -1px 0 0 var(--alpha-white-15);
 }
@@ -1128,11 +1128,11 @@
   padding: 2px;
   background: linear-gradient(
     180deg,
-    rgba(255, 255, 255, 0.5) 0%,
+    var(--alpha-white-50) 0%,
     var(--alpha-white-15) 20%,
-    rgba(255, 255, 255, 0.05) 50%,
+    var(--alpha-white-05) 50%,
     var(--alpha-white-15) 80%,
-    rgba(255, 255, 255, 0.4) 100%
+    var(--alpha-white-40) 100%
   );
   -webkit-mask:
     linear-gradient(#fff 0 0) content-box,
@@ -1166,7 +1166,7 @@
   position: fixed;
   inset: 0;
   /* 弹窗遮罩：透明底（不加纯色压暗）+ 背景模糊，磨砂虚化下层页面 */
-  background-color: rgba(0, 0, 0, 0);
+  background-color: var(--alpha-black-00);
   backdrop-filter: blur(18px) saturate(1.1);
 }
 
@@ -1178,12 +1178,12 @@
      导致弹窗退化为 relative，top 坐标把它推到 body 末端（页面底部），看起来在视口底部"乱跑"。
      这里强制 position: fixed，与 .bg-surface 同优先级但定义在更后面，赢得级联。 */
   position: fixed;
-  background-color: rgba(255, 255, 255, 0.95) !important;
+  background-color: var(--alpha-white-95) !important;
   backdrop-filter: blur(14px) saturate(1.1);
   border: 1px solid rgba(59, 130, 246, 0.4) !important;
   border-radius: 10px !important;
   box-shadow:
-    0 0 0 1px rgba(255, 255, 255, 0.4),
+    0 0 0 1px var(--alpha-white-40),
     0 8px 28px rgba(15, 23, 42, 0.18);
   overflow: hidden;
 }
@@ -1208,12 +1208,12 @@
      导致菜单的 top/left 退化为相对页面末端定位，跑到视口底部。
      用 !important 强制覆盖 .bg-surface 的 position（特异性相同时 !important 胜出）。 */
   position: fixed !important;
-  background-color: rgba(255, 255, 255, 0.95) !important;
+  background-color: var(--alpha-white-95) !important;
   backdrop-filter: blur(14px) saturate(1.1);
   border: 1px solid rgba(59, 130, 246, 0.4) !important;
   border-radius: 10px !important;
   box-shadow:
-    0 0 0 1px rgba(255, 255, 255, 0.4),
+    0 0 0 1px var(--alpha-white-40),
     0 8px 28px rgba(15, 23, 42, 0.18);
   overflow: hidden;
 }
@@ -1229,7 +1229,7 @@
    无需再用 `:root *` 逐元素下发（原来的通用选择器写法结果等价，纯属多余匹配开销）。 */
 :root:is([data-theme="glass"], [data-theme="win11"]) {
   scrollbar-width: thin;
-  scrollbar-color: rgba(255, 255, 255, 0.55) var(--alpha-white-08);
+  scrollbar-color: var(--alpha-white-55) var(--alpha-white-08);
 }
 /* 说明：原先这里还有整套 ::-webkit-scrollbar / -track / -thumb / -corner 皮肤（10px 宽、
    白色渐变 thumb、透明 corner），已删除。Chromium 的规则是「只要元素的 scrollbar-width 或
@@ -1245,10 +1245,10 @@
   border-radius: 10px;
   box-shadow:
     0 1px 6px rgba(15, 23, 42, 0.05),
-    inset 0 1px 0 rgba(255, 255, 255, 0.35);
+    inset 0 1px 0 var(--alpha-white-35);
 }
 :root:is([data-theme="glass"], [data-theme="win11"]) .search-panel .bg-surface-hover {
-  background-color: rgba(255, 255, 255, 0.5) !important;
+  background-color: var(--alpha-white-50) !important;
 }
 /* 工具栏「搜索」按钮：白色毛玻璃带上暖暖橙调，浓度对齐同排实色按钮（参照标题栏玻璃配方） */
 :root:is([data-theme="glass"], [data-theme="win11"]) .btn-search {
@@ -1256,9 +1256,9 @@
   background-color: rgba(255, 205, 148, 0.92) !important;
   color: #7a3d08 !important;
   backdrop-filter: blur(16px) saturate(1.2);
-  border: 1px solid rgba(255, 255, 255, 0.35);
+  border: 1px solid var(--alpha-white-35);
   box-shadow:
-    inset 0 1px 0 rgba(255, 255, 255, 0.22),
+    inset 0 1px 0 var(--alpha-white-22),
     0 1px 4px rgba(154, 52, 18, 0.08);
 }
 :root:is([data-theme="glass"], [data-theme="win11"]) .btn-search:hover {

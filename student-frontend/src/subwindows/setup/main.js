@@ -6,6 +6,7 @@ import '../../styles/index.css'
 import { loadThemeStyles } from '../../styles/themeLoader'
 import { useThemeStore } from '../../stores/theme'
 import { setupApiClient, backendBaseUrl } from '../../utils/httpClient'
+import { INVOKE } from '../../electronChannels.js'
 
 // 各窗口共用的 axios 装配：baseURL、登录态注入、后端重启期间的退避重试、安全通道加密。
 // 引导页「改储存目录」会重启后端，期间的网络错误由拦截器等就绪后自动重试。
@@ -31,7 +32,7 @@ async function resolveLaunch() {
   let forced = ''
   try {
     forced = new URLSearchParams(location.search).get('screen') || ''
-    const p = await window.electron?.invoke?.('launch-plan')
+    const p = await window.electron?.invoke?.(INVOKE.LAUNCH_PLAN)
     if (p) plan = p
   } catch (_) {}
   if (forced === 'warning' || forced === 'welcome' || forced === 'wizard') {

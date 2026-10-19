@@ -433,7 +433,7 @@ import AiConversationPanel from '../components/ai/AiConversationPanel.vue'
 import AiLinkPanel from '../components/ai/AiLinkPanel.vue'
 import AiChangePanel from '../components/ai/AiChangePanel.vue'
 import AiChatMessages from '../components/ai/AiChatMessages.vue'
-import AiComposer from '../components/ai/AiComposer.vue'
+import AiComposer from '../components/ai/AiComposer/AiComposer.vue'
 import { ensureMarkdown, buildBlocks, updateLiveRender } from '../composables/ai/aiMarkdown.js'
 import {
   parseMessages, lastAssistant, lastAssistantIndex, buildProc, isAutoMessage,
@@ -444,6 +444,7 @@ import { AI_PERMISSION_KEY, AI_PERMISSION_FULL, AI_WEB_SEARCH_KEY, tableJumpTarg
 import aiConversations from '../composables/ai/aiConversations.js'
 import aiChat from '../composables/ai/aiChat.js'
 import aiExec from '../composables/ai/aiExec.js'
+import { INVOKE } from '../electronChannels.js'
 
 // 读取本地保存的写入权限挡位（只有 'full' 视为完全权限，其余一律回落到默认的「全部审批」）
 function readPermissionMode() {
@@ -669,14 +670,14 @@ export default {
           this.$emit('capture-start')
           await new Promise((r) => setTimeout(r, 160))
         }
-        const res = await window.electron.invoke('screenshot-region')
+        const res = await window.electron.invoke(INVOKE.SCREENSHOT_REGION)
         if (!res || !res.success) throw new Error((res && res.error) || '截屏失败')
         this.regionShot = res.dataUrl
         this.regionRect = null
         // 等渲染层把冻结画面画好，再让窗口铺满整屏显示遮罩，避免露出原界面闪一下
         await this.$nextTick()
         await new Promise((r) => requestAnimationFrame(r))
-        await window.electron.invoke('screenshot-region-show')
+        await window.electron.invoke(INVOKE.SCREENSHOT_REGION_SHOW)
         document.addEventListener('keydown', this.onRegionKey)
       } catch (err) {
         await this.endRegionSelect()
@@ -761,7 +762,7 @@ export default {
     async endRegionSelect() {
       document.removeEventListener('keydown', this.onRegionKey)
       try {
-        if (window.electron && window.electron.invoke) await window.electron.invoke('screenshot-region-end')
+        if (window.electron && window.electron.invoke) await window.electron.invoke(INVOKE.SCREENSHOT_REGION_END)
       } catch (_) { /* 忽略 */ }
       this.regionShot = null
       this.regionRect = null
@@ -835,7 +836,7 @@ export default {
     // 用系统默认浏览器打开当前抽屉里的地址
     openLinkExternal(url) {
       if (!url) return
-      if (window.electron && window.electron.invoke) window.electron.invoke('open-external', url)
+      if (window.electron && window.electron.invoke) window.electron.invoke(INVOKE.OPEN_EXTERNAL, url)
     },
     // 置底：合并到下一帧执行。流式输出时每个 chunk 都会请求置底，
     // 若每次都同步读写 scrollTop / scrollHeight 会反复触发强制布局；

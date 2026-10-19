@@ -11,6 +11,8 @@
 //   - 数据面：AES-256-GCM；请求体加密为 JSON { session, d: b64(iv).b64(tag).b64(ct) }；
 //     响应体为 { d: 同格式加密串 }，由后端中间件包装。
 
+import { INVOKE } from '../electronChannels.js'
+
 const subtle = typeof crypto !== 'undefined' && crypto.subtle ? crypto.subtle : (globalThis.crypto && globalThis.crypto.subtle)
 const BASE = 'http://localhost:3000'
 
@@ -27,7 +29,7 @@ async function getMasterKey() {
   if (kMaster) return kMaster
   const e = typeof window !== 'undefined' && window.electron
   if (e && typeof e.invoke === 'function') {
-    kMaster = await e.invoke('get-master-key')
+    kMaster = await e.invoke(INVOKE.GET_MASTER_KEY)
   } else if (import.meta.env && import.meta.env.VITE_SECURE_MASTER) {
     kMaster = import.meta.env.VITE_SECURE_MASTER
   }

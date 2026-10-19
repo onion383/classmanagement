@@ -2,6 +2,7 @@
 // 纯代码搬运自 SettingsView.vue 的 methods，未改写逻辑；通过展开注册到组件 methods。
 import axios from 'axios'
 import { useNotification } from '../../composables/useNotification'
+import { SEND, INVOKE } from '../../electronChannels.js'
 
 export function useSettingsAppearance() {
   return {
@@ -47,7 +48,7 @@ export function useSettingsAppearance() {
           const reader = new FileReader()
           reader.onload = async (ev) => {
             const base64Data = ev.target.result.split(',')[1] // 去掉 data:image/...;base64, 前缀
-            const result = await window.electron.invoke('save-background-image', {
+            const result = await window.electron.invoke(INVOKE.SAVE_BACKGROUND_IMAGE, {
               name: file.name,
               base64: base64Data
             })
@@ -111,7 +112,7 @@ export function useSettingsAppearance() {
           noteSavePath: this.noteSavePath,
           screenshotSavePath: this.screenshotSavePath
         })
-        window.electron?.send('to-widget', { type: 'settings-changed' })
+        window.electron?.send(SEND.TO_WIDGET, { type: 'settings-changed' })
       } catch (err) {
         console.error('保存工具箱设置失败:', err)
       }
@@ -123,22 +124,22 @@ export function useSettingsAppearance() {
     },
     async loadSession() {
       try {
-        this.sessionEnabled = await window.electron?.invoke('get-session-widget-visible')
+        this.sessionEnabled = await window.electron?.invoke(INVOKE.GET_SESSION_WIDGET_VISIBLE)
       } catch (_) {}
       if (this.sessionEnabled === null || this.sessionEnabled === undefined) {
         this.sessionEnabled = this.toolboxEnabled
-        window.electron?.send('widget-set-session-visible', this.sessionEnabled)
+        window.electron?.send(SEND.WIDGET_SET_SESSION_VISIBLE, this.sessionEnabled)
       }
       this.sessionLoaded = true
     },
     onSessionChange(e) {
       this.sessionEnabled = e.target.checked
       if (!this.sessionLoaded) return
-      window.electron?.send('widget-set-session-visible', this.sessionEnabled)
+      window.electron?.send(SEND.WIDGET_SET_SESSION_VISIBLE, this.sessionEnabled)
     },
     async loadUsbAutoOpen() {
       try {
-        const res = await window.electron?.invoke('get-usb-auto-open')
+        const res = await window.electron?.invoke(INVOKE.GET_USB_AUTO_OPEN)
         this.usbAutoOpen = !!res?.enabled
       } catch (_) {}
     },
@@ -146,19 +147,19 @@ export function useSettingsAppearance() {
     onDesktopWidgetChange(e) {
       this.desktopWidgetEnabled = e.target.checked
       try { localStorage.setItem('desktopWidgetEnabled', this.desktopWidgetEnabled ? '1' : '0') } catch (_) {}
-      window.electron?.send('desktop-widget-enabled', this.desktopWidgetEnabled)
+      window.electron?.send(SEND.DESKTOP_WIDGET_ENABLED, this.desktopWidgetEnabled)
     },
     async onUsbAutoOpenChange(e) {
       this.usbAutoOpen = e.target.checked
       try {
-        await window.electron?.invoke('set-usb-auto-open', this.usbAutoOpen)
+        await window.electron?.invoke(INVOKE.SET_USB_AUTO_OPEN, this.usbAutoOpen)
       } catch (_) {
         console.error('保存U盘自动打开设置失败')
       }
     },
     async loadDataDirs() {
       try {
-        const res = await window.electron?.invoke('get-data-directories')
+        const res = await window.electron?.invoke(INVOKE.GET_DATA_DIRECTORIES)
         if (res) {
           this.dataDir = res.dataDir
           this.thumbsDir = res.thumbsDir
@@ -173,7 +174,7 @@ export function useSettingsAppearance() {
       this.showConfirm(`确定把数据库目录搬迁到「${picked}」吗？搬迁期间所有窗口会暂时关闭并显示迁移进度，请勿强行停止程序，完成后会自动重开主界面。`, async () => {
         this.busyDataDir = true
         try {
-          const res = await window.electron.invoke('set-data-dir', picked)
+          const res = await window.electron.invoke(INVOKE.SET_DATA_DIR, picked)
           if (res?.ok) {
             this.dataDir = res.dataDir
             this.showAlert(res.changed ? '数据库目录搬迁成功，应用服务已重启。' : '目录未变化。')
@@ -191,7 +192,7 @@ export function useSettingsAppearance() {
       this.showConfirm(`确定把相册缩略图缓存目录改为「${picked}」吗？将自动重启应用服务，缩略图会按需重建。`, async () => {
         this.busyThumbsDir = true
         try {
-          const res = await window.electron.invoke('set-thumbs-dir', picked)
+          const res = await window.electron.invoke(INVOKE.SET_THUMBS_DIR, picked)
           if (res?.ok) {
             this.thumbsDir = res.thumbsDir
             this.showAlert(res.changed ? '缓存目录已切换，应用服务已重启。' : '目录未变化。')
@@ -209,7 +210,7 @@ export function useSettingsAppearance() {
       this.showConfirm(`确定把技能文件目录搬迁到「${picked}」吗？将把现有技能文件移动到该目录并重启应用服务。`, async () => {
         this.busySkillsDir = true
         try {
-          const res = await window.electron.invoke('set-skills-dir', picked)
+          const res = await window.electron.invoke(INVOKE.SET_SKILLS_DIR, picked)
           if (res?.ok) {
             this.skillsDir = res.skillsDir
             this.showAlert(res.changed ? '技能目录搬迁成功，应用服务已重启。' : '目录未变化。')
@@ -240,7 +241,7 @@ export function useSettingsAppearance() {
         this.busyDbEncryption = true
         try {
           // 主窗口即将被关闭并重开，转换结果由主进程提示条反馈
-          await window.electron.invoke('set-db-encryption', { encrypt: !turningOff })
+          await window.electron.invoke(INVOKE.SET_DB_ENCRYPTION, { encrypt: !turningOff })
         } catch (err) {
           this.showAlert(err?.message || '操作失败')
         } finally {
@@ -250,7 +251,7 @@ export function useSettingsAppearance() {
     },
     async pickDir() {
       try {
-        const result = await window.electron?.invoke('select-folder')
+        const result = await window.electron?.invoke(INVOKE.SELECT_FOLDER)
         if (result && result.filePaths && result.filePaths.length > 0) {
           return result.filePaths[0]
         }
@@ -260,14 +261,14 @@ export function useSettingsAppearance() {
     async openDir(path) {
       if (!path) return
       try {
-        await window.electron?.invoke('open-folder', path)
+        await window.electron?.invoke(INVOKE.OPEN_FOLDER, path)
       } catch (err) {
         console.error('打开文件夹失败:', err)
       }
     },
     async selectFolder(type) {
       try {
-        const result = await window.electron?.invoke('select-folder')
+        const result = await window.electron?.invoke(INVOKE.SELECT_FOLDER)
         if (result && result.filePaths && result.filePaths.length > 0) {
           const path = result.filePaths[0]
           if (type === 'note') {
@@ -306,7 +307,7 @@ export function useSettingsAppearance() {
     // 取一次逐进程内存快照，并更新三个重启目标的存活状态
     async loadPerf() {
       try {
-        const snap = await window.electron?.invoke('perf-snapshot')
+        const snap = await window.electron?.invoke(INVOKE.PERF_SNAPSHOT)
         if (snap) {
           this.perfProcs = Array.isArray(snap.procs) ? snap.procs : []
           // 首位条形目标占比每次采样在 85%~95% 间跳动，避免最高占用恒为满格
@@ -328,7 +329,7 @@ export function useSettingsAppearance() {
     // 取上次启动耗时
     async loadStartup() {
       try {
-        const t = await window.electron?.invoke('perf-startup')
+        const t = await window.electron?.invoke(INVOKE.PERF_STARTUP)
         // 不做取整：主进程传来的 total 带 getCreationTime 的微秒级小数，
         // 面板按秒原样呈现（如 1.17285693359375 s）。
         this.perfStartupTotal = t?.total || 0
@@ -349,7 +350,7 @@ export function useSettingsAppearance() {
       if (this.busyGc) return
       this.busyGc = true
       try {
-        await window.electron?.invoke('perf-gc')
+        await window.electron?.invoke(INVOKE.PERF_GC)
         await this.loadPerf()
         this.notifySuccess('已执行内存回收')
       } catch (_) {
@@ -360,14 +361,14 @@ export function useSettingsAppearance() {
     },
     // 重启前端：页面会自行重载，无需提示
     restartFrontend() {
-      window.electron?.invoke('perf-restart-frontend')
+      window.electron?.invoke(INVOKE.PERF_RESTART_FRONTEND)
     },
     // 重启后端：复用已有的 restart-backend 通道
     async restartBackend() {
       if (this.busyRestartBackend) return
       this.busyRestartBackend = true
       try {
-        await window.electron?.invoke('restart-backend')
+        await window.electron?.invoke(INVOKE.RESTART_BACKEND)
         await this.loadPerf()
         this.notifySuccess('后端已重启')
       } catch (_) {
@@ -381,7 +382,7 @@ export function useSettingsAppearance() {
       if (this.busyRestartWidget) return
       this.busyRestartWidget = true
       try {
-        await window.electron?.invoke('perf-restart-widget')
+        await window.electron?.invoke(INVOKE.PERF_RESTART_WIDGET)
         await this.loadPerf()
         this.notifySuccess('小组件已重启')
       } catch (_) {
@@ -400,15 +401,15 @@ export function useSettingsAppearance() {
       if (import.meta.env.DEV) {
         this._softRestartAll()
       } else {
-        window.electron?.invoke('perf-relaunch-app')
+        window.electron?.invoke(INVOKE.PERF_RELAUNCH_APP)
       }
     },
     async _softRestartAll() {
       try {
-        await window.electron?.invoke('restart-backend')
-        await window.electron?.invoke('perf-restart-widget')
+        await window.electron?.invoke(INVOKE.RESTART_BACKEND)
+        await window.electron?.invoke(INVOKE.PERF_RESTART_WIDGET)
         this.notifySuccess('正在重启全部进程')
-        window.electron?.invoke('perf-restart-frontend')
+        window.electron?.invoke(INVOKE.PERF_RESTART_FRONTEND)
       } catch (_) {
         this.notifyError('全部重启失败')
         this.busyRestartAll = false

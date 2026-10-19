@@ -1,7 +1,5 @@
 <template>
-  <Teleport to="body">
-  <Transition name="dialog">
-  <div v-if="visible" class="fixed inset-0 bg-black/30 z-50 flex items-center justify-center">
+  <DialogShell :visible="visible" :z-index="50" overlay-class="bg-black/30">
     <div class="bg-surface rounded-lg p-6 w-80 shadow-card dialog-card">
       <h3 class="text-lg font-bold mb-4">座位设置</h3>
       <div class="mb-3">
@@ -36,17 +34,17 @@
         <button @click="save" class="bg-info text-text-inverse px-4 py-2 rounded">保存</button>
       </div>
     </div>
-  </div>
-  </Transition>
-  </Teleport>
+  </DialogShell>
 </template>
 
 <script>
 import { useNotification } from '../../composables/useNotification.js'
 import '../../styles/dialog-transition.css'
+import DialogShell from '../base/DialogShell.vue'
 
 export default {
   name: 'SeatSettingsDialog',
+  components: { DialogShell },
   props: {
     visible: Boolean,
     rows: { type: Number, required: true },

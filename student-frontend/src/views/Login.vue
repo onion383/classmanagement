@@ -119,6 +119,7 @@ import { defineAsyncComponent } from 'vue';
 import { useNotification } from '../composables/useNotification.js';
 import AppSelect from '../components/base/AppSelect.vue';
 import '../styles/dialog-transition.css';
+import { INVOKE } from '../electronChannels.js';
 
 // 弹窗类组件懒加载：打开时才加载对应 chunk
 const loadConfirmDialog = () => import('../components/base/ConfirmDialog.vue');
@@ -256,7 +257,7 @@ export default {
       const fileName = `恢复密钥-${this.restoredUsername || 'account'}.txt`;
       try {
         // 走 Electron 原生保存对话框，写盘成功才返回成功；用户取消则保持锁定
-        const res = await window.electron?.invoke('save-file', { defaultName: fileName, data: content });
+        const res = await window.electron?.invoke(INVOKE.SAVE_FILE, { defaultName: fileName, data: content });
         if (res && !res.canceled) {
           this.recoveryDownloaded = true;   // 文件已真正保存，解锁「确认并完成注册」
           useNotification().success('恢复密钥文本已保存到本地');

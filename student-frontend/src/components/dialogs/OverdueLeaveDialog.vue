@@ -1,7 +1,5 @@
 <template>
-  <Teleport to="body">
-  <Transition name="dialog">
-    <div v-if="visible" class="fixed inset-0 bg-black/30 z-[70] flex items-center justify-center">
+  <DialogShell :visible="visible" :z-index="70" overlay-class="bg-black/30">
       <div class="bg-surface rounded-lg p-5 shadow-card dialog-card flex flex-col" style="width: 460px; max-width: 90vw;">
         <h4 class="text-base font-bold mb-1">⏰ 发现假期已结束</h4>
         <p class="text-sm text-text-secondary mb-4">以下同学假期已经结束但尚未销假，请确认返校情况：</p>
@@ -22,16 +20,16 @@
           </div>
         </div>
       </div>
-    </div>
-  </Transition>
-  </Teleport>
+  </DialogShell>
 </template>
 
 <script>
 import '../../styles/dialog-transition.css'
+import DialogShell from '../base/DialogShell.vue'
 
 export default {
   name: 'OverdueLeaveDialog',
+  components: { DialogShell },
   props: {
     visible: Boolean,
     records: { type: Array, default: () => [] }

@@ -1,5 +1,6 @@
 import axios from 'axios'
 import { useNotification } from '../useNotification.js'
+import { INVOKE } from '../../electronChannels.js'
 
 export function readAsDataURL(file) {
   return new Promise((resolve) => {
@@ -65,10 +66,10 @@ export async function readFile(file) {
 export async function saveExportWithDialog(defaultName, blob) {
   if (window.electron && typeof window.electron.invoke === 'function') {
     const arrayBuffer = await blob.arrayBuffer()
-    const result = await window.electron.invoke('save-file', { defaultName, data: arrayBuffer })
+    const result = await window.electron.invoke(INVOKE.SAVE_FILE, { defaultName, data: arrayBuffer })
     if (result && !result.canceled && result.filePath) {
       // 保存成功后用系统默认应用打开文件
-      window.electron.invoke('open-file', { filePath: result.filePath }).catch(() => {})
+      window.electron.invoke(INVOKE.OPEN_FILE, { filePath: result.filePath }).catch(() => {})
     }
     return result && !result.canceled ? result.filePath : ''
   }

@@ -5,6 +5,8 @@
 // 契约：resolve(true) = 已就绪（可能远早于 timeout）；resolve(false) = 等满 timeout 仍未知。
 // 调用方把它当成「可提前结束的退避等待」：慢不过原来的固定 sleep，快则在后端就绪瞬间立即重试。
 
+import { INVOKE, RECEIVE } from '../electronChannels.js'
+
 let ready = false
 const waiters = new Set()
 let subscribed = false
@@ -18,7 +20,7 @@ function subscribe() {
   subscribed = true
   const api = electronApi()
   if (!api || typeof api.on !== 'function') return
-  api.on('from-main', (msg) => {
+  api.on(RECEIVE.FROM_MAIN, (msg) => {
     if (!msg) return
     if (msg.type === 'backend-ready') {
       ready = true
@@ -60,6 +62,6 @@ export function waitForBackendReady(timeoutMs = 4000) {
     waiters.add(onReady)
     timer = setTimeout(() => finish(ready), timeoutMs)
     // 主动查一次当前状态：事件可能在本监听注册之前就已经广播过了
-    api.invoke('backend-status').then((v) => { if (v) finish(true) }).catch(() => {})
+    api.invoke(INVOKE.BACKEND_STATUS).then((v) => { if (v) finish(true) }).catch(() => {})
   })
 }

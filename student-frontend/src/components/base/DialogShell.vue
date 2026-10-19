@@ -8,7 +8,7 @@
     <Transition name="dialog">
       <div
         v-if="visible"
-        class="fixed inset-0 bg-black/50 flex items-center justify-center pointer-events-auto"
+        class="fixed inset-0 flex items-center justify-center"
         :class="overlayClass"
         :style="{ zIndex }"
         @click.self="$emit('overlay')"
@@ -26,8 +26,8 @@ defineProps({
   visible: { type: Boolean, default: false },
   // 与各弹窗原来的 z-[xxxx] 保持一致，默认沿用确认框的层级
   zIndex: { type: Number, default: 10006 },
-  // 面板对齐方式：默认居中；少数弹窗需要顶部对齐时传 top
-  overlayClass: { type: String, default: '' },
+  // 遮罩附加 class：默认沿用确认框样式；个别弹窗需要不同遮罩浓度/对齐方式时整体覆盖
+  overlayClass: { type: String, default: 'bg-black/50 pointer-events-auto' },
 })
 
 defineEmits(['overlay'])

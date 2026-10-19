@@ -18,6 +18,8 @@
 // 用法：dev 控制台 __inp() 导出并返回汇总、__inpReset() 清空；每 15s 有新增自动导出。
 // =========================================================================
 
+import { SEND } from '../electronChannels.js'
+
 const DEV = import.meta.env.DEV
 // 只记录 ≥40ms 的交互，过滤掉大量无关紧要的快速点击
 const MIN_DURATION = 40
@@ -125,7 +127,7 @@ function dump(reason) {
   console.table(details)
   // 同步一份给主进程落盘（electron/main.inpLog.js → <数据目录>/inp.log）。
   // 探针只在 dev 安装，打包版不会走到这里，通道名也不会被使用。
-  try { window.electron?.send?.('inp-report', { reason, categories, details }) } catch (_) {}
+  try { window.electron?.send?.(SEND.INP_REPORT, { reason, categories, details }) } catch (_) {}
   return { reason, categories, details }
 }
 

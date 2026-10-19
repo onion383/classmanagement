@@ -107,6 +107,7 @@
 import { ref, computed, onMounted, onUnmounted } from 'vue'
 import axios from 'axios'
 import AnimatedClock from '../../components/AnimatedClock.vue'
+import { INVOKE } from '../../electronChannels.js'
 
 // ========== 时钟：逐字符动画已抽取为 AnimatedClock 组件 ==========
 const now = ref(new Date())
@@ -343,7 +344,7 @@ async function loadApps() {
 function launchApp(app) {
   if (!app || !app.path) return
   if (window.electron && window.electron.invoke) {
-    window.electron.invoke('apps-launch', app.path).catch(() => {})
+    window.electron.invoke(INVOKE.APPS_LAUNCH, app.path).catch(() => {})
   }
 }
 
@@ -354,7 +355,7 @@ function toggleEdit() {
 async function addApp() {
   try {
     if (!window.electron || !window.electron.invoke) return
-    const result = await window.electron.invoke('apps-select-file')
+    const result = await window.electron.invoke(INVOKE.APPS_SELECT_FILE)
     if (!result || result.canceled || !result.filePath) return
     apps.value.push({
       id: `app-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,

@@ -95,6 +95,7 @@
 
 <script>
 import { useNotification } from '../composables/useNotification.js'
+import { INVOKE } from '../electronChannels.js'
 
 // 主色之外的补充色（切片超过 4 个时使用，保证同一张图里颜色不重复）
 const EXTRA_PALETTE = ['#8b5cf6', '#14b8a6', '#ec4899', '#0ea5e9', '#f97316', '#64748b', '#a3e635', '#a855f7']
@@ -298,7 +299,7 @@ export default {
     async saveBlob(defaultName, blob) {
       if (window.electron && typeof window.electron.invoke === 'function') {
         const data = await blob.arrayBuffer()
-        const result = await window.electron.invoke('save-file', { defaultName, data })
+        const result = await window.electron.invoke(INVOKE.SAVE_FILE, { defaultName, data })
         if (!result || result.canceled) throw new Error('已取消')
         return
       }

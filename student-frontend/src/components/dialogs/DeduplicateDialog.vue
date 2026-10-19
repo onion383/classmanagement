@@ -1,12 +1,6 @@
 <template>
   <!-- 重复筛选组件 -->
-  <Teleport to="body">
-  <Transition name="dialog">
-  <div
-    v-if="visible"
-    class="fixed inset-0 bg-black/50 flex items-center justify-center z-[10001]"
-    @click.self="cancel"
-  >
+  <DialogShell :visible="visible" :z-index="10001" overlay-class="bg-black/50" @overlay="cancel">
     <div class="bg-surface p-5 rounded-lg w-[900px] max-h-[85vh] flex flex-col shadow-card dialog-card">
       <h3 class="text-lg font-bold mb-3">管理重复数据</h3>
 
@@ -74,18 +68,17 @@
         </div>
       </template>
     </div>
-  </div>
-  </Transition>
-  </Teleport>
+  </DialogShell>
 </template>
 
 <script>
 import DynamicTable from '../tables/DynamicTable/DynamicTable.vue';
 import '../../styles/dialog-transition.css'
+import DialogShell from '../base/DialogShell.vue'
 
 export default {
   name: 'DeduplicateDialog',
-  components: { DynamicTable },
+  components: { DynamicTable, DialogShell },
   props: {
     visible: Boolean,
     // 修复 1：去掉 required，提供默认空数组

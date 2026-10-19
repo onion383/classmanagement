@@ -4,15 +4,16 @@
 //   供「数据管理」页的「导出聊天记录 / 导出 Markdown 文件」弹窗复用，
 //   与 ExportExcel.vue（面向课表/座位等带特殊行语义的表格）相互独立、互不影响。
 // =========================================================================
+import { INVOKE } from '../electronChannels.js'
 
 // 保存文件：Electron 下弹系统保存对话框，用户确认后才写入；浏览器则直接下载
 export async function saveFileWithDialog(defaultName, blob) {
   if (window.electron && typeof window.electron.invoke === 'function') {
     const arrayBuffer = await blob.arrayBuffer()
-    const result = await window.electron.invoke('save-file', { defaultName, data: arrayBuffer })
+    const result = await window.electron.invoke(INVOKE.SAVE_FILE, { defaultName, data: arrayBuffer })
     if (result && !result.canceled && result.filePath) {
       // 保存成功后用系统默认应用打开文件
-      window.electron.invoke('open-file', { filePath: result.filePath }).catch(() => {})
+      window.electron.invoke(INVOKE.OPEN_FILE, { filePath: result.filePath }).catch(() => {})
     }
     return !!result && !result.canceled
   }

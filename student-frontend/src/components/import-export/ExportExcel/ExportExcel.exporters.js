@@ -5,6 +5,7 @@
 // 方法体内部仍使用 this，主组件以 methods: { ...useExportFormats() } 展开注册。
 // 仅 doExport / open / close / cancel 留在主组件。
 // =========================================================================
+import { INVOKE } from '../../../electronChannels.js'
 
 const SECTION_NAMES = { morning: '上午', noon: '中午', afternoon: '下午', evening: '傍晚', night: '晚上' };
 
@@ -15,13 +16,13 @@ export function useExportFormats() {
     async saveFileWithDialog(defaultName, blob) {
       if (window.electron && typeof window.electron.invoke === 'function') {
         const arrayBuffer = await blob.arrayBuffer()
-        const result = await window.electron.invoke('save-file', {
+        const result = await window.electron.invoke(INVOKE.SAVE_FILE, {
           defaultName,
           data: arrayBuffer
         })
         if (result && !result.canceled && result.filePath) {
           // 导出成功后用系统默认应用打开文件
-          window.electron.invoke('open-file', { filePath: result.filePath }).catch(() => {})
+          window.electron.invoke(INVOKE.OPEN_FILE, { filePath: result.filePath }).catch(() => {})
         }
         return !!result && !result.canceled
       }

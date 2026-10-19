@@ -2,6 +2,7 @@ import { defineStore } from 'pinia'
 import { ref, computed, watch } from 'vue'
 import { resourceUrl } from '../utils/apiUrl'
 import { loadThemeStyles } from '../styles/themeLoader'
+import { SEND } from '../electronChannels.js'
 
 const THEME_KEY = 'app-theme'
 // 全局日/夜模式：与「主题」正交，任何主题之上再叠一层夜间配色（见 styles/theme-night.css）。
@@ -135,7 +136,7 @@ export const useThemeStore = defineStore('theme', () => {
     // 通知主进程：窗口统一为无边框亚克力（恒 frameless）。主进程传 frameless 会触发
     // recreateMainWindow 的「当前已相同」直接返回，故主题切换不会重建窗口（见 electron/main.js）。
     if (window.electron?.send) {
-      window.electron.send('theme-chrome', { mode: 'frameless' })
+      window.electron.send(SEND.THEME_CHROME, { mode: 'frameless' })
     }
   }
 

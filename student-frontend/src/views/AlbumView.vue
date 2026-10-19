@@ -276,6 +276,7 @@ import AppSelect from '../components/base/AppSelect.vue'
 import { resourceUrl } from '../utils/apiUrl'
 import { pad2 } from '../utils/dateTime.js'
 import '../styles/dialog-transition.css'
+import { INVOKE } from '../electronChannels.js'
 
 const albums = ref([])
 const activeAlbumId = ref(null)
@@ -479,7 +480,7 @@ async function pickFolder() {
     return
   }
   try {
-    const result = await window.electron.invoke('select-folder')
+    const result = await window.electron.invoke(INVOKE.SELECT_FOLDER)
     if (result && result.filePaths && result.filePaths.length > 0) {
       newPath.value = result.filePaths[0]
       // 相册名缺省取文件夹名
@@ -681,7 +682,7 @@ async function openFolder(a) {
     return
   }
   try {
-    await window.electron.invoke('open-folder', a.folder_path)
+    await window.electron.invoke(INVOKE.OPEN_FOLDER, a.folder_path)
   } catch (_) {
     useNotification().error('打开文件夹失败')
   }
@@ -698,7 +699,7 @@ function openFolderViewer() {
     useNotification().warning('请使用桌面客户端打开文件夹')
     return
   }
-  window.electron.invoke('open-folder', dir).catch(() => useNotification().error('打开文件夹失败'))
+  window.electron.invoke(INVOKE.OPEN_FOLDER, dir).catch(() => useNotification().error('打开文件夹失败'))
 }
 
 async function rescanAll(mode = 'incremental') {

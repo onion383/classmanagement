@@ -1,7 +1,5 @@
 <template>
-  <Teleport to="body">
-  <Transition name="dialog">
-  <div v-if="visible" class="fixed inset-0 bg-black/50 flex items-center justify-center z-[10001] pointer-events-auto" @click.self="$emit('cancel')">
+  <DialogShell :visible="visible" :z-index="10001" @overlay="$emit('cancel')">
     <div class="bg-surface p-5 rounded-xl w-[520px] max-w-full shadow-lg dialog-card">
       <h3 class="text-lg font-bold mb-4 text-text">{{ title }}</h3>
 
@@ -140,21 +138,20 @@
         <button type="button" @click="submit" class="px-4 py-2 rounded-lg bg-primary text-text-inverse hover:bg-primary-hover">确认保存</button>
       </div>
     </div>
-  </div>
-  </Transition>
-  </Teleport>
+  </DialogShell>
 </template>
 
 <script>
 import axios from 'axios'
 import AppSelect from '../base/AppSelect.vue'
+import DialogShell from '../base/DialogShell.vue'
 import '../../styles/dialog-transition.css'
 import { useNotification } from '../../composables/useNotification.js'
 import { formatDateTimeLocal } from '../../utils/dateTime.js'
 
 export default {
   name: 'AddScoreDialog',
-  components: { AppSelect },
+  components: { AppSelect, DialogShell },
   props: {
     visible: { type: Boolean, default: false },
     students: { type: Array, default: () => [] },

@@ -157,6 +157,7 @@ import ColorSwatch from '../../components/base/ColorSwatch.vue'
 import IconGlyph from '../../components/base/IconGlyph.vue'
 import axios from 'axios'
 import { calcW, drawCurveSegment } from './Note.curve.js'
+import { INVOKE } from '../../electronChannels.js'
 
 const emit = defineEmits(['close', 'ready', 'shrink'])
 const canvasArea = ref(null)
@@ -457,7 +458,7 @@ async function startSave() {
 
     // 直接传 Uint8Array：IPC 走结构化克隆的二进制路径（内存紧凑），
     // 避免 Array.from 将每个字节装箱成 Number（全屏 PNG 会膨胀 8~16 倍）。
-    const res = await window.electron.invoke('note-save', arr, { saveDir })
+    const res = await window.electron.invoke(INVOKE.NOTE_SAVE, arr, { saveDir })
     if (res.success) {
       saveFilePath.value = res.filePath
       noteState.value = 'saved'
@@ -491,7 +492,7 @@ function close() {
 // 加载截图
 async function loadScreenshot() {
   await new Promise(resolve => setTimeout(resolve, 500))
-  const res = await window.electron.invoke('screenshot-capture')
+  const res = await window.electron.invoke(INVOKE.SCREENSHOT_CAPTURE)
   if (!res.success || !res.dataUrl) {
     noteState.value = 'saveError'
     saveError.value = '截屏失败，请重试'

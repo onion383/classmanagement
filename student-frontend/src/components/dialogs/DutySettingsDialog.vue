@@ -1,7 +1,5 @@
 <template>
-  <Teleport to="body">
-  <Transition name="dialog">
-    <div v-if="visible" class="fixed inset-0 bg-black/30 z-50 flex items-center justify-center">
+  <DialogShell :visible="visible" :z-index="50" overlay-class="bg-black/30">
       <div class="bg-surface rounded-xl p-6 w-[680px] max-w-[94vw] shadow-card border border-border dialog-card">
         <h3 class="text-lg font-bold mb-4">值日设置</h3>
 
@@ -111,19 +109,19 @@
           <button class="bg-info text-text-inverse px-4 py-2 rounded" @click="save">保存设置</button>
         </div>
       </div>
-    </div>
-  </Transition>
-  </Teleport>
+  </DialogShell>
 </template>
 
 <script>
 import '../../styles/dialog-transition.css'
+import DialogShell from '../base/DialogShell.vue'
 
 const WEEK = ['周一', '周二', '周三', '周四', '周五', '周六', '周日']
 const DEFAULT_POOL = ['擦黑板', '倒垃圾', '拖地', '扫地', '摆桌子']
 
 export default {
   name: 'DutySettingsDialog',
+  components: { DialogShell },
   props: {
     visible: Boolean,
     days: { type: Array, default: () => ['周一', '周二', '周三', '周四', '周五'] },

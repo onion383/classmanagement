@@ -48,12 +48,12 @@
   --color-text-inverse: #ffffff;
 
   --color-border: var(--alpha-white-08);
-  --color-border-strong: rgba(255, 255, 255, 0.16);
+  --color-border-strong: var(--alpha-white-16);
 
   --shadow-sm: 0 1px 2px var(--alpha-black-25);
-  --shadow-md: 0 4px 12px rgba(0, 0, 0, 0.3);
-  --shadow-lg: 0 8px 28px rgba(0, 0, 0, 0.42);
-  --shadow-card: 0 2px 10px rgba(0, 0, 0, 0.28);
+  --shadow-md: 0 4px 12px var(--alpha-black-30);
+  --shadow-lg: 0 8px 28px var(--alpha-black-42);
+  --shadow-card: 0 2px 10px var(--alpha-black-28);
 }
 /* 表单原生控件（日期/下拉/滚动条）跟随深色 */
 :root[data-mode="night"]:is([data-theme="glass"], [data-theme="glass2"]) {
@@ -91,11 +91,11 @@
   border-bottom-color: var(--alpha-white-08);
   box-shadow:
     inset 0 1px 0 var(--alpha-white-10),
-    0 4px 32px rgba(0, 0, 0, 0.35),
+    0 4px 32px var(--alpha-black-35),
     inset 0 -1px 0 var(--alpha-white-06);
 }
 :root[data-mode="night"][data-theme="glass"] .window-title-bar::before {
-  background: linear-gradient(180deg, rgba(255, 255, 255, 0.07) 0%, rgba(255, 255, 255, 0.02) 55%, rgba(255, 255, 255, 0) 100%);
+  background: linear-gradient(180deg, var(--alpha-white-07) 0%, var(--alpha-white-02) 55%, var(--alpha-white-00) 100%);
 }
 :root[data-mode="night"][data-topbar-color="light"][data-theme="glass"] .window-title-bar {
   background-color: rgba(37, 54, 90, 0.46) !important;
@@ -122,7 +122,7 @@
     inset -1px 0 0 var(--alpha-white-06);
 }
 :root[data-mode="night"][data-theme="glass"] .bg-sidebar::before {
-  background: linear-gradient(180deg, rgba(255, 255, 255, 0.07) 0%, rgba(255, 255, 255, 0.02) 55%, rgba(255, 255, 255, 0) 100%);
+  background: linear-gradient(180deg, var(--alpha-white-07) 0%, var(--alpha-white-02) 55%, var(--alpha-white-00) 100%);
 }
 :root[data-mode="night"][data-topbar-color="light"][data-theme="glass"] .bg-sidebar {
   background-color: rgba(38, 55, 90, 0.50) !important;
@@ -170,17 +170,17 @@
   box-shadow: 0 0 20px var(--alpha-black-25);
 }
 :root[data-mode="night"][data-theme="glass"] .bg-surface::before {
-  background: linear-gradient(180deg, rgba(255, 255, 255, 0.02) 0%, rgba(255, 255, 255, 0.008) 55%, rgba(255, 255, 255, 0) 100%);
+  background: linear-gradient(180deg, var(--alpha-white-02) 0%, var(--alpha-white-01) 55%, var(--alpha-white-00) 100%);
 }
 :root[data-mode="night"][data-theme="glass"] .bg-surface-hover {
   background-color: rgba(47, 66, 106, calc(var(--glass-opacity, 0.4) + 0.24)) !important;
 }
 :root[data-mode="night"][data-theme="glass"] .bg-surface.shadow-md {
   background-color: rgba(36, 53, 88, 0.36) !important;
-  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.3);
+  box-shadow: 0 2px 10px var(--alpha-black-30);
 }
 :root[data-mode="night"][data-theme="glass"] .bg-surface.shadow-md::before {
-  background: linear-gradient(180deg, rgba(255, 255, 255, 0.03) 0%, rgba(255, 255, 255, 0.01) 50%, rgba(255, 255, 255, 0.015) 100%);
+  background: linear-gradient(180deg, var(--alpha-white-03) 0%, var(--alpha-white-01) 50%, var(--alpha-white-02) 100%);
 }
 /* 班费统计卡片 */
 :root[data-mode="night"][data-theme="glass"] .grid.grid-cols-3 > div {
@@ -188,7 +188,7 @@
   box-shadow: 0 0 16px var(--alpha-black-25);
 }
 :root[data-mode="night"][data-theme="glass"] .grid.grid-cols-3 > div::before {
-  background: linear-gradient(180deg, rgba(255, 255, 255, 0.03) 0%, rgba(255, 255, 255, 0.01) 50%, rgba(255, 255, 255, 0.015) 100%);
+  background: linear-gradient(180deg, var(--alpha-white-03) 0%, var(--alpha-white-01) 50%, var(--alpha-white-02) 100%);
 }
 :root[data-mode="night"][data-theme="glass"] .grid.grid-cols-3 .text-success { color: #4ade80 !important; }
 :root[data-mode="night"][data-theme="glass"] .grid.grid-cols-3 .text-info { color: #7cb3fb !important; }
@@ -211,13 +211,13 @@
 }
 /* 数据行比空数据区亮一档；hover / 选中依次再亮一档（保持原层次逻辑） */
 :root[data-mode="night"][data-theme="glass"] table tbody tr td {
-  background-color: rgba(255, 255, 255, 0.045) !important;
+  background-color: var(--alpha-white-05) !important;
 }
 :root[data-mode="night"][data-theme="glass"] table tbody tr:hover td {
-  background-color: rgba(255, 255, 255, 0.09) !important;
+  background-color: var(--alpha-white-09) !important;
 }
 :root[data-mode="night"][data-theme="glass"] table tbody tr.bg-surface-hover td {
-  background-color: rgba(255, 255, 255, 0.13) !important;
+  background-color: var(--alpha-white-13) !important;
 }
 :root[data-mode="night"][data-theme="glass"] .table-scroll-wrapper .bg-primary {
   background-color: rgba(96, 165, 250, 0.22) !important;
@@ -237,16 +237,16 @@
   box-shadow: 0 0 16px var(--alpha-black-25);
 }
 :root[data-mode="night"][data-theme="glass"] .grid-view-container::before {
-  background: linear-gradient(180deg, rgba(255, 255, 255, 0.04) 0%, rgba(255, 255, 255, 0.012) 50%, rgba(255, 255, 255, 0.02) 100%);
+  background: linear-gradient(180deg, var(--alpha-white-04) 0%, var(--alpha-white-01) 50%, var(--alpha-white-02) 100%);
 }
 :root[data-mode="night"][data-theme="glass"] .grid-view-container table th {
-  background-color: rgba(255, 255, 255, 0.07) !important;
+  background-color: var(--alpha-white-07) !important;
   color: #e6ecf5 !important;
   border-right-color: rgba(150, 180, 255, 0.18) !important;
   border-bottom-color: rgba(150, 180, 255, 0.18) !important;
 }
 :root[data-mode="night"][data-theme="glass"] .grid-view-container table td {
-  background-color: rgba(255, 255, 255, 0.045) !important;
+  background-color: var(--alpha-white-05) !important;
   color: #e6ecf5 !important;
   border-right-color: rgba(150, 180, 255, 0.18) !important;
   border-bottom-color: rgba(150, 180, 255, 0.18) !important;
@@ -254,7 +254,7 @@
 :root[data-mode="night"][data-theme="glass"] .grid-view-container table .bg-warning\/30,
 :root[data-mode="night"][data-theme="glass"] .grid-view-container table .bg-warning\/20,
 :root[data-mode="night"][data-theme="glass"] .grid-view-container table .bg-info\/10 {
-  background-color: rgba(255, 255, 255, 0.07) !important;
+  background-color: var(--alpha-white-07) !important;
 }
 :root[data-mode="night"][data-theme="glass"] .grid-view-container table .bg-primary {
   background-color: rgba(96, 165, 250, 0.22) !important;
@@ -305,7 +305,7 @@
 }
 :root[data-mode="night"][data-theme="glass"] input:disabled,
 :root[data-mode="night"][data-theme="glass"] textarea:disabled {
-  background-color: rgba(255, 255, 255, 0.04) !important;
+  background-color: var(--alpha-white-04) !important;
 }
 :root[data-mode="night"][data-theme="glass"] select option {
   background-color: #1e263a;
@@ -331,13 +331,13 @@
   box-shadow: 0 0 0 3px rgba(96, 165, 250, 0.28) !important;
 }
 :root[data-mode="night"][data-theme="glass"] .av-select--disabled .av-select__trigger {
-  background-color: rgba(255, 255, 255, 0.04) !important;
+  background-color: var(--alpha-white-04) !important;
 }
 :root[data-mode="night"][data-theme="glass"] .av-select__menu {
   background-color: rgba(45, 63, 102, 0.85) !important;
   border-color: rgba(150, 180, 255, 0.18) !important;
   color: var(--color-text, #e6ecf5);
-  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.45);
+  box-shadow: 0 10px 30px var(--alpha-black-45);
 }
 :root[data-mode="night"][data-theme="glass"] .move-arrow-btn {
   background-color: rgba(96, 165, 250, 0.22);
@@ -374,20 +374,20 @@
     0 0 0 1px var(--alpha-white-12),
     0 0 30px rgba(96, 165, 250, 0.10),
     0 0 60px rgba(96, 165, 250, 0.06),
-    0 4px 20px rgba(0, 0, 0, 0.4),
-    inset 0 1px 0 rgba(255, 255, 255, 0.16),
+    0 4px 20px var(--alpha-black-40),
+    inset 0 1px 0 var(--alpha-white-16),
     inset 1px 0 0 var(--alpha-white-08),
-    inset 0 -1px 0 rgba(255, 255, 255, 0.04),
+    inset 0 -1px 0 var(--alpha-white-04),
     inset -1px 0 0 var(--alpha-white-06);
 }
 :root[data-mode="night"][data-theme="glass"] .login-glow::before {
   background: linear-gradient(
     180deg,
-    rgba(255, 255, 255, 0.22) 0%,
+    var(--alpha-white-22) 0%,
     var(--alpha-white-06) 20%,
-    rgba(255, 255, 255, 0.02) 50%,
+    var(--alpha-white-02) 50%,
     var(--alpha-white-06) 80%,
-    rgba(255, 255, 255, 0.16) 100%
+    var(--alpha-white-16) 100%
   );
 }
 
@@ -434,8 +434,8 @@
 :root[data-mode="night"][data-theme="glass"] button.bg-danger.text-text-inverse:not(.tab-active),
 :root[data-mode="night"][data-theme="glass"] button.bg-info.text-text-inverse:not(.tab-active) {
   box-shadow:
-    inset 0 0 0 40px rgba(0, 0, 0, 0.22),
-    0 0 14px rgba(0, 0, 0, 0.20) !important;
+    inset 0 0 0 40px var(--alpha-black-22),
+    0 0 14px var(--alpha-black-20) !important;
 }
 :root[data-mode="night"][data-theme="glass"] button.bg-primary.text-text-inverse:not(.tab-active):hover,
 :root[data-mode="night"][data-theme="glass"] button.bg-success.text-text-inverse:not(.tab-active):hover,
@@ -443,8 +443,8 @@
 :root[data-mode="night"][data-theme="glass"] button.bg-danger.text-text-inverse:not(.tab-active):hover,
 :root[data-mode="night"][data-theme="glass"] button.bg-info.text-text-inverse:not(.tab-active):hover {
   box-shadow:
-    inset 0 0 0 40px rgba(0, 0, 0, 0.28),
-    0 0 18px rgba(0, 0, 0, 0.26) !important;
+    inset 0 0 0 40px var(--alpha-black-28),
+    0 0 18px var(--alpha-black-26) !important;
 }
 :root[data-mode="night"][data-theme="glass"] button.bg-surface-hover {
   background-color: var(--alpha-white-10) !important;
@@ -452,31 +452,31 @@
   color: var(--color-text) !important;
 }
 :root[data-mode="night"][data-theme="glass"] button.bg-surface-hover:hover {
-  background-color: rgba(255, 255, 255, 0.16) !important;
+  background-color: var(--alpha-white-16) !important;
 }
 :root[data-mode="night"][data-theme="glass"] button.btn-refresh {
   background: rgba(251, 146, 60, 0.32) !important;
   color: #fed7aa !important;
   box-shadow:
-    inset 0 0 0 40px rgba(0, 0, 0, 0.18),
+    inset 0 0 0 40px var(--alpha-black-18),
     0 0 14px rgba(251, 146, 60, 0.18) !important;
 }
 :root[data-mode="night"][data-theme="glass"] button.btn-refresh:hover {
   color: #ffedd5 !important;
   box-shadow:
-    inset 0 0 0 40px rgba(0, 0, 0, 0.24),
+    inset 0 0 0 40px var(--alpha-black-24),
     0 0 20px rgba(251, 146, 60, 0.28) !important;
 }
 /* 操作栏按钮的白色内遮罩改暗 */
 :root[data-mode="night"][data-theme="glass"] .opbar button:not(.view-switch-btn) {
   box-shadow:
-    inset 0 0 0 40px rgba(0, 0, 0, 0.20),
-    0 0 14px rgba(0, 0, 0, 0.12) !important;
+    inset 0 0 0 40px var(--alpha-black-20),
+    0 0 14px var(--alpha-black-12) !important;
 }
 :root[data-mode="night"][data-theme="glass"] .opbar button:hover:not(.view-switch-btn) {
   box-shadow:
-    inset 0 0 0 40px rgba(0, 0, 0, 0.26),
-    0 0 18px rgba(0, 0, 0, 0.18) !important;
+    inset 0 0 0 40px var(--alpha-black-26),
+    0 0 18px var(--alpha-black-18) !important;
 }
 
 /* A10. 浮层：候选列表 / 右键菜单 / 搜索面板 */
@@ -486,7 +486,7 @@
   border-color: rgba(96, 165, 250, 0.4) !important;
   box-shadow:
     0 0 0 1px rgba(140, 175, 250, 0.10),
-    0 8px 28px rgba(0, 0, 0, 0.5);
+    0 8px 28px var(--alpha-black-50);
 }
 :root[data-mode="night"][data-theme="glass"] .candidate-popup .bg-info\/20 {
   background-color: rgba(96, 165, 250, 0.22) !important;
@@ -504,7 +504,7 @@
   background-color: rgba(37, 55, 90, calc(var(--glass-opacity, 0.4) + 0.12)) !important;
   border-color: var(--alpha-white-10);
   box-shadow:
-    0 1px 6px rgba(0, 0, 0, 0.35),
+    0 1px 6px var(--alpha-black-35),
     inset 0 1px 0 var(--alpha-white-06);
 }
 :root[data-mode="night"][data-theme="glass"] .search-panel .bg-surface-hover {
@@ -523,12 +523,12 @@
   background-color: rgba(44, 62, 100, calc(var(--glass-opacity, 0.4) - 0.1)) !important;
   border-color: var(--alpha-white-10) !important;
   box-shadow:
-    0 4px 24px rgba(0, 0, 0, 0.4),
-    0 1px 4px rgba(0, 0, 0, 0.3),
+    0 4px 24px var(--alpha-black-40),
+    0 1px 4px var(--alpha-black-30),
     inset 0 1px 0 var(--alpha-white-08);
 }
 :root[data-mode="night"][data-theme="glass"] .nt-toast::before {
-  background: linear-gradient(180deg, var(--alpha-white-12) 0%, rgba(255, 255, 255, 0.03) 50%, rgba(255, 255, 255, 0.05) 100%) !important;
+  background: linear-gradient(180deg, var(--alpha-white-12) 0%, var(--alpha-white-03) 50%, var(--alpha-white-05) 100%) !important;
 }
 :root[data-mode="night"][data-theme="glass"] .nt-title { color: #e6ecf5 !important; }
 :root[data-mode="night"][data-theme="glass"] .nt-msg { color: #a7b4c9 !important; }
@@ -537,7 +537,7 @@
 
 /* A12. 滚动条 */
 :root[data-mode="night"][data-theme="glass"] {
-  scrollbar-color: rgba(255, 255, 255, 0.22) rgba(255, 255, 255, 0.04);
+  scrollbar-color: var(--alpha-white-22) var(--alpha-white-04);
 }
 
 /* ============================================================
@@ -551,14 +551,14 @@
   --g2-glass-strong: rgba(49, 58, 88, calc(var(--g2-a) + 0.30));
   --g2-glass-soft: rgba(36, 43, 68, calc(var(--g2-a) + 0.1));
   --g2-line: var(--alpha-white-10);
-  --g2-line-soft: rgba(255, 255, 255, 0.07);
+  --g2-line-soft: var(--alpha-white-07);
   --g2-hair: var(--alpha-white-12);
-  --g2-hair-strong: rgba(255, 255, 255, 0.22);
+  --g2-hair-strong: var(--alpha-white-22);
   --g2-hl: inset 0 1px 0 var(--alpha-white-10);
 
-  --g2-shadow-1: 0 1px 2px var(--alpha-black-25), 0 2px 8px rgba(0, 0, 0, 0.22);
-  --g2-shadow-2: 0 4px 16px rgba(0, 0, 0, 0.3), 0 14px 36px rgba(0, 0, 0, 0.28);
-  --g2-shadow-3: 0 18px 60px rgba(0, 0, 0, 0.5);
+  --g2-shadow-1: 0 1px 2px var(--alpha-black-25), 0 2px 8px var(--alpha-black-22);
+  --g2-shadow-2: 0 4px 16px var(--alpha-black-30), 0 14px 36px var(--alpha-black-28);
+  --g2-shadow-3: 0 18px 60px var(--alpha-black-50);
 
   --g2-accent: #7c93ff;
   --g2-accent-strong: #93a8ff;
@@ -592,7 +592,7 @@
   --color-text-inverse: #ffffff;
 
   --color-border: var(--g2-hair);
-  --color-border-strong: rgba(255, 255, 255, 0.22);
+  --color-border-strong: var(--alpha-white-22);
 }
 
 /* B2. 背景：深色渐变 + 柔光斑 */
@@ -622,10 +622,10 @@
 /* B3. 标题栏 */
 :root[data-mode="night"][data-theme="glass2"] .window-title-bar {
   border-bottom-color: var(--g2-hair);
-  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.3);
+  box-shadow: 0 1px 2px var(--alpha-black-30);
 }
 :root[data-mode="night"][data-theme="glass2"] .window-title-bar::before {
-  background: linear-gradient(180deg, var(--alpha-white-10) 0%, rgba(255, 255, 255, 0.02) 55%, rgba(255, 255, 255, 0) 100%);
+  background: linear-gradient(180deg, var(--alpha-white-10) 0%, var(--alpha-white-02) 55%, var(--alpha-white-00) 100%);
 }
 :root[data-mode="night"][data-topbar-color="light"][data-theme="glass2"] .window-title-bar {
   background-color: rgba(38, 45, 72, 0.62) !important;
@@ -641,13 +641,13 @@
 
 /* B4. 侧边栏 */
 :root[data-mode="night"][data-theme="glass2"] .bg-sidebar::before {
-  background: linear-gradient(180deg, var(--alpha-white-10) 0%, rgba(255, 255, 255, 0.02) 55%, rgba(255, 255, 255, 0) 100%);
+  background: linear-gradient(180deg, var(--alpha-white-10) 0%, var(--alpha-white-02) 55%, var(--alpha-white-00) 100%);
 }
 :root[data-mode="night"][data-topbar-color="light"][data-theme="glass2"] .bg-sidebar {
   background-color: rgba(38, 45, 72, 0.60) !important;
   color: #e7eaf6 !important;
   border-right-color: var(--g2-line-soft) !important;
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3), var(--g2-hl);
+  box-shadow: 0 2px 8px var(--alpha-black-30), var(--g2-hl);
 }
 :root[data-mode="night"][data-topbar-color="blue"][data-theme="glass2"] .bg-sidebar {
   background-color: rgba(48, 56, 108, 0.56) !important;
@@ -677,7 +677,7 @@
   box-shadow:
     inset 0 0 0 1px rgba(124, 147, 255, 0.3),
     inset 0 1px 0 var(--alpha-white-10),
-    0 2px 10px rgba(0, 0, 0, 0.3);
+    0 2px 10px var(--alpha-black-30);
 }
 
 /* B5. 表格（表头字色、数据行层次、格内编辑态） */
@@ -693,25 +693,25 @@
   background-color: rgba(124, 147, 255, 0.2) !important;
 }
 :root[data-mode="night"][data-theme="glass2"] table tbody tr td {
-  background-color: rgba(255, 255, 255, 0.05) !important;
+  background-color: var(--alpha-white-05) !important;
 }
 :root[data-mode="night"][data-theme="glass2"] table tbody tr:hover td {
-  background-color: rgba(255, 255, 255, 0.09) !important;
+  background-color: var(--alpha-white-09) !important;
 }
 :root[data-mode="night"][data-theme="glass2"] table tbody tr.bg-surface-hover td {
-  background-color: rgba(255, 255, 255, 0.13) !important;
+  background-color: var(--alpha-white-13) !important;
 }
 :root[data-mode="night"][data-theme="glass2"] table input:focus,
 :root[data-mode="night"][data-theme="glass2"] table select:focus {
   background-color: rgba(44, 52, 80, 0.7) !important;
 }
 :root[data-mode="night"][data-theme="glass2"] .grid-view-container table td {
-  background-color: rgba(255, 255, 255, 0.05) !important;
+  background-color: var(--alpha-white-05) !important;
 }
 :root[data-mode="night"][data-theme="glass2"] .grid-view-container table .bg-warning\/30,
 :root[data-mode="night"][data-theme="glass2"] .grid-view-container table .bg-warning\/20,
 :root[data-mode="night"][data-theme="glass2"] .grid-view-container table .bg-info\/10 {
-  background-color: rgba(255, 255, 255, 0.07) !important;
+  background-color: var(--alpha-white-07) !important;
 }
 /* 正在编辑的单元格：非热力图单元格改浅色字 */
 :root[data-mode="night"][data-theme="glass2"] .grid-view-container table tbody tr td.cell-editing:not(.cell-heat),
@@ -778,10 +778,10 @@
 /* B9. 滚动条 */
 :root[data-mode="night"][data-theme="glass2"],
 :root[data-mode="night"][data-theme="glass2"] * {
-  scrollbar-color: rgba(255, 255, 255, 0.18) transparent;
+  scrollbar-color: var(--alpha-white-18) transparent;
 }
 :root[data-mode="night"][data-theme="glass2"] ::-webkit-scrollbar-thumb {
-  background: rgba(255, 255, 255, 0.18);
+  background: var(--alpha-white-18);
   background-clip: content-box;
 }
 :root[data-mode="night"][data-theme="glass2"] ::-webkit-scrollbar-thumb:hover {
@@ -808,7 +808,7 @@
 :root[data-mode="night"]:is([data-theme="glass"], [data-theme="glass2"]) .class-info-card {
   background: rgba(46, 64, 100, 0.42);
   border-color: transparent;
-  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.30);
+  box-shadow: 0 4px 20px var(--alpha-black-30);
 }
 :root[data-mode="night"]:is([data-theme="glass"], [data-theme="glass2"]) .info-divider {
   background: var(--alpha-white-12);

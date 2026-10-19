@@ -1,7 +1,5 @@
 <template>
-  <Teleport to="body">
-  <Transition name="dialog">
-  <div v-if="visible" class="fixed inset-0 bg-black/50 flex items-center justify-center z-[10001]">
+  <DialogShell :visible="visible" :z-index="10001" overlay-class="bg-black/50">
     <div class="bg-surface p-6 rounded-lg w-[750px] max-h-[85vh] flex flex-col shadow-card dialog-card">
       <h3 class="text-lg font-bold mb-4">⏱️ 作息时间设置</h3>
 
@@ -114,18 +112,17 @@
         <button @click="save" class="bg-info text-text-inverse px-4 py-2 rounded">保存设置</button>
       </div>
     </div>
-  </div>
-  </Transition>
-  </Teleport>
+  </DialogShell>
 </template>
 
 <script>
 import '../../styles/dialog-transition.css'
+import DialogShell from '../base/DialogShell.vue'
 import AppSelect from '../base/AppSelect.vue'
 
 export default {
   name: 'SettingsDialog',
-  components: { AppSelect },
+  components: { AppSelect, DialogShell },
   props: {
     visible: Boolean,
     settings: { type: Object, default: () => ({}) },

@@ -128,6 +128,7 @@ import ExportMarkdownDialog from './ExportMarkdownDialog.vue'
 import { useNotification } from '../../composables/useNotification'
 import { formatTime } from '../../composables/ai/aiMessages.js'
 import '../../styles/dialog-transition.css'
+import { INVOKE } from '../../electronChannels.js'
 
 export default {
   name: 'DataManageDialog',
@@ -185,14 +186,14 @@ export default {
     // 技能 md 文件目录：取主进程配置（与系统设置「技能文件目录」一致）
     async loadSkillsDir() {
       try {
-        const res = await window.electron?.invoke('get-data-directories')
+        const res = await window.electron?.invoke(INVOKE.GET_DATA_DIRECTORIES)
         this.skillsDir = (res && res.skillsDir) || ''
       } catch (_) { this.skillsDir = '' }
     },
     // 在资源管理器中打开技能文件目录
     async openSkillsDir() {
       if (!this.skillsDir) return
-      try { await window.electron?.invoke('open-folder', this.skillsDir) } catch (_) { /* 忽略 */ }
+      try { await window.electron?.invoke(INVOKE.OPEN_FOLDER, this.skillsDir) } catch (_) { /* 忽略 */ }
     },
     async loadConversations() {
       this.loadingConv = true

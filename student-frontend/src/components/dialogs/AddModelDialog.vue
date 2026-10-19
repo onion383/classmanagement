@@ -1,7 +1,5 @@
 <template>
-  <Teleport to="body">
-  <Transition name="dialog">
-    <div v-if="show" class="fixed inset-0 bg-black/50 flex items-center justify-center z-[10070]" @click.self="close">
+  <DialogShell :visible="show" :z-index="10070" overlay-class="bg-black/50" @overlay="close">
       <div class="dialog-card bg-surface rounded-lg p-6 w-[28rem] max-w-[calc(100vw-2rem)] border border-border shadow-lg">
         <div class="flex items-center justify-between mb-5 flex-shrink-0">
           <h3 class="text-lg font-bold text-text">{{ isEdit ? '编辑模型' : '添加模型' }}</h3>
@@ -66,19 +64,19 @@
           </div>
         </div>
       </div>
-    </div>
-  </Transition>
-  </Teleport>
+  </DialogShell>
 </template>
 
 <script>
 import axios from 'axios'
 import AppSelect from '../base/AppSelect.vue'
 import '../../styles/dialog-transition.css'
+import DialogShell from '../base/DialogShell.vue'
+import { INVOKE } from '../../electronChannels.js'
 
 export default {
   name: 'AddModelDialog',
-  components: { AppSelect },
+  components: { AppSelect, DialogShell },
   props: {
     show: { type: Boolean, default: false },
     // 传入已有模型对象即为「编辑」模式：标题改为「编辑模型」并回填数据，保存时走更新接口
@@ -180,7 +178,7 @@ export default {
       if (!url) return
       if (window.electron && window.electron.invoke) {
         event.preventDefault()
-        window.electron.invoke('open-external', url)
+        window.electron.invoke(INVOKE.OPEN_EXTERNAL, url)
       }
     },
     // 点击「识别」：调用服务商 /models 接口获取可用模型，切换为下拉选择

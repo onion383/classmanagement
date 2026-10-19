@@ -51,6 +51,9 @@ function injectSplash() {
 export default defineConfig({
   plugins: [vue(), tailwindcss(), injectSplash(), nonBlockingCss()],
   server: {
+    // 允许 dev server 读取仓库根：electron/ipc-channels.json 位于 vite root 之外，
+    // 由 src/electronChannels.js 直接 import（构建时会被内联，dev 下经 fs 白名单放行）。
+    fs: { allow: [path.resolve(__dirname), path.resolve(__dirname, '..')] },
     // 预热首屏模块图：服务器启动时即预编译入口及关键依赖，
     // 避免第一个请求才逐文件编译导致窗口白屏过长。
     warmup: {

@@ -188,6 +188,7 @@ import { Minus, Square, X, Undo2, Redo2, Search, Palette, User, Settings, Info }
 import axios from 'axios'
 import { undoState as undo, performUndo, refreshUndoStatus } from './composables/useUndo.js'
 import './styles/dialog-transition.css'
+import { SEND, INVOKE, RECEIVE } from './electronChannels.js'
 
 // AI 助手懒加载：loader 抽成命名函数，既给 defineAsyncComponent 用，也供悬浮图标 hover 预取（v-preload）
 const loadAiAssistant = () => import('./views/AiAssistant.vue')
@@ -309,7 +310,7 @@ export default {
     const reportWidgetsReady = () => {
       try {
         const enabled = (localStorage.getItem('desktopWidgetEnabled') ?? '1') !== '0'
-        if (window.electron?.send) window.electron.send('widgets-ready', enabled)
+        if (window.electron?.send) window.electron.send(SEND.WIDGETS_READY, enabled)
       } catch (_) {}
     }
     // 占位页移除时由渲染层入口广播 app-visible（见 src/main.js 的 dropSplash）。
@@ -357,7 +358,7 @@ export default {
     this.fetchPendingNotification()
     // 兜住「就绪广播早于本组件创建」的竞态：查一次当前状态，确保之后运行期异常能接管提示。
     // 后端确认就绪后顺带查一次智能排表草稿（此时接口才可用，避免启动瞬间静默失败）。
-    window.electron?.invoke('backend-status').then((ok) => { if (ok) { this.backendEverReady = true; this.checkSeatDraft(); this.loadAiEnabled() } }).catch(() => {})
+    window.electron?.invoke(INVOKE.BACKEND_STATUS).then((ok) => { if (ok) { this.backendEverReady = true; this.checkSeatDraft(); this.loadAiEnabled() } }).catch(() => {})
     // AI 设置变更（启用/停用、换模型）后刷新图标显隐
     window.addEventListener('ai-config-changed', this.onAiConfigChanged)
   },
@@ -478,7 +479,7 @@ export default {
     },
     // 图标右键：呼出原生菜单（与工具箱一致，含「本次退出」）
     onAiContextMenu() {
-      window.electron?.send('ai-context-menu')
+      window.electron?.send(SEND.AI_CONTEXT_MENU)
     },
     // 点击浮窗/图标以外的区域自动收起（与工具箱一致）。AI 自身被 Teleport 到 body 的
     // 弹出层（截屏遮罩、权限挡位菜单等）带 data-ai-float-keep，视为浮窗内部，不触发收起。
@@ -544,13 +545,13 @@ export default {
 
     // ---- 无边框窗口控制（经 preload 白名单通道通知主进程） ----
     winMinimize() {
-      window.electron?.send('win-minimize')
+      window.electron?.send(SEND.WIN_MINIMIZE)
     },
     winMaximizeToggle() {
-      window.electron?.send('win-maximize-toggle')
+      window.electron?.send(SEND.WIN_MAXIMIZE_TOGGLE)
     },
     winClose() {
-      window.electron?.send('win-close')
+      window.electron?.send(SEND.WIN_CLOSE)
     },
 
     // 模板只能访问实例成员，故把懒加载 loader 包成方法供 v-preload 预取
@@ -582,19 +583,19 @@ export default {
     async retryBackendFromDead() {
       if (this.reconnectRetrying) return
       this.reconnectRetrying = true
-      try { await window.electron?.invoke('restart-backend') } catch (_) {}
+      try { await window.electron?.invoke(INVOKE.RESTART_BACKEND) } catch (_) {}
       // 后端已重新 fork：整页重载重走一遍启动流程（若仍起不来会再次显示失败提示）
       setTimeout(() => location.reload(), 400)
     },
     quitAppFromDead() {
-      window.electron?.send('quit-app')
+      window.electron?.send(SEND.QUIT_APP)
     },
 
     // 取走主进程暂存的待展示提示（如数据库迁移完成）。迁移会重建主窗口，
     // 提示无法在迁移时推送到尚未加载的渲染层，故由主窗口加载后主动取走再弹提示条。
     async fetchPendingNotification() {
       try {
-        const res = await window.electron?.invoke('get-pending-notification')
+        const res = await window.electron?.invoke(INVOKE.GET_PENDING_NOTIFICATION)
         if (res && res.message) {
           const notify = useNotification()
           const fn = { success: notify.success, error: notify.error, warning: notify.warning, info: notify.info }[res.type] || notify.info
@@ -633,8 +634,8 @@ export default {
     // ---- 关闭选择弹窗（复用现有弹窗动画，替代主进程原生菜单） ----
     setupShutdownIpc() {
       // 告知主进程：渲染层已就绪，可接管关闭菜单（弹窗生命周期内有 IPC 时此标记生效）
-      window.electron?.send('shutdown-action', { type: 'ready' })
-      this.ipcFromMain = window.electron?.on('from-main', (data) => {
+      window.electron?.send(SEND.SHUTDOWN_ACTION, { type: 'ready' })
+      this.ipcFromMain = window.electron?.on(RECEIVE.FROM_MAIN, (data) => {
         if (!data) return
         // 版本更新：新版本下载完成后给一条常驻提示（可在「关于」页点「重启并安装」）
         if (data.type === 'update-state') {
@@ -676,7 +677,7 @@ export default {
           // 若用户上次选了「下次不再提示」，则直接按上次的范围执行，不再弹窗
           const remembered = this.getRememberedShutdown()
           if (remembered && remembered.action) {
-            window.electron?.send('shutdown-action', { action: remembered.action, remember: true })
+            window.electron?.send(SEND.SHUTDOWN_ACTION, { action: remembered.action, remember: true })
             return
           }
           this.shutdownHasToolbox = !!data.hasToolbox
@@ -687,7 +688,7 @@ export default {
     },
     teardownShutdownIpc() {
       if (window.electron?.off && this.ipcFromMain) {
-        window.electron.off('from-main', this.ipcFromMain)
+        window.electron.off(RECEIVE.FROM_MAIN, this.ipcFromMain)
         this.ipcFromMain = null
       }
     },
@@ -696,11 +697,11 @@ export default {
       this.shutdownMenuVisible = false
       if (remember) this.setRememberedShutdown(action)
       else this.clearRememberedShutdown()
-      window.electron?.send('shutdown-action', { action })
+      window.electron?.send(SEND.SHUTDOWN_ACTION, { action })
     },
     onShutdownCancel() {
       this.shutdownMenuVisible = false
-      window.electron?.send('shutdown-action', { action: 'cancel' })
+      window.electron?.send(SEND.SHUTDOWN_ACTION, { action: 'cancel' })
     },
     // 持久化「下次不再提示」的选择：仅前端 localStorage（同主窗口会话内有效）
     getRememberedShutdown() {

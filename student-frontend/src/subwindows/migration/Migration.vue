@@ -69,6 +69,7 @@
 </template>
 
 <script>
+import { SEND, INVOKE, RECEIVE } from '../../electronChannels.js'
 export default {
   name: 'Migration',
   data() {
@@ -103,13 +104,13 @@ export default {
     const api = window.electron
     if (!api) return
     this._onMain = (payload) => this.onMain(payload)
-    api.on('from-main', this._onMain)
+    api.on(RECEIVE.FROM_MAIN, this._onMain)
     // 通知主进程渲染层已就绪，可以开始推送进度
-    api.send('migration-ready')
+    api.send(SEND.MIGRATION_READY)
   },
   beforeUnmount() {
     const api = window.electron
-    if (api && this._onMain) api.off('from-main', this._onMain)
+    if (api && this._onMain) api.off(RECEIVE.FROM_MAIN, this._onMain)
   },
   methods: {
     onMain(payload) {
@@ -173,7 +174,7 @@ export default {
           this.state = 'done'
           this.percent = 100
           // 短暂停留展示「完成」后回报主进程，由其设置提示条并重开主窗口
-          setTimeout(() => window.electron?.send('migration-dismiss', { ok: true }), 700)
+          setTimeout(() => window.electron?.send(SEND.MIGRATION_DISMISS, { ok: true }), 700)
         } else {
           this.state = 'error'
           this.errorMessage = failMsg
@@ -185,11 +186,11 @@ export default {
     },
     // 打开已复制内容所在的目标文件夹，供用户自行确认
     openTarget() {
-      if (this.targetDir) window.electron?.invoke('open-folder', this.targetDir)
+      if (this.targetDir) window.electron?.invoke(INVOKE.OPEN_FOLDER, this.targetDir)
     },
     // clean=true：「确定」按用户确认清除已复制内容；clean=false：「取消」原样保留
     finish(clean) {
-      window.electron?.send('migration-dismiss', { clean: !!clean })
+      window.electron?.send(SEND.MIGRATION_DISMISS, { clean: !!clean })
     },
   },
 }

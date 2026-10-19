@@ -373,7 +373,7 @@ import { apiFetch } from '../utils/apiUrl.js';
 
 // 弹窗类组件懒加载：打开时才加载对应 chunk
 const ConfirmDialog = defineAsyncComponent(() => import('../components/base/ConfirmDialog.vue'));
-const loadSmartGroupDialog = () => import('../components/dialogs/SmartGroupDialog.vue');
+const loadSmartGroupDialog = () => import('../components/dialogs/SmartGroupDialog/SmartGroupDialog.vue');
 const SmartGroupDialog = defineAsyncComponent(loadSmartGroupDialog);
 const loadExportExcel = () => import('../components/import-export/ExportExcel/ExportExcel.vue');
 const ExportExcel = defineAsyncComponent(loadExportExcel);

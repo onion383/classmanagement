@@ -1,7 +1,5 @@
 <template>
-  <Teleport to="body">
-    <Transition name="dialog">
-      <div v-if="visible" class="fixed inset-0 bg-black/40 z-[10004] flex items-center justify-center">
+  <DialogShell :visible="visible" :z-index="10004" overlay-class="bg-black/40">
         <div class="bg-surface rounded-lg p-5 shadow-card dialog-card border border-border flex flex-col overflow-hidden" style="width: 720px; height: 640px; max-width: 92vw; max-height: 90vh;">
           <h3 class="text-lg font-bold mb-4">管理周座位记录</h3>
 
@@ -75,9 +73,7 @@
             @cancel="cancelDelete"
           />
         </div>
-      </div>
-    </Transition>
-  </Teleport>
+  </DialogShell>
 </template>
 
 <script>
@@ -85,6 +81,7 @@
 // 学期下拉用于在前端过滤周列表，不改变全局当前学期。
 import axios from 'axios'
 import '../../styles/dialog-transition.css'
+import DialogShell from '../base/DialogShell.vue'
 import AppSelect from '../base/AppSelect.vue'
 import ConfirmDialog from '../base/ConfirmDialog.vue'
 import { useNotification } from '../../composables/useNotification.js'
@@ -92,7 +89,7 @@ import { mondayOf, shiftDateStr, diffDays } from '../../utils/dateTime.js'
 
 export default {
   name: 'SeatRecordSettingsDialog',
-  components: { AppSelect, ConfirmDialog },
+  components: { AppSelect, ConfirmDialog, DialogShell },
   props: {
     visible: { type: Boolean, default: false }
   },

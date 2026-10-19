@@ -314,6 +314,7 @@
 import axios from 'axios'
 import { useThemeStore } from '../../stores/theme'
 import { waitForBackendReady } from '../../utils/backendReady'
+import { SEND, INVOKE, RECEIVE } from '../../electronChannels.js'
 
 // 主题预览色：仅用于「主题选择」的缩略示意（真实配色由各主题 CSS 变量驱动）
 const PREVIEW = {
@@ -422,9 +423,9 @@ export default {
     const api = window.electron
     if (api) {
       this._onMain = (payload) => { if (payload && payload.type === 'setup-warmup') this.applyWarmup(payload) }
-      api.on('from-main', this._onMain)
+      api.on(RECEIVE.FROM_MAIN, this._onMain)
       // 通知主进程渲染层已就绪
-      api.send('setup-ready')
+      api.send(SEND.SETUP_READY)
       this.loadWarmup()
       this.loadDirs()
     }
@@ -433,7 +434,7 @@ export default {
   },
   beforeUnmount() {
     const api = window.electron
-    if (api && this._onMain) api.off('from-main', this._onMain)
+    if (api && this._onMain) api.off(RECEIVE.FROM_MAIN, this._onMain)
   },
   methods: {
     // ---------- 主题 ----------
@@ -459,26 +460,26 @@ export default {
     },
     async loadWarmup() {
       try {
-        const w = await window.electron?.invoke('get-setup-warmup')
+        const w = await window.electron?.invoke(INVOKE.GET_SETUP_WARMUP)
         if (w) this.applyWarmup(w)
       } catch (_) {}
     },
     // ---------- 储存设置 ----------
     async loadDirs() {
       try {
-        const res = await window.electron?.invoke('get-data-directories')
+        const res = await window.electron?.invoke(INVOKE.GET_DATA_DIRECTORIES)
         if (res) this.dirs = { dataDir: res.dataDir || '', thumbsDir: res.thumbsDir || '' }
       } catch (_) {}
     },
     async pickDir() {
       try {
-        const res = await window.electron?.invoke('select-folder')
+        const res = await window.electron?.invoke(INVOKE.SELECT_FOLDER)
         if (res && res.filePaths && res.filePaths.length) return res.filePaths[0]
       } catch (_) {}
       return ''
     },
     openDir(p) {
-      if (p) window.electron?.invoke('open-folder', p)
+      if (p) window.electron?.invoke(INVOKE.OPEN_FOLDER, p)
     },
     async changeDataDir() {
       const picked = await this.pickDir()
@@ -487,7 +488,7 @@ export default {
       this.storageHint = ''
       this.busyDataDir = true
       try {
-        const res = await window.electron.invoke('set-initial-data-dir', { dataDir: picked })
+        const res = await window.electron.invoke(INVOKE.SET_INITIAL_DATA_DIR, { dataDir: picked })
         if (res && res.ok) {
           this.dirs = { dataDir: res.dataDir, thumbsDir: res.thumbsDir }
           this.storageHint = res.changed ? '数据库目录已更新' : '目录未变化'
@@ -505,7 +506,7 @@ export default {
       this.storageHint = ''
       this.busyThumbsDir = true
       try {
-        const res = await window.electron.invoke('set-initial-data-dir', { thumbsDir: picked })
+        const res = await window.electron.invoke(INVOKE.SET_INITIAL_DATA_DIR, { thumbsDir: picked })
         if (res && res.ok) {
           this.dirs = { dataDir: res.dataDir, thumbsDir: res.thumbsDir }
           this.storageHint = res.changed ? '缩略图缓存目录已更新' : '目录未变化'
@@ -636,18 +637,18 @@ export default {
     // 关闭按钮（欢迎页与各步骤页）：通知主进程完全退出软件（前端窗口 + 后端子进程），
     // 且不写「引导完成」标记——下次启动仍会重新进入引导，不会直接进入主窗口。
     quitSetup() {
-      window.electron?.send('setup-quit')
+      window.electron?.send(SEND.SETUP_QUIT)
     },
     // ---------- 低版本系统提示 ----------
     // 忽略：记录「不再提示」（如勾选），随即从提示画面进入下一屏。
     // 还需引导时本页自行切到欢迎画面；纯提示时主进程会直接开主窗口并关闭本窗口。
     ignoreWarn() {
-      window.electron?.send('launch-skip-warn', { remember: this.warnRemember })
+      window.electron?.send(SEND.LAUNCH_SKIP_WARN, { remember: this.warnRemember })
       if (!this.plan || this.plan.setup) this.screen = 'welcome'
     },
     // 获取最新的 Windows：默认浏览器打开系统下载页，随后主进程退出班集
     openDownload() {
-      window.electron?.send('launch-open-download')
+      window.electron?.send(SEND.LAUNCH_OPEN_DOWNLOAD)
     },
     // ---------- 完成 ----------
     async finish() {
@@ -665,7 +666,7 @@ export default {
         console.error('[setup] 保存班级信息失败:', err)
       } finally {
         this.busy = false
-        window.electron?.send('setup-complete')
+        window.electron?.send(SEND.SETUP_COMPLETE)
       }
     },
     // 储存目录变更会重启后端，等待其恢复后再写入班级信息

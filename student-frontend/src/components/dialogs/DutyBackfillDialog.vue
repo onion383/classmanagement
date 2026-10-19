@@ -1,7 +1,5 @@
 <template>
-  <Teleport to="body">
-    <Transition name="dialog">
-      <div v-if="visible" class="fixed inset-0 bg-black/40 z-[10004] flex items-center justify-center">
+  <DialogShell :visible="visible" :z-index="10004" overlay-class="bg-black/40">
         <div class="bg-surface rounded-lg p-5 shadow-card dialog-card border border-border flex flex-col overflow-hidden" style="width: 760px; height: 660px; max-width: 92vw; max-height: 90vh;">
           <h3 class="text-lg font-bold mb-4 flex-shrink-0">补录记录</h3>
 
@@ -81,13 +79,12 @@
             <button @click="$emit('close')" class="bg-surface-hover px-4 py-2 rounded text-text border border-border">关闭</button>
           </div>
         </div>
-      </div>
-    </Transition>
-  </Teleport>
+  </DialogShell>
 </template>
 
 <script>
 import '../../styles/dialog-transition.css'
+import DialogShell from '../base/DialogShell.vue'
 import axios from 'axios'
 import WeekSwitcher from '../base/WeekSwitcher.vue'
 import { useNotification } from '../../composables/useNotification.js'
@@ -95,7 +92,7 @@ import { mondayOf, shiftDateStr, diffDays } from '../../utils/dateTime.js'
 
 export default {
   name: 'DutyBackfillDialog',
-  components: { WeekSwitcher },
+  components: { WeekSwitcher, DialogShell },
   props: {
     visible: { type: Boolean, default: false },
     // 值日模式：daily 日常值日 / big 大扫除
