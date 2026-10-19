@@ -375,7 +375,7 @@ import { apiFetch } from '../utils/apiUrl.js';
 const ConfirmDialog = defineAsyncComponent(() => import('../components/base/ConfirmDialog.vue'));
 const loadSmartGroupDialog = () => import('../components/dialogs/SmartGroupDialog.vue');
 const SmartGroupDialog = defineAsyncComponent(loadSmartGroupDialog);
-const loadExportExcel = () => import('../components/import-export/ExportExcel.vue');
+const loadExportExcel = () => import('../components/import-export/ExportExcel/ExportExcel.vue');
 const ExportExcel = defineAsyncComponent(loadExportExcel);
 
 const { success, error, info } = useNotification();

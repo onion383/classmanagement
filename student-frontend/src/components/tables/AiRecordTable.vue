@@ -24,7 +24,7 @@
 </template>
 
 <script>
-import DynamicTable from './DynamicTable.vue'
+import DynamicTable from './DynamicTable/DynamicTable.vue'
 import AiGridPreview, { GRID_TABLES } from './AiGridPreview.vue'
 import { apiFetch } from '../../utils/apiUrl.js'
 

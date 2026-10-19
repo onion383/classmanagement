@@ -4,7 +4,7 @@ const fsp = fs.promises;
 const path = require('path');
 const { execFile } = require('child_process');
 const { db, _current: currentDb } = require('../db');
-const dbManager = require('../dbManager');
+const dbManager = require('../dbManager/dbManager');
 const { moveToTrash, deleteThumb } = require('../albumOps');
 // 懒加载：ffmpeg 只为视频封面抓帧时使用，且可能触发按需下载，故不随顶层 require 加载
 const { ensureFfmpeg } = require('../services/ffmpeg');

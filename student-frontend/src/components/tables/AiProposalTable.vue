@@ -118,7 +118,7 @@
 </template>
 
 <script>
-import DynamicTable from './DynamicTable.vue'
+import DynamicTable from './DynamicTable/DynamicTable.vue'
 import AiRecordTable from './AiRecordTable.vue'
 import AiGridPreview, { GRID_TABLES } from './AiGridPreview.vue'
 import { lineDiff } from '../../composables/ai/aiMessages.js'

@@ -130,6 +130,7 @@
           <span class="text-danger whitespace-nowrap">-{{ changeSummary(m).removed }}</span>
           <span class="ml-auto flex-shrink-0 text-text-muted transition-transform duration-150" :class="m._changeOpen ? 'rotate-180' : ''">▾</span>
           <button
+            v-if="!floating"
             class="open-changes-btn ai-glass-panel bg-white/55 backdrop-blur-md border border-border rounded-sm px-2 py-1 text-text-muted hover:text-primary transition-theme cursor-pointer flex-shrink-0 leading-none"
             title="在右侧查看改动明细"
             @click.stop="$emit('open-changes', m)"
@@ -150,7 +151,7 @@
           </div>
         </div>
       </div>
-      <!-- 回复操作：复制 / 重试 / 撤回数据更改；右侧统计用时与 token -->
+      <!-- 回复操作：复制 / 重试 / 撤回数据更改；右侧统计用时与 token（浮窗模式精简掉） -->
       <div v-if="m.role !== 'user' && !m.loading" class="mt-2 flex items-center gap-2 text-xs">
         <button
           @click="$emit('copy', m)"
@@ -182,7 +183,7 @@
         <span v-if="m.interrupted" class="ai-glass-panel bg-white/55 backdrop-blur-md border border-border rounded-sm px-2 py-0.5 text-text-muted inline-flex items-center gap-1.5">
           <span class="stop-mark"></span> 已中断
         </span>
-        <span v-if="m.processMs || m.tokens" class="ml-auto text-text-muted/80 flex items-center gap-3 whitespace-nowrap">
+        <span v-if="!floating && (m.processMs || m.tokens)" class="ml-auto text-text-muted/80 flex items-center gap-3 whitespace-nowrap">
           <span v-if="m.processMs">用时 {{ (m.processMs / 1000).toFixed(1) }}s</span>
           <span v-if="tokenSpeed(m) != null" title="生成速度：输出 tokens ÷ 耗时">{{ tokenSpeed(m).toFixed(1) }} tokens/s</span>
           <span v-if="m.tokens" :title="`输入 ${m.promptTokens} · 输出 ${m.completionTokens}`">{{ m.tokens }} tokens</span>
@@ -272,6 +273,8 @@ export default {
     messages: { type: Array, default: () => [] },
     busy: { type: Boolean, default: false },
     activeReasoningOn: { type: Boolean, default: false },
+    // 浮窗（窗口）模式：精简掉用时 / token 统计与改动明细抽屉入口
+    floating: { type: Boolean, default: false },
     // 父预计算的判定函数（保持与原渲染判定一致）
     isRetryable: { type: Function, required: true },
     isRollbackable: { type: Function, required: true },

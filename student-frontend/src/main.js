@@ -2,29 +2,13 @@ import { createApp } from 'vue'
 import { createPinia } from 'pinia'
 import App from './App.vue'
 import router from './router'
-import axios from 'axios'   // 必须导入
 import './styles/index.css'
 import { loadThemeStyles } from './styles/themeLoader'
 import { useThemeStore } from './stores/theme'
-import { setupSecureAxios } from './composables/secureAxios'
+import { setupApiClient, backendBaseUrl } from './utils/httpClient'
 import { useNotification } from './composables/useNotification'
-import { waitForBackendReady, isBackendUnreachable } from './utils/backendReady'
 import { ensureDashboardData } from './composables/useDashboardData'
 import { installInpProbe } from './utils/inpProbe'
-
-// 生产模式（file:// 协议）下无 Vite 代理，需指定完整后端地址
-if (import.meta.env.PROD) {
-  axios.defaults.baseURL = 'http://localhost:3000'
-}
-
-// 请求拦截器
-axios.interceptors.request.use(config => {
-  const token = localStorage.getItem('token')
-  if (token) {
-    config.headers.Authorization = `Bearer ${token}`
-  }
-  return config
-})
 
 // 401 提示条去重：记录最近一次已处理的 401 时间，避免同一瞬间并发 401 重复弹提示
 let lastAuthPrompt = 0
@@ -40,78 +24,36 @@ window.electron?.on?.('from-main', (msg) => {
   else if (msg.type === 'backend-failed') backendReconnecting = !!msg.failed
 })
 
-// 读请求本身幂等，重试没有副作用；只有写请求在重连期间不能自动重发
-const isWriteRequest = (config) => {
-  const m = (config?.method || 'get').toLowerCase()
-  return m !== 'get' && m !== 'head'
-}
-
-// 响应拦截器：主窗口先于后端启动时，首屏请求可能遇到「连接被拒」等网络错误
-// （此时 error.response 为 undefined）。等待后端就绪信号（backend-ready）后再重试：
-// 后端一就绪立即重试，不再盲等固定退避；信号缺失时退化为原先的退避等待。
-// 有 HTTP 响应（4xx/5xx）的错误不重试，避免重复提交等副作用；
-// 例外是 502/503/504 网关错误（dev 下 Vite 代理对「上游未就绪」的包装），
-// 它与「连接被拒」同义，一并走等就绪重试（见 isBackendUnreachable）。
-axios.interceptors.response.use(
-  res => res,
-  async (error) => {
-    const config = error.config
-
-    // 安全通道「会话过期」不是登录态失效：加密会话 15 分钟被动过期时，后端在请求解密阶段
-    // 直接回 401 且 body 为 { d:'session-expired' }（不是密文，也非登录 token 问题）。
-    // 这种 401 由 secureAxios 清会话、重新握手后重试，绝不能在这里当成登录过期把用户踢回登录页。
-    const secureExpired = (() => {
-      const d = error.response && error.response.data
-      return !!d && typeof d === 'object' && d.d === 'session-expired'
-    })()
-
-    // token 失效（401，且非登录/注册/恢复等自身接口）：清除过期 token、
-    // 弹出提示条并回到登录页。用时间戳锁去重：同一瞬间多个并发 401 只处理一次，
-    // 但几秒后的再次过期仍能重新触发。
-    if (error.response && error.response.status === 401 && !secureExpired) {
-      const url = (config?.url || '')
-      const isAuthReq = /(login|register|restore|recover)/i.test(url)
-      if (!config?.__skipAuth && !isAuthReq && Date.now() - lastAuthPrompt > 2000) {
-        lastAuthPrompt = Date.now()
-        localStorage.removeItem('token')
-        useNotification().error('登录已过期，请重新登录', 5000)
-        if (router.currentRoute.value.path !== '/login') {
-          router.push('/login')
-        }
+// 统一装配 axios：baseURL、token 注入、401 处理、后端不可达探针与退避重试、安全通道加密。
+// 主窗口在此注入三项专属行为：
+//   - onAuthExpired：token 失效时清除过期 token、弹提示条并回到登录页（含时间戳去重）
+//   - onUnreachable：请求失败即让主进程探测一次，把每次失败操作变成探针
+//   - writeRetryGuard：主进程重连期间禁止写请求自动重发，避免重复落库
+setupApiClient({
+  baseURL: backendBaseUrl(),
+  onAuthExpired: (error, config) => {
+    const url = (config?.url || '')
+    const isAuthReq = /(login|register|restore|recover)/i.test(url)
+    if (!config?.__skipAuth && !isAuthReq && Date.now() - lastAuthPrompt > 2000) {
+      lastAuthPrompt = Date.now()
+      localStorage.removeItem('token')
+      useNotification().error('登录已过期，请重新登录', 5000)
+      if (router.currentRoute.value.path !== '/login') {
+        router.push('/login')
       }
     }
-
-    // 主动取消的请求不是故障，既不探测也不重试
-    if (error.code === 'ERR_CANCELED') return Promise.reject(error)
-
-    if (isBackendUnreachable(error) && config) {
-      // 没拿到任何响应 = 后端可能已不可达。让主进程立刻探测一次，
-      // 把用户的每一次失败操作变成探针，不必等下一个心跳周期。
-      if (!config.__probed) {
-        config.__probed = true
-        window.electron?.invoke?.('probe-backend').catch(() => {})
-      }
-
-      // 重连期间：写请求不自动重发，把失败直接交给调用方提示用户手动重试
-      if (backendReconnecting && isWriteRequest(config)) {
-        return Promise.reject(error)
-      }
-
-      const retryCount = config.__retryCount || 0
-      if (retryCount < 6) {
-        config.__retryCount = retryCount + 1
-        // 启动窗口内的等待保持静默：主窗口此时仍被首屏占位页盖着，弹提示条毫无意义
-        // （占位页已移除、且后端迟迟不来的情形由全屏失败页接管，见 main.js 的 dropSplash）。
-        await waitForBackendReady(200 * config.__retryCount)
-        return axios(config)
-      }
-    }
-    return Promise.reject(error)
-  }
-)
-
-// 安全通道：请求体加密 + 响应体解密（仅 JSON API；无开关时直通）
-setupSecureAxios(axios)
+  },
+  onUnreachable: () => {
+    // 没拿到任何响应 = 后端可能已不可达。让主进程立刻探测一次，不必等下一个心跳周期。
+    window.electron?.invoke?.('probe-backend').catch(() => {})
+  },
+  writeRetryGuard: (config) => {
+    // 读请求本身幂等，重试没有副作用；只有写请求在重连期间不能自动重发
+    if (!backendReconnecting) return true
+    const m = (config?.method || 'get').toLowerCase()
+    return m === 'get' || m === 'head'
+  },
+})
 
 // ===== 关键路径优化：在 Vue 初始化之前就设置主题和预加载资源 =====
 

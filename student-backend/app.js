@@ -30,7 +30,7 @@ function hasImageSignature(filePath) {
 }
 
 const { db } = require('./db');
-const dbManager = require('./dbManager');
+const dbManager = require('./dbManager/dbManager');
 const secureChannel = require('./services/secureChannel');
 const { deleteRow } = require('./services/tableService');
 const { studentRelations, purgeStudentRelations } = require('./services/studentRelations');
@@ -165,12 +165,12 @@ function startServer(port) {
       () => { app.use('/api/scores', auth(['teacher']), require('./routes/scores')); },
       () => { app.use('/api/duty', auth(['teacher']), require('./routes/duty')); },
       () => { app.use('/api/widget-settings', auth(['teacher']), require('./routes/widgetSettings')); },
-      () => { app.use('/api/undo', auth(['teacher']), require('./routes/undo')); },
+      () => { app.use('/api/undo', auth(['teacher']), require('./routes/undo/undo')); },
       () => { app.use('/api/search', auth(['teacher']), require('./routes/search')); },
       () => { app.use('/api/activities', auth(['teacher']), require('./routes/activities')); },
       () => { app.use('/api/countdowns', auth(['teacher']), require('./routes/countdowns')); },
       () => { app.use('/api/cadres', auth(['teacher']), require('./routes/cadres')); },
-      () => { app.use('/api/ai', auth(['teacher']), require('./routes/ai')); },
+      () => { app.use('/api/ai', auth(['teacher']), require('./routes/ai/ai')); },
       // fee-records 含 multer（文件上传处理），一起延迟加载
       () => {
         const multer = require('multer');

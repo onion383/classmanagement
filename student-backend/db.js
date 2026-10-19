@@ -13,7 +13,7 @@
 // get 会把函数 this 绑定到当前连接，保证内部状态正确。
 // =========================================================================
 
-const dbManager = require('./dbManager');
+const dbManager = require('./dbManager/dbManager');
 
 // 解析当前请求对应的数据库连接（未绑定则抛出「未绑定数据库连接」）
 function currentDb() {

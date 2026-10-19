@@ -1,12 +1,12 @@
 import { onMounted, onUnmounted, onActivated, onDeactivated, reactive, watch } from 'vue'
-import axios from 'axios'
+import { pushUndo, undoStatus, applyUndo } from '../api/undo'
 
 // ==================== 记录一条单元格编辑撤销 ====================
 // 供非 useTableCRUD 页面复用。
 // key = 后端 undo 分组的表 key（须在 undo.js ALLOWED_TABLES 内）
 export function recordCellUndo(key, rowId, fieldName, oldVal, newVal) {
   try {
-    axios.post('/api/undo', {
+    pushUndo({
       key,
       type: 'cell_update',
       label: `${fieldName}：「${oldVal == null ? '' : oldVal}」→「${newVal == null ? '' : newVal}」`,
@@ -32,7 +32,7 @@ export function recordGridCellUndo(key, table, row, col, oldVal, newVal, label) 
   if (label) payload.label = label
   const text = label || `格子(${row + 1},${col + 1})：「${cellText(oldVal)}」→「${cellText(newVal)}」`
   try {
-    axios.post('/api/undo', { key, type: 'grid_cell', label: text, payload }).then(() => refreshUndoStatus(true)).catch(() => {})
+    pushUndo({ key, type: 'grid_cell', label: text, payload }).then(() => refreshUndoStatus(true)).catch(() => {})
   } catch {
     /* 撤销记录失败不影响主流程 */
   }
@@ -45,7 +45,7 @@ export function recordGridSnapshotUndo(key, table, oldArr, newArr, label) {
   const payload = { table, oldValue: oldArr, newValue: newArr }
   if (label) payload.label = label
   try {
-    axios.post('/api/undo', { key, type: 'grid_snapshot', label: label || '整块变更', payload }).then(() => refreshUndoStatus(true)).catch(() => {})
+    pushUndo({ key, type: 'grid_snapshot', label: label || '整块变更', payload }).then(() => refreshUndoStatus(true)).catch(() => {})
   } catch {
     /* 撤销记录失败不影响主流程 */
   }
@@ -55,7 +55,7 @@ export function recordGridSnapshotUndo(key, table, oldArr, newArr, label) {
 // row 为完整记录对象（须含 id 及所有可回填列字段）。
 function pushRow(type, key, row) {
   try {
-    axios.post('/api/undo', { key, type, label: row ? `${row.姓名 || row.group_name || row.主题 || row.名称 || `#${row.id}`}` : '', payload: { table: key, row } }).then(() => refreshUndoStatus(true)).catch(() => {})
+    pushUndo({ key, type, label: row ? `${row.姓名 || row.group_name || row.主题 || row.名称 || `#${row.id}`}` : '', payload: { table: key, row } }).then(() => refreshUndoStatus(true)).catch(() => {})
   } catch {
     /* 撤销记录失败不影响主流程 */
   }
@@ -73,7 +73,7 @@ export function recordRowUpdate(key, oldRow, newRow) {
   const payload = { table: key, rowId: newRow ? newRow.id : oldRow.id, oldRow, newRow }
   try {
     const name = (newRow || oldRow)?.姓名 || (newRow || oldRow)?.group_name || (newRow || oldRow)?.主题 || (newRow || oldRow)?.名称 || `#${payload.rowId}`
-    axios.post('/api/undo', { key, type: 'row_update', label: `${name}`, payload }).then(() => refreshUndoStatus(true)).catch(() => {})
+    pushUndo({ key, type: 'row_update', label: `${name}`, payload }).then(() => refreshUndoStatus(true)).catch(() => {})
   } catch {
     /* 撤销记录失败不影响主流程 */
   }
@@ -113,7 +113,7 @@ export function refreshUndoStatus(force = false) {
   if (!force && _lastProbe.key === key && now - _lastProbe.at < 400) return
   _lastProbe = { key, at: now }
   const seq = ++_probeSeq
-  axios.get(`/api/undo/table/${encodeURIComponent(key)}/status`)
+  undoStatus(key)
     .then(({ data }) => {
       // 过期或已切页的结果直接丢弃，避免旧 key 的状态覆盖新 key
       if (seq !== _probeSeq || undoState.key !== key) return
@@ -132,7 +132,7 @@ export function performUndo(redo = false) {
   const key = ctx.resolveKey()
   if (!key) return Promise.resolve(false)
   undoState.busy = true
-  return axios.post(`/api/undo/table/${encodeURIComponent(key)}/${redo ? 'redo' : 'undo'}`)
+  return applyUndo(key, redo)
     .then(({ data }) => {
       if (data.ok) {
         if (redo) { if (ctx.onAfterRedo) ctx.onAfterRedo(data.label, data.change) }

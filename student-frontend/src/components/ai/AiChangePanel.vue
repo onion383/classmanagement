@@ -81,7 +81,7 @@
 </template>
 
 <script>
-import DynamicTable from '../tables/DynamicTable.vue'
+import DynamicTable from '../tables/DynamicTable/DynamicTable.vue'
 import AiGridPreview from '../tables/AiGridPreview.vue'
 import { summarizeProposalChanges, gridCellFocus } from '../../composables/ai/aiMessages.js'
 import { TABLE_ROUTE } from '../../composables/ai/aiConstants.js'

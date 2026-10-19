@@ -17,7 +17,7 @@ const bcrypt = {
 const { SECRET, auth, TOKEN_SIGN_OPTS, TOKEN_COOKIE_MAX_AGE } = require('../middleware/auth');
 const sessions = require('../services/sessions');
 const { pickPhrase, deriveRestoreHash, normalizePhrase, formatPhrase, safeEqualHash } = require('../services/recoveryKey');
-const dbManager = require('../dbManager');
+const dbManager = require('../dbManager/dbManager');
 
 // 待确认注册草稿：有密码账号先生成恢复密钥，用户「抄写前 3 词」通过后才真正建库。
 // 未确认的草稿不会占用账号，且在 TTL 后自动失效。

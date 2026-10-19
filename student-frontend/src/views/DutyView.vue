@@ -259,7 +259,7 @@ import axios from 'axios'
 import Tabs from '../components/base/Tabs.vue'
 import ViewSwitch from '../components/base/ViewSwitch.vue'
 import EmptySnapshot from '../components/base/EmptySnapshot.vue'
-import GridView from '../components/tables/GridView.vue'
+import GridView from '../components/tables/GridView/GridView.vue'
 import WeekSwitcher from '../components/base/WeekSwitcher.vue'
 import AppSelect from '../components/base/AppSelect.vue'
 import { useNotification } from '../composables/useNotification.js'
@@ -267,6 +267,7 @@ import { useUndoShortcut, recordGridSnapshotUndo } from '../composables/useUndo.
 import { syncStudentNamesFromRows, syncStudentNames } from '../composables/useSyncStudentNames.js'
 import { createRowReuseCache } from '../utils/rowReuse.js'
 import { applyRouteRowFocus } from '../composables/useRowFocus.js'
+import { weightHeatRgb, weightHeatFg } from '../utils/heatColor.js'
 
 // 弹窗类组件懒加载：打开时才加载对应 chunk。loader 抽出为命名函数，
 // 可用 v-preload="loadXxx" 在悬停按钮时预取，点击时即时弹出。
@@ -276,7 +277,7 @@ const loadArrangementDialog = () => import('../components/dialogs/DutyArrangemen
 const DutyArrangementDialog = defineAsyncComponent(loadArrangementDialog)
 const loadWeightAlgoDialog = () => import('../components/dialogs/DutyWeightAlgorithmDialog.vue')
 const DutyWeightAlgorithmDialog = defineAsyncComponent(loadWeightAlgoDialog)
-const ExportExcel = defineAsyncComponent(() => import('../components/import-export/ExportExcel.vue'))
+const ExportExcel = defineAsyncComponent(() => import('../components/import-export/ExportExcel/ExportExcel.vue'))
 const ConfirmDialog = defineAsyncComponent(() => import('../components/base/ConfirmDialog.vue'))
 const loadDutyRecordSettingsDialog = () => import('../components/dialogs/DutyRecordSettingsDialog.vue')
 const DutyRecordSettingsDialog = defineAsyncComponent(loadDutyRecordSettingsDialog)
@@ -819,18 +820,8 @@ const weightMax = computed(() => {
   }
   return m
 })
-// 蓝色热力：浅蓝(#EFF6FF) → 深蓝(#1E3A8A) 线性插值
-function weightHeatRgb(t) {
-  const k = Math.max(0, Math.min(1, t))
-  const from = [239, 246, 255], to = [30, 58, 138]
-  return from.map((f, i) => Math.round(f + (to[i] - f) * k))
-}
-function weightHeatFg(t) {
-  const [r, g, b] = weightHeatRgb(t).map(v => v / 255)
-  const lin = v => (v <= 0.03928 ? v / 12.92 : Math.pow((v + 0.055) / 1.055, 2.4))
-  const L = 0.2126 * lin(r) + 0.7152 * lin(g) + 0.0722 * lin(b)
-  return L < 0.45 ? '#FFFFFF' : '#1E293B'
-}
+
+
 // 权重表的 GridView 行：与值日表同构（项目按 count 拆多子行），首子行跨行合并，
 // 同一项目的所有子行共用相同权重值（count>1 时视觉上是一行大单元格）
 const weightDisplayRows = computed(() => {

@@ -216,6 +216,7 @@
       <div
         v-if="permMenuOpen"
         ref="permMenuRef"
+        data-ai-float-keep
         class="w-52 rounded-lg border border-border shadow-lg p-1.5 bg-white/55 backdrop-blur-md ai-glass-panel text-left z-[10005]"
         :style="permMenuStyle"
       >

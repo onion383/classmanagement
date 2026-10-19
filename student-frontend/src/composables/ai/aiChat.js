@@ -1,4 +1,5 @@
 import axios from 'axios'
+import { undoById } from '../../api/undo.js'
 import { useNotification } from '../useNotification.js'
 import { useThemeStore } from '../../stores/theme.js'
 import { ASK_OTHER_KEY, AI_PERMISSION_FULL } from './aiConstants.js'
@@ -145,7 +146,7 @@ export default {
             p.reverted = true
           } else if (p.undoIds && p.undoIds.length) {
             for (const id of p.undoIds.slice().reverse()) {
-              const { data } = await axios.post(`/api/undo/${id}/undo`)
+              const { data } = await undoById(id)
               if (!data || !data.ok) throw new Error((data && data.error) || '还原失败')
             }
             p.reverted = true

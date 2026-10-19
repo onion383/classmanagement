@@ -20,7 +20,7 @@
 </template>
 
 <script>
-import GridView from './GridView.vue'
+import GridView from './GridView/GridView.vue'
 import { generateColHeaders, buildSeatLikeRows } from '../../composables/useSeatGrid.js'
 import { apiFetch } from '../../utils/apiUrl.js'
 

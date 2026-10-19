@@ -8,7 +8,7 @@ import path from 'path'
 // 渲染阻塞 CSS 改非阻塞：首屏占位（index.html / setup.html 里内联的 splash）只用内联样式，
 // 不需要等 tailwind 全量 CSS（约 120KB）下载 + 解析才开始画。给构建产物里的
 // <link rel="stylesheet"> 加 media="print" + onload 切回 all，首帧不再被 CSS 阻塞。
-// 渲染层在移除首屏占位前会再等一次样式表就绪（见 src/main.js / src/setup/main.js），
+// 渲染层在移除首屏占位前会再等一次样式表就绪（见 src/main.js / src/subwindows/setup/main.js），
 // 因此不会出现「界面无样式」的中间态。
 // 放在 closeBundle 里直接改盘上产物：此时 Vite 注入的 CSS link 已写入，正则替换最可靠。
 function nonBlockingCss(entries = ['index.html', 'setup.html']) {
@@ -77,11 +77,11 @@ export default defineConfig({
         './src/views/Login.vue',
         './src/views/DashboardView.vue',
         './src/composables/useDashboardData.js',
-        './src/desktop-widget/main.js',
-        './src/desktop-widget/DesktopWidget.vue',
+        './src/subwindows/desktop-widget/main.js',
+        './src/subwindows/desktop-widget/DesktopWidget.vue',
         // 首次安装引导窗口：全新安装首屏，提前编译避免引导页白屏
-        './src/setup/main.js',
-        './src/setup/Setup.vue',
+        './src/subwindows/setup/main.js',
+        './src/subwindows/setup/Setup.vue',
         // 首屏依赖链补齐：主题工具（stores/theme 依赖）、引导页后端就绪等待、App 外壳的关闭菜单
         './src/utils/apiUrl.js',
         './src/utils/backendReady.js',

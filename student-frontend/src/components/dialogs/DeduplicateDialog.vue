@@ -80,7 +80,7 @@
 </template>
 
 <script>
-import DynamicTable from '../tables/DynamicTable.vue';
+import DynamicTable from '../tables/DynamicTable/DynamicTable.vue';
 import '../../styles/dialog-transition.css'
 
 export default {

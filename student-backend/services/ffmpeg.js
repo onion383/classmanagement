@@ -23,7 +23,7 @@ const crypto = require('crypto');
 const { execFile } = require('child_process');
 const { promisify } = require('util');
 const { pipeline } = promisify(require('stream').pipeline);
-const dbManager = require('../dbManager');
+const dbManager = require('../dbManager/dbManager');
 
 // 计算文件 sha256（十六进制小写）
 function sha256Hex(filePath) {

@@ -267,6 +267,7 @@
 <script setup>
 import { ref, computed, nextTick, onMounted, onActivated, onBeforeUnmount, getCurrentInstance, watch } from 'vue'
 import axios from 'axios'
+import { pushUndo } from '../api/undo'
 import { useNotification } from '../composables/useNotification.js'
 import { applyRouteRowFocus } from '../composables/useRowFocus.js'
 import { useUndoShortcut } from '../composables/useUndo.js'
@@ -498,7 +499,7 @@ async function addAlbum() {
     showAdd.value = false
     useNotification().success('相册已添加，正在后台扫描照片…')
     // 记录「添加相册」撤销：undo 撤销添加（删索引+缩略图），redo 重新添加
-    axios.post('/api/undo', {
+    pushUndo({
       key: 'album',
       type: 'album_add',
       label: `添加相册：${newName.value}`,
@@ -561,7 +562,7 @@ async function reorderAlbums(ids) {
     await axios.put('/api/album/reorder', { ids }, { headers: authHeaders() })
     // 记录相册排序撤销（顺序确有变化才记录）
     if (oldOrder.length && JSON.stringify(oldOrder) !== JSON.stringify(ids)) {
-      axios.post('/api/undo', {
+      pushUndo({
         key: 'album',
         type: 'album_order',
         label: '相册排序更新',
@@ -658,7 +659,7 @@ async function doRemove() {
     } catch (_) { /* 抓取失败不阻塞删除 */ }
     await axios.delete(`/api/album/${a.id}`, { headers: authHeaders() })
     // 记录「删除相册」撤销：undo 还原相册+照片索引，redo 再次删除
-    axios.post('/api/undo', {
+    pushUndo({
       key: 'album',
       type: 'album_delete',
       label: `删除相册：${a.name}`,
@@ -859,7 +860,7 @@ async function deletePhoto(p) {
   try {
     await axios.delete(`/api/album/photo/${p.id}`, { headers: authHeaders() })
     // 记录「删除照片」撤销：undo 从回收站搬回文件+还原索引，redo 再次移入回收站
-    axios.post('/api/undo', {
+    pushUndo({
       key: 'album',
       type: 'photo_trash',
       label: `删除照片：${p.file_name}`,

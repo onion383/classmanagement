@@ -1,5 +1,6 @@
 import { ref, computed, watch, onMounted, onBeforeUnmount } from 'vue'
 import axios from 'axios'
+import { pushUndo } from '../api/undo'
 import { useNotification } from './useNotification'
 import { createRowReuseCache } from '../utils/rowReuse.js'
 
@@ -251,7 +252,7 @@ export function useTableCRUD(apiBase, defaultFields, options = {}) {
   // 记录一条持久化撤销（单元格编辑）
   function recordUndo(rowId, fieldName, oldVal, newVal) {
     try {
-      axios.post('/api/undo', {
+      pushUndo({
         key: undoTableKey,
         type: 'cell_update',
         label: `${fieldName}：「${oldVal == null ? '' : oldVal}」→「${newVal == null ? '' : newVal}」`,

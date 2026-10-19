@@ -228,7 +228,7 @@
 import axios from 'axios'
 import { defineAsyncComponent, getCurrentInstance } from 'vue'
 import Tabs from '../components/base/Tabs.vue'
-import DynamicTable from '../components/tables/DynamicTable.vue'
+import DynamicTable from '../components/tables/DynamicTable/DynamicTable.vue'
 import LeaveTimeline from '../components/base/LeaveTimeline.vue'
 import { useNotification } from '../composables/useNotification.js'
 import { recordCellUndo, useUndoShortcut } from '../composables/useUndo.js'
@@ -238,7 +238,7 @@ import { applyRouteRowFocus } from '../composables/useRowFocus.js'
 // 弹窗类组件懒加载：打开时才加载对应 chunk
 const loadAddLeaveDialog = () => import('../components/dialogs/AddLeaveDialog.vue')
 const AddLeaveDialog = defineAsyncComponent(loadAddLeaveDialog)
-const loadExportExcel = () => import('../components/import-export/ExportExcel.vue')
+const loadExportExcel = () => import('../components/import-export/ExportExcel/ExportExcel.vue')
 const ExportExcel = defineAsyncComponent(loadExportExcel)
 const ConfirmDialog = defineAsyncComponent(() => import('../components/base/ConfirmDialog.vue'))
 const OverdueLeaveDialog = defineAsyncComponent(() => import('../components/dialogs/OverdueLeaveDialog.vue'))

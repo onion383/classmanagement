@@ -21,7 +21,9 @@ import {
   RefreshCw, Download, Upload, Trash2, Search, ClipboardList, Folder, FolderOpen,
   Undo2, Image as ImageIcon, SlidersHorizontal, Check, Wrench, Paperclip,
   Clock, BarChart3, Loader2, Toolbox, User, Palette, Brain,
-  Home, Zap, Camera, RotateCcw,
+  Home, Zap, Camera, RotateCcw, Eye, EyeOff,
+  Timer, Dices, NotebookPen, PenLine, Pen, PenTool, Highlighter, Eraser,
+  Save, X, XCircle, Construction,
 } from '@lucide/vue'
 import { useThemeStore } from '../../stores/theme'
 
@@ -81,6 +83,24 @@ const MAP = {
   zap:      { comp: Zap, emoji: '⚡', color: '#f59e0b' },
   camera:   { comp: Camera, emoji: '📸', color: '#64748b' },
   rollback: { comp: RotateCcw, emoji: '↺', color: '#f59e0b' },
+  // 金额显示/隐藏切换：eye=显示（睁眼）｜eyeOff=隐藏（捂脸）
+  eye:      { comp: Eye,    emoji: '👁️', color: '#64748b' },
+  eyeOff:   { comp: EyeOff, emoji: '🙈', color: '#64748b' },
+
+  // ---- 工具箱（浮窗图标 / 工具菜单 / 四个小工具）----
+  timer:       { comp: Timer,       emoji: '⏱️', color: '#0ea5e9' },
+  rollcall:    { comp: Dices,       emoji: '🎲', color: '#818cf8' },
+  screenshot:  { comp: Camera,      emoji: '📷', color: '#64748b' },
+  note:        { comp: NotebookPen, emoji: '📝', color: '#f59e0b' },
+  brush:       { comp: PenLine,     emoji: '🖊️', color: '#3b82f6' },
+  eraser:      { comp: Eraser,      emoji: '🧹', color: '#64748b' },
+  save:        { comp: Save,        emoji: '💾', color: '#3b82f6' },
+  close:       { comp: X,           emoji: '✕',  color: '#64748b' },
+  ballpoint:   { comp: Pen,         emoji: '🖊️', color: '#3b82f6' },
+  pen:         { comp: PenTool,     emoji: '✒️', color: '#1e293b' },
+  highlighter: { comp: Highlighter, emoji: '🖍️', color: '#f59e0b' },
+  error:       { comp: XCircle,     emoji: '❌', color: '#ef4444' },
+  developing:  { comp: Construction,emoji: '🚧', color: '#f59e0b' },
 }
 
 const { iconStyle } = storeToRefs(useThemeStore())

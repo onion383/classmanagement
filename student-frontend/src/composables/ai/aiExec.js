@@ -1,4 +1,5 @@
 import axios from 'axios'
+import { pushUndo, undoById } from '../../api/undo.js'
 import { useNotification } from '../useNotification.js'
 import { refreshUndoStatus } from '../useUndo.js'
 import { useThemeStore } from '../../stores/theme.js'
@@ -252,7 +253,7 @@ export default {
         let label = ''
         // 逆序撤销，保证批量新增按相反顺序删除
         for (const id of p.undoIds.slice().reverse()) {
-          const { data } = await axios.post(`/api/undo/${id}/undo`)
+          const { data } = await undoById(id)
           if (!data || !data.ok) throw new Error((data && data.error) || '撤回失败')
           label = data.label || label
         }
@@ -297,7 +298,7 @@ export default {
     // origin：AI 提案执行时传入的批次标识（供 AI 的 undo_change 工具整批回退）；手动编辑不传
     async _pushUndo(type, key, label, payload, origin) {
       try {
-        const { data } = await axios.post('/api/undo', { key, type, label, payload, origin })
+        const { data } = await pushUndo({ key, type, label, payload, origin })
         refreshUndoStatus(true)
         return data && data.id
       } catch (_) { return null }

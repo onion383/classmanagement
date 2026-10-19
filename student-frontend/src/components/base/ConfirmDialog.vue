@@ -1,7 +1,5 @@
 <template>
-  <Teleport to="body">
-  <Transition name="dialog">
-  <div v-if="visible" class="fixed inset-0 bg-black/50 flex items-center justify-center z-[10006] pointer-events-auto" @click.self="handleOverlayClick">
+  <DialogShell :visible="visible" :z-index="10006" @overlay="handleOverlayClick">
     <div class="bg-surface p-5 rounded-lg min-w-[300px] max-w-[600px] text-center shadow-card dialog-card">
       <h3 v-if="title" class="text-lg font-bold mb-3">{{ title }}</h3>
       <!-- 添加列：显示列名输入 + 类型选择 -->
@@ -43,14 +41,13 @@
         <button @click="$emit('confirm')" :disabled="confirmDisabled" class="bg-info text-text-inverse border-none px-4 py-1.5 rounded cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed">{{ confirmText }}</button>
       </div>
     </div>
-  </div>
-  </Transition>
-  </Teleport>
+  </DialogShell>
 </template>
 
 <script>
 import '../../styles/dialog-transition.css'
 import { defineAsyncComponent } from 'vue'
+import DialogShell from './DialogShell.vue'
 
 // 下拉组件只在「添加列」弹窗（type === 'columnAdd'）里用到，属业务页操作触发，
 // 与启动时的确认弹窗主路径无关。改为懒加载后不再计入首屏同步入口 chunk；
@@ -61,7 +58,7 @@ const AppSelect = defineAsyncComponent(loadAppSelect)
 
 export default {
   name: 'ConfirmDialog',
-  components: { AppSelect },
+  components: { AppSelect, DialogShell },
   mounted() { loadAppSelect().catch(() => {}) },
   props: {
     visible: Boolean,

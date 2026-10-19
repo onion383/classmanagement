@@ -10,7 +10,7 @@ function jwtLib() {
 const crypto = require('crypto');
 const fs = require('fs');
 const path = require('path');
-const dbManager = require('../dbManager');
+const dbManager = require('../dbManager/dbManager');
 const sessions = require('../services/sessions');
 
 // 杜绝硬编码兜底：优先使用环境变量 JWT_SECRET。

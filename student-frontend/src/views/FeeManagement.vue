@@ -208,7 +208,7 @@
 import { ref, computed, watch, onMounted, onActivated, getCurrentInstance, defineAsyncComponent } from 'vue'
 import axios from 'axios'
 import SearchBar from '../components/base/SearchBar.vue'
-import DynamicTable from '../components/tables/DynamicTable.vue'
+import DynamicTable from '../components/tables/DynamicTable/DynamicTable.vue'
 import { useTableCRUD } from '../composables/useTableCRUD.js'
 import { useUndoShortcut } from '../composables/useUndo.js'
 import { useNotification } from '../composables/useNotification.js'
@@ -218,7 +218,7 @@ import { applyRouteRowFocus } from '../composables/useRowFocus.js'
 // 弹窗类组件懒加载：打开时才加载对应 chunk
 const ConfirmDialog = defineAsyncComponent(() => import('../components/base/ConfirmDialog.vue'))
 const ContextMenu = defineAsyncComponent(() => import('../components/base/ContextMenu.vue'))
-const loadExportExcel = () => import('../components/import-export/ExportExcel.vue')
+const loadExportExcel = () => import('../components/import-export/ExportExcel/ExportExcel.vue')
 const ExportExcel = defineAsyncComponent(loadExportExcel)
 const loadImportExcel = () => import('../components/import-export/ImportExcel.vue')
 const ImportExcel = defineAsyncComponent(loadImportExcel)

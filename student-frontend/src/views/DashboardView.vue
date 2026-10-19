@@ -25,17 +25,17 @@
           </button>
         </div>
         <div class="flex items-center gap-4 shrink-0">
-          <div class="flex items-baseline gap-1.5">
+          <div class="stat-link flex items-baseline gap-1.5" @click="goTo('/students')" title="跳转：学生管理">
             <span class="text-lg font-bold text-text leading-none">{{ attendance.present }}</span>
             <span class="text-xs text-text-muted">在校</span>
           </div>
           <div class="w-px h-6 bg-border"></div>
-          <div class="flex items-baseline gap-1.5">
+          <div class="stat-link flex items-baseline gap-1.5" @click="goTo('/leaves')" title="跳转：请假管理">
             <span class="text-lg font-bold text-warning leading-none">{{ attendance.onLeave }}</span>
             <span class="text-xs text-text-muted">请假</span>
           </div>
           <div class="w-px h-6 bg-border"></div>
-          <div class="flex items-baseline gap-1.5">
+          <div class="stat-link flex items-baseline gap-1.5" @click="goTo('/schedule')" title="跳转：课程表">
             <span class="text-lg font-bold text-primary leading-none">{{ todayCourseCount }}</span>
             <span class="text-xs text-text-muted">课程</span>
           </div>
@@ -97,8 +97,8 @@
         <div class="bg-surface shadow rounded-xl p-5 border border-border card-link" @click="goTo('/fee')" title="跳转：班费">
           <h2 class="text-base font-semibold text-text mb-3 flex items-center justify-between">
             <span class="flex items-center gap-2"><IconGlyph name="fee" :size="20" /> 班费剩余</span>
-            <button class="text-text-muted hover:text-text transition-colors" title="显示/隐藏金额" @click.stop="toggleFee">
-              {{ showFee ? '🙈' : '👁️' }}
+            <button class="text-text-muted hover:text-text transition-colors flex items-center" title="显示/隐藏金额" @click.stop="toggleFee">
+              <IconGlyph :name="showFee ? 'eyeOff' : 'eye'" :size="18" tint="current" />
             </button>
           </h2>
           <div class="text-3xl font-bold text-text tabular-nums flex items-baseline">
@@ -655,6 +655,19 @@ onBeforeUnmount(() => {
 .card-link:hover {
   border-color: rgba(59, 130, 246, 0.35);
   box-shadow: 0 4px 16px rgba(59, 130, 246, 0.10);
+}
+
+/* 欢迎条右侧关键数据（在校 / 请假 / 课程）：可点击跳转，悬停给轻微底色反馈。
+   内边距配负外边距抵消，静止时文字位置与原来完全一致。 */
+.stat-link {
+  cursor: pointer;
+  padding: 2px 8px;
+  margin: -2px -8px;
+  border-radius: 8px;
+  transition: background-color .15s ease;
+}
+.stat-link:hover {
+  background: rgba(59, 130, 246, 0.08);
 }
 
 /* 班级名旁的齿轮按钮 */

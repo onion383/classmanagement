@@ -14,7 +14,7 @@
 const fs = require('fs');
 const fsp = fs.promises;
 const path = require('path');
-const dbManager = require('./dbManager');
+const dbManager = require('./dbManager/dbManager');
 
 const THUMB_DIR = dbManager.thumbsDir;
 const TRASH_DIR = dbManager.trashDir;

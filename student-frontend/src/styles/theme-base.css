@@ -18,6 +18,16 @@
   --color-info: #3b82f6;
   --color-info-hover: #2563eb;
 
+  /* 玻璃层透明度阶梯：各主题文件统一引用，改整体浓淡只动这里
+     （取值与原硬编码逐字一致，替换后视觉零变化） */
+  --alpha-white-06: rgba(255, 255, 255, 0.06);
+  --alpha-white-08: rgba(255, 255, 255, 0.08);
+  --alpha-white-10: rgba(255, 255, 255, 0.10);
+  --alpha-white-12: rgba(255, 255, 255, 0.12);
+  --alpha-white-15: rgba(255, 255, 255, 0.15);
+  --alpha-white-30: rgba(255, 255, 255, 0.30);
+  --alpha-black-25: rgba(0, 0, 0, 0.25);
+
   /* 背景色 */
   --color-bg: #f9fafb;
   --color-surface: #ffffff;

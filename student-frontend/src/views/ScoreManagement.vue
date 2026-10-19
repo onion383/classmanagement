@@ -163,7 +163,7 @@ import { defineAsyncComponent, getCurrentInstance } from 'vue'
 import AppSelect from '../components/base/AppSelect.vue'
 import Tabs from '../components/base/Tabs.vue'
 import LeaveTimeline from '../components/base/LeaveTimeline.vue'
-import DynamicTable from '../components/tables/DynamicTable.vue'
+import DynamicTable from '../components/tables/DynamicTable/DynamicTable.vue'
 import { useNotification } from '../composables/useNotification.js'
 import { recordCellUndo, recordRowInsert, recordRowDelete, recordRowUpdate, useUndoShortcut } from '../composables/useUndo.js'
 import { formatDate } from '../utils/dateTime.js'
@@ -173,7 +173,7 @@ import { applyRouteRowFocus } from '../composables/useRowFocus.js'
 const loadAddScoreDialog = () => import('../components/dialogs/AddScoreDialog.vue')
 const AddScoreDialog = defineAsyncComponent(loadAddScoreDialog)
 const ConfirmDialog = defineAsyncComponent(() => import('../components/base/ConfirmDialog.vue'))
-const loadExportExcel = () => import('../components/import-export/ExportExcel.vue')
+const loadExportExcel = () => import('../components/import-export/ExportExcel/ExportExcel.vue')
 const ExportExcel = defineAsyncComponent(loadExportExcel)
 
 const API = '/api'

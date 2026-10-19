@@ -161,7 +161,7 @@ const AddActivityDialog = defineAsyncComponent(loadAddActivityDialog)
 const loadAddCountdownDialog = () => import('../components/dialogs/AddCountdownDialog.vue')
 const AddCountdownDialog = defineAsyncComponent(loadAddCountdownDialog)
 const ConfirmDialog = defineAsyncComponent(() => import('../components/base/ConfirmDialog.vue'))
-const loadExportExcel = () => import('../components/import-export/ExportExcel.vue')
+const loadExportExcel = () => import('../components/import-export/ExportExcel/ExportExcel.vue')
 const ExportExcel = defineAsyncComponent(loadExportExcel)
 
 const API = '/api'

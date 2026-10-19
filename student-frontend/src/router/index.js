@@ -7,7 +7,7 @@ const routes = [
   { path: '/students', name: 'classroom', component: () => import('../views/ClassroomView.vue') },
   { path: '/fee', name: 'fee', component: () => import('../views/FeeManagement.vue') },
   { path: '/login', name: 'login', component: () => import('../views/Login.vue') },
-  { path: '/settings', name: 'settings', component: () => import('../views/SettingsView.vue'), meta: { requiresAuth: true } },
+  { path: '/settings', name: 'settings', component: () => import('../views/SettingsView/SettingsView.vue'), meta: { requiresAuth: true } },
   { path: '/account', redirect: '/settings' },
   { path: '/schedule', name: 'schedule', component: () => import('../views/ScheduleView.vue'), meta: { requiresAuth: true } },
   { path: '/seats', name: 'SeatView', component: () => import('../views/SeatView.vue') },

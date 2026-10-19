@@ -40,27 +40,43 @@ const PRESETS = [
 ]
 
 export const useThemeStore = defineStore('theme', () => {
-  const currentTheme = ref(localStorage.getItem(THEME_KEY) || 'glass')
-  // 全局日/夜模式：'day' | 'night'（默认日间，保持现有观感）
-  const mode = ref(localStorage.getItem(MODE_KEY) === 'night' ? 'night' : 'day')
+  // 持久化设置的读取集中在这里：既用于初始状态，也用于「别的窗口改了设置」时重新同步
+  // （工具箱浮窗跟随主窗口的主题/日夜间切换，见 src/subwindows/widget/main.js）。
+  const readPersisted = () => ({
+    theme: localStorage.getItem(THEME_KEY) || 'glass',
+    // 全局日/夜模式：'day' | 'night'（默认日间，保持现有观感）
+    mode: localStorage.getItem(MODE_KEY) === 'night' ? 'night' : 'day',
+    // 是否跟随系统配色（true 时 mode 由系统偏好决定，手动切换会自动关闭它）
+    followSystem: localStorage.getItem(FOLLOW_KEY) === '1',
+    customColors: JSON.parse(localStorage.getItem(CUSTOM_KEY) || '{}'),
+    customThemes: JSON.parse(localStorage.getItem(CUSTOM_THEMES_KEY) || '[]'),
+    backgroundImage: localStorage.getItem(BG_IMAGE_KEY) || '',
+    // 背景遮罩层不透明度（0~1，有自定义背景图时生效）
+    bgMaskOpacity: parseFloat(localStorage.getItem(BG_MASK_KEY)) || 0.6,
+    // 组件透明玻璃层不透明度（0~1，卡片基准值）
+    glassOpacity: parseFloat(localStorage.getItem(GLASS_KEY)) || 0.4,
+    // 图标样式：'color'（彩色图标）| 'emoji'（Emoji）
+    iconStyle: localStorage.getItem(ICON_STYLE_KEY) || 'color',
+    // 标题栏/侧边栏毛玻璃配色：'blue'（深蓝，旧款）| 'light'（白色调，新款默认）
+    topbarColor: localStorage.getItem(TOPBAR_COLOR_KEY) || 'light',
+    // 动画效果总开关：关闭后全局禁用过渡与动画（含窗口淡入淡出、弹窗/列表动效等）
+    animationsEnabled: localStorage.getItem(ANIMATIONS_KEY) !== '0',
+  })
+  const persisted = readPersisted()
+  const currentTheme = ref(persisted.theme)
+  const mode = ref(persisted.mode)
   const isNight = computed(() => mode.value === 'night')
-  // 是否跟随系统配色（true 时 mode 由系统偏好决定，手动切换会自动关闭它）
-  const followSystem = ref(localStorage.getItem(FOLLOW_KEY) === '1')
+  const followSystem = ref(persisted.followSystem)
   // 当前主题是否已实现夜间配色（决定切换按钮是否可用）
   const nightSupported = computed(() => NIGHT_THEMES.includes(currentTheme.value))
-  const customColors = ref(JSON.parse(localStorage.getItem(CUSTOM_KEY) || '{}'))
-  const customThemes = ref(JSON.parse(localStorage.getItem(CUSTOM_THEMES_KEY) || '[]'))
-  const backgroundImage = ref(localStorage.getItem(BG_IMAGE_KEY) || '')
-  // 背景遮罩层不透明度（0~1，有自定义背景图时生效）
-  const bgMaskOpacity = ref(parseFloat(localStorage.getItem(BG_MASK_KEY)) || 0.6)
-  // 组件透明玻璃层不透明度（0~1，卡片基准值）
-  const glassOpacity = ref(parseFloat(localStorage.getItem(GLASS_KEY)) || 0.4)
-  // 图标样式：'color'（彩色图标）| 'emoji'（Emoji）
-  const iconStyle = ref(localStorage.getItem(ICON_STYLE_KEY) || 'color')
-  // 标题栏/侧边栏毛玻璃配色：'blue'（深蓝，旧款）| 'light'（白色调，新款默认）
-  const topbarColor = ref(localStorage.getItem(TOPBAR_COLOR_KEY) || 'light')
-  // 动画效果总开关：关闭后全局禁用过渡与动画（含窗口淡入淡出、弹窗/列表动效等）
-  const animationsEnabled = ref(localStorage.getItem(ANIMATIONS_KEY) !== '0')
+  const customColors = ref(persisted.customColors)
+  const customThemes = ref(persisted.customThemes)
+  const backgroundImage = ref(persisted.backgroundImage)
+  const bgMaskOpacity = ref(persisted.bgMaskOpacity)
+  const glassOpacity = ref(persisted.glassOpacity)
+  const iconStyle = ref(persisted.iconStyle)
+  const topbarColor = ref(persisted.topbarColor)
+  const animationsEnabled = ref(persisted.animationsEnabled)
 
   const allThemes = computed(() => [
     ...PRESETS,
@@ -126,6 +142,24 @@ export const useThemeStore = defineStore('theme', () => {
   const setTheme = (themeId) => {
     currentTheme.value = themeId
     localStorage.setItem(THEME_KEY, themeId)
+    applyTheme()
+  }
+
+  // 从 localStorage 重新读取全部持久化设置并重新应用。
+  // 用于「别的窗口改了主题」时同步本窗口（工具箱浮窗跟随主窗口的主题/日夜间切换）。
+  const reloadFromStorage = () => {
+    const p = readPersisted()
+    currentTheme.value = p.theme
+    mode.value = p.mode
+    followSystem.value = p.followSystem
+    customColors.value = p.customColors
+    customThemes.value = p.customThemes
+    backgroundImage.value = p.backgroundImage
+    bgMaskOpacity.value = p.bgMaskOpacity
+    glassOpacity.value = p.glassOpacity
+    iconStyle.value = p.iconStyle
+    topbarColor.value = p.topbarColor
+    animationsEnabled.value = p.animationsEnabled
     applyTheme()
   }
 
@@ -263,6 +297,7 @@ export const useThemeStore = defineStore('theme', () => {
     deleteCustomTheme,
     updateCustomTheme,
     applyTheme,
+    reloadFromStorage,
     setBackgroundImage,
     setBgMaskOpacity,
     setGlassOpacity,

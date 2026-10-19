@@ -1,0 +1,670 @@
+// =========================================================================
+// DynamicTable.drag.js —— DynamicTable 的行/列拖拽、落点高亮框与交换 FLIP 动画
+//
+// 逐字搬运自 DynamicTable.vue 的 methods，未改写任何逻辑与注释；
+// 方法体内部仍使用 this（Vue Options API 会把 methods 绑定到组件实例），
+// 主组件以 methods: { ...useDynamicTableDrag() } 展开注册，行为与拆分前完全一致。
+// =========================================================================
+
+import { applyRowShift, applyColShift, clearShift, createEdgeAutoScroll } from '../../../composables/tableDragFx';
+
+export function useDynamicTableDrag() {
+  return {
+
+    // ==================== 拖拽落点高亮框 ====================
+    // 整层包住目标行/列的蓝色边框（不用 border 直接改单元格，避免撑动列宽/行高）
+    createDropBox() {
+      const box = document.createElement('div');
+      box.style.cssText = 'position:fixed;left:0;top:0;z-index:99999;pointer-events:none;display:none;box-sizing:border-box;will-change:transform;border:2px solid var(--color-info, #2563eb);border-radius:4px;';
+      document.body.appendChild(box);
+      return box;
+    },
+    // rect: {left, top, right, bottom}（视口坐标）；container 内裁剪，避免滚动时溢出表格范围
+    updateDropBox(box, rect, container) {
+      if (!box) return;
+      if (!rect) { box.style.display = 'none'; return; }
+      let { left, top, right, bottom } = rect;
+      if (container) {
+        const c = container.getBoundingClientRect();
+        left = Math.max(left, c.left);
+        top = Math.max(top, c.top);
+        right = Math.min(right, c.right);
+        bottom = Math.min(bottom, c.bottom);
+      }
+      const w = right - left, h = bottom - top;
+      if (w <= 0 || h <= 0) { box.style.display = 'none'; return; }
+      box.style.display = 'block';
+      box.style.transform = `translate(${left}px, ${top}px)`;
+      box.style.width = w + 'px';
+      box.style.height = h + 'px';
+    },
+    // 拖拽开始时一次性缓存各行与容器的几何信息，拖动过程中纯计算，避免每帧 O(n) 布局读取
+    _cacheRowGeom() {
+      const trs = this.$el ? this.$el.querySelectorAll('tbody tr') : [];
+      const arr = [];
+      for (let i = 0; i < trs.length; i++) {
+        const r = trs[i].getBoundingClientRect();
+        arr.push({ left: r.left, top: r.top, right: r.right, bottom: r.bottom });
+      }
+      this._rowGeom = arr;
+      this._rowGeomContainer = this.$el ? this.$el.getBoundingClientRect() : null;
+    },
+    // 列拖拽几何缓存：按下时一次性量出各数据列的左右边界、表头行 top、表底 bottom 与容器 rect，
+    // 拖动过程中纯数值比较，避免每帧 O(n) getBoundingClientRect 触发布局（INP 优化）
+    _cacheColGeom() {
+      const ths = this.$el ? this.$el.querySelectorAll('thead th') : [];
+      const hasOp = !!this.$el && !!this.$el.querySelector('th.col-op');
+      const arr = [];
+      for (let i = 1; i < ths.length; i++) {
+        const colIndex = i - 1;
+        if (i === ths.length - 1 && hasOp) { arr[colIndex] = null; continue; } // 跳过操作列
+        const r = ths[i].getBoundingClientRect();
+        arr[colIndex] = { left: r.left, right: r.right };
+      }
+      this._colGeom = arr;
+      this._colGeomHeaderTop = ths.length ? ths[0].parentElement.getBoundingClientRect().top : null;
+      const tbl = this.$el ? this.$el.querySelector('table') : null;
+      this._colGeomTblBottom = tbl ? tbl.getBoundingClientRect().bottom : null;
+      this._colGeomContainer = this.$el ? this.$el.getBoundingClientRect() : null;
+    },
+    // 复制一份跟手虚影作为「落点虚影」：更淡、无阴影、初始隐藏，
+    // 位置由 update*DropBox 贴在目标格上。两个虚影同时存在：
+    // 手上的跟手，落点的那份提示会落在哪。
+    _cloneGhostForSlot(src, opacity) {
+      if (!src) return null;
+      const el = src.cloneNode(true);
+      el.style.opacity = String(opacity);
+      el.style.boxShadow = 'none';
+      el.style.display = 'none';
+      el.style.zIndex = '99997';
+      document.body.appendChild(el);
+      return el;
+    },
+    updateRowDropBox() {
+      const box = this._rowDropBox;
+      if (!box) return;
+      const hide = () => {
+        box.style.display = 'none';
+        if (this._rowSlotGhost) this._rowSlotGhost.style.display = 'none';
+        this._rowDropSig = null;
+      };
+      const geom = this._rowGeom;
+      const g = (geom && this.dragOverIndex !== null) ? geom[this.dragOverIndex] : null;
+      if (!g) { hide(); return; }
+      let { left, top, right, bottom } = g;
+      const c = this._rowGeomContainer;
+      if (c) {
+        left = Math.max(left, c.left);
+        top = Math.max(top, c.top);
+        right = Math.min(right, c.right);
+        bottom = Math.min(bottom, c.bottom);
+      }
+      const w = right - left, h = bottom - top;
+      if (w <= 0 || h <= 0) { hide(); return; }
+      // 每帧都会走到这里；几何没变就别再写样式（写 width/height 会触发布局）
+      const sig = `${left}|${top}|${w}|${h}`;
+      if (this._rowDropSig === sig) return;
+      this._rowDropSig = sig;
+      // 落点虚影延迟到「确实要显示」时才克隆
+      if (!this._rowSlotGhost && this._rowGhost) {
+        this._rowSlotGhost = this._cloneGhostForSlot(this._rowGhost, 0.22);
+      }
+      const ghost = this._rowSlotGhost;
+      box.style.display = 'block';
+      box.style.transform = `translate(${left}px, ${top}px)`;
+      box.style.width = w + 'px';
+      box.style.height = h + 'px';
+      // 落点虚影：被拖行的半透明副本固定在落点上（不跟随鼠标），
+      // 松手前就能看到它将落在哪一格。
+      if (ghost) {
+        ghost.style.display = 'block';
+        ghost.style.transform = `translate(${left}px, ${top}px)`;
+        ghost.style.width = w + 'px';
+        ghost.style.height = h + 'px';
+        ghost.style.overflow = 'hidden';
+      }
+    },
+    updateColDropBox() {
+      const box = this._colDropBox;
+      if (!box) return;
+      const hide = () => {
+        box.style.display = 'none';
+        if (this._colSlotGhost) this._colSlotGhost.style.display = 'none';
+        this._colDropSig = null;
+      };
+      const geom = this._colGeom;
+      const g = (geom && this.colDragOverIndex !== null) ? geom[this.colDragOverIndex] : null;
+      if (!g || this._colGeomHeaderTop == null) { hide(); return; }
+      // 用按下时缓存的几何，拖动过程中不再读取布局
+      let { left, right } = g;
+      let top = this._colGeomHeaderTop;
+      let bottom = this._colGeomTblBottom;
+      const c = this._colGeomContainer;
+      if (c) {
+        left = Math.max(left, c.left);
+        top = Math.max(top, c.top);
+        right = Math.min(right, c.right);
+        bottom = Math.min(bottom, c.bottom);
+      }
+      const w = right - left, h = bottom - top;
+      if (w <= 0 || h <= 0) { hide(); return; }
+      // 每帧都会走到这里；几何没变就别再写样式
+      const sig = `${left}|${top}|${w}|${h}`;
+      if (this._colDropSig === sig) return;
+      this._colDropSig = sig;
+      // 落点虚影延迟创建
+      if (!this._colSlotGhost && this._colGhost) {
+        this._colSlotGhost = this._cloneGhostForSlot(this._colGhost, 0.22);
+      }
+      const ghost = this._colSlotGhost;
+      box.style.display = 'block';
+      box.style.transform = `translate(${left}px, ${top}px)`;
+      box.style.width = w + 'px';
+      box.style.height = h + 'px';
+      // 落点虚影：半透明列副本贴在目标格上
+      if (ghost) {
+        ghost.style.display = 'block';
+        ghost.style.transform = `translate(${left}px, ${top}px)`;
+        ghost.style.width = w + 'px';
+        ghost.style.height = h + 'px';
+      }
+    },
+
+    onRowHandleDown(event, index) {
+      if (this.noRowDrag || this.readonly) return;
+      const row = this.rows[index];
+      if (!row || row._isNew || row._isSeparator) return;
+      if (this.selectedRowKeys.length > 1 && !this.selectedKeySet.has(row._rowKey)) return;
+      const trEl = (event.currentTarget instanceof Element && event.currentTarget.closest('tr')) || null;
+      event.preventDefault();
+      this.dragIndex = index;
+      this.dragOverIndex = index;
+      this._suppressCellClick = true; // 压制从手柄冒出的 click
+      // 自绘 fixed 虚影（不用原生拖拽图，避免被浏览器居中/卡住）
+      const wrapper = document.createElement('div');
+      wrapper.style.cssText = 'position:fixed;left:0;top:0;z-index:99998;pointer-events:none;opacity:0.85;border-radius:4px;will-change:transform;contain:layout paint;box-shadow:0 6px 18px rgba(0,0,0,0.18);';
+      let grabX = 16, grabY = 12;
+      if (this.selectedRowKeys.length > 1) {
+        // 多选：整批胶囊
+        const selectedRows = this.rows.filter(r => this.selectedRowKeys.includes(r._rowKey) && !r._isNew && !r._isSeparator);
+        const names = selectedRows.slice(0, 2).map(r => r['姓名'] || r['收支编码'] || '项目');
+        let text = '🚚 ' + names.join('、');
+        if (selectedRows.length > 2) text += ` 等${selectedRows.length}项`;
+        const pill = document.createElement('div');
+        pill.textContent = text;
+        pill.style.cssText = 'padding:6px 10px;background:rgba(219,234,254,0.95);border:2px solid #3b82f6;border-radius:6px;color:#1e3a8a;font-weight:bold;font-size:13px;white-space:nowrap;';
+        wrapper.appendChild(pill);
+        grabX = -14; grabY = -8; // 胶囊出现在指针右下角
+      } else if (trEl) {
+        // 单选：忠实克隆整行（样式/颜色/字号与表格一致），装进单行 table 以保留单元格布局
+        const r = trEl.getBoundingClientRect();
+        const clone = trEl.cloneNode(true);
+        clone.classList.remove('content-visibility-auto', 'opacity-30');
+        clone.style.transition = 'none';
+        const srcTds = trEl.querySelectorAll('td,th');
+        // 逐列记录原件真实宽度，克隆后按固定表格布局还原，避免列被挤压变形
+        const colWidths = Array.from(srcTds).map(td => td.getBoundingClientRect().width);
+        clone.querySelectorAll('td,th').forEach((td, i) => {
+          td.style.transition = 'none';
+          if (colWidths[i] > 0) td.style.width = colWidths[i] + 'px';
+          td.style.overflow = 'hidden';
+        });
+        const tbl = document.createElement('table');
+        tbl.style.cssText = 'border-collapse:collapse;table-layout:fixed;width:' + r.width + 'px;';
+        // 继承原行字体，保证字号/字族/颜色与表格一致
+        const cs = getComputedStyle(srcTds[0] || trEl);
+        tbl.style.fontFamily = cs.fontFamily;
+        tbl.style.fontSize = cs.fontSize;
+        tbl.style.lineHeight = cs.lineHeight;
+        tbl.style.color = cs.color;
+        tbl.style.background = getComputedStyle(srcTds[0]).backgroundColor;
+        const tbody = document.createElement('tbody');
+        tbody.appendChild(clone);
+        tbl.appendChild(tbody);
+        wrapper.appendChild(tbl);
+        grabX = Math.min(30, event.clientX - r.left);
+        grabY = event.clientY - r.top;
+      }
+      document.body.appendChild(wrapper);
+      this._rowGhost = wrapper;
+      // 落点虚影在 updateRowDropBox 里延迟创建
+      this._rowGrab = { grabX, grabY };
+      // 跟手的虚影：自由跟随指针（不吸附、不锁位置）
+      wrapper.style.transform = `translate(${event.clientX - grabX}px, ${event.clientY - grabY}px)`;
+      // 落点高亮框：包住即将落位的那一行（几何信息在此一次性缓存）
+      this._cacheRowGeom();
+      // 让位与自动滚动的初始状态：行元素列表 + 「空槽」高度（取被拖行自身高度）
+      this._rowEls = Array.from(this.$el.querySelectorAll('tbody tr'));
+      const g0 = this._rowGeom ? this._rowGeom[index] : null;
+      this._rowSlotH = g0 ? Math.round(g0.bottom - g0.top) : 0;
+      this._rowAutoScroll = createEdgeAutoScroll(
+        () => this.$el,
+        (mx, my) => this._onRowScrolled(mx, my)
+      );
+      this._rowDropBox = this.createDropBox();
+      this.updateRowDropBox();
+
+      const move = (e) => {
+        if (!this._rowGhost) return;
+        // rAF 对齐到帧：同一帧内多次 mousemove 只处理最后一次
+        this._rowPending = e;
+        if (this._rowRaf) return;
+        this._rowRaf = requestAnimationFrame(() => {
+          this._rowRaf = null;
+          this._applyRowMove();
+        });
+      };
+      const up = () => this.finishRowDrag();
+      this._rowMove = move;
+      this._rowUp = up;
+      // passive：这两个监听不阻止默认行为，声明后不阻塞滚动/合成的路径
+      window.addEventListener('mousemove', move, { passive: true });
+      window.addEventListener('mouseup', up, { passive: true });
+    },
+    resolveRowIndexAt(clientY) {
+      // 优先用拖拽开始时缓存的几何信息（无布局读取）
+      const geom = this._rowGeom;
+      if (geom && geom.length) {
+        let best = null, min = Infinity;
+        for (let i = 0; i < geom.length; i++) {
+          const r = geom[i];
+          if (clientY >= r.top && clientY <= r.bottom) return i;
+          const d = Math.min(Math.abs(clientY - r.top), Math.abs(clientY - r.bottom));
+          if (d < min) { min = d; best = i; }
+        }
+        return best;
+      }
+      const trs = this.$el ? this.$el.querySelectorAll('tbody tr') : [];
+      let best = null, min = Infinity;
+      trs.forEach((tr, i) => {
+        const r = tr.getBoundingClientRect();
+        if (clientY >= r.top && clientY <= r.bottom) { best = i; return; }
+        const d = Math.min(Math.abs(clientY - r.top), Math.abs(clientY - r.bottom));
+        if (d < min) { min = d; best = i; }
+      });
+      return best;
+    },
+    // 应用最近一次待处理的拖拽位置（rAF 帧内执行；松手前也会强制冲刷一次，避免丢最后一帧）
+    _applyRowMove() {
+      if (!this._rowGhost || !this._rowPending) return;
+      const ev = this._rowPending;
+      // 跟手虚影自由跟随指针
+      const g = this._rowGrab || { grabX: 0, grabY: 0 };
+      this._rowGhost.style.transform = `translate(${ev.clientX - g.grabX}px, ${ev.clientY - g.grabY}px)`;
+      const idx = this.resolveRowIndexAt(ev.clientY);
+      // 只有目标行变了才重算让位与落点（每帧无条件全量遍历是拖拽卡顿的主因）
+      if (idx !== this.dragOverIndex) {
+        this.dragOverIndex = idx;
+        this._syncRowShift();
+        this.updateRowDropBox();
+      }
+      // 边缘自动滚动（上下左右）：滚起来后由 _onRowScrolled 同步几何缓存，保持跟手
+      if (this._rowAutoScroll) this._rowAutoScroll.update(ev.clientX, ev.clientY);
+    },
+    // 行让位（移动语义）：按几何逐行补偿，行高不等也不会错位
+    _syncRowShift() {
+      applyRowShift(this._rowEls, this.dragIndex, this.dragOverIndex, this._rowGeom, this._rowSlotH);
+    },
+    // 清让位位移（拖拽结束/取消）：transform 与 transition 一起清掉，避免出现回弹动画
+    _clearRowShiftFx() {
+      const tbody = this.$refs.tbodyRef;
+      if (tbody) clearShift(tbody);
+      this._rowEls = null;
+      this._rowSlotH = 0;
+    },
+    // 容器滚动后：把缓存的几何一起平移，保证命中判定与落点高亮框继续跟手
+    _onRowScrolled(mx, my) {
+      const geom = this._rowGeom;
+      if (geom) {
+        for (const r of geom) {
+          if (!r) continue;
+          r.left -= mx; r.right -= mx; r.top -= my; r.bottom -= my;
+        }
+      }
+      this.updateRowDropBox();
+    },
+    finishRowDrag() {
+      if (this._rowMove) window.removeEventListener('mousemove', this._rowMove);
+      if (this._rowUp) window.removeEventListener('mouseup', this._rowUp);
+      this._rowMove = null;
+      this._rowUp = null;
+      if (this._rowRaf) { cancelAnimationFrame(this._rowRaf); this._rowRaf = null; }
+      this._applyRowMove(); // 冲刷最后一帧
+      // 松手位置：落位动画的起点（清 pending 之前取）
+      const relRow = this._rowPending ? { x: this._rowPending.clientX, y: this._rowPending.clientY } : null;
+      this._rowPending = null;
+      this._rowGeom = null;
+      this._rowGeomContainer = null;
+      if (this._rowAutoScroll) { this._rowAutoScroll.stop(); this._rowAutoScroll = null; }
+      if (this._rowGhost) { this._rowGhost.remove(); this._rowGhost = null; }
+      if (this._rowSlotGhost) { this._rowSlotGhost.remove(); this._rowSlotGhost = null; }
+      if (this._rowDropBox) { this._rowDropBox.remove(); this._rowDropBox = null; }
+      const from = this.dragIndex;
+      const to = this.dragOverIndex;
+      this.dragIndex = null;
+      this.dragOverIndex = null;
+      if (from === null || to === null || from === to) { this._clearRowShiftFx(); return; }
+      const movedRow = this.rows[from];
+      // 让位交给拖动期完成；松手只做一段「从松手位置落位」的收尾动画
+      this._clearRowShiftFx();
+      if (this.selectedRowKeys.length > 1 && this.selectedRowKeys.includes(movedRow._rowKey)) {
+        const selectedKeys = this.selectedRowKeys.filter(key => this.rows.some(r => r._rowKey === key && !r._isSeparator));
+        this.$emit('moveSelectedRows', { selectedKeys, oldIndex: from, newIndex: to, isDownward: to > from });
+      } else {
+        this.$emit('swapRows', from, to);
+      }
+      if (relRow) this.$nextTick(() => this._slideInRow(to, relRow));
+    },
+    // 落位动画：被移动的这一行从「松手位置」滑进落点（X/Y 双向）
+    _slideInRow(to, rel) {
+      if (!rel) return;
+      const tbody = this.$refs.tbodyRef;
+      if (!tbody) return;
+      const tr = tbody.querySelectorAll('tr')[to];
+      if (!tr || typeof tr.animate !== 'function') return;
+      const r = tr.getBoundingClientRect();
+      if (!r.width && !r.height) return;
+      const dx = Math.round(rel.x - (r.left + r.width / 2));
+      const dy = Math.round(rel.y - (r.top + r.height / 2));
+      if (!dx && !dy) return;
+      tr.animate(
+        [{ transform: `translate(${dx}px, ${dy}px)` }, { transform: 'translate(0, 0)' }],
+        { duration: 200, easing: 'cubic-bezier(0.22, 0.61, 0.36, 1)' }
+      );
+    },
+    // 采集换位前各行垂直位置（一次性读取，供换位后 FLIP 用）
+    _captureRowCells() {
+      const tbody = this.$refs.tbodyRef;
+      if (!tbody) { this._flipRows = null; return; }
+      this._flipRows = Array.from(tbody.querySelectorAll('tr[data-row-id]')).map((el) => ({
+        el,
+        top: el.getBoundingClientRect().top,
+      }));
+    },
+    // 换位后播放 FLIP：移动过的行从旧位置滑到新位置；未移动的行（dy≈0）跳过
+    _playRowCellFlip() {
+      const list = this._flipRows;
+      this._flipRows = null;
+      if (!list) return;
+      for (const item of list) {
+        const el = item.el;
+        if (!el || !el.isConnected || typeof el.animate !== 'function') continue;
+        const dy = item.top - el.getBoundingClientRect().top;
+        if (Math.abs(dy) < 0.5) continue;
+        el.animate(
+          [{ transform: `translateY(${dy}px)` }, { transform: 'translateY(0)' }],
+          { duration: 320, easing: 'cubic-bezier(0.34, 1.08, 0.64, 1)' }
+        );
+      }
+    },
+
+    // ==================== 手动列拖拽（不用原生 HTML5 drag，完全可控，无浏览器居中问题） ====================
+    onColHandleDown(event, colIndex) {
+      if (this.readonly || this.editingCell) return;
+      event.preventDefault();
+      this.colDragIndex = colIndex;
+      this.colDragOverIndex = colIndex;
+      // 拖动期间不启用表头 FLIP：落位动画统一由松手后的「滑入」负责，
+      // 否则表头会再播一次交换动画（观感像弹两下）。
+      this.colAnimDone = false;
+      // 不再生成整列虚影：源列本身已淡化（opacity-30）+ 蓝色落点框，再加浮层会显得重复。
+      this._colActive = true;
+      this._colGhost = null;
+      this._colGrab = null;
+      // 落点高亮框：包住即将落位的那一列（几何信息在此一次性缓存）
+      this._cacheColGeom();
+      // 落点虚影：被拖列的半透明副本，固定贴在落点上（不跟随鼠标）
+      {
+        const tbl = this.$el.querySelector('table');
+        const thsH = tbl ? tbl.querySelectorAll('thead th') : [];
+        const thOff = this.readonly ? 0 : 1;
+        const srcTh = thsH[colIndex + thOff] || null;
+        if (srcTh) {
+          const colWidth = srcTh.getBoundingClientRect().width;
+          const cs = getComputedStyle(srcTh);
+          const ghostTable = document.createElement('table');
+          ghostTable.style.cssText =
+            'border-collapse:collapse;table-layout:fixed;width:' + colWidth +
+            'px;font-family:' + cs.fontFamily + ';font-size:' + cs.fontSize +
+            ';line-height:' + cs.lineHeight + ';color:' + cs.color + ';';
+          const gThead = document.createElement('thead');
+          const gThRow = document.createElement('tr');
+          const gTh = srcTh.cloneNode(true);
+          gTh.classList.remove('opacity-30');
+          gTh.style.transition = 'none';
+          gTh.style.width = colWidth + 'px';
+          gTh.style.overflow = 'hidden';
+          gThRow.appendChild(gTh);
+          gThead.appendChild(gThRow);
+          ghostTable.appendChild(gThead);
+          const gTbody = document.createElement('tbody');
+          if (tbl) {
+            tbl.querySelectorAll('tbody tr').forEach(tr => {
+              const td = tr.children[colIndex + thOff];
+              if (!td) return;
+              const gTr = document.createElement('tr');
+              const gTd = td.cloneNode(true);
+              gTd.style.transition = 'none';
+              gTd.style.width = colWidth + 'px';
+              gTd.style.overflow = 'hidden';
+              gTr.appendChild(gTd);
+              gTbody.appendChild(gTr);
+            });
+          }
+          ghostTable.appendChild(gTbody);
+          const wrap = document.createElement('div');
+          wrap.style.cssText = 'position:fixed;left:0;top:0;z-index:99998;pointer-events:none;opacity:0.85;overflow:hidden;will-change:transform;contain:layout paint;box-shadow:0 6px 18px rgba(0,0,0,0.18);';
+          wrap.appendChild(ghostTable);
+          document.body.appendChild(wrap);
+          this._colGhost = wrap;
+          // 落点虚影在 updateColDropBox 里延迟创建
+          // 跟手虚影：按抓取点跟随指针（自由移动，不吸附格子）
+          const thRect0 = srcTh.getBoundingClientRect();
+          this._colGrab = { grabX: event.clientX - thRect0.left, grabY: event.clientY - thRect0.top };
+          wrap.style.transform = `translate(${event.clientX - this._colGrab.grabX}px, ${event.clientY - this._colGrab.grabY}px)`;
+        }
+      }
+      // 让位：每列 = 表头 th + 各行该列 td（按 data-col 分组，顺序与 fields 一致）
+      const ths0 = this.$el.querySelectorAll('thead th');
+      const thOff = this.readonly ? 0 : 1;
+      const colEls = [];
+      const tbody0 = this.$refs.tbodyRef;
+      if (tbody0) {
+        for (const tr of tbody0.querySelectorAll('tr')) {
+          const cells = tr.querySelectorAll('td[data-col]');
+          for (let k = 0; k < cells.length; k++) {
+            if (!colEls[k]) colEls[k] = [];
+            colEls[k].push(cells[k]);
+          }
+        }
+      }
+      for (let k = 0; k < colEls.length; k++) {
+        const th = ths0[k + thOff];
+        if (th) colEls[k].unshift(th);
+      }
+      this._colEls = colEls;
+      const gc0 = this._colGeom ? this._colGeom[colIndex] : null;
+      this._colSlotW = gc0 ? Math.round(gc0.right - gc0.left) : 0;
+      this._colAutoScroll = createEdgeAutoScroll(
+        () => this.$el,
+        (mx, my) => this._onColScrolled(mx, my)
+      );
+      this._colDropBox = this.createDropBox();
+      this.updateColDropBox();
+
+      const move = (e) => {
+        if (!this._colActive) return;
+        // rAF 对齐到帧：同一帧内多次 mousemove 只处理最后一次
+        this._colPending = e;
+        if (this._colRaf) return;
+        this._colRaf = requestAnimationFrame(() => {
+          this._colRaf = null;
+          this._applyColMove();
+        });
+      };
+      const up = () => this.finishColDrag();
+      this._colMove = move;
+      this._colUp = up;
+      // passive：这两个监听不阻止默认行为，声明后不阻塞滚动/合成的路径
+      window.addEventListener('mousemove', move, { passive: true });
+      window.addEventListener('mouseup', up, { passive: true });
+    },
+    // 应用最近一次待处理的列拖拽位置（rAF 帧内执行；松手前也会强制冲刷一次）
+    _applyColMove() {
+      if (!this._colActive || !this._colPending) return;
+      const ev = this._colPending;
+      // 跟手虚影自由跟随指针
+      const g = this._colGrab;
+      if (g && this._colGhost) {
+        this._colGhost.style.transform = `translate(${ev.clientX - g.grabX}px, ${ev.clientY - g.grabY}px)`;
+      }
+      const hov = this.resolveColIndexAt(ev.clientX);
+      // 只有目标列变了才重算让位与落点
+      if (hov !== null && hov !== this.colDragOverIndex) {
+        this.colDragOverIndex = hov;
+        this._syncColShift();
+        this.updateColDropBox();
+      }
+      // 边缘自动滚动（上下左右）
+      if (this._colAutoScroll) this._colAutoScroll.update(ev.clientX, ev.clientY);
+    },
+    // 列让位（移动语义）：按几何逐列补偿（列宽不等时也能精确让位）
+    _syncColShift() {
+      applyColShift(this._colEls, this.colDragIndex, this.colDragOverIndex, this._colGeom, this._colSlotW);
+    },
+    _clearColShiftFx() {
+      clearShift(this.$el);
+      this._colEls = null;
+      this._colSlotW = 0;
+    },
+    // 容器滚动后同步列几何（左右按 mx、表头/表底按 my），保证命中与落点框跟手
+    _onColScrolled(mx, my) {
+      const geom = this._colGeom;
+      if (geom) {
+        for (const r of geom) {
+          if (!r) continue;
+          r.left -= mx; r.right -= mx;
+        }
+      }
+      if (this._colGeomHeaderTop != null) this._colGeomHeaderTop -= my;
+      if (this._colGeomTblBottom != null) this._colGeomTblBottom -= my;
+      this.updateColDropBox();
+    },
+    resolveColIndexAt(clientX) {
+      // 优先用拖拽开始时缓存的几何信息（无布局读取）
+      const geom = this._colGeom;
+      if (geom && geom.length) {
+        let best = null;
+        let minDist = Infinity;
+        for (let k = 0; k < geom.length; k++) {
+          const r = geom[k];
+          if (!r) continue; // 操作列不参与落点
+          if (clientX >= r.left - 2 && clientX <= r.right + 2) return k; // 直接命中该列
+          const center = (r.left + r.right) / 2;
+          const d = Math.abs(clientX - center);
+          if (d < minDist) { minDist = d; best = k; }
+        }
+        return best; // 落在间隙，取最近邻列
+      }
+      const ths = this.$el ? this.$el.querySelectorAll('thead th') : [];
+      const hasOp = !!this.$el && !!this.$el.querySelector('th.col-op');
+      let best = null;
+      let minDist = Infinity;
+      for (let i = 1; i < ths.length; i++) {
+        if (i === ths.length - 1 && hasOp) continue; // 跳过操作列
+        const r = ths[i].getBoundingClientRect();
+        if (clientX >= r.left - 2 && clientX <= r.right + 2) return i - 1; // 直接命中该列
+        const center = (r.left + r.right) / 2;
+        const d = Math.abs(clientX - center);
+        if (d < minDist) { minDist = d; best = i - 1; }
+      }
+      return best; // 落在间隙，取最近邻列
+    },
+    finishColDrag() {
+      if (this._colMove) window.removeEventListener('mousemove', this._colMove);
+      if (this._colUp) window.removeEventListener('mouseup', this._colUp);
+      this._colMove = null;
+      this._colUp = null;
+      if (this._colRaf) { cancelAnimationFrame(this._colRaf); this._colRaf = null; }
+      this._applyColMove(); // 冲刷最后一帧
+      // 松手位置：落位动画的起点
+      const relCol = this._colPending ? { x: this._colPending.clientX, y: this._colPending.clientY } : null;
+      this._colPending = null;
+      const from = this.colDragIndex;
+      const to = this.colDragOverIndex;
+      this._colGeom = null;
+      this._colGeomContainer = null;
+      this._colGrab = null;
+      this._colActive = false;
+      if (this._colAutoScroll) { this._colAutoScroll.stop(); this._colAutoScroll = null; }
+      if (this._colDropBox) { this._colDropBox.remove(); this._colDropBox = null; }
+      if (this._colGhost) { this._colGhost.remove(); this._colGhost = null; }
+      if (this._colSlotGhost) { this._colSlotGhost.remove(); this._colSlotGhost = null; }
+      this._clearColShiftFx();
+      if (from !== null && to !== null && from !== to && to >= 0) {
+        this.$emit('swapColumns', from, to);
+        // colAnimDone 必须在「重排渲染之后」才恢复，否则表头会再播一遍交换动画。
+        this.$nextTick(() => {
+          if (relCol) this._slideInCol(to, relCol);
+          this.colAnimDone = true;
+        });
+      } else {
+        this.$nextTick(() => { this.colAnimDone = true; });
+      }
+      this.colDragIndex = null;
+      this.colDragOverIndex = null;
+    },
+    // 落位动画：被移动的这一列从「松手位置」滑进落点（X/Y 双向；表头随列一起）
+    _slideInCol(to, rel) {
+      if (!rel) return;
+      const ths = this.$el.querySelectorAll('thead th');
+      const thOff = this.readonly ? 0 : 1;
+      const th = ths[to + thOff];
+      if (!th) return;
+      const r = th.getBoundingClientRect();
+      const dx = Math.round(rel.x - (r.left + r.width / 2));
+      const dy = Math.round(rel.y - (r.top + r.height / 2));
+      if (!dx && !dy) return;
+      const els = [th];
+      const tbody = this.$refs.tbodyRef;
+      if (tbody) {
+        for (const tr of tbody.querySelectorAll('tr')) {
+          const cells = tr.querySelectorAll('td[data-col]');
+          if (cells[to]) els.push(cells[to]);
+        }
+      }
+      for (const el of els) {
+        if (!el || typeof el.animate !== 'function') continue;
+        el.animate(
+          [{ transform: `translate(${dx}px, ${dy}px)` }, { transform: 'translate(0, 0)' }],
+          { duration: 200, easing: 'cubic-bezier(0.22, 0.61, 0.36, 1)' }
+        );
+      }
+    },
+    // 采集换位前 body 数据单元格的水平位置（一次性读取，供换位后 FLIP 用）
+    _captureColCells() {
+      const tbody = this.$refs.tbodyRef;
+      if (!tbody) { this._flipColCells = null; return; }
+      this._flipColCells = Array.from(tbody.querySelectorAll('td[data-col]')).map((el) => ({
+        el,
+        left: el.getBoundingClientRect().left,
+      }));
+    },
+    // 换位后播放 FLIP：每个移动过的单元格从旧位置滑到新位置；约束失败/未移动则跳过
+    _playColCellFlip() {
+      const list = this._flipColCells;
+      this._flipColCells = null;
+      if (!list) return;
+      for (const item of list) {
+        const el = item.el;
+        if (!el || !el.isConnected || typeof el.animate !== 'function') continue;
+        const dx = item.left - el.getBoundingClientRect().left;
+        if (Math.abs(dx) < 0.5) continue; // 没换位的列（含首/末未动列）不动画
+        el.animate(
+          [{ transform: `translateX(${dx}px)` }, { transform: 'translateX(0)' }],
+          { duration: 320, easing: 'cubic-bezier(0.34, 1.08, 0.64, 1)' }
+        );
+      }
+    },
+  };
+}

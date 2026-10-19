@@ -123,7 +123,7 @@ function dump(reason) {
   console.table(categories)
   console.log(`[inp] 最慢交互明细 Top ${details.length}`)
   console.table(details)
-  // 同步一份给主进程落盘（electron/main/inpLog.js → <数据目录>/inp.log）。
+  // 同步一份给主进程落盘（electron/main.inpLog.js → <数据目录>/inp.log）。
   // 探针只在 dev 安装，打包版不会走到这里，通道名也不会被使用。
   try { window.electron?.send?.('inp-report', { reason, categories, details }) } catch (_) {}
   return { reason, categories, details }

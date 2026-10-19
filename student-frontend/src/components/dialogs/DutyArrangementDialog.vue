@@ -127,7 +127,7 @@
 </template>
 
 <script>
-import GridView from '../tables/GridView.vue'
+import GridView from '../tables/GridView/GridView.vue'
 import AppSelect from '../base/AppSelect.vue'
 import axios from 'axios'
 import '../../styles/dialog-transition.css'

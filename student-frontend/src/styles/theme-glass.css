@@ -89,7 +89,7 @@
   left: 0;
   right: 0;
   height: 40%;
-  background: linear-gradient(180deg, rgba(255, 255, 255, 0.22) 0%, rgba(255, 255, 255, 0.06) 55%, rgba(255, 255, 255, 0) 100%);
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.22) 0%, var(--alpha-white-06) 55%, rgba(255, 255, 255, 0) 100%);
   pointer-events: none;
   z-index: -1;
 }
@@ -112,7 +112,7 @@
 }
 /* 深蓝：控制按钮 hover 用浅色遮罩 */
 :root[data-topbar-color="blue"]:is([data-theme="glass"], [data-theme="win11"]) .window-controls .win-btn:hover {
-  background: rgba(255, 255, 255, 0.15);
+  background: var(--alpha-white-15);
 }
 :root:is([data-theme="glass"], [data-theme="win11"]) .window-controls .win-btn-close:hover {
   background: #e81123;
@@ -207,7 +207,7 @@
   border-radius: 0 18px 18px 0;
   /* 同样的预防处理：去掉右向 4px 0 32px 的暗带投影（它会压在网格表格左列背后，
      被表格 backdrop-filter 二次采样成那条"越往右越深"的渐变线），保留顶部内侧高光。 */
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.12);
+  box-shadow: inset 0 1px 0 var(--alpha-white-12);
 }
 /* 顶部玻璃受光渐变高光（与原版完全一致：淡 0.22→0.06→0） */
 :root:is([data-theme="glass"], [data-theme="win11"]) .bg-sidebar::before {
@@ -217,7 +217,7 @@
   left: 0;
   right: 0;
   height: 40%;
-  background: linear-gradient(180deg, rgba(255, 255, 255, 0.22) 0%, rgba(255, 255, 255, 0.06) 55%, rgba(255, 255, 255, 0) 100%);
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.22) 0%, var(--alpha-white-06) 55%, rgba(255, 255, 255, 0) 100%);
   pointer-events: none;
   z-index: -1;
 }
@@ -231,9 +231,9 @@
   padding: 1px;
   background: linear-gradient(
     180deg,
-    rgba(255, 255, 255, 0.3) 0%,
-    rgba(255, 255, 255, 0.08) 50%,
-    rgba(255, 255, 255, 0.12) 100%
+    var(--alpha-white-30) 0%,
+    var(--alpha-white-08) 50%,
+    var(--alpha-white-12) 100%
   );
   -webkit-mask:
     linear-gradient(#fff 0 0) content-box,
@@ -302,11 +302,11 @@
 :root[data-topbar-color="blue"]:is([data-theme="glass"], [data-theme="win11"]) .bg-sidebar-hover {
   /* 旧版 hover 背景：8% 透明白 + blur + 阴影（Tailwind hover:bg-sidebar-hover 触发）。
      描边用 box-shadow inset 模拟，不用真 border，避免 hover 时产生 1px 布局位移（顿挫） */
-  background-color: rgba(255, 255, 255, 0.08) !important;
+  background-color: var(--alpha-white-08) !important;
   backdrop-filter: blur(8px) saturate(1.1);
   box-shadow:
-    inset 0 0 0 1px rgba(255, 255, 255, 0.12),
-    inset 0 1px 0 rgba(255, 255, 255, 0.12),
+    inset 0 0 0 1px var(--alpha-white-12),
+    inset 0 1px 0 var(--alpha-white-12),
     0 0 8px rgba(59, 130, 246, 0.06),
     0 1px 3px rgba(15, 23, 42, 0.05);
 }
@@ -339,9 +339,9 @@
   transition: background-color 0.2s, box-shadow 0.2s, color 0.2s, transform 0.15s;
   position: relative;
   box-shadow:
-    0 0 0 1px rgba(255, 255, 255, 0.12),
+    0 0 0 1px var(--alpha-white-12),
     0 0 12px rgba(255, 255, 255, 0.04),
-    inset 0 1px 0 rgba(255, 255, 255, 0.15);
+    inset 0 1px 0 var(--alpha-white-15);
 }
 :root:is([data-theme="glass"], [data-theme="win11"]) button::before {
   content: '';
@@ -353,7 +353,7 @@
     180deg,
     rgba(255, 255, 255, 0.25) 0%,
     rgba(255, 255, 255, 0.05) 50%,
-    rgba(255, 255, 255, 0.1) 100%
+    var(--alpha-white-10) 100%
   );
   -webkit-mask:
     linear-gradient(#fff 0 0) content-box,
@@ -374,7 +374,7 @@
   color: #166534 !important;
   border-color: transparent;
   box-shadow:
-    0 0 0 1px rgba(255, 255, 255, 0.15),
+    0 0 0 1px var(--alpha-white-15),
     0 0 12px rgba(34, 197, 94, 0.15),
     inset 0 1px 0 rgba(255, 255, 255, 0.2);
 }
@@ -384,14 +384,14 @@
   box-shadow:
     0 0 0 1px rgba(255, 255, 255, 0.25),
     0 0 20px rgba(34, 197, 94, 0.25),
-    inset 0 1px 0 rgba(255, 255, 255, 0.3);
+    inset 0 1px 0 var(--alpha-white-30);
 }
 :root:is([data-theme="glass"], [data-theme="win11"]) button.bg-warning.text-text-inverse {
   background: rgba(245, 158, 11, 0.36) !important;
   color: #92400e !important;
   border-color: transparent;
   box-shadow:
-    0 0 0 1px rgba(255, 255, 255, 0.15),
+    0 0 0 1px var(--alpha-white-15),
     0 0 12px rgba(245, 158, 11, 0.15),
     inset 0 1px 0 rgba(255, 255, 255, 0.2);
 }
@@ -400,14 +400,14 @@
   box-shadow:
     0 0 0 1px rgba(255, 255, 255, 0.25),
     0 0 20px rgba(245, 158, 11, 0.25),
-    inset 0 1px 0 rgba(255, 255, 255, 0.3);
+    inset 0 1px 0 var(--alpha-white-30);
 }
 :root:is([data-theme="glass"], [data-theme="win11"]) button.bg-danger.text-text-inverse {
   background: rgba(239, 68, 68, 0.36) !important;
   color: #991b1b !important;
   border-color: transparent;
   box-shadow:
-    0 0 0 1px rgba(255, 255, 255, 0.15),
+    0 0 0 1px var(--alpha-white-15),
     0 0 12px rgba(239, 68, 68, 0.15),
     inset 0 1px 0 rgba(255, 255, 255, 0.2);
 }
@@ -416,14 +416,14 @@
   box-shadow:
     0 0 0 1px rgba(255, 255, 255, 0.25),
     0 0 20px rgba(239, 68, 68, 0.25),
-    inset 0 1px 0 rgba(255, 255, 255, 0.3);
+    inset 0 1px 0 var(--alpha-white-30);
 }
 :root:is([data-theme="glass"], [data-theme="win11"]) button.bg-info.text-text-inverse {
   background: rgba(59, 130, 246, 0.36) !important;
   color: #1e40af !important;
   border-color: transparent;
   box-shadow:
-    0 0 0 1px rgba(255, 255, 255, 0.15),
+    0 0 0 1px var(--alpha-white-15),
     0 0 12px rgba(59, 130, 246, 0.15),
     inset 0 1px 0 rgba(255, 255, 255, 0.2);
 }
@@ -432,7 +432,7 @@
   box-shadow:
     0 0 0 1px rgba(255, 255, 255, 0.25),
     0 0 20px rgba(59, 130, 246, 0.25),
-    inset 0 1px 0 rgba(255, 255, 255, 0.3);
+    inset 0 1px 0 var(--alpha-white-30);
 }
 /* ========== 切换栏 Tabs 选中态：仅把字改成白色，玻璃背景保持不变 ========== */
 :root:is([data-theme="glass"], [data-theme="win11"]) button.tab-active.bg-info.text-text-inverse,
@@ -471,7 +471,7 @@
   backdrop-filter: blur(12px) saturate(1.3);
   box-shadow:
     inset 0 0 0 40px rgba(255, 255, 255, 0.50),
-    0 0 14px rgba(255, 255, 255, 0.12) !important;
+    0 0 14px var(--alpha-white-12) !important;
 }
 :root:is([data-theme="glass"], [data-theme="win11"]) .opbar button:hover:not(.view-switch-btn) {
   box-shadow:
@@ -488,7 +488,7 @@
   backdrop-filter: blur(12px) saturate(1.3);
   box-shadow:
     inset 0 0 0 40px rgba(255, 255, 255, 0.50),
-    0 0 14px rgba(255, 255, 255, 0.12) !important;
+    0 0 14px var(--alpha-white-12) !important;
 }
 :root:is([data-theme="glass"], [data-theme="win11"]) button.bg-primary.text-text-inverse:not(.tab-active):hover,
 :root:is([data-theme="glass"], [data-theme="win11"]) button.bg-success.text-text-inverse:not(.tab-active):hover,
@@ -638,7 +638,7 @@
   contain: paint;
   box-shadow:
     0 0 20px rgba(255, 255, 255, 0.03),
-    inset 0 1px 0 rgba(255, 255, 255, 0.15);
+    inset 0 1px 0 var(--alpha-white-15);
 }
 /* 顶部玻璃受光渐变高光：与侧边栏 / 标题栏统一（自上而下 0.22→0.06→0，占高度 40%），
    取代原来的「四周 1px 渐变荧光描边」；底边与四周的 1px 亮边仍由 border + box-shadow 提供 */
@@ -650,7 +650,7 @@
   right: 0;
   height: 40%;
   border-radius: inherit;
-  background: linear-gradient(180deg, rgba(255, 255, 255, 0.22) 0%, rgba(255, 255, 255, 0.06) 55%, rgba(255, 255, 255, 0) 100%);
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.22) 0%, var(--alpha-white-06) 55%, rgba(255, 255, 255, 0) 100%);
   pointer-events: none;
   z-index: -1;
 }
@@ -665,9 +665,9 @@
   padding: 1px;
   background: linear-gradient(
     180deg,
-    rgba(255, 255, 255, 0.3) 0%,
-    rgba(255, 255, 255, 0.08) 50%,
-    rgba(255, 255, 255, 0.12) 100%
+    var(--alpha-white-30) 0%,
+    var(--alpha-white-08) 50%,
+    var(--alpha-white-12) 100%
   );
   -webkit-mask:
     linear-gradient(#fff 0 0) content-box,
@@ -689,22 +689,22 @@
     0 0 20px rgba(255, 255, 255, 0.03),
     0 4px 18px rgba(15, 23, 42, 0.12),
     0 18px 48px rgba(15, 23, 42, 0.14),
-    inset 0 1px 0 rgba(255, 255, 255, 0.15);
+    inset 0 1px 0 var(--alpha-white-15);
 }
 /* 夜间（glass）：弹窗阴影。
    当前启用：原深色阴影（theme-night.css 的 .bg-surface 原值）。
    下方注释备用：曾试过的「侧栏选中同款蓝光 + 蓝底」方案，保留供对比选用（未删）。 */
 :root[data-mode="night"][data-theme="glass"] .bg-surface.dialog-card {
-  box-shadow: 0 0 20px rgba(0, 0, 0, 0.25);
+  box-shadow: 0 0 20px var(--alpha-black-25);
 }
 /* 备用：侧栏选中同款蓝光 + 蓝底
 :root[data-mode="night"][data-theme="glass"] .bg-surface.dialog-card {
   background-color: rgba(49, 78, 124, calc(var(--glass-opacity, 0.4) + 0.16)) !important;
   box-shadow:
     inset 0 0 0 1px rgba(96, 165, 250, 0.35),
-    inset 0 1px 0 rgba(255, 255, 255, 0.10),
+    inset 0 1px 0 var(--alpha-white-10),
     0 0 16px rgba(96, 165, 250, 0.25),
-    0 2px 8px rgba(0, 0, 0, 0.25);
+    0 2px 8px var(--alpha-black-25);
 }
 */
 :root:is([data-theme="glass"], [data-theme="win11"]) .bg-surface-hover {
@@ -723,9 +723,9 @@
   contain: layout paint style;
   will-change: transform;
   box-shadow:
-    0 0 0 1px rgba(255, 255, 255, 0.12),
+    0 0 0 1px var(--alpha-white-12),
     0 0 16px rgba(255, 255, 255, 0.04),
-    inset 0 1px 0 rgba(255, 255, 255, 0.15);
+    inset 0 1px 0 var(--alpha-white-15);
 }
 
 /* 底角边框补绘（白天换成统一的受光描边）：
@@ -741,9 +741,9 @@
   padding: 1px;
   background: linear-gradient(
     180deg,
-    rgba(255, 255, 255, 0.3) 0%,
-    rgba(255, 255, 255, 0.08) 50%,
-    rgba(255, 255, 255, 0.12) 100%
+    var(--alpha-white-30) 0%,
+    var(--alpha-white-08) 50%,
+    var(--alpha-white-12) 100%
   );
   -webkit-mask:
     linear-gradient(#fff 0 0) content-box,
@@ -775,7 +775,7 @@
   border: 1px solid rgba(255, 255, 255, 0.14);
   box-shadow:
     0 1px 6px rgba(15, 23, 42, 0.05),
-    inset 0 1px 0 rgba(255, 255, 255, 0.15);
+    inset 0 1px 0 var(--alpha-white-15);
 }
 :root:is([data-theme="glass"], [data-theme="win11"]) table {
   border-collapse: separate;
@@ -851,7 +851,7 @@
 :root:is([data-theme="glass"], [data-theme="win11"]) .grid-view-container {
   position: relative;
   border-radius: 16px;
-  background-color: rgba(255, 255, 255, 0.30) !important;
+  background-color: var(--alpha-white-30) !important;
   /* 单层整表模糊：原来每个 th/td 各有一层 blur(12px)，一张 8×10 的表就是 80 层，
      页面滚动时逐帧重采样导致掉帧。这里收敛成容器这 1 层，半径提到 30px 补厚度。 */
   backdrop-filter: blur(30px) saturate(1.3);
@@ -859,9 +859,9 @@
   contain: layout paint style;
   will-change: transform;
   box-shadow:
-    0 0 0 1px rgba(255, 255, 255, 0.12),
+    0 0 0 1px var(--alpha-white-12),
     0 0 16px rgba(255, 255, 255, 0.04),
-    inset 0 1px 0 rgba(255, 255, 255, 0.15);
+    inset 0 1px 0 var(--alpha-white-15);
 }
 /* 网格表内部滚动容器：滚动/编辑引起的重绘收窄在容器内 */
 :root:is([data-theme="glass"], [data-theme="win11"]) .grid-view-container > .overflow-auto {
@@ -881,9 +881,9 @@
   padding: 1px;
   background: linear-gradient(
     180deg,
-    rgba(255, 255, 255, 0.3) 0%,
-    rgba(255, 255, 255, 0.08) 50%,
-    rgba(255, 255, 255, 0.12) 100%
+    var(--alpha-white-30) 0%,
+    var(--alpha-white-08) 50%,
+    var(--alpha-white-12) 100%
   );
   -webkit-mask:
     linear-gradient(#fff 0 0) content-box,
@@ -971,7 +971,7 @@
   box-shadow:
     0 4px 24px rgba(0, 0, 0, 0.08),
     0 1px 4px rgba(0, 0, 0, 0.04),
-    inset 0 1px 0 rgba(255, 255, 255, 0.3);
+    inset 0 1px 0 var(--alpha-white-30);
   position: relative;
 }
 :root:is([data-theme="glass"], [data-theme="win11"]) .nt-toast::before {
@@ -983,8 +983,8 @@
   background: linear-gradient(
     180deg,
     rgba(255, 255, 255, 0.4) 0%,
-    rgba(255, 255, 255, 0.1) 50%,
-    rgba(255, 255, 255, 0.15) 100%
+    var(--alpha-white-10) 50%,
+    var(--alpha-white-15) 100%
   ) !important;
   -webkit-mask:
     linear-gradient(#fff 0 0) content-box,
@@ -1024,9 +1024,9 @@
   padding: 1px;
   background: linear-gradient(
     180deg,
-    rgba(255, 255, 255, 0.3) 0%,
-    rgba(255, 255, 255, 0.08) 50%,
-    rgba(255, 255, 255, 0.12) 100%
+    var(--alpha-white-30) 0%,
+    var(--alpha-white-08) 50%,
+    var(--alpha-white-12) 100%
   );
   -webkit-mask:
     linear-gradient(#fff 0 0) content-box,
@@ -1064,9 +1064,9 @@
   border: none !important;
   border-radius: 16px !important;
   box-shadow:
-    0 0 0 1px rgba(255, 255, 255, 0.12),
+    0 0 0 1px var(--alpha-white-12),
     0 0 16px rgba(255, 255, 255, 0.04),
-    inset 0 1px 0 rgba(255, 255, 255, 0.15);
+    inset 0 1px 0 var(--alpha-white-15);
 }
 :root:is([data-theme="glass"], [data-theme="win11"]) .grid.grid-cols-3 > div::before {
   content: '';
@@ -1076,9 +1076,9 @@
   padding: 1px;
   background: linear-gradient(
     180deg,
-    rgba(255, 255, 255, 0.3) 0%,
-    rgba(255, 255, 255, 0.08) 50%,
-    rgba(255, 255, 255, 0.12) 100%
+    var(--alpha-white-30) 0%,
+    var(--alpha-white-08) 50%,
+    var(--alpha-white-12) 100%
   );
   -webkit-mask:
     linear-gradient(#fff 0 0) content-box,
@@ -1112,13 +1112,13 @@
   position: relative;
   box-shadow:
     0 0 0 1px rgba(255, 255, 255, 0.25),
-    0 0 30px rgba(255, 255, 255, 0.1),
+    0 0 30px var(--alpha-white-10),
     0 0 60px rgba(255, 255, 255, 0.05),
     0 4px 20px rgba(0, 0, 0, 0.15),
     inset 0 1px 0 rgba(255, 255, 255, 0.35),
     inset 1px 0 0 rgba(255, 255, 255, 0.2),
-    inset 0 -1px 0 rgba(255, 255, 255, 0.1),
-    inset -1px 0 0 rgba(255, 255, 255, 0.15);
+    inset 0 -1px 0 var(--alpha-white-10),
+    inset -1px 0 0 var(--alpha-white-15);
 }
 :root:is([data-theme="glass"], [data-theme="win11"]) .login-glow::before {
   content: '';
@@ -1129,9 +1129,9 @@
   background: linear-gradient(
     180deg,
     rgba(255, 255, 255, 0.5) 0%,
-    rgba(255, 255, 255, 0.15) 20%,
+    var(--alpha-white-15) 20%,
     rgba(255, 255, 255, 0.05) 50%,
-    rgba(255, 255, 255, 0.15) 80%,
+    var(--alpha-white-15) 80%,
     rgba(255, 255, 255, 0.4) 100%
   );
   -webkit-mask:
@@ -1151,7 +1151,7 @@
   border-radius: inherit;
   background: linear-gradient(
     180deg,
-    rgba(255, 255, 255, 0.15) 0%,
+    var(--alpha-white-15) 0%,
     transparent 50%
   );
   pointer-events: none;
@@ -1229,7 +1229,7 @@
    无需再用 `:root *` 逐元素下发（原来的通用选择器写法结果等价，纯属多余匹配开销）。 */
 :root:is([data-theme="glass"], [data-theme="win11"]) {
   scrollbar-width: thin;
-  scrollbar-color: rgba(255, 255, 255, 0.55) rgba(255, 255, 255, 0.08);
+  scrollbar-color: rgba(255, 255, 255, 0.55) var(--alpha-white-08);
 }
 /* 说明：原先这里还有整套 ::-webkit-scrollbar / -track / -thumb / -corner 皮肤（10px 宽、
    白色渐变 thumb、透明 corner），已删除。Chromium 的规则是「只要元素的 scrollbar-width 或

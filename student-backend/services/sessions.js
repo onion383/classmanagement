@@ -1,7 +1,7 @@
 const crypto = require('crypto');
 const fs = require('fs');
 const path = require('path');
-const dbManager = require('../dbManager');
+const dbManager = require('../dbManager/dbManager');
 
 // 有效登录会话名单（sid）：JWT 里只带一个随机 sid，服务端按这份名单校验。
 // 「不主动退出就一直有效」+「退出后原 token 立即失效」都由此实现——

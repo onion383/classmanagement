@@ -118,49 +118,58 @@
   />
 
   <!-- AI 助手：悬浮呼出按钮与浮窗（登录页不显示；AI 助手页面本身已有完整对话界面，也不再渲染悬浮按钮；AI 未启用时同样不显示悬浮按钮） -->
-  <template v-if="$route.path !== '/login' && $route.path !== '/ai-assistant' && aiEnabled">
+  <template v-if="$route.path !== '/login' && $route.path !== '/ai-assistant' && aiEnabled && !aiIconHidden">
     <Teleport to="body">
       <button
         ref="aiIcon"
-        @mousedown="startDragIcon"
+        @mousedown="startUnitDrag"
+        @contextmenu.prevent="onAiContextMenu"
         v-preload="preloadAiAssistant"
         @click="onIconClick"
         class="fixed z-[20000] w-12 h-12 rounded-full bg-primary hover:bg-primary-hover text-text-inverse text-xl shadow-lg flex items-center justify-center cursor-move select-none"
         :style="iconStyle"
-        title="AI 助手（可拖动，点击打开/关闭浮窗）"
+        title="AI 助手（左键打开/关闭浮窗，右键菜单，可拖动）"
       >🤖</button>
     </Teleport>
-    <Teleport to="body" v-if="assistantOpen">
-      <div
-        ref="assistantPanel"
-        class="fixed z-[20001] border border-border rounded-card shadow-2xl flex flex-col overflow-hidden"
-        style="background-color: rgba(255,255,255,0.72); backdrop-filter: blur(28px) saturate(1.5);"
-        :style="{
-          width: '24rem',
-          maxWidth: 'calc(100vw - 2rem)',
-          height: 'min(520px, calc(100vh - 6.5rem))',
-          maxHeight: 'calc(100vh - 6rem)',
-          left: assistantPos.x != null ? assistantPos.x + 'px' : 'auto',
-          right: assistantPos.x == null ? '1.5rem' : 'auto',
-          top: assistantPos.y != null ? assistantPos.y + 'px' : '5rem',
-        }">
+    <Teleport to="body">
+      <!-- 复用工具箱的浮现/收回动画：整块面板从贴合图标的一侧缩放浮现 -->
+      <Transition name="ai-pop">
+        <!-- ai-glass-panel：硬编码浅色玻璃的标记类，夜间模式由 theme-night.css 统一覆盖为深色玻璃
+             （与 AI 页面内的对话列表/聊天区等玻璃块保持一致） -->
         <div
-          @mousedown="startDragAssistant"
-          @click.stop
-          class="flex items-center justify-between px-4 py-2.5 border-b border-border bg-surface-hover flex-shrink-0 cursor-move select-none"
-        >
-          <span class="font-semibold text-text">🤖 AI 助手</span>
-          <button
-            type="button"
-            @click.stop="assistantOpen = false"
-            class="dlg-close"
-            title="关闭"
-          >✕</button>
+          v-if="assistantOpen"
+          ref="assistantPanel"
+          class="ai-panel ai-glass-panel fixed z-[20001] border border-border rounded-card shadow-2xl flex flex-col overflow-hidden"
+          :class="{ 'ai-panel-retracted': assistantRetracted }"
+          style="background-color: rgba(255,255,255,0.72); backdrop-filter: blur(28px) saturate(1.5);"
+          :style="{
+            width: '36rem',
+            maxWidth: 'calc(100vw - 2rem)',
+            height: 'min(520px, calc(100vh - 6.5rem))',
+            maxHeight: 'calc(100vh - 6rem)',
+            left: assistantPos.x != null ? assistantPos.x + 'px' : 'auto',
+            right: assistantPos.x == null ? '1.5rem' : 'auto',
+            top: assistantPos.y != null ? assistantPos.y + 'px' : '5rem',
+            transformOrigin: assistantAttach === 'left' ? 'left center' : 'right center',
+          }">
+          <div
+            @mousedown="startUnitDrag"
+            @click.stop
+            class="flex items-center justify-between px-4 py-2.5 border-b border-border bg-surface-hover flex-shrink-0 cursor-move select-none"
+          >
+            <span class="font-semibold text-text">🤖 AI 助手</span>
+            <button
+              type="button"
+              @click.stop="assistantOpen = false"
+              class="dlg-close"
+              title="关闭"
+            >✕</button>
+          </div>
+          <div class="flex-1 p-4 overflow-hidden">
+            <AiAssistant :floating="true" @capture-start="onAssistantCaptureStart" @capture-end="onAssistantCaptureEnd" />
+          </div>
         </div>
-        <div class="flex-1 p-4 overflow-hidden">
-          <AiAssistant :floating="true" />
-        </div>
-      </div>
+      </Transition>
     </Teleport>
   </template>
 </template>
@@ -215,11 +224,19 @@ export default {
       assistantOpen: false,
       // AI 助手是否已启用（null=尚未查到，先用隐藏态，避免图标闪一下又消失）
       aiEnabled: null,
+      // 本次运行是否已从图标右键菜单「本次退出」隐藏悬浮图标（不持久化，重启恢复）
+      aiIconHidden: false,
       assistantPos: { x: null, y: null },
-      assistantDrag: null,
+      // 浮窗打开中（异步等 AI 内容加载完成，避免连点重复触发）
+      assistantOpening: false,
+      // 浮窗贴合图标的一侧（'left'|'right'）：决定浮现动画的缩放锚点
+      assistantAttach: 'right',
+      // 截屏期间把浮窗收起到图标位置（保持挂载，不丢对话/附件状态），截屏结束再展开
+      assistantRetracted: false,
       // 图标位置：用 CSS transform translate 做偏移，基准位置始终 right/bottom: 1.5rem
       iconTranslate: { x: 0, y: 0 },
-      iconDrag: null,
+      // 整体拖动状态：图标与浮窗作为一个整体一起移动
+      unitDrag: null,
       // 关闭选择弹窗状态
       shutdownMenuVisible: false,
       shutdownHasToolbox: false,
@@ -284,6 +301,8 @@ export default {
   },
   mounted() {
     window.addEventListener('resize', this.onWindowResize)
+    // 点击浮窗/图标以外的区域自动收起（与工具箱一致）
+    document.addEventListener('mousedown', this.onDocMouseDown)
     // 启动回报「桌面小组件启用状态」：主进程据此按需创建工具箱浮窗与（如启用）桌面小组件。
     // 时机：推迟到占位页消失（首屏真正可用）之后 —— 主进程建这两个窗口有约 40ms 的同步开销，
     // 早于此前它会紧压在「后端就绪」的处理之前，占用启动关键路径的时间。
@@ -345,108 +364,183 @@ export default {
   beforeUnmount() {
     window.removeEventListener('resize', this.onWindowResize)
     window.removeEventListener('ai-config-changed', this.onAiConfigChanged)
-    this.stopDragAssistant()
-    this.stopDragIcon()
+    document.removeEventListener('mousedown', this.onDocMouseDown)
+    this.stopUnitDrag()
     this.teardownShutdownIpc()
   },
   methods: {
     onWindowResize() {
-      // 窗口缩放时，保持图标仍在可视区内（简单钳制 translate 范围）
-      const size = 48
-      const m = 12
-      const maxX = window.innerWidth - size - 24 - m
-      const maxY = window.innerHeight - size - 24 - m
-      this.iconTranslate.x = Math.max(-maxX, Math.min(this.iconTranslate.x, 0))
-      this.iconTranslate.y = Math.max(-maxY, Math.min(this.iconTranslate.y, 0))
-    },
-
-    // ---- 悬浮图标拖动 ----
-    startDragIcon(e) {
-      if (e.button !== 0) return
-      const el = this.$refs.aiIcon
-      const rect = el.getBoundingClientRect()
-      this.iconDrag = {
-        startX: e.clientX,
-        startY: e.clientY,
-        startLeft: rect.left,
-        startTop: rect.top,
-      }
-      this._iconMoved = false
-      document.addEventListener('mousemove', this.onDragIcon, { capture: true })
-      document.addEventListener('mouseup', this.stopDragIcon, { capture: true })
-      e.preventDefault()
-      e.stopPropagation()
-    },
-    onDragIcon(e) {
-      if (!this.iconDrag) return
-      const drag = this.iconDrag
-      const dx = e.clientX - drag.startX
-      const dy = e.clientY - drag.startY
-      if (Math.abs(dx) > 2 || Math.abs(dy) > 2) this._iconMoved = true
-      // 计算新左上角位置并钳制在可视区内（留出 12px 边距）
       const size = 48
       const m = 12
       const vw = window.innerWidth
       const vh = window.innerHeight
-      let newLeft = drag.startLeft + dx
-      let newTop = drag.startTop + dy
-      newLeft = Math.max(m, Math.min(newLeft, vw - size - m))
-      newTop = Math.max(m, Math.min(newTop, vh - size - m))
-      // translate = 新位置 - 基准位置（基准是 right=1.5rem/bottom=1.5rem 时的 left/top）
-      const baseLeft = vw - size - 24
-      const baseTop = vh - size - 24
-      drag.x = newLeft - baseLeft
-      drag.y = newTop - baseTop
-      // 直接改 DOM transform，避免每帧写响应式导致根组件重渲染；松手时再同步回 iconTranslate
-      const el = this.$refs.aiIcon
-      if (el) el.style.transform = `translate(${drag.x}px, ${drag.y}px)`
+      // 图标以 right=1.5rem / bottom=1.5rem 锚定，窗口缩放时基准位置随边缘移动，
+      // 故先按新尺寸钳制 translate，再把图标新位置换算回绝对坐标。
+      const maxX = vw - size - 24 - m
+      const maxY = vh - size - 24 - m
+      const nx = Math.max(-maxX, Math.min(this.iconTranslate.x, 0))
+      const ny = Math.max(-maxY, Math.min(this.iconTranslate.y, 0))
+      if (nx !== this.iconTranslate.x || ny !== this.iconTranslate.y) {
+        this.iconTranslate = { x: nx, y: ny }
+      }
+      // 浮窗与图标是一个整体：按图标钳制后的新屏幕位置重新贴合同一侧，使面板随图标一起移动
+      if (!this.assistantOpen || this.assistantPos.x == null) return
+      const left = vw - size - 24 + this.iconTranslate.x
+      const top = vh - size - 24 + this.iconTranslate.y
+      const pos = this.computeAssistantAttachPos(
+        { left, top, right: left + size, bottom: top + size },
+        true,
+      )
+      if (pos.x !== this.assistantPos.x || pos.y !== this.assistantPos.y) {
+        this.assistantPos = { x: pos.x, y: pos.y }
+      }
     },
-    stopDragIcon() {
-      document.removeEventListener('mousemove', this.onDragIcon, { capture: true })
-      document.removeEventListener('mouseup', this.stopDragIcon, { capture: true })
-      const drag = this.iconDrag
-      // 松手后把最终位移同步回响应式状态，保持后续窗口缩放等逻辑一致
-      if (drag && drag.x != null) this.iconTranslate = { x: drag.x, y: drag.y }
-      this.iconDrag = null
+
+    // ---- 悬浮按钮 + 浮窗整体拖动 ----
+    // 图标与浮窗视为一个整体（与工具箱一致）：拖动按钮或拖动面板标题栏，两者一起移动，相对位置保持不变。
+    // 拖动过程中直接改 DOM 样式，松手时再同步回响应式状态，避免每帧写响应式导致根组件重渲染。
+    startUnitDrag(e) {
+      if (e.button !== 0) return
+      const iconEl = this.$refs.aiIcon
+      const panelEl = this.assistantOpen ? this.$refs.assistantPanel : null
+      const iconRect = iconEl ? iconEl.getBoundingClientRect() : { left: 0, top: 0, right: 0, bottom: 0 }
+      const panelRect = panelEl ? panelEl.getBoundingClientRect() : null
+      // 取「图标 + 面板」的联合包围盒作为整体，拖动时按整体钳制，保证两者都不出界
+      const left = panelRect ? Math.min(iconRect.left, panelRect.left) : iconRect.left
+      const top = panelRect ? Math.min(iconRect.top, panelRect.top) : iconRect.top
+      const right = panelRect ? Math.max(iconRect.right, panelRect.right) : iconRect.right
+      const bottom = panelRect ? Math.max(iconRect.bottom, panelRect.bottom) : iconRect.bottom
+      this.unitDrag = {
+        startX: e.clientX,
+        startY: e.clientY,
+        box: { left, top, w: right - left, h: bottom - top },
+        icon: { left: iconRect.left, top: iconRect.top },
+        panel: panelRect ? { left: panelRect.left, top: panelRect.top } : null,
+        curIconX: this.iconTranslate.x,
+        curIconY: this.iconTranslate.y,
+        curPanelX: this.assistantPos.x,
+        curPanelY: this.assistantPos.y,
+      }
+      this._iconMoved = false
+      document.addEventListener('mousemove', this.onUnitDrag, { capture: true })
+      document.addEventListener('mouseup', this.stopUnitDrag, { capture: true })
+      e.preventDefault()
+      e.stopPropagation()
+    },
+    onUnitDrag(e) {
+      const d = this.unitDrag
+      if (!d) return
+      let dx = e.clientX - d.startX
+      let dy = e.clientY - d.startY
+      if (Math.abs(dx) > 2 || Math.abs(dy) > 2) this._iconMoved = true
+      // 整体包围盒钳制在可视区内（留 12px 边距）
+      const m = 12
+      const vw = window.innerWidth
+      const vh = window.innerHeight
+      const maxLeft = Math.max(m, vw - d.box.w - m)
+      const maxTop = Math.max(m, vh - d.box.h - m)
+      const newLeft = Math.max(m, Math.min(d.box.left + dx, maxLeft))
+      const newTop = Math.max(m, Math.min(d.box.top + dy, maxTop))
+      dx = newLeft - d.box.left
+      dy = newTop - d.box.top
+      // 图标：translate = 实际位置 - 基准位置（基准是 right=1.5rem/bottom=1.5rem 时的 left/top）
+      const baseLeft = vw - 48 - 24
+      const baseTop = vh - 48 - 24
+      d.curIconX = d.icon.left + dx - baseLeft
+      d.curIconY = d.icon.top + dy - baseTop
+      const iconEl = this.$refs.aiIcon
+      if (iconEl) iconEl.style.transform = `translate(${d.curIconX}px, ${d.curIconY}px)`
+      // 面板：跟随同一位移
+      const panelEl = this.$refs.assistantPanel
+      if (panelEl && d.panel) {
+        d.curPanelX = d.panel.left + dx
+        d.curPanelY = d.panel.top + dy
+        panelEl.style.left = d.curPanelX + 'px'
+        panelEl.style.top = d.curPanelY + 'px'
+        panelEl.style.right = 'auto'
+      }
+    },
+    stopUnitDrag() {
+      document.removeEventListener('mousemove', this.onUnitDrag, { capture: true })
+      document.removeEventListener('mouseup', this.stopUnitDrag, { capture: true })
+      const d = this.unitDrag
+      this.unitDrag = null
+      if (!d) return
+      // 松手后把最终位置同步回响应式状态，保持后续窗口缩放等逻辑一致
+      this.iconTranslate = { x: d.curIconX, y: d.curIconY }
+      if (d.panel) this.assistantPos = { x: d.curPanelX, y: d.curPanelY }
     },
     // 图标点击：拖动超过阈值则不触发；否则切换浮窗打开/关闭
     onIconClick() {
       if (this._iconMoved) { this._iconMoved = false; return }
-      this.assistantOpen = !this.assistantOpen
+      if (this.assistantOpen) this.assistantOpen = false
+      else this.openAssistant()
+    },
+    // 图标右键：呼出原生菜单（与工具箱一致，含「本次退出」）
+    onAiContextMenu() {
+      window.electron?.send('ai-context-menu')
+    },
+    // 点击浮窗/图标以外的区域自动收起（与工具箱一致）。AI 自身被 Teleport 到 body 的
+    // 弹出层（截屏遮罩、权限挡位菜单等）带 data-ai-float-keep，视为浮窗内部，不触发收起。
+    onDocMouseDown(e) {
+      if (!this.assistantOpen) return
+      const t = e.target
+      if (t && typeof t.closest === 'function' && t.closest('[data-ai-float-keep]')) return
+      const panel = this.$refs.assistantPanel
+      const icon = this.$refs.aiIcon
+      if (panel && panel.contains(t)) return
+      if (icon && icon.contains(t)) return
+      this.assistantOpen = false
+    },
+    // 打开浮窗：先等 AI 内容加载完成，再定位、下一帧显示（对齐工具箱「内容就位后再出现」的延迟策略），
+    // 避免浮窗先露出「加载中…」占位再跳成正式内容
+    async openAssistant() {
+      if (this.assistantOpening || this.assistantOpen) return
+      this.assistantOpening = true
+      try { await loadAiAssistant() } catch (_) {}
+      await new Promise((r) => requestAnimationFrame(r))
+      const el = this.$refs.aiIcon
+      if (el) this.assistantPos = this.computeAssistantAttachPos(el.getBoundingClientRect())
+      this.assistantOpen = true
+      this.assistantOpening = false
+    },
+    // 截屏开始：把浮窗收起到图标位置（用 CSS 过渡缩放淡出，保持组件挂载，不丢对话/附件状态），
+    // 让浮窗在截屏画面前先消失，避免被截进画面
+    onAssistantCaptureStart() {
+      this.assistantRetracted = true
+    },
+    // 截屏结束：把浮窗重新展开
+    onAssistantCaptureEnd() {
+      this.assistantRetracted = false
+    },
+    // 依据图标当前屏幕位置计算浮窗落点。尺寸与浮窗样式保持一致：
+    // 宽 36rem(576px)（maxWidth 100vw-2rem），高 min(520px, 100vh-6.5rem)
+    // keepSide=true 时保持当前贴合侧（窗口缩放用），避免面板在左右之间跳变。
+    computeAssistantAttachPos(rect, keepSide = false) {
+      const m = 12, gap = 8
+      const vw = this.clientW()
+      const vh = this.clientH()
+      const w = Math.min(576, vw - 32)
+      const h = Math.min(520, vh - 104)
+      let x
+      if (keepSide) {
+        x = this.assistantAttach === 'left' ? rect.right + gap : rect.left - gap - w
+        x = Math.max(m, Math.min(x, vw - w - m))
+      } else if (rect.left - gap - w >= m) {
+        x = rect.left - gap - w
+        this.assistantAttach = 'right'
+      } else if (rect.right + gap + w <= vw - m) {
+        x = rect.right + gap
+        this.assistantAttach = 'left'
+      } else {
+        x = Math.max(m, Math.min(rect.left - gap - w, vw - w - m))
+        this.assistantAttach = 'right'
+      }
+      const y = Math.max(m, Math.min(rect.bottom - h, vh - h - m))
+      return { x, y }
     },
     clientW() { return document.documentElement.clientWidth || window.innerWidth || 800 },
     clientH() { return document.documentElement.clientHeight || window.innerHeight || 600 },
-
-    // ---- 浮窗拖拽 ----
-    // 面板整体 mousedown 不拦截点击；真正的拖拽只由标题栏 startDragAssistant 触发
-    startDragAssistant(e) {
-      if (e.button !== 0) return
-      this.assistantDrag = { startX: e.clientX, startY: e.clientY, x: this.assistantPos.x, y: this.assistantPos.y }
-      window.addEventListener('mousemove', this.onDragAssistant)
-      window.addEventListener('mouseup', this.stopDragAssistant)
-    },
-    onDragAssistant(e) {
-      if (!this.assistantDrag) return
-      const dx = e.clientX - this.assistantDrag.startX
-      const dy = e.clientY - this.assistantDrag.startY
-      let x = (this.assistantDrag.x ?? 0) + dx
-      let y = (this.assistantDrag.y ?? 0) + dy
-      // 边界钳制：让面板整体完整留在可视区内（上下左右都不超出），并留 12px 边距
-      const el = this.$refs.assistantPanel
-      const w = el ? el.offsetWidth : 384
-      const h = el ? el.offsetHeight : 520
-      const m = 12
-      const vw = this.clientW()
-      const vh = this.clientH()
-      x = Math.max(m, Math.min(x, vw - w - m))
-      y = Math.max(m, Math.min(y, vh - h - m))
-      this.assistantPos = { x, y }
-    },
-    stopDragAssistant() {
-      this.assistantDrag = null
-      window.removeEventListener('mousemove', this.onDragAssistant)
-      window.removeEventListener('mouseup', this.stopDragAssistant)
-    },
 
     // ---- 无边框窗口控制（经 preload 白名单通道通知主进程） ----
     winMinimize() {
@@ -553,6 +647,12 @@ export default {
         // AI 网页抽屉里网页触发的下载被主进程拦截：提示改用本地浏览器打开
         if (data.type === 'link-download-blocked') {
           useNotification().info('下载文件请打开本地浏览器')
+          return
+        }
+        // AI 悬浮图标右键菜单选了「本次退出」：本次运行隐藏悬浮图标与浮窗（重启恢复）
+        if (data.type === 'ai-widget-exit') {
+          this.aiIconHidden = true
+          this.assistantOpen = false
           return
         }
         // 运行期后端异常状态（心跳探测 / 进程退出后主进程发起的重连）
@@ -718,5 +818,36 @@ export default {
   /* 关闭钮 hover 红：Win11 官方关闭红 #c42b1c，比原来的 #e81123 深一档，不那么刺眼 */
   background: #c42b1c;
   color: #fff;
+}
+
+/* AI 助手浮窗：截屏时收起到图标位置（保持挂载，不丢对话/附件状态），截屏结束再展开。
+   过渡放在基础类上，收起/展开共用；缩放锚点由浮窗 :style 的 transform-origin 动态指定。 */
+.ai-panel {
+  transition:
+    transform 0.1s cubic-bezier(0.22, 1, 0.36, 1),
+    opacity 0.1s ease;
+}
+.ai-panel-retracted {
+  transform: scale(0.86);
+  opacity: 0;
+  pointer-events: none;
+}
+
+/* AI 助手浮窗：复用工具箱的浮现/收回动画（整块面板从贴合图标的一侧缩放浮现）。
+   缩放锚点由浮窗 :style 的 transform-origin 动态指定（图标在右则锚右侧，反之锚左侧）。 */
+.ai-pop-enter-active {
+  transition:
+    transform 0.1s cubic-bezier(0.22, 1, 0.36, 1),
+    opacity 0.1s ease;
+}
+.ai-pop-leave-active {
+  transition:
+    transform 0.1s cubic-bezier(0.4, 0, 1, 1),
+    opacity 0.1s ease;
+}
+.ai-pop-enter-from,
+.ai-pop-leave-to {
+  transform: scale(0.86);
+  opacity: 0;
 }
 </style>

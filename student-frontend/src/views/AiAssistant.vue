@@ -62,6 +62,7 @@
               :messages="messages"
               :busy="busy"
               :active-reasoning-on="activeReasoningOn"
+              :floating="floating"
               :is-retryable="isRetryable"
               :is-rollbackable="isRollbackable"
               :can-undo="canUndoChange"
@@ -231,6 +232,7 @@
     <Teleport to="body">
       <div
         v-if="regionShot"
+        data-ai-float-keep
         class="region-overlay"
         @mousedown="onRegionDown"
         @mousemove="onRegionMove"
@@ -661,6 +663,12 @@ export default {
       }
       this.capturing = true
       try {
+        // 窗口模式：截屏时主窗口保持可见（画面带上应用界面），先把 AI 浮窗收起到图标位置，
+        // 等收起动画走完再截，避免浮窗被截进画面；截屏结束后由 endRegionSelect 通知宿主重新展开
+        if (this.floating) {
+          this.$emit('capture-start')
+          await new Promise((r) => setTimeout(r, 160))
+        }
         const res = await window.electron.invoke('screenshot-region')
         if (!res || !res.success) throw new Error((res && res.error) || '截屏失败')
         this.regionShot = res.dataUrl
@@ -759,6 +767,8 @@ export default {
       this.regionRect = null
       this.regionDragging = false
       this.regionStart = null
+      // 窗口模式：截屏流程结束，通知宿主把收起的 AI 浮窗重新展开
+      if (this.floating) this.$emit('capture-end')
     },
     // 聊天区滚动到接近顶部时补载更早的历史消息（贴底由 scrollBottom 负责）
     onMsgScroll() {
@@ -799,6 +809,8 @@ export default {
     },
     // 打开改动明细抽屉（已有抽屉则复用，仅切换展示的提案；同一提案重复点则收起，避免无反应）
     openChangeDrawer(m) {
+      // 浮窗（窗口）模式精简：不提供改动明细抽屉
+      if (this.floating) return
       const p = m && m.proposal
       if (!p) return
       if (this.changeDrawerOpen && this.changeDrawerProposal === p) { this.changeDrawerOpen = false; return }

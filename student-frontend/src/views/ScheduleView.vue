@@ -199,7 +199,7 @@
 import axios from 'axios';
 import { getCurrentInstance, defineAsyncComponent } from 'vue';
 import EmptySnapshot from '../components/base/EmptySnapshot.vue';
-import GridView from '../components/tables/GridView.vue';
+import GridView from '../components/tables/GridView/GridView.vue';
 import Tabs from '../components/base/Tabs.vue';
 import WeekSwitcher from '../components/base/WeekSwitcher.vue';
 import { useNotification } from '../composables/useNotification.js';
@@ -211,7 +211,7 @@ import { applyRouteRowFocus } from '../composables/useRowFocus.js';
 // 可用 v-preload="loadXxx" 在悬停按钮时预取，点击时即时弹出。
 const loadSettingsDialog = () => import('../components/dialogs/SettingsDialog.vue');
 const SettingsDialog = defineAsyncComponent(loadSettingsDialog);
-const ExportExcel = defineAsyncComponent(() => import('../components/import-export/ExportExcel.vue'));
+const ExportExcel = defineAsyncComponent(() => import('../components/import-export/ExportExcel/ExportExcel.vue'));
 const ConfirmDialog = defineAsyncComponent(() => import('../components/base/ConfirmDialog.vue'));
 
 const API_BASE = '/api';
@@ -301,6 +301,11 @@ export default {
       // ========== 全局 ==========
       semesterStart: '',
       loaded: false,
+      // 加载状态：_xxInFlight 防重复请求；_xxLoadOk 记录是否成功，供重进页面时补拉失败项
+      _activeInFlight: 0,
+      _activeLoadOk: false,
+      _masterInFlight: 0,
+      _masterLoadOk: false,
       activeTab: 'schedule',
       tabItems: [
         { label: '课程表管理', value: 'schedule' },
@@ -609,6 +614,13 @@ export default {
       return cells;
     },
 
+    // 重进页面（KeepAlive activated）时只补拉「上次失败」的表；
+    // 已加载成功的表不再重复请求，保持原有行为，避免多余往返
+    retryFailedLoads() {
+      if (!this._activeLoadOk && !this._activeInFlight) this.loadActive();
+      if (!this._masterLoadOk && !this._masterInFlight) this.loadMaster();
+    },
+
     // 课表单元格里是否有实际课程内容（行结构始终存在，不能用行数判空）
     _applyRowFocus() {
       applyRouteRowFocus(this, {
@@ -638,10 +650,11 @@ export default {
     async refreshMaster() {
       try {
         await this.loadMaster()
-        this.notifySuccess('已刷新课程表模板')
+        if (this._masterLoadOk) this.notifySuccess('已刷新课程表模板')
       } catch (e) { /* 错误已在 loadMaster 内部处理 */ }
     },
     async loadMaster() {
+      this._masterInFlight = (this._masterInFlight || 0) + 1;
       try {
         const res = await axios.get(`${API_BASE}/schedule/master`);
         const { cells, settings } = res.data;
@@ -663,7 +676,15 @@ export default {
           await this.saveMaster();
         }
         this.masterCells = this.adjustCells(this.masterCells, this.masterSettings);
-      } catch (e) { console.error(e); }
+        this._masterLoadOk = true;
+      } catch (e) {
+        // 加载失败不再静默：留标记供重进页面时补拉，并给出提示
+        this._masterLoadOk = false;
+        this.notifyError('一般课表加载失败，请稍后重试');
+        console.error(e);
+      } finally {
+        this._masterInFlight = (this._masterInFlight || 1) - 1;
+      }
     },
     async saveMaster() {
       await axios.put(`${API_BASE}/schedule/master`, {
@@ -801,10 +822,11 @@ export default {
     async refreshActive() {
       try {
         await this.loadActive()
-        this.notifySuccess('已刷新实行课表')
+        if (this._activeLoadOk) this.notifySuccess('已刷新实行课表')
       } catch (e) { /* 错误已在 loadActive 内部处理 */ }
     },
     async loadActive() {
+      this._activeInFlight = (this._activeInFlight || 0) + 1;
       try {
         const res = await axios.get(`${API_BASE}/schedule`);
         const { cells, settings } = res.data;
@@ -827,10 +849,21 @@ export default {
         }
         this.activeCells = this.adjustCells(this.activeCells, this.activeSettings);
 
-        // 加载学期开始日期
-        const setRes = await axios.get(`${API_BASE}/schedule/settings`);
-        this.semesterStart = setRes.data?.semester_start || '';
-      } catch (e) { console.error(e); }
+        // 加载学期开始日期（单独兜底：失败不影响课表本身的加载判定）
+        try {
+          const setRes = await axios.get(`${API_BASE}/schedule/settings`);
+          this.semesterStart = setRes.data?.semester_start || '';
+        } catch (e) { console.error(e); }
+
+        this._activeLoadOk = true;
+      } catch (e) {
+        // 加载失败不再静默：留标记供重进页面时补拉，并给出提示
+        this._activeLoadOk = false;
+        this.notifyError('实行课表加载失败，请稍后重试');
+        console.error(e);
+      } finally {
+        this._activeInFlight = (this._activeInFlight || 1) - 1;
+      }
     },
     async saveActive() {
       await axios.put(`${API_BASE}/schedule`, {
@@ -1026,6 +1059,8 @@ export default {
   },
   activated() {
     this._applyRowFocus();
+    // KeepAlive 缓存：再次进入页面时补拉上次失败的表，避免一次失败后长期空白
+    this.retryFailedLoads();
   }
 };
 </script>
