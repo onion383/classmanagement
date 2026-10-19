@@ -210,12 +210,6 @@ const COLUMN_RULES = {
     desktop_apps: { kind: 'apps' },
     class_info: { kind: 'classinfo' },
   },
-  // —— 学期设置 ——
-  schedule_settings: {
-    semester_start: { kind: 'date' },
-    semester_end: { kind: 'date' },
-    auto_apply: { kind: 'bool' },
-  },
   // —— 课表（cells 必须是「元素合法」的数组，settings 必须是对象）——
   schedule: { cells: { kind: 'json', shape: 'array', each: 'slot' }, settings: { kind: 'json', shape: 'object' } },
   master_schedule: { cells: { kind: 'json', shape: 'array', each: 'slot' }, settings: { kind: 'json', shape: 'object' } },

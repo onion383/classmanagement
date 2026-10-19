@@ -6,10 +6,15 @@ const { now, cleanUp, maxPosition, buildInsert, buildUpdate } = require('../util
 // 允许前端更新的字段白名单
 const EDITABLE = ['时间', '主题', '地点', '简介', '参与人员'];
 
+// 全量列表（共用于 GET /api/activities 与 /api/dashboard）
+function readAll() {
+  return db.prepare('SELECT * FROM activities ORDER BY position, id').all();
+}
+
 // GET /api/activities 全量列表
 router.get('/', (req, res) => {
   try {
-    res.json({ data: db.prepare('SELECT * FROM activities ORDER BY position, id').all() });
+    res.json({ data: readAll() });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -54,3 +59,5 @@ router.delete('/:id', (req, res) => {
 });
 
 module.exports = router;
+// 供 /api/dashboard 聚合复用（挂在 router 函数对象上，不影响既有路由）
+module.exports.readAll = readAll;

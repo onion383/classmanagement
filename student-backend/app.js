@@ -171,6 +171,8 @@ function startServer(port) {
       () => { app.use('/api/countdowns', auth(['teacher']), require('./routes/countdowns')); },
       () => { app.use('/api/cadres', auth(['teacher']), require('./routes/cadres')); },
       () => { app.use('/api/ai', auth(['teacher']), require('./routes/ai/ai')); },
+      // 首屏聚合接口：把首页 9 个接口合并为 1 次请求（依赖上面各路由已注册，故放最后）
+      () => { app.use('/api/dashboard', auth(['teacher']), require('./routes/dashboard')); },
       // fee-records 含 multer（文件上传处理），一起延迟加载
       () => {
         const multer = require('multer');

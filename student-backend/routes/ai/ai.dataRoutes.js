@@ -2,6 +2,7 @@ const express = require('express');
 const path = require('path');
 const fs = require('fs');
 const { db, getFields } = require('../../db');
+const store = require('../../services/slotStore');
 const { sanitizeField } = require('../../services/sanitize');
 const { validateRow } = require('../../services/businessRules');
 const dbManager = require('../../dbManager/dbManager');
@@ -33,16 +34,17 @@ router.get('/records/:table', (req, res) => {
   }
 });
 
-// 整块写入前的自动快照：只对「当前在用」的表生效（模板/权重表无对应历史表，不存）。
-// 写快照的目的：整块写入是「整体替换」，一旦写坏无法回滚，故写入前先把旧值留一份。
-// key 语义：week 按周 upsert（schedule_history 以 week_start 为主键维度）；
-//          day 按天 upsert（seat_history 以 snap_date + mode 为主键维度）；
-//          dutyday 按天 + 模式 upsert（duty_history 以 snap_date + mode 为主键维度，需按 daily/big 拆行）。
-const SNAPSHOT_RULES = {
-  schedule: { history: 'schedule_history', key: 'week' },
-  seat_layout: { history: 'seat_history', key: 'day' },
-  duty_layout: { history: 'duty_history', key: 'dutyday' },
-};
+// 整块写入前的自动快照：只对「当前在用」的表生效（模板/权重表无对应历史语义，不存）。
+// 历史快照统一存于 domain_history（经 slotStore 写入）：
+//   schedule   → 按周快照
+//   duty_layout→ 按天 + 模式（daily/big）各存一条
+//   seat_layout→ 按天快照
+function parseJsonText(text, fallback) {
+  try {
+    const v = JSON.parse(text);
+    return v == null ? fallback : v;
+  } catch (_) { return fallback; }
+}
 
 // 按 daily/big 拆分「按模式打包」的字段（与 routes/duty.js 的 fieldToModeMap 口径一致）：
 // 顶层键全是 daily/big 视为新模式结构，否则视为旧版整块、整体归入 daily。
@@ -69,54 +71,52 @@ function localDateStr(date) {
   return `${date.getFullYear()}-${p(date.getMonth() + 1)}-${p(date.getDate())}`;
 }
 
-// 写入前把当前行的旧值快照进对应历史表（幂等 upsert，失败不阻断写入，仅记录）
+// 写入前把当前行的旧值快照进 domain_history（幂等 upsert，失败不阻断写入，仅记录）
 function snapshotBeforeWrite(table, row) {
-  const rule = SNAPSHOT_RULES[table];
-  if (!rule) return;
+  if (table !== 'schedule' && table !== 'duty_layout' && table !== 'seat_layout') return;
   const today = new Date();
   const week = mondayOf(today);
-  if (rule.key === 'week') {
-    // 课表快照：week_start + cells + settings
-    const exists = db.prepare(`SELECT id FROM ${rule.history} WHERE week_start = ?`).get(week);
-    if (exists) {
-      db.prepare(`UPDATE ${rule.history} SET cells = ?, settings = ? WHERE week_start = ?`)
-        .run(row.cells ?? '[]', row.settings ?? '{}', week);
-    } else {
-      db.prepare(`INSERT INTO ${rule.history} (week_start, cells, settings) VALUES (?, ?, ?)`)
-        .run(week, row.cells ?? '[]', row.settings ?? '{}');
-    }
-    return;
-  }
-  // 值日快照：duty_history 以 snap_date + mode 为维度，cells/settings 按 daily/big 拆开各写一行
-  if (rule.key === 'dutyday') {
-    const snapDate = localDateStr(today);
-    const cellsMap = splitModeMap(row.cells);
-    const settingsMap = splitModeMap(row.settings);
-    ['daily', 'big'].forEach((m) => {
-      const cells = JSON.stringify(cellsMap[m] || {});
-      const settings = JSON.stringify(settingsMap[m] || {});
-      const exists = db.prepare(`SELECT id FROM ${rule.history} WHERE snap_date = ? AND mode = ?`).get(snapDate, m);
-      if (exists) {
-        db.prepare(`UPDATE ${rule.history} SET week_start=?, cells=?, settings=? WHERE snap_date=? AND mode=?`)
-          .run(week, cells, settings, snapDate, m);
-      } else {
-        db.prepare(`INSERT INTO ${rule.history} (week_start, snap_date, mode, cells, settings) VALUES (?,?,?,?,?)`)
-          .run(week, snapDate, m, cells, settings);
-      }
+  if (table === 'schedule') {
+    store.histUpsert('schedule', {
+      weekStart: week,
+      payload: {
+        cells: parseJsonText(row.cells, []),
+        settings: parseJsonText(row.settings, {}),
+      },
     });
     return;
   }
-  // 座位快照：snap_date + mode 维度 upsert，保留几何与分组等全部字段
   const snapDate = localDateStr(today);
-  const mode = row.mode || 'single';
-  const exists = db.prepare(`SELECT id FROM ${rule.history} WHERE snap_date = ? AND mode = ?`).get(snapDate, mode);
-  if (exists) {
-    db.prepare(`UPDATE ${rule.history} SET week_start=?, rows=?, cols=?, seats=?, aisle_cols=?, groups_config=?, settings=? WHERE snap_date=? AND mode=?`)
-      .run(week, row.rows, row.cols, row.seats ?? '[]', row.aisle_cols ?? '[]', row.groups_config ?? '[]', row.settings ?? '{}', snapDate, mode);
-  } else {
-    db.prepare(`INSERT INTO ${rule.history} (week_start, snap_date, mode, rows, cols, seats, aisle_cols, groups_config, settings) VALUES (?,?,?,?,?,?,?,?,?)`)
-      .run(week, snapDate, mode, row.rows, row.cols, row.seats ?? '[]', row.aisle_cols ?? '[]', row.groups_config ?? '[]', row.settings ?? '{}');
+  if (table === 'duty_layout') {
+    // 值日快照：按 daily/big 拆开各存一条
+    const cellsMap = splitModeMap(row.cells);
+    const settingsMap = splitModeMap(row.settings);
+    ['daily', 'big'].forEach((m) => {
+      store.histUpsert('duty', {
+        weekStart: week,
+        snapDate,
+        mode: m,
+        payload: { cells: cellsMap[m] || {}, settings: settingsMap[m] || {} },
+      });
+    });
+    return;
   }
+  // 座位快照：保留几何与分组等全部字段
+  const mode = row.mode || 'single';
+  store.histUpsert('seat', {
+    weekStart: week,
+    snapDate,
+    mode,
+    payload: {
+      mode,
+      rows: row.rows,
+      cols: row.cols,
+      seats: parseJsonText(row.seats, []),
+      aisleCols: [],
+      groupsConfig: [],
+      settings: parseJsonText(row.settings, {}),
+    },
+  });
 }
 
 // 取某列在 table_meta 登记的字段类型（供 sanitizeField 的「按类型兜底」使用），未登记默认「文字」
@@ -164,7 +164,12 @@ function applyDocWrite(table, id, values) {
     console.warn(`[ai] 写入前快照失败（已跳过，不影响本次写入）：${e.message}`);
   }
   const setSql = keys.map((k) => `"${k}" = ?`).join(', ');
-  db.prepare(`UPDATE "${table}" SET ${setSql} WHERE id = ?`).run(...keys.map((k) => serializeColVal(cleaned[k])), rid);
+  if (store.isDoc(table)) {
+    // 单例文档表已合并为槽位表，写入统一走 slotStore
+    store.setDoc(table, cleaned);
+  } else {
+    db.prepare(`UPDATE "${table}" SET ${setSql} WHERE id = ?`).run(...keys.map((k) => serializeColVal(cleaned[k])), rid);
+  }
   return { ok: true, table, id: rid, before, after };
 }
 

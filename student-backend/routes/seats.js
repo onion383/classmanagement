@@ -1,6 +1,7 @@
 const express = require('express');
 const router = express.Router();
 const { db } = require('../db');
+const store = require('../services/slotStore');
 const { validateRow } = require('../services/businessRules');
 const { normalizeSeats } = require('../services/sanitize');
 
@@ -65,16 +66,15 @@ router.put('/', (req, res) => {
     // 依赖既有数据的一致性校验：座位里的学生 id 必须真实存在（尺寸越界也在此拦下）
     validateRow('seat_layout', { seats: trimmed, rows, cols });
 
-    db.prepare(`UPDATE seat_layout SET mode=?, rows=?, cols=?, seats=?, aisle_cols=?, groups_config=?, settings=? WHERE id=1`)
-      .run(
-        mode || 'single',
-        rows,
-        cols,
-        JSON.stringify(trimmed),
-        JSON.stringify(aisleCols || []),
-        JSON.stringify(groupsConfig || []),
-        JSON.stringify(settings || {})
-      );
+    store.setDoc('seat_layout', {
+      mode: mode || 'single',
+      rows,
+      cols,
+      seats: JSON.stringify(trimmed),
+      aisle_cols: JSON.stringify(aisleCols || []),
+      groups_config: JSON.stringify(groupsConfig || []),
+      settings: JSON.stringify(settings || {}),
+    });
     res.json({ message: '保存成功' });
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -83,11 +83,11 @@ router.put('/', (req, res) => {
 
 // ======================== 单格更新（供撤销/重做前的单格提交） ========================
 function updateSingleCell(table, row, col, value) {
-  const rec = db.prepare(`SELECT seats FROM "${table}" WHERE id = 1`).get()
-  const seats = rec ? JSON.parse(rec.seats) : []
-  if (!Array.isArray(seats[row])) seats[row] = []
-  seats[row][col] = value == null ? null : value
-  db.prepare(`UPDATE "${table}" SET seats = ? WHERE id = 1`).run(JSON.stringify(seats))
+  const rec = store.getDoc(table);
+  const seats = rec ? JSON.parse(rec.seats) : [];
+  if (!Array.isArray(seats[row])) seats[row] = [];
+  seats[row][col] = value == null ? null : value;
+  store.setDoc(table, { seats: JSON.stringify(seats) });
 }
 
 router.patch('/cell', (req, res) => {
@@ -150,16 +150,15 @@ router.put('/master', (req, res) => {
     // 依赖既有数据的一致性校验：座位里的学生 id 必须真实存在
     validateRow('seat_template', { seats: trimmed, rows, cols });
 
-    db.prepare(`UPDATE seat_template SET mode=?, rows=?, cols=?, seats=?, aisle_cols=?, groups_config=?, settings=? WHERE id=1`)
-      .run(
-        mode || 'single',
-        rows,
-        cols,
-        JSON.stringify(trimmed),
-        JSON.stringify(aisleCols || []),
-        JSON.stringify(groupsConfig || []),
-        JSON.stringify(settings || {})
-      );
+    store.setDoc('seat_template', {
+      mode: mode || 'single',
+      rows,
+      cols,
+      seats: JSON.stringify(trimmed),
+      aisle_cols: JSON.stringify(aisleCols || []),
+      groups_config: JSON.stringify(groupsConfig || []),
+      settings: JSON.stringify(settings || {}),
+    });
     res.json({ message: '模板保存成功' });
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -171,8 +170,15 @@ router.post('/apply-master', (req, res) => {
   try {
     const template = db.prepare('SELECT mode, rows, cols, seats, aisle_cols, groups_config, settings FROM seat_template WHERE id=1').get();
     if (!template) return res.status(400).json({ error: '模板为空' });
-    db.prepare('UPDATE seat_layout SET mode=?, rows=?, cols=?, seats=?, aisle_cols=?, groups_config=?, settings=? WHERE id=1')
-      .run(template.mode, template.rows, template.cols, template.seats, template.aisle_cols, template.groups_config, template.settings);
+    store.setDoc('seat_layout', {
+      mode: template.mode,
+      rows: template.rows,
+      cols: template.cols,
+      seats: template.seats,
+      aisle_cols: template.aisle_cols,
+      groups_config: template.groups_config,
+      settings: template.settings,
+    });
     res.json({ message: '已应用模板' });
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -213,8 +219,13 @@ router.put('/weight', (req, res) => {
     });
     while (trimmed.length < rows) trimmed.push(Array(cols).fill(null));
 
-    db.prepare(`UPDATE seat_weight SET mode=?, rows=?, cols=?, weights=?, settings=? WHERE id=1`)
-      .run(mode || 'single', rows, cols, JSON.stringify(trimmed), JSON.stringify(settings || {}));
+    store.setDoc('seat_weight', {
+      mode: mode || 'single',
+      rows,
+      cols,
+      weights: JSON.stringify(trimmed),
+      settings: JSON.stringify(settings || {}),
+    });
     res.json({ message: '权重保存成功' });
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -267,17 +278,17 @@ router.put('/draft', (req, res) => {
     }
 
     const savedAt = new Date().toISOString();
-    db.prepare(`UPDATE seat_draft SET mode=?, rows=?, cols=?, seats=?, aisle_cols=?, settings=?, conditions=?, saved_at=? WHERE id=1`)
-      .run(
-        mode || 'single',
-        rows,
-        cols,
-        JSON.stringify(trimmed),
-        JSON.stringify(aisleCols || []),
-        JSON.stringify(settings || {}),
-        JSON.stringify(conditions || []),
-        savedAt
-      );
+    store.setDoc('seat_draft', {
+      mode: mode || 'single',
+      rows,
+      cols,
+      seats: JSON.stringify(trimmed),
+      aisle_cols: JSON.stringify(aisleCols || []),
+      groups_config: JSON.stringify([]),
+      settings: JSON.stringify(settings || {}),
+      conditions: JSON.stringify(conditions || []),
+      saved_at: savedAt,
+    });
     res.json({ message: '草稿已保存', savedAt });
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -287,7 +298,7 @@ router.put('/draft', (req, res) => {
 // 清除草稿：清空内容与 saved_at，下次启动不再提示
 router.delete('/draft', (req, res) => {
   try {
-    db.prepare(`UPDATE seat_draft SET seats='[]', conditions='[]', saved_at='' WHERE id=1`).run();
+    store.setDoc('seat_draft', { seats: '[]', conditions: '[]', saved_at: '' });
     res.json({ message: '草稿已清除' });
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -332,11 +343,7 @@ function mondayOf(s) {
 // 历史列表：按周聚合（代表日期 = 该周最后一天），供下拉框使用
 router.get('/history', (req, res) => {
   try {
-    const rows = db.prepare(`
-      SELECT week_start, MAX(snap_date) AS last_date, MAX(created_at) AS created_at, COUNT(*) AS count
-      FROM seat_history GROUP BY week_start ORDER BY week_start DESC
-    `).all();
-    res.json(rows);
+    res.json(store.histWeeks('seat'));
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -345,20 +352,20 @@ router.get('/history', (req, res) => {
 // 单周快照：返回该周最后一天（最新一天）的座位
 router.get('/history/:weekStart', (req, res) => {
   try {
-    const { weekStart } = req.params;
-    const row = db.prepare('SELECT * FROM seat_history WHERE week_start = ? ORDER BY snap_date DESC, id DESC LIMIT 1').get(weekStart);
-    if (!row) return res.json(null);
+    const rec = store.histLatest('seat', req.params.weekStart, null);
+    if (!rec) return res.json(null);
+    const p = rec.payload || {};
     res.json({
-      week_start: row.week_start,
-      snap_date: row.snap_date,
-      mode: row.mode,
-      rows: row.rows,
-      cols: row.cols,
-      seats: JSON.parse(row.seats),
-      aisleCols: JSON.parse(row.aisle_cols),
-      groupsConfig: JSON.parse(row.groups_config),
-      settings: JSON.parse(row.settings),
-      created_at: row.created_at
+      week_start: rec.week_start,
+      snap_date: rec.snap_date,
+      mode: rec.mode,
+      rows: p.rows,
+      cols: p.cols,
+      seats: p.seats || [],
+      aisleCols: p.aisleCols || [],
+      groupsConfig: p.groupsConfig || [],
+      settings: p.settings || {},
+      created_at: rec.created_at,
     });
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -369,26 +376,18 @@ router.get('/history/:weekStart', (req, res) => {
 router.get('/daily', (req, res) => {
   try {
     const { from, to } = req.query;
-    const cols = 'snap_date, week_start, mode, rows, cols, seats, settings';
-    let rows;
-    if (from && to) {
-      rows = db.prepare(`SELECT ${cols} FROM seat_history WHERE snap_date >= ? AND snap_date <= ? ORDER BY snap_date ASC`).all(from, to);
-    } else if (to) {
-      rows = db.prepare(`SELECT ${cols} FROM seat_history WHERE snap_date <= ? ORDER BY snap_date ASC`).all(to);
-    } else if (from) {
-      rows = db.prepare(`SELECT ${cols} FROM seat_history WHERE snap_date >= ? ORDER BY snap_date ASC`).all(from);
-    } else {
-      rows = db.prepare(`SELECT ${cols} FROM seat_history ORDER BY snap_date ASC`).all();
-    }
-    res.json(rows.map(r => ({
-      snap_date: r.snap_date,
-      week_start: r.week_start,
-      mode: r.mode,
-      rows: r.rows,
-      cols: r.cols,
-      seats: JSON.parse(r.seats),
-      settings: JSON.parse(r.settings)
-    })));
+    res.json(store.histDaily('seat', { from, to }).map((rec) => {
+      const p = rec.payload || {};
+      return {
+        snap_date: rec.snap_date,
+        week_start: rec.week_start,
+        mode: rec.mode,
+        rows: p.rows,
+        cols: p.cols,
+        seats: p.seats || [],
+        settings: p.settings || {},
+      };
+    }));
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -400,19 +399,21 @@ router.post('/snapshot', (req, res) => {
     const { snap_date, mode, rows, cols, seats, settings } = req.body;
     if (!snap_date) return res.status(400).json({ error: '缺少快照日期' });
 
-    const week_start = mondayOf(snap_date);
     // 走廊列根据 mode 和 settings.showAisle 动态生成，无需存储
-    const aisleCols = [];
-    const groupsConfig = [];
-
-    const exists = db.prepare('SELECT id FROM seat_history WHERE snap_date = ?').get(snap_date);
-    if (exists) {
-      db.prepare('UPDATE seat_history SET week_start=?, mode=?, rows=?, cols=?, seats=?, aisle_cols=?, groups_config=?, settings=? WHERE snap_date=?')
-        .run(week_start, mode, rows, cols, JSON.stringify(seats), JSON.stringify(aisleCols), JSON.stringify(groupsConfig), JSON.stringify(settings), snap_date);
-    } else {
-      db.prepare('INSERT INTO seat_history (week_start, snap_date, mode, rows, cols, seats, aisle_cols, groups_config, settings) VALUES (?,?,?,?,?,?,?,?,?)')
-        .run(week_start, snap_date, mode, rows, cols, JSON.stringify(seats), JSON.stringify(aisleCols), JSON.stringify(groupsConfig), JSON.stringify(settings));
-    }
+    store.histUpsert('seat', {
+      weekStart: mondayOf(snap_date),
+      snapDate: snap_date,
+      mode: mode || 'single',
+      payload: {
+        mode: mode || 'single',
+        rows,
+        cols,
+        seats,
+        aisleCols: [],
+        groupsConfig: [],
+        settings,
+      },
+    });
     res.json({ message: '快照已保存' });
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -425,9 +426,7 @@ router.post('/snapshot/backfill', (req, res) => {
   try {
     const includeToday = !!(req.body && req.body.includeToday);
     const today = localDateStr(new Date());
-    const settings = db.prepare('SELECT semester_start, semester_end FROM schedule_settings WHERE id = 1').get();
-    const start = (settings && settings.semester_start) || '';
-    const end = (settings && settings.semester_end) || '';
+    const { start, end } = store.semesterRange();
     // 未设置学期开始日期时无法界定结算范围，直接跳过
     if (!start) return res.json({ message: '未设置学期开始日期', inserted: 0 });
 
@@ -435,26 +434,37 @@ router.post('/snapshot/backfill', (req, res) => {
     if (end && upper > end) upper = end;
     if (upper < start) return res.json({ message: '学期范围外', inserted: 0 });
 
-    const layout = db.prepare('SELECT mode, rows, cols, seats, settings FROM seat_layout WHERE id = 1').get();
-    const getByDate = db.prepare('SELECT id FROM seat_history WHERE snap_date = ?');
-    const getPrev = db.prepare('SELECT mode, rows, cols, seats, settings FROM seat_history WHERE snap_date < ? ORDER BY snap_date DESC LIMIT 1');
-    const ins = db.prepare('INSERT INTO seat_history (week_start, snap_date, mode, rows, cols, seats, aisle_cols, groups_config, settings) VALUES (?,?,?,?,?,?,?,?,?)');
-    const upd = db.prepare('UPDATE seat_history SET mode=?, rows=?, cols=?, seats=?, settings=? WHERE snap_date=?');
+    const layout = store.getDoc('seat_layout');
+    const layoutPayload = layout ? {
+      mode: layout.mode,
+      rows: layout.rows,
+      cols: layout.cols,
+      seats: JSON.parse(layout.seats),
+      settings: JSON.parse(layout.settings),
+    } : null;
 
     let inserted = 0;
     let cur = start;
     while (cur <= upper) {
       const isToday = cur === today;
-      if (isToday && includeToday && layout) {
+      const exists = store.histFind('seat', cur, null);
+      if (isToday && includeToday && layoutPayload) {
         // 今天：总是覆盖为当前临时表
-        if (getByDate.get(cur)) upd.run(layout.mode, layout.rows, layout.cols, layout.seats, layout.settings, cur);
-        else ins.run(mondayOf(cur), cur, layout.mode, layout.rows, layout.cols, layout.seats, '[]', '[]', layout.settings);
+        if (exists) store.histUpdateByDate('seat', cur, null, layoutPayload);
+        else store.histInsert('seat', {
+          weekStart: mondayOf(cur), snapDate: cur, mode: layoutPayload.mode,
+          payload: { ...layoutPayload, aisleCols: [], groupsConfig: [] },
+        });
         inserted++;
-      } else if (!getByDate.get(cur)) {
+      } else if (!exists) {
         // 过去日期：缺失才补，沿用最近一天座位；没有更早快照则用当前座位
-        const src = getPrev.get(cur) || layout;
-        if (src) {
-          ins.run(mondayOf(cur), cur, src.mode, src.rows, src.cols, src.seats, '[]', '[]', src.settings);
+        const prev = store.histPrev('seat', cur, null);
+        const payload = prev ? prev.payload : layoutPayload;
+        if (payload) {
+          store.histInsert('seat', {
+            weekStart: mondayOf(cur), snapDate: cur, mode: payload.mode || 'single',
+            payload: { ...payload, aisleCols: [], groupsConfig: [] },
+          });
           inserted++;
         }
       }
@@ -469,9 +479,8 @@ router.post('/snapshot/backfill', (req, res) => {
 // 删除某一周的历史快照（该周下的全部天）
 router.delete('/history/:weekStart', (req, res) => {
   try {
-    const { weekStart } = req.params;
-    const info = db.prepare('DELETE FROM seat_history WHERE week_start = ?').run(weekStart);
-    if (!info.changes) return res.status(404).json({ error: '该周快照不存在' });
+    const changes = store.histDeleteWeek('seat', req.params.weekStart, null);
+    if (!changes) return res.status(404).json({ error: '该周快照不存在' });
     res.json({ message: '快照已删除' });
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -485,18 +494,26 @@ router.post('/history/week', (req, res) => {
     const raw = (req.body && req.body.week_start) || '';
     if (!/^\d{4}-\d{2}-\d{2}$/.test(String(raw))) return res.status(400).json({ error: '缺少周起始日期' });
     const weekStart = mondayOf(raw);
-    const layout = db.prepare('SELECT mode, rows, cols, seats, settings FROM seat_layout WHERE id = 1').get();
-    const getByDate = db.prepare('SELECT id FROM seat_history WHERE snap_date = ?');
-    const getPrev = db.prepare('SELECT mode, rows, cols, seats, settings FROM seat_history WHERE snap_date < ? ORDER BY snap_date DESC LIMIT 1');
-    const ins = db.prepare('INSERT INTO seat_history (week_start, snap_date, mode, rows, cols, seats, aisle_cols, groups_config, settings) VALUES (?,?,?,?,?,?,?,?,?)');
+    const layout = store.getDoc('seat_layout');
+    const layoutPayload = layout ? {
+      mode: layout.mode,
+      rows: layout.rows,
+      cols: layout.cols,
+      seats: JSON.parse(layout.seats),
+      settings: JSON.parse(layout.settings),
+    } : null;
 
     let inserted = 0;
     for (let i = 0; i < 7; i++) {
       const date = shiftDateStr(weekStart, i);
-      if (getByDate.get(date)) continue;
-      const src = getPrev.get(date) || layout;
-      if (!src) continue;
-      ins.run(weekStart, date, src.mode, src.rows, src.cols, src.seats, '[]', '[]', src.settings);
+      if (store.histFind('seat', date, null)) continue;
+      const prev = store.histPrev('seat', date, null);
+      const payload = prev ? prev.payload : layoutPayload;
+      if (!payload) continue;
+      store.histInsert('seat', {
+        weekStart, snapDate: date, mode: payload.mode || 'single',
+        payload: { ...payload, aisleCols: [], groupsConfig: [] },
+      });
       inserted++;
     }
     res.json({ message: inserted ? `已生成 ${inserted} 天记录` : '该周记录已完整，无需补录', inserted });

@@ -120,3 +120,5 @@ router.post('/:id/cancel', (req, res) => {
 });
 
 module.exports = router;
+// 供 /api/dashboard 聚合复用（挂在 router 函数对象上，不影响既有路由）
+module.exports.listOrders = listOrders;

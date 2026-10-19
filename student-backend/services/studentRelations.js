@@ -10,6 +10,7 @@
 //
 // db 为多库代理：本模块只读写当前请求绑定的班主任库。
 const { db } = require('../db');
+const store = require('./slotStore');
 
 // ---------- 座位 seats 解析：兼容三种元素形态 ----------
 // 返回 { ids: [学生id...], names: [姓名...] }，便于按 id 或姓名比对。
@@ -35,7 +36,7 @@ function collectSeatRefs(seats) {
 
 function readSeats() {
   try {
-    const rec = db.prepare('SELECT seats FROM seat_layout WHERE id = 1').get();
+    const rec = store.getDoc('seat_layout');
     return rec ? JSON.parse(rec.seats) : [];
   } catch (_) {
     return [];
@@ -45,7 +46,7 @@ function readSeats() {
 // ---------- 值日 cells 解析：{项目:{星期:[姓名,...]}} ----------
 function readDutyCells() {
   try {
-    const rec = db.prepare('SELECT cells FROM duty_layout WHERE id = 1').get();
+    const rec = store.getDoc('duty_layout');
     return rec ? JSON.parse(rec.cells) : {};
   } catch (_) {
     return {};
@@ -90,7 +91,7 @@ function purgeSeatRelation(student) {
       if (hit) { row[i] = null; removed++; }
     }
   }
-  if (removed) db.prepare('UPDATE seat_layout SET seats = ? WHERE id = 1').run(JSON.stringify(seats));
+  if (removed) store.setDoc('seat_layout', { seats: JSON.stringify(seats) });
   return removed;
 }
 
@@ -109,7 +110,7 @@ function purgeDutyRelation(student) {
       byDay[day] = kept;
     }
   }
-  if (removed) db.prepare('UPDATE duty_layout SET cells = ? WHERE id = 1').run(JSON.stringify(cells));
+  if (removed) store.setDoc('duty_layout', { cells: JSON.stringify(cells) });
   return removed;
 }
 

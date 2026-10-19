@@ -33,33 +33,6 @@ function migrateGroup(conn) {
     );
   `);
 
-  // 存量库迁移：为分组维度表补充 group_count（小组组数）列
-  {
-    const dimCols = conn.prepare('PRAGMA table_info(group_dimensions)').all().map(c => c.name);
-    if (!dimCols.includes('group_count')) {
-      conn.exec(`ALTER TABLE group_dimensions ADD COLUMN group_count INTEGER DEFAULT 0`);
-    }
-  }
-  // 存量库迁移：为分组维度表补充 内置标记 + 男/女生宿舍数列
-  {
-    const dimCols = conn.prepare('PRAGMA table_info(group_dimensions)').all().map(c => c.name);
-    if (!dimCols.includes('is_default')) {
-      conn.exec(`ALTER TABLE group_dimensions ADD COLUMN is_default INTEGER DEFAULT 0`);
-    }
-    if (!dimCols.includes('male_group_count')) {
-      conn.exec(`ALTER TABLE group_dimensions ADD COLUMN male_group_count INTEGER DEFAULT 0`);
-    }
-    if (!dimCols.includes('female_group_count')) {
-      conn.exec(`ALTER TABLE group_dimensions ADD COLUMN female_group_count INTEGER DEFAULT 0`);
-    }
-  }
-  // 存量库迁移：为 groups 表补充 gender 列（0=男生 1=女生）
-  {
-    const groupCols = conn.prepare('PRAGMA table_info(groups)').all().map(c => c.name);
-    if (!groupCols.includes('gender')) {
-      conn.exec(`ALTER TABLE groups ADD COLUMN gender INTEGER DEFAULT 0`);
-    }
-  }
   // 优化：分组/班干部列表是「先查父级，再按父级 id 逐个查成员」的形态，
   // 没索引时每个父级一次全表扫。按外键列建索引（幂等，存量库下次打开自动补建）。
   // 注：cadre_members 的表在本文件末尾才创建，它的索引放在建表处（见下方）。

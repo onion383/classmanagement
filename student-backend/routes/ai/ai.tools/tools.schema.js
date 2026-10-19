@@ -100,7 +100,7 @@ const jsonWriteTool = {
   type: 'function',
   function: {
     name: 'propose_json_write',
-    description: '对「整块 JSON 存储」的表（课表/座位表/座位权重/值日设置/值日表/值日权重/各模板，以及系统设置 widget_settings、学期设置 schedule_settings）做整块写入提案：按 id 覆盖指定列。此调用不会真的改数据，用户确认后才执行。必须先用 query 读出该行当前内容，再基于它给出「该列完整的新值」（整列整体替换，不要只给增量）；一次可写多列。',
+    description: '对「整块 JSON 存储」的表（课表/座位表/座位权重/值日设置/值日表/值日权重/各模板，以及系统设置 widget_settings）做整块写入提案：按 id 覆盖指定列。此调用不会真的改数据，用户确认后才执行。必须先用 query 读出该行当前内容，再基于它给出「该列完整的新值」（整列整体替换，不要只给增量）；一次可写多列。',
     parameters: {
       type: 'object',
       properties: {
@@ -641,7 +641,7 @@ const teachingWeekTool = {
   type: 'function',
   function: {
     name: 'teaching_week',
-    description: '计算教学周次：结合学期设置（schedule_settings 的起止日期）回答「现在是第几周」「距期末考试还有几周」。用户问到第几周、还有几周考试/放假这类问题且与学期进度有关时用它，不要凭记忆数。期末日优先取倒计时表里名称含「期末/考试」的最近一项，没有则用学期结束日。',
+    description: '计算教学周次：结合当前学期（semesters）的起止日期回答「现在是第几周」「距期末考试还有几周」。用户问到第几周、还有几周考试/放假这类问题且与学期进度有关时用它，不要凭记忆数。期末日优先取倒计时表里名称含「期末/考试」的最近一项，没有则用学期结束日。',
     parameters: {
       type: 'object',
       properties: {

@@ -8,6 +8,7 @@
     "electron": "electron .",
     "electron:dev": "concurrently --names \"Vite,Electron\" --prefix-colors \"blue,green\" --kill-others \"npm run dev\" \"electron .\"",
     "inp": "node testjs/inp-probe.mjs",
+    "seed": "node testjs/seed-test-data.js",
     "test:units": "node --test \"testjs/units/*.test.js\"",
     "build": "cd student-frontend && npm run build",
     "build:win:inno": "node electron/inno/compile.mjs",

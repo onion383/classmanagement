@@ -1,32 +1,38 @@
 const express = require('express');
 const router = express.Router();
 const { db } = require('../db');
+const store = require('../services/slotStore');
 const { registerHistoryRoutes } = require('./historyRoutes');
 
 // ======================== 实行课表（临时表） ========================
-router.get('/', (req, res) => {
-  try {
-    const row = db.prepare('SELECT cells, settings FROM schedule WHERE id = 1').get();
-    let cells = row ? JSON.parse(row.cells) : [];
-    let settings = row ? JSON.parse(row.settings) : {};
-    // 活动课表为空时，回退到主课表，保证首页/桌面小组件也能显示已排课程
-    if (!Array.isArray(cells) || cells.length === 0) {
-      const master = db.prepare('SELECT cells, settings FROM master_schedule WHERE id = 1').get();
-      if (master) {
-        const mCells = JSON.parse(master.cells);
-        if (Array.isArray(mCells) && mCells.length > 0) {
-          cells = mCells;
-          settings = JSON.parse(master.settings) || settings;
-        }
+// 读取当前课表（含「空则回退主课表」「对象键规范化为数组」两步），共用于 GET / 与 /api/dashboard。
+function readSchedule() {
+  const row = db.prepare('SELECT cells, settings FROM schedule WHERE id = 1').get();
+  let cells = row ? JSON.parse(row.cells) : [];
+  let settings = row ? JSON.parse(row.settings) : {};
+  // 活动课表为空时，回退到主课表，保证首页/桌面小组件也能显示已排课程
+  if (!Array.isArray(cells) || cells.length === 0) {
+    const master = db.prepare('SELECT cells, settings FROM master_schedule WHERE id = 1').get();
+    if (master) {
+      const mCells = JSON.parse(master.cells);
+      if (Array.isArray(mCells) && mCells.length > 0) {
+        cells = mCells;
+        settings = JSON.parse(master.settings) || settings;
       }
     }
-    // 若 cells 是「按节次键的对象」而非数组，规范化为数组，避免首页/桌面小组件按行索引取不到
-    if (!Array.isArray(cells) && cells && typeof cells === 'object') {
-      cells = Object.keys(cells)
-        .sort((a, b) => Number(a) - Number(b))
-        .map(k => cells[k]);
-    }
-    res.json({ cells, settings });
+  }
+  // 若 cells 是「按节次键的对象」而非数组，规范化为数组，避免首页/桌面小组件按行索引取不到
+  if (!Array.isArray(cells) && cells && typeof cells === 'object') {
+    cells = Object.keys(cells)
+      .sort((a, b) => Number(a) - Number(b))
+      .map(k => cells[k]);
+  }
+  return { cells, settings };
+}
+
+router.get('/', (req, res) => {
+  try {
+    res.json(readSchedule());
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -36,8 +42,10 @@ router.put('/', (req, res) => {
   try {
     const { cells, settings } = req.body;
     if (cells && !Array.isArray(cells)) return res.status(400).json({ error: '数据格式错误' });
-    db.prepare('UPDATE schedule SET cells = ?, settings = ? WHERE id = 1')
-      .run(JSON.stringify(cells || []), JSON.stringify(settings || {}));
+    store.setDoc('schedule', {
+      cells: JSON.stringify(cells || []),
+      settings: JSON.stringify(settings || {}),
+    });
     res.json({ message: '保存成功' });
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -60,8 +68,10 @@ router.put('/master', (req, res) => {
   try {
     const { cells, settings } = req.body;
     if (cells && !Array.isArray(cells)) return res.status(400).json({ error: '数据格式错误' });
-    db.prepare('UPDATE master_schedule SET cells = ?, settings = ? WHERE id = 1')
-      .run(JSON.stringify(cells || []), JSON.stringify(settings || {}));
+    store.setDoc('master_schedule', {
+      cells: JSON.stringify(cells || []),
+      settings: JSON.stringify(settings || {}),
+    });
     res.json({ message: '一般课表保存成功' });
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -71,10 +81,9 @@ router.put('/master', (req, res) => {
 // ======================== 从一般课表应用到实行课表 ========================
 router.post('/apply-master', (req, res) => {
   try {
-    const master = db.prepare('SELECT cells, settings FROM master_schedule WHERE id = 1').get();
+    const master = store.getDoc('master_schedule');
     if (!master) return res.status(400).json({ error: '一般课表为空' });
-    db.prepare('UPDATE schedule SET cells = ?, settings = ? WHERE id = 1')
-      .run(master.cells, master.settings);
+    store.setDoc('schedule', { cells: master.cells, settings: master.settings });
     res.json({ message: '已将一般课表应用为实行课表' });
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -96,14 +105,6 @@ function autoSemester() {
 function currentSemester() {
   return db.prepare('SELECT id, name, start_date, end_date FROM semesters WHERE is_current = 1 ORDER BY id DESC LIMIT 1').get()
     || db.prepare('SELECT id, name, start_date, end_date FROM semesters ORDER BY id DESC LIMIT 1').get();
-}
-
-// 把当前学期的起止日期同步到 schedule_settings（镜像，供座位补存/座位指数读取）
-// 没有任何学期时清空镜像，避免沿用已被删除学期的旧日期
-function syncSemesterToSettings() {
-  const cur = currentSemester();
-  db.prepare('UPDATE schedule_settings SET semester_start = ?, semester_end = ? WHERE id = 1')
-    .run(cur ? (cur.start_date || '') : '', cur ? (cur.end_date || '') : '');
 }
 
 // 学期列表（按开始日期倒序，未填日期的排最后）+ 当前学期
@@ -130,7 +131,6 @@ router.post('/semesters', (req, res) => {
     db.prepare('UPDATE semesters SET is_current = 0').run();
     const info = db.prepare('INSERT INTO semesters (name, start_date, end_date, is_current) VALUES (?,?,?,1)')
       .run(name, start_date, end_date);
-    syncSemesterToSettings();
     res.json({ message: '学期已增加', id: info.lastInsertRowid, name, start_date, end_date });
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -146,7 +146,6 @@ router.put('/semesters/current', (req, res) => {
     if (!exists) return res.status(404).json({ error: '学期不存在' });
     db.prepare('UPDATE semesters SET is_current = 0').run();
     db.prepare('UPDATE semesters SET is_current = 1 WHERE id = ?').run(id);
-    syncSemesterToSettings();
     res.json({ message: '已切换当前学期' });
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -165,7 +164,6 @@ router.put('/semesters/:id', (req, res) => {
     const end_date = body.end_date != null ? body.end_date : row.end_date;
     db.prepare('UPDATE semesters SET name = ?, start_date = ?, end_date = ? WHERE id = ?')
       .run(name, start_date, end_date, id);
-    if (row.is_current) syncSemesterToSettings();
     res.json({ message: '学期已保存' });
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -183,7 +181,6 @@ router.delete('/semesters/:id', (req, res) => {
       const next = db.prepare('SELECT id FROM semesters ORDER BY start_date DESC, id DESC LIMIT 1').get();
       if (next) db.prepare('UPDATE semesters SET is_current = 1 WHERE id = ?').run(next.id);
     }
-    syncSemesterToSettings();
     res.json({ message: '学期已删除' });
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -194,9 +191,7 @@ router.delete('/semesters/:id', (req, res) => {
 router.get('/settings', (req, res) => {
   try {
     const cur = currentSemester();
-    if (cur) return res.json({ semester_start: cur.start_date || '', semester_end: cur.end_date || '' });
-    const row = db.prepare('SELECT semester_start, semester_end FROM schedule_settings WHERE id = 1').get();
-    res.json(row || { semester_start: '', semester_end: '' });
+    res.json({ semester_start: (cur && cur.start_date) || '', semester_end: (cur && cur.end_date) || '' });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -205,13 +200,15 @@ router.get('/settings', (req, res) => {
 router.put('/settings', (req, res) => {
   try {
     const { semester_start, semester_end } = req.body;
-    db.prepare('UPDATE schedule_settings SET semester_start = ?, semester_end = ? WHERE id = 1')
-      .run(semester_start || '', semester_end || '');
-    // 直接改学期起止日期时同步写回当前学期，避免两处不一致
     const cur = currentSemester();
     if (cur) {
       db.prepare('UPDATE semesters SET start_date = ?, end_date = ? WHERE id = ?')
         .run(semester_start || '', semester_end || '', cur.id);
+    } else {
+      // 没有任何学期时直接建一条当前学期，避免设置无处可存
+      const def = autoSemester();
+      db.prepare('INSERT INTO semesters (name, start_date, end_date, is_current) VALUES (?,?,?,1)')
+        .run(def.name, semester_start || '', semester_end || '');
     }
     res.json({ message: '设置已保存' });
   } catch (err) {
@@ -221,12 +218,20 @@ router.put('/settings', (req, res) => {
 
 // ======================== 历史快照 ========================
 // 四组路由（列表 / 单周 / 保存 / 删除）与 duty 同构，走公共实现。
-// schedule 的 cells/settings 直接 JSON 解析；单周快照响应额外带 id 字段。
+// 快照存于 domain_history（domain='schedule'），payload 为 { cells, settings }。
 registerHistoryRoutes(router, {
-  table: 'schedule_history',
-  includeId: true,
-  parseSnapshot: (row) => ({ cells: JSON.parse(row.cells), settings: JSON.parse(row.settings) }),
-  stringifySnapshot: (cells, settings) => [JSON.stringify(cells), JSON.stringify(settings)],
+  domain: 'schedule',
+  listRow: (r) => ({ week_start: r.week_start, created_at: r.created_at }),
+  toSnapshot: (rec) => ({
+    id: rec.id,
+    week_start: rec.week_start,
+    cells: rec.payload.cells || [],
+    settings: rec.payload.settings || {},
+    created_at: rec.created_at,
+  }),
+  buildPayload: (body) => ({ cells: body.cells || [], settings: body.settings || {} }),
 });
 
 module.exports = router;
+// 供 /api/dashboard 聚合复用（挂在 router 函数对象上，不影响既有路由）
+module.exports.readSchedule = readSchedule;

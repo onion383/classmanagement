@@ -1,11 +1,24 @@
-// 注释保真审计（第二版）：对"疑似丢失"做子串复核，区分「真丢失」与「改写/换行」
+// 注释保真审计：把「重构前的文件」与「重构后的文件目录」做注释级对比，
+// 区分「文字被改写/换行」与「注释真的丢了」，避免拆分大文件时静默丢掉设计说明。
+// 用法（任意 cwd 均可，脚本会自行切到仓库根目录）：
+//   node testjs/comment-audit.js
+//   AUDIT_BASE=<git ref> node testjs/comment-audit.js   # 默认 HEAD
+// 说明：下面的 units 是历次大拆分（SettingsView / ai.tools / electron/main / schema …）
+//       的快照清单；新的拆分完成后在数组里追加一条 { name, head, now } 即可复用。
+//       全程只读：git show + 读文件，不改动任何代码。
 const fs = require('fs');
 const path = require('path');
-const { execSync } = require('child_process');
+const { execFileSync } = require('child_process');
+
+const ROOT = path.resolve(__dirname, '..');
+process.chdir(ROOT);
+const BASE = process.env.AUDIT_BASE || 'HEAD';
 
 const readHead = (p) => {
-  try { return execSync(`git show "HEAD:${p}"`, { maxBuffer: 1e9 }).toString('utf8'); }
-  catch { return null; }
+  try {
+    // stdio: 只取 stdout，吞掉 git 的 fatal 噪声（文件在该版本不存在属正常情况）
+    return execFileSync('git', ['show', `${BASE}:${p}`], { maxBuffer: 1e9, stdio: ['ignore', 'pipe', 'ignore'] }).toString('utf8');
+  } catch { return null; }
 };
 
 function extractComments(src) {
@@ -100,6 +113,9 @@ for (const u of units) {
 }
 
 let truthLost = 0;
+if (!report.length) {
+  console.log(`未在 ${BASE} 找到可对比的旧文件。请用 AUDIT_BASE=<拆分前的 commit> 指定基线。`);
+}
 for (const r of report) {
   console.log(`\n===== ${r.name} =====  HEAD ${r.oldCount} 条 → 现状 ${r.newCount} 条（${r.files} 个文件）`);
   if (!r.reallyLost.length && !r.rewritten.length) { console.log('  ✓ 注释全部保留'); continue; }

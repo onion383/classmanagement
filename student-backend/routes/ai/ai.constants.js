@@ -13,7 +13,6 @@ const READ_TABLES = {
   cadre_members: '班干部任职（cadre_id 职务id/student_id 学生id/student_name 姓名/sort_order 排序）',
   semesters: '学期列表（name 学期名/start_date 开始日/end_date 结束日/is_current 是否当前学期（1 是））',
   widget_settings: '系统设置（toolbox_enabled 是否启用桌面悬浮小组件（1 启用/0 关闭）/note_save_path 随手记保存目录/screenshot_save_path 截图保存目录/desktop_apps JSON 数组：桌面软件列表，元素形如 {id,name,path,icon}/class_info JSON 对象：首页班级信息 {name 班名,motto 班级口号,mottoStyle 班风,xuefeng 学风}）',
-  schedule_settings: '学期设置（semester_start 学期开始日/semester_end 学期结束日/auto_apply 是否自动应用课表（1 是/0 否））',
   master_schedule: '主课表模板（cells 为 JSON 课程数据、settings 为 JSON 配置）',
   schedule: '当前课表（cells 为 JSON 课程数据、settings 为 JSON 配置）',
   schedule_history: '历史课表快照（week_start 周一起始日/cells JSON 课程数据/settings JSON/created_at 时间）',
@@ -60,7 +59,6 @@ const JSON_WRITE_TABLES = {
   duty_template: '值日模板',
   duty_weight: '值日权重表',
   widget_settings: '系统设置',
-  schedule_settings: '学期设置',
 };
 
 // 整块写入对应的撤销分组 key（与各业务页 Ctrl+Z 的分组保持一致，便于在该页撤销）
@@ -68,7 +66,7 @@ const DOC_UNDO_KEY = {
   schedule: '课程表', master_schedule: '课程表',
   seat_layout: '座位表', seat_template: '座位表', seat_weight: '座位表',
   duty_settings: '值日表', duty_layout: '值日表', duty_template: '值日表', duty_weight: '值日表',
-  widget_settings: '系统设置', schedule_settings: '学期设置',
+  widget_settings: '系统设置',
 };
 
 module.exports = { READ_TABLES, WRITE_TABLES, JSON_WRITE_TABLES, DOC_UNDO_KEY };

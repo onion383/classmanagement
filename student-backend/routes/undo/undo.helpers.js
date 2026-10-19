@@ -5,16 +5,23 @@
 // =========================================================================
 
 const { db } = require('../../db')
+const store = require('../../services/slotStore')
 
-// 读取网格某列的完整 JSON
+// 读取网格某列的完整 JSON（单例文档表经 slotStore 读取，其余仍走物理表）
 function readGridArray(table, column) {
-  const row = db.prepare(`SELECT "${column}" FROM "${table}" WHERE id = 1`).get()
+  const row = store.isDoc(table)
+    ? store.getDoc(table)
+    : db.prepare(`SELECT "${column}" FROM "${table}" WHERE id = 1`).get()
   if (!row) return []
   try { return JSON.parse(row[column]) } catch { return [] }
 }
 // 整体覆盖网格某列：原样 JSON 序列化。
 // 座位/课表是二维数组，值日表是 {项目:{星期:[人名]}} 对象，统一原样存储，不做强转。
 function writeGridArray(table, column, value) {
+  if (store.isDoc(table)) {
+    store.setDoc(table, { [column]: JSON.stringify(value) })
+    return
+  }
   db.prepare(`UPDATE "${table}" SET "${column}" = ? WHERE id = 1`).run(JSON.stringify(value))
 }
 // 单元格展示文案：value 可能是纯值（座位 id/姓名、人名），也可能是课表 {course} 对象，
@@ -52,6 +59,11 @@ function updateRowById(table, id, row) {
 // 整块写入「非行式」表：按给定列整体覆盖某行（对象/数组列按 JSON 文本落库）。
 // obj 为「列名 → 列值」，仅写入该表真实列（不含 id）。
 function writeDocCols(table, id, obj) {
+  // 单例文档表（课表/值日/座位）写入统一走 slotStore
+  if (store.isDoc(table)) {
+    store.setDoc(table, obj)
+    return
+  }
   const keys = rowKeys(table, obj).filter(k => k !== 'id')
   if (!keys.length) return
   const set = keys.map(k => `"${k}" = ?`).join(', ')

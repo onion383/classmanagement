@@ -1,6 +1,7 @@
 // ===== AI 工具执行：数据体检 / 冲突检测 / 权重评分 =====
 // 纯代码搬运自 ../executors.js，行为不变。门面装配见 tools.js。
 const { db } = require('../../../../db');
+const store = require('../../../../services/slotStore');
 const {
   aiParseDate, aiParseJson, aiTodayStr, studentIdNameMap,
   unpackDutyModeCol, dutyModeLabel, aiLooksMultiCourse,
@@ -246,8 +247,8 @@ function runScoreWeights({ type, from, to, top, mode } = {}) {
     if (!Number.isInteger(n) || n < 1) return { error: `top 需要是 1 以上的整数（收到：${top}）` };
     lim = Math.min(n, 50);
   }
-  const st = db.prepare('SELECT semester_start FROM schedule_settings WHERE id = 1').get();
-  const fromD = aiParseDate(from) || (st ? aiParseDate(st.semester_start) : '');
+  const st = store.semesterRange();
+  const fromD = aiParseDate(from) || aiParseDate(st.start);
   const toD = aiParseDate(to) || aiTodayStr();
   const result = { ok: true, type: kind, range: { from: fromD || '(最早快照)', to: toD }, note: '口径与界面「座位指数/值日指数」一致：学期内每日快照按位置/项目权重逐天累加，数值越高代表承担越多（越吃亏）；最差=累计最高的前若干人。' };
   if (!fromD) result.note += ' 未设置学期开始日，已从最早快照算起。';

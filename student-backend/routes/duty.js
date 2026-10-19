@@ -1,24 +1,11 @@
 const express = require('express');
 const router = express.Router();
 const { db } = require('../db');
+const store = require('../services/slotStore');
 const { validateRow } = require('../services/businessRules');
 
 // cells 结构：{ 劳动项目名: { 星期几: [学生姓名,...] } }
 // settings 结构：{ days: ['周一',...], items: [{name, difficulty, count}, ...] }
-
-function parseCell({ cells, settings }) {
-  try {
-    const parsed = JSON.parse(cells || '{}');
-    return parsed && typeof parsed === 'object' ? parsed : {};
-  } catch (e) { return {}; }
-}
-
-function parseSettings(str) {
-  try {
-    const s = JSON.parse(str || '{}');
-    return s && typeof s === 'object' ? s : {};
-  } catch (e) { return {}; }
-}
 
 // ======================== 模式（日常值日 / 大扫除） ========================
 // cells/settings/items 字段既可存旧版「整块即日常」，也可存「按模式分键」的新结构，
@@ -67,8 +54,7 @@ router.put('/settings', (req, res) => {
     }
     const row = db.prepare('SELECT items FROM duty_settings WHERE id = 1').get();
     const mergedItems = packMode(row ? row.items : null, mode, items);
-    db.prepare('UPDATE duty_settings SET days=?, items=? WHERE id=1')
-      .run(JSON.stringify(days), JSON.stringify(mergedItems));
+    store.setDoc('duty_settings', { days: JSON.stringify(days), items: JSON.stringify(mergedItems) });
     res.json({ message: '设置已保存' });
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -76,37 +62,42 @@ router.put('/settings', (req, res) => {
 });
 
 // ======================== 当前值日表 ========================
+// 读取当前值日表（含「空则回退模板」「补回设置里的 items」两步），共用于 GET / 与 /api/dashboard。
+function readDuty(modeRaw) {
+  const mode = normalizeMode(modeRaw);
+  const row = db.prepare('SELECT cells, settings FROM duty_layout WHERE id = 1').get();
+  let cells = row ? unpackMode(row.cells, mode) : {};
+  let settings = row ? unpackMode(row.settings, mode) : {};
+  // 当前值日表为空时，回退到值日模板，保证首页/桌面小组件能看到已配置的值日
+  const hasLayout = (cells && Object.keys(cells).length > 0)
+    || (settings && Array.isArray(settings.items) && settings.items.length > 0);
+  if (!hasLayout) {
+    const tpl = db.prepare('SELECT cells, settings FROM duty_template WHERE id = 1').get();
+    if (tpl) {
+      const tCells = unpackMode(tpl.cells, mode);
+      const tSettings = unpackMode(tpl.settings, mode);
+      if (tSettings.items && tSettings.items.length > 0) {
+        cells = tCells;
+        settings = tSettings;
+      }
+    }
+  }
+  // layout/template 未携带 items（项目存于独立的 duty_settings 表）时补回，保证首页能列出值日项目
+  if (!Array.isArray(settings.items) || settings.items.length === 0) {
+    const g = db.prepare(`SELECT items FROM duty_settings WHERE id = 1`).get();
+    if (g && g.items) {
+      try {
+        const gItems = unpackMode(g.items, mode);
+        if (Array.isArray(gItems) && gItems.length > 0) settings.items = gItems;
+      } catch (_) { /* 解析失败则忽略 */ }
+    }
+  }
+  return { cells, settings };
+}
+
 router.get('/', (req, res) => {
   try {
-    const mode = normalizeMode(req.query.mode);
-    const row = db.prepare('SELECT cells, settings FROM duty_layout WHERE id = 1').get();
-    let cells = row ? unpackMode(row.cells, mode) : {};
-    let settings = row ? unpackMode(row.settings, mode) : {};
-    // 当前值日表为空时，回退到值日模板，保证首页/桌面小组件能看到已配置的值日
-    const hasLayout = (cells && Object.keys(cells).length > 0)
-      || (settings && Array.isArray(settings.items) && settings.items.length > 0);
-    if (!hasLayout) {
-      const tpl = db.prepare('SELECT cells, settings FROM duty_template WHERE id = 1').get();
-      if (tpl) {
-        const tCells = unpackMode(tpl.cells, mode);
-        const tSettings = unpackMode(tpl.settings, mode);
-        if (tSettings.items && tSettings.items.length > 0) {
-          cells = tCells;
-          settings = tSettings;
-        }
-      }
-    }
-    // layout/template 未携带 items（项目存于独立的 duty_settings 表）时补回，保证首页能列出值日项目
-    if (!Array.isArray(settings.items) || settings.items.length === 0) {
-      const g = db.prepare(`SELECT items FROM duty_settings WHERE id = 1`).get();
-      if (g && g.items) {
-        try {
-          const gItems = unpackMode(g.items, mode);
-          if (Array.isArray(gItems) && gItems.length > 0) settings.items = gItems;
-        } catch (_) { /* 解析失败则忽略 */ }
-      }
-    }
-    res.json({ cells, settings });
+    res.json(readDuty(req.query.mode));
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -124,8 +115,10 @@ router.put('/', (req, res) => {
     const row = db.prepare('SELECT cells, settings FROM duty_layout WHERE id = 1').get();
     const mergedCells = packMode(row ? row.cells : null, mode, cells);
     const mergedSettings = packMode(row ? row.settings : null, mode, settings || {});
-    db.prepare('UPDATE duty_layout SET cells=?, settings=? WHERE id=1')
-      .run(JSON.stringify(mergedCells), JSON.stringify(mergedSettings));
+    store.setDoc('duty_layout', {
+      cells: JSON.stringify(mergedCells),
+      settings: JSON.stringify(mergedSettings),
+    });
     res.json({ message: '保存成功' });
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -159,8 +152,10 @@ router.put('/template', (req, res) => {
     const row = db.prepare('SELECT cells, settings FROM duty_template WHERE id = 1').get();
     const mergedCells = packMode(row ? row.cells : null, mode, cells);
     const mergedSettings = packMode(row ? row.settings : null, mode, settings || {});
-    db.prepare('UPDATE duty_template SET cells=?, settings=? WHERE id=1')
-      .run(JSON.stringify(mergedCells), JSON.stringify(mergedSettings));
+    store.setDoc('duty_template', {
+      cells: JSON.stringify(mergedCells),
+      settings: JSON.stringify(mergedSettings),
+    });
     res.json({ message: '模板保存成功' });
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -193,16 +188,17 @@ router.put('/save', (req, res) => {
       // ① 全局设置（时间 + 劳动项目）
       const s = db.prepare('SELECT items FROM duty_settings WHERE id = 1').get();
       const mergedItems = packMode(s ? s.items : null, mode, items);
-      db.prepare('UPDATE duty_settings SET days=?, items=? WHERE id=1')
-        .run(JSON.stringify(days), JSON.stringify(mergedItems));
+      store.setDoc('duty_settings', { days: JSON.stringify(days), items: JSON.stringify(mergedItems) });
 
       // ② 当前值日表（仅当显式传入 active 时）
       if (active !== undefined) {
         const row = db.prepare('SELECT cells, settings FROM duty_layout WHERE id = 1').get();
         const mergedCells = packMode(row ? row.cells : null, mode, active);
         const mergedSettings = packMode(row ? row.settings : null, mode, {});
-        db.prepare('UPDATE duty_layout SET cells=?, settings=? WHERE id=1')
-          .run(JSON.stringify(mergedCells), JSON.stringify(mergedSettings));
+        store.setDoc('duty_layout', {
+          cells: JSON.stringify(mergedCells),
+          settings: JSON.stringify(mergedSettings),
+        });
       }
 
       // ③ 值日模板（仅当显式传入 master 时）
@@ -210,8 +206,10 @@ router.put('/save', (req, res) => {
         const row = db.prepare('SELECT cells, settings FROM duty_template WHERE id = 1').get();
         const mergedCells = packMode(row ? row.cells : null, mode, master);
         const mergedSettings = packMode(row ? row.settings : null, mode, {});
-        db.prepare('UPDATE duty_template SET cells=?, settings=? WHERE id=1')
-          .run(JSON.stringify(mergedCells), JSON.stringify(mergedSettings));
+        store.setDoc('duty_template', {
+          cells: JSON.stringify(mergedCells),
+          settings: JSON.stringify(mergedSettings),
+        });
       }
     })();
 
@@ -230,7 +228,10 @@ router.post('/apply-master', (req, res) => {
     const row = db.prepare('SELECT cells, settings FROM duty_layout WHERE id = 1').get();
     const mergedCells = packMode(row ? row.cells : null, mode, unpackMode(template.cells, mode));
     const mergedSettings = packMode(row ? row.settings : null, mode, unpackMode(template.settings, mode));
-    db.prepare('UPDATE duty_layout SET cells=?, settings=? WHERE id=1').run(JSON.stringify(mergedCells), JSON.stringify(mergedSettings));
+    store.setDoc('duty_layout', {
+      cells: JSON.stringify(mergedCells),
+      settings: JSON.stringify(mergedSettings),
+    });
     res.json({ message: '已应用模板' });
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -259,7 +260,7 @@ router.put('/weight', (req, res) => {
     }
     const row = db.prepare('SELECT weights FROM duty_weight WHERE id = 1').get();
     const merged = packMode(row ? row.weights : null, mode, weights);
-    db.prepare('UPDATE duty_weight SET weights=? WHERE id=1').run(JSON.stringify(merged));
+    store.setDoc('duty_weight', { weights: JSON.stringify(merged) });
     res.json({ message: '权重保存成功' });
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -302,8 +303,12 @@ router.put('/draft', (req, res) => {
     const mergedCells = packMode(row ? row.cells : null, mode, cells);
     const mergedSettings = packMode(row ? row.settings : null, mode, settings || {});
     const savedAt = new Date().toISOString();
-    db.prepare(`UPDATE duty_draft SET cells=?, settings=?, conditions=?, saved_at=? WHERE id=1`)
-      .run(JSON.stringify(mergedCells), JSON.stringify(mergedSettings), JSON.stringify(conditions || []), savedAt);
+    store.setDoc('duty_draft', {
+      cells: JSON.stringify(mergedCells),
+      settings: JSON.stringify(mergedSettings),
+      conditions: JSON.stringify(conditions || []),
+      saved_at: savedAt,
+    });
     res.json({ message: '草稿已保存', savedAt });
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -313,7 +318,7 @@ router.put('/draft', (req, res) => {
 // 清除草稿：清空内容与 saved_at，下次启动不再提示
 router.delete('/draft', (req, res) => {
   try {
-    db.prepare(`UPDATE duty_draft SET cells='{}', settings='{}', conditions='[]', saved_at='' WHERE id=1`).run();
+    store.setDoc('duty_draft', { cells: '{}', settings: '{}', conditions: '[]', saved_at: '' });
     res.json({ message: '草稿已清除' });
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -345,14 +350,15 @@ function mondayOf(s) {
   d.setDate(diff);
   return localDateStr(d);
 }
-function snapshotRow(row) {
+function snapshotRow(rec) {
+  const p = rec.payload || {};
   return {
-    week_start: row.week_start,
-    snap_date: row.snap_date,
-    mode: row.mode,
-    cells: parseCell(row),
-    settings: parseSettings(row.settings),
-    created_at: row.created_at
+    week_start: rec.week_start,
+    snap_date: rec.snap_date,
+    mode: rec.mode,
+    cells: p.cells || {},
+    settings: p.settings || {},
+    created_at: rec.created_at,
   };
 }
 
@@ -360,11 +366,7 @@ function snapshotRow(row) {
 router.get('/history', (req, res) => {
   try {
     const mode = normalizeMode(req.query.mode);
-    const rows = db.prepare(`
-      SELECT week_start, MAX(snap_date) AS last_date, MAX(created_at) AS created_at, COUNT(*) AS count
-      FROM duty_history WHERE mode = ? GROUP BY week_start ORDER BY week_start DESC
-    `).all(mode);
-    res.json(rows);
+    res.json(store.histWeeks('duty', mode));
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -373,11 +375,9 @@ router.get('/history', (req, res) => {
 // 单周快照：返回该周最后一天（最新一天）的值日表
 router.get('/history/:weekStart', (req, res) => {
   try {
-    const { weekStart } = req.params;
     const mode = normalizeMode(req.query.mode);
-    const row = db.prepare('SELECT * FROM duty_history WHERE week_start = ? AND mode = ? ORDER BY snap_date DESC, id DESC LIMIT 1').get(weekStart, mode);
-    if (!row) return res.json(null);
-    res.json(snapshotRow(row));
+    const rec = store.histLatest('duty', req.params.weekStart, mode);
+    res.json(rec ? snapshotRow(rec) : null);
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -388,18 +388,7 @@ router.get('/daily', (req, res) => {
   try {
     const { from, to } = req.query;
     const mode = normalizeMode(req.query.mode);
-    const cols = 'snap_date, week_start, mode, cells, settings, created_at';
-    let rows;
-    if (from && to) {
-      rows = db.prepare(`SELECT ${cols} FROM duty_history WHERE mode = ? AND snap_date >= ? AND snap_date <= ? ORDER BY snap_date ASC`).all(mode, from, to);
-    } else if (to) {
-      rows = db.prepare(`SELECT ${cols} FROM duty_history WHERE mode = ? AND snap_date <= ? ORDER BY snap_date ASC`).all(mode, to);
-    } else if (from) {
-      rows = db.prepare(`SELECT ${cols} FROM duty_history WHERE mode = ? AND snap_date >= ? ORDER BY snap_date ASC`).all(mode, from);
-    } else {
-      rows = db.prepare(`SELECT ${cols} FROM duty_history WHERE mode = ? ORDER BY snap_date ASC`).all(mode);
-    }
-    res.json(rows.map(snapshotRow));
+    res.json(store.histDaily('duty', { from, to, mode }).map(snapshotRow));
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -413,17 +402,12 @@ router.post('/snapshot', (req, res) => {
     const snapDate = body.snap_date || body.week_start;
     if (!snapDate) return res.status(400).json({ error: '缺少快照日期' });
     const mode = normalizeMode(body.mode);
-    const cells = JSON.stringify(body.cells || {});
-    const settings = JSON.stringify(body.settings || {});
-    const weekStart = mondayOf(snapDate);
-    const exists = db.prepare('SELECT id FROM duty_history WHERE snap_date = ? AND mode = ?').get(snapDate, mode);
-    if (exists) {
-      db.prepare('UPDATE duty_history SET week_start=?, cells=?, settings=? WHERE snap_date=? AND mode=?')
-        .run(weekStart, cells, settings, snapDate, mode);
-    } else {
-      db.prepare('INSERT INTO duty_history (week_start, snap_date, mode, cells, settings) VALUES (?,?,?,?,?)')
-        .run(weekStart, snapDate, mode, cells, settings);
-    }
+    store.histUpsert('duty', {
+      weekStart: mondayOf(snapDate),
+      snapDate,
+      mode,
+      payload: { cells: body.cells || {}, settings: body.settings || {} },
+    });
     res.json({ message: '快照已保存' });
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -437,9 +421,7 @@ router.post('/snapshot/backfill', (req, res) => {
     const mode = normalizeMode(req.body && req.body.mode);
     const includeToday = !!(req.body && req.body.includeToday);
     const today = localDateStr(new Date());
-    const settings = db.prepare('SELECT semester_start, semester_end FROM schedule_settings WHERE id = 1').get();
-    const start = (settings && settings.semester_start) || '';
-    const end = (settings && settings.semester_end) || '';
+    const { start, end } = store.semesterRange();
     // 未设置学期开始日期时无法界定结算范围，直接跳过
     if (!start) return res.json({ message: '未设置学期开始日期', inserted: 0 });
 
@@ -447,29 +429,27 @@ router.post('/snapshot/backfill', (req, res) => {
     if (end && upper > end) upper = end;
     if (upper < start) return res.json({ message: '学期范围外', inserted: 0 });
 
-    const layout = db.prepare('SELECT cells, settings FROM duty_layout WHERE id = 1').get();
-    const layoutCells = JSON.stringify(layout ? unpackMode(layout.cells, mode) : {});
-    const layoutSettings = JSON.stringify(layout ? unpackMode(layout.settings, mode) : {});
-    const getByDate = db.prepare('SELECT id FROM duty_history WHERE snap_date = ? AND mode = ?');
-    const getPrev = db.prepare('SELECT cells, settings FROM duty_history WHERE snap_date < ? AND mode = ? ORDER BY snap_date DESC LIMIT 1');
-    const ins = db.prepare('INSERT INTO duty_history (week_start, snap_date, mode, cells, settings) VALUES (?,?,?,?,?)');
-    const upd = db.prepare('UPDATE duty_history SET cells=?, settings=? WHERE snap_date=? AND mode=?');
+    const layout = store.getDoc('duty_layout');
+    const layoutPayload = {
+      cells: layout ? unpackMode(layout.cells, mode) : {},
+      settings: layout ? unpackMode(layout.settings, mode) : {},
+    };
 
     let inserted = 0;
     let cur = start;
     while (cur <= upper) {
       const isToday = cur === today;
+      const exists = store.histFind('duty', cur, mode);
       if (isToday && includeToday) {
         // 今天：总是覆盖为当前值日表
-        if (getByDate.get(cur, mode)) upd.run(layoutCells, layoutSettings, cur, mode);
-        else ins.run(mondayOf(cur), cur, mode, layoutCells, layoutSettings);
+        if (exists) store.histUpdateByDate('duty', cur, mode, layoutPayload);
+        else store.histInsert('duty', { weekStart: mondayOf(cur), snapDate: cur, mode, payload: layoutPayload });
         inserted++;
-      } else if (!getByDate.get(cur, mode)) {
+      } else if (!exists) {
         // 过去日期：缺失才补，沿用最近一天该模式的值日表；没有更早快照则用当前值日表
-        const src = getPrev.get(cur, mode);
-        const srcCells = src ? JSON.stringify(parseCell(src)) : layoutCells;
-        const srcSettings = src ? JSON.stringify(parseSettings(src.settings)) : layoutSettings;
-        ins.run(mondayOf(cur), cur, mode, srcCells, srcSettings);
+        const src = store.histPrev('duty', cur, mode);
+        const payload = src ? { cells: src.payload.cells || {}, settings: src.payload.settings || {} } : layoutPayload;
+        store.histInsert('duty', { weekStart: mondayOf(cur), snapDate: cur, mode, payload });
         inserted++;
       }
       cur = shiftDateStr(cur, 1);
@@ -483,10 +463,9 @@ router.post('/snapshot/backfill', (req, res) => {
 // 删除某一周的历史快照（该周下该模式的全部天）
 router.delete('/history/:weekStart', (req, res) => {
   try {
-    const { weekStart } = req.params;
     const mode = normalizeMode(req.query.mode);
-    const info = db.prepare('DELETE FROM duty_history WHERE week_start = ? AND mode = ?').run(weekStart, mode);
-    if (!info.changes) return res.status(404).json({ error: '该周快照不存在' });
+    const changes = store.histDeleteWeek('duty', req.params.weekStart, mode);
+    if (!changes) return res.status(404).json({ error: '该周快照不存在' });
     res.json({ message: '快照已删除' });
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -501,21 +480,19 @@ router.post('/history/week', (req, res) => {
     if (!/^\d{4}-\d{2}-\d{2}$/.test(String(raw))) return res.status(400).json({ error: '缺少周起始日期' });
     const mode = normalizeMode(req.body && req.body.mode);
     const weekStart = mondayOf(raw);
-    const layout = db.prepare('SELECT cells, settings FROM duty_layout WHERE id = 1').get();
-    const layoutCells = JSON.stringify(layout ? unpackMode(layout.cells, mode) : {});
-    const layoutSettings = JSON.stringify(layout ? unpackMode(layout.settings, mode) : {});
-    const getByDate = db.prepare('SELECT id FROM duty_history WHERE snap_date = ? AND mode = ?');
-    const getPrev = db.prepare('SELECT cells, settings FROM duty_history WHERE snap_date < ? AND mode = ? ORDER BY snap_date DESC LIMIT 1');
-    const ins = db.prepare('INSERT INTO duty_history (week_start, snap_date, mode, cells, settings) VALUES (?,?,?,?,?)');
+    const layout = store.getDoc('duty_layout');
+    const layoutPayload = {
+      cells: layout ? unpackMode(layout.cells, mode) : {},
+      settings: layout ? unpackMode(layout.settings, mode) : {},
+    };
 
     let inserted = 0;
     for (let i = 0; i < 7; i++) {
       const date = shiftDateStr(weekStart, i);
-      if (getByDate.get(date, mode)) continue;
-      const src = getPrev.get(date, mode);
-      const srcCells = src ? JSON.stringify(parseCell(src)) : layoutCells;
-      const srcSettings = src ? JSON.stringify(parseSettings(src.settings)) : layoutSettings;
-      ins.run(weekStart, date, mode, srcCells, srcSettings);
+      if (store.histFind('duty', date, mode)) continue;
+      const src = store.histPrev('duty', date, mode);
+      const payload = src ? { cells: src.payload.cells || {}, settings: src.payload.settings || {} } : layoutPayload;
+      store.histInsert('duty', { weekStart, snapDate: date, mode, payload });
       inserted++;
     }
     res.json({ message: inserted ? `已生成 ${inserted} 天记录` : '该周记录已完整，无需补录', inserted });
@@ -525,3 +502,5 @@ router.post('/history/week', (req, res) => {
 });
 
 module.exports = router;
+// 供 /api/dashboard 聚合复用（挂在 router 函数对象上，不影响既有路由）
+module.exports.readDuty = readDuty;

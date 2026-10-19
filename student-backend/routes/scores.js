@@ -6,11 +6,15 @@ const { now, cleanUp, buildInsert, buildUpdate } = require('../utils/sql');
 // 允许前端更新的字段白名单
 const EDITABLE = ['姓名', '学号', '类型', '项目', '分值', '原因', '加分时间', 'source', 'group_name', '成员数'];
 
+// 全量列表（共用于 GET /api/scores 与 /api/dashboard）
+function readAll() {
+  return db.prepare('SELECT * FROM score_records ORDER BY 加分时间 DESC, id DESC').all();
+}
+
 // GET /api/scores 全量列表（按加分时间倒序）
 router.get('/', (req, res) => {
   try {
-    const rows = db.prepare('SELECT * FROM score_records ORDER BY 加分时间 DESC, id DESC').all();
-    res.json({ data: rows });
+    res.json({ data: readAll() });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -84,3 +88,5 @@ router.delete('/:id', (req, res) => {
 });
 
 module.exports = router;
+// 供 /api/dashboard 聚合复用（挂在 router 函数对象上，不影响既有路由）
+module.exports.readAll = readAll;

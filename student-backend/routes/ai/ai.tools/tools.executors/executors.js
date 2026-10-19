@@ -9,6 +9,7 @@
 //   ./executors.common.js    通用小工具（日期 / JSON / 拼音 / 值日解包）
 // 本文件只保留「展示类工具 + 过程块文案」并统一再导出，对外接口与拆分前一致。
 const { db, getFields } = require('../../../../db');
+const store = require('../../../../services/slotStore');
 const { COLUMN_RULES } = require('../../../../services/sanitize');
 const dbManager = require('../../../../dbManager/dbManager');
 const { READ_TABLES, WRITE_TABLES, JSON_WRITE_TABLES } = require('../../ai.constants');
@@ -392,7 +393,7 @@ function runDescribeTable({ table, tables } = {}) {
 // 已拆分至 ./executors.impact.js（纯代码搬运，行为不变）。
 
 // ===== teaching_week 工具：教学周次计算 =====
-// 读 schedule_settings 的学期起止日；期末优先取倒计时表里名称含「期末/考试」的最近一项，回退学期结束日。
+// 读 semesters 的当前学期起止日；期末优先取倒计时表里名称含「期末/考试」的最近一项，回退学期结束日。
 function aiDateObj(s) {
   const t = aiParseDate(s);
   if (!t) return null;
@@ -406,9 +407,9 @@ function runTeachingWeek({ date } = {}) {
   if (date && !base) return { error: `无法识别日期：${date}（请用 YYYY-MM-DD）` };
   base.setHours(0, 0, 0, 0);
   const todayStr = aiDateStr(base);
-  const s = db.prepare('SELECT semester_start, semester_end FROM schedule_settings WHERE id = 1').get();
-  const start = s && s.semester_start ? aiDateObj(s.semester_start) : null;
-  const endFromSettings = s && s.semester_end ? aiDateObj(s.semester_end) : null;
+  const s = store.semesterRange();
+  const start = s.start ? aiDateObj(s.start) : null;
+  const endFromSettings = s.end ? aiDateObj(s.end) : null;
 
   let exam = null;
   let examName = '';

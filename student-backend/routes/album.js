@@ -122,14 +122,17 @@ function createBatchedTxn(batchSize = 200) {
 
 // ---------- 相册 CRUD ----------
 
-// GET /api/album 列出所有相册（含照片数、路径），按 sort_order 排序
+// 相册列表（含照片数、路径），按 sort_order 排序；共用于 GET /api/album 与 /api/dashboard
+function readAlbums() {
+  return db.prepare(`
+    SELECT a.*, (SELECT COUNT(*) FROM album_photos p WHERE p.album_id = a.id) AS photo_count
+    FROM albums a ORDER BY a.sort_order ASC, a.id ASC
+  `).all();
+}
+
 router.get('/', (req, res) => {
   try {
-    const albums = db.prepare(`
-      SELECT a.*, (SELECT COUNT(*) FROM album_photos p WHERE p.album_id = a.id) AS photo_count
-      FROM albums a ORDER BY a.sort_order ASC, a.id ASC
-    `).all();
-    res.json({ data: albums });
+    res.json({ data: readAlbums() });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -546,6 +549,8 @@ async function incrementalScan(albumId) {
 }
 
 module.exports = router;
+// 供 /api/dashboard 聚合复用（挂在 router 函数对象上，不影响既有路由）
+module.exports.readAlbums = readAlbums;
 
 // 供 undo.js「撤销添加相册」调用：取消该相册仍在进行的扫描任务。
 router.cancelScan = (albumId) => {

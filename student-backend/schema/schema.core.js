@@ -1,6 +1,4 @@
-// schema 拆分子文件：核心表（学生 / 用户 / 待办 / 表元数据）+ 学生表迁移与默认列。
-const { ensureTableWithMigration } = require('./schema.helpers');
-
+// schema 拆分子文件：核心表（学生 / 用户 / 待办 / 表元数据）+ 默认列与索引。
 function migrateCore(conn) {
   conn.exec(`
     CREATE TABLE IF NOT EXISTS students (
@@ -49,25 +47,6 @@ function migrateCore(conn) {
   const initMeta = conn.prepare(`INSERT OR IGNORE INTO table_meta (table_name, column_name, sort_order) VALUES (?, ?, ?)`);
   ['学号','年级','班级','姓名','年龄','家长联系电话','学生联系电话','备注'].forEach((c, i) => initMeta.run('students', c, i + 1));
   ['收支编码','收支类型','收支金额','收支时间','备注','收据'].forEach((c, i) => initMeta.run('fee_records', c, i + 1));
-
-  // ======================== 学生表联系方式迁移 ========================
-  ensureTableWithMigration(conn, 'students', `
-    CREATE TABLE students (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      position INTEGER DEFAULT 1,
-      学号 TEXT,
-      年级 TEXT,
-      班级 TEXT,
-      姓名 TEXT NOT NULL,
-      年龄 INTEGER,
-      家长联系电话 TEXT,
-      学生联系电话 TEXT,
-      备注 TEXT
-    );
-  `, [
-    { column: '家长联系电话', sql: `"家长联系电话" TEXT` },
-    { column: '学生联系电话', sql: `"学生联系电话" TEXT` }
-  ]);
 
   // 优化：学生按姓名搜索（搜索栏/下拉候选）
   conn.exec(`CREATE INDEX IF NOT EXISTS idx_students_name ON students (姓名);`);

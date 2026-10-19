@@ -25,24 +25,8 @@ function migrateAlbum(conn) {
     );
   `);
 
-  // 存量库迁移：为相册照片表补充 thumb_path 列
-  {
-    const photoCols = conn.prepare('PRAGMA table_info(album_photos)').all().map(c => c.name);
-    if (!photoCols.includes('thumb_path')) {
-      conn.exec(`ALTER TABLE album_photos ADD COLUMN thumb_path TEXT DEFAULT ''`);
-    }
-  }
   // 优化：相册照片按 (album_id, mtime) 排序展示，建索引避免大相册全表扫+排序（幂等）
   conn.exec(`CREATE INDEX IF NOT EXISTS idx_album_photos_album_mtime ON album_photos (album_id, mtime DESC);`);
-  // 存量库迁移：为相册表补充 sort_order 列
-  {
-    const albumCols = conn.prepare('PRAGMA table_info(albums)').all().map(c => c.name);
-    if (!albumCols.includes('sort_order')) {
-      conn.exec(`ALTER TABLE albums ADD COLUMN sort_order INTEGER DEFAULT 0`);
-      // 已有数据按 id 序填充 sort_order
-      conn.exec(`UPDATE albums SET sort_order = id WHERE sort_order = 0`);
-    }
-  }
 }
 
 module.exports = { migrateAlbum };

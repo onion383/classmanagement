@@ -1,0 +1,1170 @@
+{
+  "steps": [
+    {
+      "name": "read:/api/schedule",
+      "method": "GET",
+      "urlPath": "/api/schedule",
+      "status": 200,
+      "body": {
+        "cells": [],
+        "settings": {}
+      }
+    },
+    {
+      "name": "read:/api/schedule/master",
+      "method": "GET",
+      "urlPath": "/api/schedule/master",
+      "status": 200,
+      "body": {
+        "cells": [],
+        "settings": {}
+      }
+    },
+    {
+      "name": "read:/api/schedule/semesters",
+      "method": "GET",
+      "urlPath": "/api/schedule/semesters",
+      "status": 200,
+      "body": {
+        "semesters": [
+          {
+            "id": 1,
+            "name": "2026秋季学期",
+            "start_date": "2026-09-01",
+            "end_date": "2027-01-31",
+            "is_current": 1
+          }
+        ],
+        "current": {
+          "id": 1,
+          "name": "2026秋季学期",
+          "start_date": "2026-09-01",
+          "end_date": "2027-01-31",
+          "is_current": 1
+        }
+      }
+    },
+    {
+      "name": "read:/api/schedule/settings",
+      "method": "GET",
+      "urlPath": "/api/schedule/settings",
+      "status": 200,
+      "body": {
+        "semester_start": "2026-09-01",
+        "semester_end": "2027-01-31"
+      }
+    },
+    {
+      "name": "read:/api/schedule/history",
+      "method": "GET",
+      "urlPath": "/api/schedule/history",
+      "status": 200,
+      "body": []
+    },
+    {
+      "name": "read:/api/schedule/history/2026-03-02",
+      "method": "GET",
+      "urlPath": "/api/schedule/history/2026-03-02",
+      "status": 200,
+      "body": null
+    },
+    {
+      "name": "read:/api/duty",
+      "method": "GET",
+      "urlPath": "/api/duty",
+      "status": 200,
+      "body": {
+        "cells": {},
+        "settings": {
+          "items": [
+            {
+              "name": "擦黑板",
+              "difficulty": 0.6,
+              "count": 1
+            },
+            {
+              "name": "倒垃圾",
+              "difficulty": 0.7,
+              "count": 2
+            },
+            {
+              "name": "扫地",
+              "difficulty": 0.8,
+              "count": 2
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "read:/api/duty?mode=big",
+      "method": "GET",
+      "urlPath": "/api/duty?mode=big",
+      "status": 200,
+      "body": {
+        "cells": {},
+        "settings": {}
+      }
+    },
+    {
+      "name": "read:/api/duty/settings",
+      "method": "GET",
+      "urlPath": "/api/duty/settings",
+      "status": 200,
+      "body": {
+        "days": [
+          "周一",
+          "周二",
+          "周三",
+          "周四",
+          "周五"
+        ],
+        "items": [
+          {
+            "name": "擦黑板",
+            "difficulty": 0.6,
+            "count": 1
+          },
+          {
+            "name": "倒垃圾",
+            "difficulty": 0.7,
+            "count": 2
+          },
+          {
+            "name": "扫地",
+            "difficulty": 0.8,
+            "count": 2
+          }
+        ]
+      }
+    },
+    {
+      "name": "read:/api/duty/settings?mode=big",
+      "method": "GET",
+      "urlPath": "/api/duty/settings?mode=big",
+      "status": 200,
+      "body": {
+        "days": [
+          "周一",
+          "周二",
+          "周三",
+          "周四",
+          "周五"
+        ],
+        "items": {}
+      }
+    },
+    {
+      "name": "read:/api/duty/template",
+      "method": "GET",
+      "urlPath": "/api/duty/template",
+      "status": 200,
+      "body": {
+        "cells": {},
+        "settings": {}
+      }
+    },
+    {
+      "name": "read:/api/duty/template?mode=big",
+      "method": "GET",
+      "urlPath": "/api/duty/template?mode=big",
+      "status": 200,
+      "body": {
+        "cells": {},
+        "settings": {}
+      }
+    },
+    {
+      "name": "read:/api/duty/weight",
+      "method": "GET",
+      "urlPath": "/api/duty/weight",
+      "status": 200,
+      "body": {
+        "weights": {}
+      }
+    },
+    {
+      "name": "read:/api/duty/draft",
+      "method": "GET",
+      "urlPath": "/api/duty/draft",
+      "status": 200,
+      "body": {
+        "exists": false
+      }
+    },
+    {
+      "name": "read:/api/duty/history",
+      "method": "GET",
+      "urlPath": "/api/duty/history",
+      "status": 200,
+      "body": []
+    },
+    {
+      "name": "read:/api/duty/history?mode=big",
+      "method": "GET",
+      "urlPath": "/api/duty/history?mode=big",
+      "status": 200,
+      "body": []
+    },
+    {
+      "name": "read:/api/duty/history/2026-03-02",
+      "method": "GET",
+      "urlPath": "/api/duty/history/2026-03-02",
+      "status": 200,
+      "body": null
+    },
+    {
+      "name": "read:/api/duty/daily",
+      "method": "GET",
+      "urlPath": "/api/duty/daily",
+      "status": 200,
+      "body": []
+    },
+    {
+      "name": "read:/api/seats",
+      "method": "GET",
+      "urlPath": "/api/seats",
+      "status": 200,
+      "body": {
+        "mode": "single",
+        "rows": 6,
+        "cols": 7,
+        "seats": [],
+        "aisleCols": [],
+        "groupsConfig": [],
+        "settings": {}
+      }
+    },
+    {
+      "name": "read:/api/seats/master",
+      "method": "GET",
+      "urlPath": "/api/seats/master",
+      "status": 200,
+      "body": {
+        "mode": "single",
+        "rows": 6,
+        "cols": 7,
+        "seats": [],
+        "aisleCols": [],
+        "groupsConfig": [],
+        "settings": {}
+      }
+    },
+    {
+      "name": "read:/api/seats/weight",
+      "method": "GET",
+      "urlPath": "/api/seats/weight",
+      "status": 200,
+      "body": {
+        "mode": "single",
+        "rows": 6,
+        "cols": 7,
+        "weights": [],
+        "settings": {}
+      }
+    },
+    {
+      "name": "read:/api/seats/draft",
+      "method": "GET",
+      "urlPath": "/api/seats/draft",
+      "status": 200,
+      "body": {
+        "exists": false
+      }
+    },
+    {
+      "name": "read:/api/seats/history",
+      "method": "GET",
+      "urlPath": "/api/seats/history",
+      "status": 200,
+      "body": []
+    },
+    {
+      "name": "read:/api/seats/history/2026-03-02",
+      "method": "GET",
+      "urlPath": "/api/seats/history/2026-03-02",
+      "status": 200,
+      "body": null
+    },
+    {
+      "name": "read:/api/seats/daily",
+      "method": "GET",
+      "urlPath": "/api/seats/daily",
+      "status": 200,
+      "body": []
+    },
+    {
+      "name": "read:/api/dashboard",
+      "method": "GET",
+      "urlPath": "/api/dashboard",
+      "status": 200,
+      "body": {
+        "schedule": {
+          "cells": [],
+          "settings": {}
+        },
+        "duty": {
+          "cells": {},
+          "settings": {
+            "items": [
+              {
+                "name": "擦黑板",
+                "difficulty": 0.6,
+                "count": 1
+              },
+              {
+                "name": "倒垃圾",
+                "difficulty": 0.7,
+                "count": 2
+              },
+              {
+                "name": "扫地",
+                "difficulty": 0.8,
+                "count": 2
+              }
+            ]
+          }
+        },
+        "countdowns": [],
+        "leaves": [],
+        "students": [],
+        "scores": [],
+        "activities": [],
+        "fees": [],
+        "album": []
+      }
+    },
+    {
+      "name": "sched.put",
+      "method": "PUT",
+      "urlPath": "/api/schedule",
+      "status": 200,
+      "body": {
+        "message": "保存成功"
+      }
+    },
+    {
+      "name": "sched.master.put",
+      "method": "PUT",
+      "urlPath": "/api/schedule/master",
+      "status": 200,
+      "body": {
+        "message": "一般课表保存成功"
+      }
+    },
+    {
+      "name": "sched.apply",
+      "method": "POST",
+      "urlPath": "/api/schedule/apply-master",
+      "status": 200,
+      "body": {
+        "message": "已将一般课表应用为实行课表"
+      }
+    },
+    {
+      "name": "sched.get",
+      "method": "GET",
+      "urlPath": "/api/schedule",
+      "status": 200,
+      "body": {
+        "cells": [
+          [
+            {
+              "course": "英语"
+            }
+          ]
+        ],
+        "settings": {}
+      }
+    },
+    {
+      "name": "sched.snapshot",
+      "method": "POST",
+      "urlPath": "/api/schedule/snapshot",
+      "status": 200,
+      "body": {
+        "message": "快照已保存"
+      }
+    },
+    {
+      "name": "sched.history",
+      "method": "GET",
+      "urlPath": "/api/schedule/history",
+      "status": 200,
+      "body": [
+        {
+          "week_start": "2026-03-02",
+          "created_at": "<volatile>"
+        }
+      ]
+    },
+    {
+      "name": "sched.history.one",
+      "method": "GET",
+      "urlPath": "/api/schedule/history/2026-03-02",
+      "status": 200,
+      "body": {
+        "id": 1,
+        "week_start": "2026-03-02",
+        "cells": [
+          [
+            {
+              "course": "语文"
+            }
+          ]
+        ],
+        "settings": {},
+        "created_at": "<volatile>"
+      }
+    },
+    {
+      "name": "sched.history.del",
+      "method": "DELETE",
+      "urlPath": "/api/schedule/history/2026-03-02",
+      "status": 200,
+      "body": {
+        "message": "快照已删除"
+      }
+    },
+    {
+      "name": "sched.history.one2",
+      "method": "GET",
+      "urlPath": "/api/schedule/history/2026-03-02",
+      "status": 200,
+      "body": null
+    },
+    {
+      "name": "sched.settings.put",
+      "method": "PUT",
+      "urlPath": "/api/schedule/settings",
+      "status": 200,
+      "body": {
+        "message": "设置已保存"
+      }
+    },
+    {
+      "name": "sched.settings.get",
+      "method": "GET",
+      "urlPath": "/api/schedule/settings",
+      "status": 200,
+      "body": {
+        "semester_start": "2026-02-01",
+        "semester_end": "2026-06-30"
+      }
+    },
+    {
+      "name": "sem.post",
+      "method": "POST",
+      "urlPath": "/api/schedule/semesters",
+      "status": 200,
+      "body": {
+        "message": "学期已增加",
+        "id": 2,
+        "name": "测试学期",
+        "start_date": "2026-01-01",
+        "end_date": "2026-05-01"
+      }
+    },
+    {
+      "name": "sem.list",
+      "method": "GET",
+      "urlPath": "/api/schedule/semesters",
+      "status": 200,
+      "body": {
+        "semesters": [
+          {
+            "id": 1,
+            "name": "2026秋季学期",
+            "start_date": "2026-02-01",
+            "end_date": "2026-06-30",
+            "is_current": 0
+          },
+          {
+            "id": 2,
+            "name": "测试学期",
+            "start_date": "2026-01-01",
+            "end_date": "2026-05-01",
+            "is_current": 1
+          }
+        ],
+        "current": {
+          "id": 2,
+          "name": "测试学期",
+          "start_date": "2026-01-01",
+          "end_date": "2026-05-01",
+          "is_current": 1
+        }
+      }
+    },
+    {
+      "name": "duty.settings.put",
+      "method": "PUT",
+      "urlPath": "/api/duty/settings",
+      "status": 200,
+      "body": {
+        "message": "设置已保存"
+      }
+    },
+    {
+      "name": "duty.settings.get",
+      "method": "GET",
+      "urlPath": "/api/duty/settings",
+      "status": 200,
+      "body": {
+        "days": [
+          "周一",
+          "周二"
+        ],
+        "items": [
+          {
+            "name": "擦黑板",
+            "difficulty": 0.6,
+            "count": 1
+          }
+        ]
+      }
+    },
+    {
+      "name": "duty.put",
+      "method": "PUT",
+      "urlPath": "/api/duty",
+      "status": 200,
+      "body": {
+        "message": "保存成功"
+      }
+    },
+    {
+      "name": "duty.get",
+      "method": "GET",
+      "urlPath": "/api/duty",
+      "status": 200,
+      "body": {
+        "cells": {},
+        "settings": {
+          "items": [
+            {
+              "name": "擦黑板",
+              "difficulty": 0.6,
+              "count": 1
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "duty.save",
+      "method": "PUT",
+      "urlPath": "/api/duty/save",
+      "status": 200,
+      "body": {
+        "message": "保存成功"
+      }
+    },
+    {
+      "name": "duty.template.put",
+      "method": "PUT",
+      "urlPath": "/api/duty/template",
+      "status": 200,
+      "body": {
+        "message": "模板保存成功"
+      }
+    },
+    {
+      "name": "duty.template.get",
+      "method": "GET",
+      "urlPath": "/api/duty/template",
+      "status": 200,
+      "body": {
+        "cells": {},
+        "settings": {}
+      }
+    },
+    {
+      "name": "duty.apply",
+      "method": "POST",
+      "urlPath": "/api/duty/apply-master",
+      "status": 200,
+      "body": {
+        "message": "已应用模板"
+      }
+    },
+    {
+      "name": "duty.weight.put",
+      "method": "PUT",
+      "urlPath": "/api/duty/weight",
+      "status": 200,
+      "body": {
+        "message": "权重保存成功"
+      }
+    },
+    {
+      "name": "duty.weight.get",
+      "method": "GET",
+      "urlPath": "/api/duty/weight",
+      "status": 200,
+      "body": {
+        "weights": {
+          "扫地": {
+            "周一": 1.5
+          }
+        }
+      }
+    },
+    {
+      "name": "duty.draft.put",
+      "method": "PUT",
+      "urlPath": "/api/duty/draft",
+      "status": 200,
+      "body": {
+        "message": "草稿已保存",
+        "savedAt": "<volatile>"
+      }
+    },
+    {
+      "name": "duty.draft.get",
+      "method": "GET",
+      "urlPath": "/api/duty/draft",
+      "status": 200,
+      "body": {
+        "exists": true,
+        "cells": {
+          "扫地": {
+            "周一": [
+              "张三"
+            ]
+          }
+        },
+        "settings": {},
+        "conditions": [],
+        "savedAt": "<volatile>"
+      }
+    },
+    {
+      "name": "duty.draft.del",
+      "method": "DELETE",
+      "urlPath": "/api/duty/draft",
+      "status": 200,
+      "body": {
+        "message": "草稿已清除"
+      }
+    },
+    {
+      "name": "duty.snapshot",
+      "method": "POST",
+      "urlPath": "/api/duty/snapshot",
+      "status": 200,
+      "body": {
+        "message": "快照已保存"
+      }
+    },
+    {
+      "name": "duty.history",
+      "method": "GET",
+      "urlPath": "/api/duty/history",
+      "status": 200,
+      "body": [
+        {
+          "week_start": "2026-03-02",
+          "last_date": "2026-03-02",
+          "created_at": "<volatile>",
+          "count": 1
+        }
+      ]
+    },
+    {
+      "name": "duty.history.one",
+      "method": "GET",
+      "urlPath": "/api/duty/history/2026-03-02",
+      "status": 200,
+      "body": {
+        "week_start": "2026-03-02",
+        "snap_date": "2026-03-02",
+        "mode": "daily",
+        "cells": {
+          "扫地": {
+            "周一": [
+              "张三"
+            ]
+          }
+        },
+        "settings": {},
+        "created_at": "<volatile>"
+      }
+    },
+    {
+      "name": "duty.daily",
+      "method": "GET",
+      "urlPath": "/api/duty/daily",
+      "status": 200,
+      "body": [
+        {
+          "week_start": "2026-03-02",
+          "snap_date": "2026-03-02",
+          "mode": "daily",
+          "cells": {
+            "扫地": {
+              "周一": [
+                "张三"
+              ]
+            }
+          },
+          "settings": {},
+          "created_at": "<volatile>"
+        }
+      ]
+    },
+    {
+      "name": "duty.week",
+      "method": "POST",
+      "urlPath": "/api/duty/history/week",
+      "status": 200,
+      "body": {
+        "message": "已生成 7 天记录",
+        "inserted": 7
+      }
+    },
+    {
+      "name": "duty.backfill",
+      "method": "POST",
+      "urlPath": "/api/duty/snapshot/backfill",
+      "status": 200,
+      "body": {
+        "message": "已补存 113 天",
+        "inserted": 113
+      }
+    },
+    {
+      "name": "duty.history.del",
+      "method": "DELETE",
+      "urlPath": "/api/duty/history/2026-03-02",
+      "status": 200,
+      "body": {
+        "message": "快照已删除"
+      }
+    },
+    {
+      "name": "seat.put",
+      "method": "PUT",
+      "urlPath": "/api/seats",
+      "status": 200,
+      "body": {
+        "message": "保存成功"
+      }
+    },
+    {
+      "name": "seat.get",
+      "method": "GET",
+      "urlPath": "/api/seats",
+      "status": 200,
+      "body": {
+        "mode": "single",
+        "rows": 2,
+        "cols": 2,
+        "seats": [
+          [
+            null,
+            null
+          ],
+          [
+            null,
+            null
+          ]
+        ],
+        "aisleCols": [],
+        "groupsConfig": [],
+        "settings": {}
+      }
+    },
+    {
+      "name": "seat.master.put",
+      "method": "PUT",
+      "urlPath": "/api/seats/master",
+      "status": 200,
+      "body": {
+        "message": "模板保存成功"
+      }
+    },
+    {
+      "name": "seat.master.get",
+      "method": "GET",
+      "urlPath": "/api/seats/master",
+      "status": 200,
+      "body": {
+        "mode": "single",
+        "rows": 1,
+        "cols": 1,
+        "seats": [
+          [
+            null
+          ]
+        ],
+        "aisleCols": [],
+        "groupsConfig": [],
+        "settings": {}
+      }
+    },
+    {
+      "name": "seat.apply",
+      "method": "POST",
+      "urlPath": "/api/seats/apply-master",
+      "status": 200,
+      "body": {
+        "message": "已应用模板"
+      }
+    },
+    {
+      "name": "seat.cell",
+      "method": "PATCH",
+      "urlPath": "/api/seats/cell",
+      "status": 200,
+      "body": {
+        "message": "已更新"
+      }
+    },
+    {
+      "name": "seat.master.cell",
+      "method": "PATCH",
+      "urlPath": "/api/seats/master/cell",
+      "status": 200,
+      "body": {
+        "message": "已更新"
+      }
+    },
+    {
+      "name": "seat.weight.put",
+      "method": "PUT",
+      "urlPath": "/api/seats/weight",
+      "status": 200,
+      "body": {
+        "message": "权重保存成功"
+      }
+    },
+    {
+      "name": "seat.weight.get",
+      "method": "GET",
+      "urlPath": "/api/seats/weight",
+      "status": 200,
+      "body": {
+        "mode": "single",
+        "rows": 1,
+        "cols": 1,
+        "weights": [
+          [
+            1
+          ]
+        ],
+        "settings": {}
+      }
+    },
+    {
+      "name": "seat.draft.put",
+      "method": "PUT",
+      "urlPath": "/api/seats/draft",
+      "status": 200,
+      "body": {
+        "message": "草稿已保存",
+        "savedAt": "<volatile>"
+      }
+    },
+    {
+      "name": "seat.draft.get",
+      "method": "GET",
+      "urlPath": "/api/seats/draft",
+      "status": 200,
+      "body": {
+        "exists": true,
+        "mode": "single",
+        "rows": 1,
+        "cols": 1,
+        "seats": [
+          [
+            7
+          ]
+        ],
+        "aisleCols": [],
+        "settings": {},
+        "conditions": [],
+        "savedAt": "<volatile>"
+      }
+    },
+    {
+      "name": "seat.snapshot",
+      "method": "POST",
+      "urlPath": "/api/seats/snapshot",
+      "status": 200,
+      "body": {
+        "message": "快照已保存"
+      }
+    },
+    {
+      "name": "seat.history",
+      "method": "GET",
+      "urlPath": "/api/seats/history",
+      "status": 200,
+      "body": [
+        {
+          "week_start": "2026-03-02",
+          "last_date": "2026-03-02",
+          "created_at": "<volatile>",
+          "count": 1
+        }
+      ]
+    },
+    {
+      "name": "seat.history.one",
+      "method": "GET",
+      "urlPath": "/api/seats/history/2026-03-02",
+      "status": 200,
+      "body": {
+        "week_start": "2026-03-02",
+        "snap_date": "2026-03-02",
+        "mode": "single",
+        "rows": 1,
+        "cols": 1,
+        "seats": [
+          [
+            7
+          ]
+        ],
+        "aisleCols": [],
+        "groupsConfig": [],
+        "settings": {},
+        "created_at": "<volatile>"
+      }
+    },
+    {
+      "name": "seat.daily",
+      "method": "GET",
+      "urlPath": "/api/seats/daily",
+      "status": 200,
+      "body": [
+        {
+          "snap_date": "2026-03-02",
+          "week_start": "2026-03-02",
+          "mode": "single",
+          "rows": 1,
+          "cols": 1,
+          "seats": [
+            [
+              7
+            ]
+          ],
+          "settings": {}
+        }
+      ]
+    },
+    {
+      "name": "seat.week",
+      "method": "POST",
+      "urlPath": "/api/seats/history/week",
+      "status": 200,
+      "body": {
+        "message": "已生成 7 天记录",
+        "inserted": 7
+      }
+    },
+    {
+      "name": "seat.backfill",
+      "method": "POST",
+      "urlPath": "/api/seats/snapshot/backfill",
+      "status": 200,
+      "body": {
+        "message": "已补存 113 天",
+        "inserted": 113
+      }
+    },
+    {
+      "name": "seat.draft.del",
+      "method": "DELETE",
+      "urlPath": "/api/seats/draft",
+      "status": 200,
+      "body": {
+        "message": "草稿已清除"
+      }
+    },
+    {
+      "name": "seat.history.del",
+      "method": "DELETE",
+      "urlPath": "/api/seats/history/2026-03-02",
+      "status": 200,
+      "body": {
+        "message": "快照已删除"
+      }
+    },
+    {
+      "name": "post:/api/schedule",
+      "method": "GET",
+      "urlPath": "/api/schedule",
+      "status": 200,
+      "body": {
+        "cells": [
+          [
+            {
+              "course": "英语"
+            }
+          ]
+        ],
+        "settings": {}
+      }
+    },
+    {
+      "name": "post:/api/schedule/master",
+      "method": "GET",
+      "urlPath": "/api/schedule/master",
+      "status": 200,
+      "body": {
+        "cells": [
+          [
+            {
+              "course": "英语"
+            }
+          ]
+        ],
+        "settings": {}
+      }
+    },
+    {
+      "name": "post:/api/duty",
+      "method": "GET",
+      "urlPath": "/api/duty",
+      "status": 200,
+      "body": {
+        "cells": {},
+        "settings": {
+          "items": [
+            {
+              "name": "扫地",
+              "difficulty": 0.8,
+              "count": 1
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "post:/api/duty/settings",
+      "method": "GET",
+      "urlPath": "/api/duty/settings",
+      "status": 200,
+      "body": {
+        "days": [
+          "周一",
+          "周二"
+        ],
+        "items": [
+          {
+            "name": "扫地",
+            "difficulty": 0.8,
+            "count": 1
+          }
+        ]
+      }
+    },
+    {
+      "name": "post:/api/duty/weight",
+      "method": "GET",
+      "urlPath": "/api/duty/weight",
+      "status": 200,
+      "body": {
+        "weights": {
+          "扫地": {
+            "周一": 1.5
+          }
+        }
+      }
+    },
+    {
+      "name": "post:/api/seats",
+      "method": "GET",
+      "urlPath": "/api/seats",
+      "status": 200,
+      "body": {
+        "mode": "single",
+        "rows": 1,
+        "cols": 1,
+        "seats": [
+          [
+            "李四"
+          ]
+        ],
+        "aisleCols": [],
+        "groupsConfig": [],
+        "settings": {}
+      }
+    },
+    {
+      "name": "post:/api/seats/master",
+      "method": "GET",
+      "urlPath": "/api/seats/master",
+      "status": 200,
+      "body": {
+        "mode": "single",
+        "rows": 1,
+        "cols": 1,
+        "seats": [
+          [
+            "王五"
+          ]
+        ],
+        "aisleCols": [],
+        "groupsConfig": [],
+        "settings": {}
+      }
+    },
+    {
+      "name": "post:/api/seats/weight",
+      "method": "GET",
+      "urlPath": "/api/seats/weight",
+      "status": 200,
+      "body": {
+        "mode": "single",
+        "rows": 1,
+        "cols": 1,
+        "weights": [
+          [
+            1
+          ]
+        ],
+        "settings": {}
+      }
+    },
+    {
+      "name": "post:/api/dashboard",
+      "method": "GET",
+      "urlPath": "/api/dashboard",
+      "status": 200,
+      "body": {
+        "schedule": {
+          "cells": [
+            [
+              {
+                "course": "英语"
+              }
+            ]
+          ],
+          "settings": {}
+        },
+        "duty": {
+          "cells": {},
+          "settings": {
+            "items": [
+              {
+                "name": "扫地",
+                "difficulty": 0.8,
+                "count": 1
+              }
+            ]
+          }
+        },
+        "countdowns": [],
+        "leaves": [],
+        "students": [],
+        "scores": [],
+        "activities": [],
+        "fees": [],
+        "album": []
+      }
+    }
+  ],
+  "failures": []
+}

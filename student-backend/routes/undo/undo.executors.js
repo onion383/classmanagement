@@ -17,7 +17,7 @@ const ALLOWED_TABLES = ['students', 'fee_records', 'leave_records', 'score_recor
 
 // 「整块 JSON 列」表：数据以整块 JSON 存于单列（座位 seats / 权重 weights / 课表 cells…），
 // 撤销时按「整块列值」整体还原。表名固定，杜绝注入。
-const DOC_TABLES = ['schedule', 'master_schedule', 'seat_layout', 'seat_template', 'seat_weight', 'duty_settings', 'duty_layout', 'duty_template', 'duty_weight', 'widget_settings', 'schedule_settings']
+const DOC_TABLES = ['schedule', 'master_schedule', 'seat_layout', 'seat_template', 'seat_weight', 'duty_settings', 'duty_layout', 'duty_template', 'duty_weight', 'widget_settings']
 
 // 网格型数据：整块 JSON 存于单列，撤销按单格或整块处理。
 // 表名固定，杜绝注入。列名到具体网格列一一对应。

@@ -54,6 +54,21 @@ test('sanitizeField：命中列级规则（枚举 / 数值范围与精度 / 布�
   assert.equal(s.sanitizeField(true, 'countdowns', '包含这一天'), 1)
 })
 
+test('sanitizeField：课表/座位/值日等逻辑表名规则仍然生效', () => {
+  // 这些逻辑表已物理合并为槽位表，但 COLUMN_RULES 仍以逻辑名索引
+  assert.doesNotThrow(() => s.sanitizeField([[{ course: '语文' }]], 'schedule', 'cells'))
+  assert.throws(() => s.sanitizeField('not-json', 'schedule', 'cells'))
+
+  assert.doesNotThrow(() => s.sanitizeField([[1, '张三'], [null, 2]], 'seat_layout', 'seats'))
+  assert.throws(() => s.sanitizeField([1, 2, 3], 'seat_layout', 'seats'))
+
+  assert.doesNotThrow(() => s.sanitizeField({ 扫地: { 周一: ['张三'] } }, 'duty_layout', 'cells'))
+  assert.throws(() => s.sanitizeField('[]', 'duty_layout', 'cells')) // 值日 cells 必须是对象
+
+  assert.doesNotThrow(() => s.sanitizeField({ days: ['周一'], items: [] }, 'duty_weight', 'weights'))
+  assert.throws(() => s.sanitizeField([], 'duty_weight', 'weights'))
+})
+
 test('normalizeSeats：二维数组原样通过；扁平对象数组规范化为二维', () => {
   assert.deepEqual(s.normalizeSeats([[1, '张三'], [null, 2]]), [[1, '张三'], [null, 2]])
   assert.deepEqual(
