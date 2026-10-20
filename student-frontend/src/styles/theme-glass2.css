@@ -771,3 +771,30 @@
     animation: none;
   }
 }
+
+/* ------------------------------------------------------------
+   15. 表头筛选面板（DynamicTable）
+   ----
+   直接用 glass2 的玻璃令牌：面板 = --g2-glass（0.55，随滑块变化），
+   输入框用 --g2-glass-soft 做「内凹」，hover 才提升到 --g2-glass-strong，
+   底图因此能一路透上来，不会像白卡片一样把背景盖住。
+   ------------------------------------------------------------ */
+:root[data-theme="glass2"] .dtf-panel {
+  background-color: var(--g2-glass) !important;
+  border-color: var(--g2-line-soft) !important;
+  backdrop-filter: blur(var(--g2-blur)) saturate(var(--g2-saturate));
+  -webkit-backdrop-filter: blur(var(--g2-blur)) saturate(var(--g2-saturate));
+  box-shadow: var(--g2-shadow-2), var(--g2-hl);
+}
+:root[data-theme="glass2"] .dtf-item:hover,
+:root[data-theme="glass2"] .dtf-sort-btn:hover {
+  background-color: var(--g2-glass-strong) !important;
+}
+:root[data-theme="glass2"] .dtf-search-input {
+  background-color: var(--g2-glass-soft);
+  border-color: var(--g2-hair);
+}
+:root[data-theme="glass2"] .dtf-search-input:focus {
+  background-color: var(--g2-glass-strong);
+  border-color: var(--g2-accent);
+}

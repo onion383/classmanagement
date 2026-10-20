@@ -48,10 +48,19 @@
               <span @click.stop="$emit('search', field.name)" class="cursor-pointer">
                 {{ field.name === 'id' ? 'ID' : field.name }}<span v-if="isProtectedField(field)" class="text-warning ml-0.5" title="核心字段，禁止删除">*</span>
               </span>
-              <span class="flex flex-col text-xs cursor-pointer" @click.stop="$emit('toggleSort', field.name)">
-                <span :class="sortField === field.name && sortOrder === 'asc' ? 'text-warning' : 'text-text-inverse/70'">▲</span>
-                <span :class="sortField === field.name && sortOrder === 'desc' ? 'text-warning' : 'text-text-inverse/70'">▼</span>
-              </span>
+              <!-- 筛选入口：未筛选=放大镜，已筛选=漏斗；排序/值筛选都在面板里。
+                   面板是懒加载 chunk，悬停按钮即预取，点开无需等待。 -->
+              <button
+                type="button"
+                class="dt-filter-btn"
+                v-preload="preloadFilterPanel"
+                :class="{ 'is-on': isColumnFiltered(field.name) || sortField === field.name }"
+                :title="filterButtonTitle(field.name)"
+                @click.stop="openFilter(field, $event)"
+              >
+                <Filter v-if="isColumnFiltered(field.name)" :size="13" stroke-width="2.2" />
+                <Search v-else :size="13" stroke-width="2.2" />
+              </button>
             </div>
           </th>
 
@@ -67,16 +76,16 @@
         </tr>
       </thead>
 
-      <tbody ref="tbodyRef" :class="{ 'row-search': searchActive }">
+      <tbody ref="tbodyRef" :class="{ 'row-search': rowAnimEnabled }">
         <!--
-          行的过渡容器只在「搜索错峰动画」开启时才真正是 TransitionGroup，其余时候退化成 Fragment。
+          行的过渡容器只在「搜索/筛选错峰动画」开启时才真正是 TransitionGroup，其余时候退化成 Fragment。
 
           为什么必须这样分：Vue 的 TransitionGroup 在**每次更新**里都会对 prevChildren 逐个
           getBoundingClientRect()，并在 onUpdated 里 cloneNode → appendChild → getComputedStyle
           → removeChild 去探测 move 过渡（见 @vue/runtime-dom 的 hasCSSTransform）。
           这两步都是「写 DOM 之后立刻读布局」，会强制同步样式重算 + 布局：
           对 56 行的大表格，实测单次交互因此多出 200~600ms（4 倍 CPU 降速下最慢一帧 277ms 里 205ms 是强制布局）。
-          而这些开销在「勾选/排序/编辑」等日常操作里毫无收益——错峰动画本就只在搜索过滤时需要。
+          而这些开销在「勾选/排序/编辑」等日常操作里毫无收益——错峰动画本就只在搜索过滤/列筛选时需要。
           退化成 Fragment 后 TransitionGroup 的 setup/hooks 完全不执行，强制布局随之消失。
         -->
         <component
@@ -90,7 +99,7 @@
           @after-leave="staggerAfterLeave"
         >
           <tr
-            v-for="(row, rowIndex) in rows"
+            v-for="(row, rowIndex) in bodyRows"
             :key="row._rowKey"
             :data-row-id="row.id"
             @contextmenu.prevent="$emit('contextmenu', $event, row._isNew ? 'newRow' : 'row', row)"
@@ -137,7 +146,7 @@
                 >⠿</span>
 
                 <template v-if="field.name === 'id'">{{ row._isNew ? '自动' : row.id }}</template>
-                <template v-else-if="field.name === 'position'">{{ row._isNew ? '-' : (displayIndexes ? displayIndexes[rowIndex] : row._displayIndex) }}</template>
+                <template v-else-if="field.name === 'position'">{{ row._isNew ? '-' : positionOf(rowIndex) }}</template>
                 <template v-else-if="field.name === '收据'">
                   <button @click="$emit('manageReceipt', { row, isNew: row._isNew })" class="bg-primary text-text-inverse border-none py-1 px-2 rounded text-xs cursor-pointer">管理收据{{ row._isNew ? '' : ' (' + getReceiptCount(row) + ')' }}</button>
                 </template>
@@ -195,6 +204,10 @@
               </td>
             </template>
           </tr>
+          <!-- 筛选后无结果：给一行提示，避免整表空白让人以为数据丢了 -->
+          <tr v-if="filterNoResult" key="__dt-filter-empty" class="dt-filter-empty">
+            <td :colspan="readonly ? fields.length : fields.length + 2">没有符合筛选条件的数据</td>
+          </tr>
         </component>
       </tbody>
     </table>
@@ -209,13 +222,40 @@
       @click="$emit('addNewRowAtBottom')"
     >＋ 点击添加一行</div>
   </transition>
+
+  <!-- 表头筛选面板：Teleport 到 body，避免被表格滚动容器的 overflow 裁掉 -->
+  <Teleport to="body">
+    <Transition name="dtf">
+      <ColumnFilter
+        v-if="filterField"
+        :key="filterField"
+        :field="filterField"
+        :options="filterOptions"
+        :sort-order="filterSortOrder"
+        :readonly="readonly"
+        :anchor-el="filterAnchorEl"
+        @sort="onFilterSort"
+        @toggle="onFilterToggle"
+        @clear="clearColumnFilter"
+        @close="closeFilter"
+      />
+    </Transition>
+  </Teleport>
   </div>
 </template>
 
 <script>
 import AppSelect from '../../base/AppSelect.vue'
-import { TransitionGroup } from 'vue'
+import { TransitionGroup, defineAsyncComponent } from 'vue'
+import { Search, Filter } from '@lucide/vue'
 import { useDynamicTableDrag } from './DynamicTable.drag.js'
+import { vPreload } from '../../../utils/dialogPrefetch.js'
+
+// 表头筛选面板：独立组件 + 懒加载。
+// 用 defineAsyncComponent 把面板拆成单独 chunk，只有第一次点开表头放大镜/漏斗时才下载；
+// 按钮上再挂 v-preload，鼠标悬停就提前预取，点开时基本感觉不到加载。
+const loadColumnFilter = () => import('./DynamicTable.filter.vue')
+const ColumnFilter = defineAsyncComponent(loadColumnFilter)
 
 // 无动画时的「透明包裹」组件：只把默认插槽原样渲染成 Fragment，不产生任何真实 DOM 元素，
 // 保证 <tr> 仍是 <tbody> 的直接子节点。
@@ -238,7 +278,9 @@ const RowsFragment = {
 
 export default {
   name: 'DynamicTable',
-  components: { AppSelect, TransitionGroup },
+  components: { AppSelect, TransitionGroup, Search, Filter, ColumnFilter },
+  // v-preload 在主窗口是全局指令；这里本地再注册一次，保证本组件在任意窗口/单测里都能解析
+  directives: { preload: vPreload },
   props: {
     fields: { type: Array, required: true },
     rows: { type: Array, required: true },
@@ -294,26 +336,67 @@ export default {
       vScroll: false,
       // 表格最大高度：内容超过此高度即启用纵向滚动（固定高度判断），默认 400，可由父组件按内容调整
       fixedMaxHeight: this.maxHeight,
+      // 列筛选状态：{ 列名: Set(允许出现的值) }。值为空表示该列未筛选（不参与过滤）
+      columnFilters: {},
+      // 当前打开筛选面板的列名（'' = 未打开）
+      filterField: '',
+      // 筛选面板打开期间才开启行错峰动画（面板关闭后延时关闭，见 rowAnimEnabled）
+      filterAnimating: false,
+      // 面板里的值列表：由 buildFilterOptions 在打开/勾选时算出，缓存避免每次渲染重算
+      filterOptions: [],
+      // 面板定位锚点（表头上的那个放大镜/漏斗按钮）
+      filterAnchorEl: null,
     };
   },
   computed: {
     hasNewRow() { return this.rows && this.rows.some(r => r._isNew); },
-    // 行过渡容器是否启用：仅在搜索过滤时启用错峰动画（见模板里的说明）。
-    // 关闭时 <component :is> 退化为 Fragment，TransitionGroup 的强制布局逻辑完全不执行。
-    rowAnimEnabled() { return !!this.searchActive; },
-    // 行容器组件：搜索动画开启时用 TransitionGroup，否则用 RowsFragment 做「透明包裹」，
+    // 是否有任何列处于筛选状态
+    columnFilterActive() { return Object.keys(this.columnFilters).length > 0; },
+    // 实际渲染的行：columns 筛选后的结果。未筛选时直接返回原数组引用（零开销、不破坏行对象复用）
+    bodyRows() {
+      if (!this.columnFilterActive) return this.rows;
+      const active = Object.keys(this.columnFilters);
+      return this.rows.filter(r => {
+        // 正在录入的新行不参与筛选，否则一勾筛选它就凭空消失
+        if (r._isNew) return true;
+        // 分隔带在筛选态下没有意义（它不代表任何数据）
+        if (r._isSeparator) return false;
+        return active.every(f => this.matchColumnFilter(r, f));
+      });
+    },
+    // 渲染下标 → rows 原始下标 的映射（仅供拖拽/序号回查用）。
+    // 未筛选时为 null，调用方按恒等处理，避免多算一份数组。
+    srcIndexList() {
+      if (!this.columnFilterActive) return null;
+      const pos = new Map();
+      this.rows.forEach((r, i) => pos.set(r, i));
+      return this.bodyRows.map(r => (pos.has(r) ? pos.get(r) : -1));
+    },
+    // 筛选后一行都不剩：提示用
+    filterNoResult() { return this.columnFilterActive && this.bodyRows.length === 0; },
+    // 面板里的排序高亮态：只有当前列就是排序列时才显示升/降序选中
+    filterSortOrder() {
+      return this.filterField && this.sortField === this.filterField ? this.sortOrder : '';
+    },
+    // 行过渡容器是否启用：仅在搜索过滤/筛选面板打开期间启用错峰动画（见模板里的说明）。
+    // 为什么不用「有筛选就开」：TransitionGroup 每次更新都要强制读写布局，而在有筛选的情况下
+    // 用户还会继续双击编辑单元格，那时动画毫无收益。故只在「筛选面板打开」这个窗口内开启，
+    // 面板关掉 600ms 后自动退化回 Fragment，日常编辑依旧零额外开销。
+    rowAnimEnabled() { return !!this.searchActive || this.filterAnimating; },
+    // 行容器组件：错峰动画窗口内（搜索中 / 筛选面板打开）用 TransitionGroup，否则用 RowsFragment 做「透明包裹」，
     // 让 <tr> 始终是 <tbody> 的直接子节点。两者都必须能在实例上取到（模板表达式不会
     // 自动解析 components 选项，直接写 TransitionGroup 会得到 undefined 而整表不渲染）。
     rowWrapper() { return this.rowAnimEnabled ? TransitionGroup : RowsFragment; },
     // 选中行键集合：O(n) 建一次，模板内 O(1) 查用，避免整张表 O(n²) 的 includes 查找
     selectedKeySet() { return new Set(this.selectedRowKeys); },
     isAllSelected() {
-      const normalRows = (this.rows || []).filter(r => !r._isSeparator);
+      const normalRows = (this.bodyRows || []).filter(r => !r._isSeparator);
       return normalRows.length > 0 && normalRows.every(r => this.selectedKeySet.has(r._rowKey));
     },
     isIndeterminate() {
-      const normalRows = (this.rows || []).filter(r => !r._isSeparator);
-      const s = this.selectedKeySet.size;
+      const normalRows = (this.bodyRows || []).filter(r => !r._isSeparator);
+      // 只统计「当前可见行」里被选中的数量：筛选态下被隐藏的选中行不应该让全选框保持半选
+      const s = normalRows.filter(r => this.selectedKeySet.has(r._rowKey)).length;
       return s > 0 && s < normalRows.length;
     },
   },
@@ -329,6 +412,10 @@ export default {
         // 行数变化也可能来自搜索过滤/增删等场景，此时不得用 .focus() 抢占焦点（否则搜索输入框失焦）
         if (this.hasNewRow) this.focusNewRowInput();
       });
+    },
+    // 列筛选只改变渲染行，不改变 rows 长度，这里单独跟进底部渐隐条/纵向滚动的判定
+    'bodyRows.length'() {
+      this.$nextTick(() => this.updateVScroll());
     },
     editingCell: {
       handler(newVal) {
@@ -376,7 +463,13 @@ export default {
       immediate: true,
     },
     fields: {
-      handler() {
+      handler(newFields) {
+        // 列被删/改名后，残留的筛选状态会让整表永久空表 → 只保留仍然存在的列
+        const names = new Set((newFields || []).map(f => f.name));
+        Object.keys(this.columnFilters).forEach(n => {
+          if (!names.has(n)) delete this.columnFilters[n];
+        });
+        if (this.filterField && !names.has(this.filterField)) this.closeFilter();
         // 增删/改名/移动列后重算列宽
         this.$nextTick(() => this.snapshotWidths());
       },
@@ -403,6 +496,10 @@ export default {
     this.playTableEnter();
     // 整表 Enter 保存新增行：焦点不在输入框时按回车也触发保存
     document.addEventListener('keydown', this.handleGlobalEnter);
+    // 筛选面板：点面板外部 / 按 Esc / 容器滚动时收起
+    document.addEventListener('click', this.onFilterDocClick);
+    document.addEventListener('keydown', this.handleFilterKeydown);
+    window.addEventListener('scroll', this.onFilterScroll, true);
     // 列交换 FLIP 动画延迟就绪：等本页首次 table 滑入播完（350ms）、表头稳定后再启用，
     // 否则挂载时 TransitionGroup 会对静态表头播放 move，造成进入页面时表头乱跳。
     this._colAnimTimer = setTimeout(() => { this.colAnimDone = true; }, 400);
@@ -421,6 +518,9 @@ export default {
   beforeUnmount() {
     document.removeEventListener('click', this.handleClickOutside);
     document.removeEventListener('keydown', this.handleGlobalEnter);
+    document.removeEventListener('click', this.onFilterDocClick);
+    document.removeEventListener('keydown', this.handleFilterKeydown);
+    window.removeEventListener('scroll', this.onFilterScroll, true);
     // 拖拽中途被卸载：停掉自动滚动并清掉让位位移，避免残留定时器/内联样式
     if (this._rowAutoScroll) { this._rowAutoScroll.stop(); this._rowAutoScroll = null; }
     if (this._colAutoScroll) { this._colAutoScroll.stop(); this._colAutoScroll = null; }
@@ -440,6 +540,7 @@ export default {
     if (this._rowDropBox) this._rowDropBox.remove();
     if (this._colDropBox) this._colDropBox.remove();
     clearTimeout(this._snapshotTimer);
+    clearTimeout(this._filterAnimTimer);
     if (this._colAnimTimer) clearTimeout(this._colAnimTimer);
     if (this._snapshotRaf) cancelAnimationFrame(this._snapshotRaf);
     if (this._tableEnterCleanup) this._tableEnterCleanup();
@@ -448,6 +549,127 @@ export default {
     ...useDynamicTableDrag(),
     // 判断字段是否受保护（受保护字段在表头显示 * 提示）
     isProtectedField(field) { return this.protectedColumns.includes(field.name); },
+
+    // ==================== 列筛选（表头放大镜/漏斗） ====================
+    // 供 v-preload 使用：把懒加载 loader 包成实例方法，模板里才能引用到
+    preloadFilterPanel() { return loadColumnFilter(); },
+    isColumnFiltered(name) { return !!this.columnFilters[name]; },
+    filterButtonTitle(name) {
+      return this.isColumnFiltered(name) ? `${name}：已筛选（点击修改）` : `${name}：筛选 / 排序`;
+    },
+    openFilter(field, event) {
+      if (event) event.stopPropagation();
+      // 再点一次同一个按钮 = 收起
+      if (this.filterField === field.name) { this.closeFilter(); return; }
+      this.filterAnchorEl = (event && event.currentTarget) || null;
+      this.filterOptions = this.buildFilterOptions(field.name);
+      this.filterField = field.name;
+      // 面板开着的这段时间就是「会有行进出」的窗口：提前打开错峰动画，
+      // 这样第一次勾选也和后续勾选一样有进出动画（而不是切换容器导致的整表重挂载）
+      clearTimeout(this._filterAnimTimer);
+      this.filterAnimating = true;
+    },
+    closeFilter() {
+      if (!this.filterField) return;
+      this.filterField = '';
+      // 留一段尾巴让最后一次收起的行动画播完，再退化回 Fragment 省掉强制布局
+      clearTimeout(this._filterAnimTimer);
+      this._filterAnimTimer = setTimeout(() => { this.filterAnimating = false; }, 600);
+    },
+    // 勾选/取消某个值：以「全部值」为起点取反，再把结果存回筛选状态
+    onFilterToggle(value) {
+      const field = this.filterField;
+      if (!field) return;
+      const current = this.columnFilters[field];
+      const sel = current ? new Set(current) : new Set(this.filterOptions.map(o => o.value));
+      if (sel.has(value)) sel.delete(value);
+      else sel.add(value);
+      // 全部勾上 == 没筛选：直接清掉该列状态，图标回到放大镜
+      if (this.filterOptions.length && sel.size === this.filterOptions.length) delete this.columnFilters[field];
+      else this.columnFilters[field] = sel;
+      // 计数只受「其它列」影响，本列勾选不变，故这里重算只为刷新勾选态
+      this.filterOptions = this.buildFilterOptions(field);
+    },
+    // 排序：把「升/降序」的明确意图交给父组件（父组件的 toggleSort 支持第二参数）
+    onFilterSort(order) {
+      if (!this.filterField) return;
+      this.$emit('toggleSort', this.filterField, order);
+    },
+    clearColumnFilter() {
+      const field = this.filterField;
+      if (!field) return;
+      delete this.columnFilters[field];
+      this.filterOptions = this.buildFilterOptions(field);
+    },
+    // 面板里的值列表：只统计「通过其它列筛选」的行，实现后筛选的列跟着前面的条件收窄
+    buildFilterOptions(field) {
+      const others = Object.keys(this.columnFilters).filter(f => f !== field);
+      const counts = new Map();
+      for (const r of this.rows || []) {
+        if (r._isSeparator || r._isNew) continue;
+        if (!others.every(f => this.matchColumnFilter(r, f))) continue;
+        const v = this.cellFilterValue(r, field);
+        counts.set(v, (counts.get(v) || 0) + 1);
+      }
+      const sel = this.columnFilters[field];
+      return [...counts.entries()]
+        .map(([value, count]) => ({ value, count, selected: !sel || sel.has(value) }))
+        .sort((a, b) => this.compareFilterValue(a.value, b.value));
+    },
+    matchColumnFilter(row, field) {
+      const sel = this.columnFilters[field];
+      if (!sel) return true;
+      return sel.has(this.cellFilterValue(row, field));
+    },
+    // 单元格值统一成字符串比较：null / undefined 视为空白（空串）
+    cellFilterValue(row, field) {
+      const v = row ? row[field] : undefined;
+      return v == null ? '' : String(v);
+    },
+    compareFilterValue(a, b) {
+      if (a === b) return 0;
+      if (a === '') return 1;      // 空白永远排最后
+      if (b === '') return -1;
+      const na = Number(a), nb = Number(b);
+      const aNum = a.trim() !== '' && !Number.isNaN(na);
+      const bNum = b.trim() !== '' && !Number.isNaN(nb);
+      if (aNum && bNum) return na - nb;
+      if (aNum !== bNum) return aNum ? -1 : 1;   // 数字排在文字前
+      return a.localeCompare(b, 'zh');
+    },
+    // 渲染下标 → rows 原始下标（未筛选时恒等）
+    srcIndex(i) {
+      const list = this.srcIndexList;
+      if (!list) return i;
+      const v = list[i];
+      return v == null || v < 0 ? i : v;
+    },
+    // 按渲染下标取到真实行对象（拖拽内部按渲染顺序处理，回查行数据时必须走这里）
+    rowAt(i) { return this.rows[this.srcIndex(i)]; },
+    // 序号列：筛选后仍显示该行在全表中的原始序号
+    positionOf(rowIndex) {
+      const src = this.srcIndex(rowIndex);
+      if (this.displayIndexes) return this.displayIndexes[src];
+      const row = this.rows[src];
+      return row ? row._displayIndex : '';
+    },
+    // 点面板外部收起
+    onFilterDocClick(e) {
+      if (!this.filterField) return;
+      const t = e.target;
+      if (t && t.closest && (t.closest('.dtf-panel') || t.closest('.dt-filter-btn'))) return;
+      this.closeFilter();
+    },
+    handleFilterKeydown(e) {
+      if (e.key === 'Escape' && this.filterField) this.closeFilter();
+    },
+    // 表格/页面滚动后锚点位置已失效：收起面板（面板内部列表滚动不算）
+    onFilterScroll(e) {
+      if (!this.filterField) return;
+      const t = e.target;
+      if (t && t.nodeType === 1 && t.closest && t.closest('.dtf-panel')) return;
+      this.closeFilter();
+    },
     // 数据区(tbody)整体从左往右弹入：不动 DOM 结构、不加 key，
     // 通过临时加一次性 keyframe 类播放动画（与课程表单行 row-flip 方向一致）。
     // 动画结束后移除类，保证下次导航能重新触发。
@@ -623,7 +845,8 @@ export default {
     },
     toggleAllSelect() {
       if (this.readonly) return;
-      const normalRows = (this.rows || []).filter(r => !r._isSeparator && !r._isNew);
+      // 全选只作用于「当前可见行」：筛选态下不应把被过滤掉的行也勾上
+      const normalRows = (this.bodyRows || []).filter(r => !r._isSeparator && !r._isNew);
       this.selectedRowKeys = this.isAllSelected ? [] : normalRows.map(r => r._rowKey);
     },
     clearSelection() { this.selectedRowKeys = []; },
@@ -636,15 +859,15 @@ export default {
       this._receiptCache.set(row, { raw, count });
       return count;
     },
-    // 搜索过滤时的上下级联动画（仅 searchActive 启用，不影响其它页/场景的普通过渡）
+    // 搜索过滤/列筛选时的上下级联动画（仅 rowAnimEnabled 启用，不影响其它页/场景的普通过渡）
     // 有结果出现 → 行从上往下依次进入；没有结果 → 行从下往上依次消失
     staggerEnter(el) {
-      if (!this.searchActive) return;
+      if (!this.rowAnimEnabled) return;
       el.style.transitionDelay = (Array.prototype.indexOf.call(el.parentNode.children, el) * 30) + 'ms';
     },
     staggerAfterEnter(el) { el.style.transitionDelay = ''; },
     staggerLeave(el) {
-      if (!this.searchActive) return;
+      if (!this.rowAnimEnabled) return;
       const kids = el.parentNode.children;
       const idx = Array.prototype.indexOf.call(kids, el);
       el.style.transitionDelay = ((kids.length - 1 - idx) * 30) + 'ms';
@@ -770,6 +993,43 @@ td.col-op::before {
 /* 数据列头禁止换行：新增行导致列宽变化时列头仍保持单行显示 */
 th.col-header {
   white-space: nowrap;
+}
+/* 表头筛选按钮（放大镜 / 漏斗）：20×20 圆角方块，配色随表头文字（白系）。
+   必须清掉毛玻璃/Win11 主题的按钮皮肤（边框、阴影、荧光描边 ::before）。 */
+.dt-filter-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  padding: 0;
+  border: none !important;
+  border-radius: 5px;
+  background: transparent;
+  box-shadow: none !important;
+  color: rgba(255, 255, 255, 0.72);
+  cursor: pointer;
+  transition: background-color 0.14s ease, color 0.14s ease, transform 0.14s ease;
+}
+.dt-filter-btn::before { display: none !important; }
+.dt-filter-btn:hover {
+  color: #fff;
+  background: rgba(255, 255, 255, 0.18);
+}
+.dt-filter-btn:active { transform: scale(0.9); }
+/* 已筛选 / 本列即当前排序列：与旧版排序箭头同样的琥珀色提示 */
+.dt-filter-btn.is-on { color: var(--color-warning, #f59e0b); }
+.dt-filter-btn.is-on:hover {
+  color: var(--color-warning, #f59e0b);
+  background: rgba(255, 255, 255, 0.2);
+}
+/* 筛选后零结果的提示行 */
+.dt-filter-empty td {
+  padding: 18px 8px;
+  border: 1px solid var(--color-border, #e5e7eb);
+  text-align: center;
+  color: var(--color-text-muted, #9ca3af);
+  font-size: 13px;
 }
 /* 注意：不再对数据行使用 content-visibility —— 它会对行应用包含裁剪，导致行内
    操作列的 position:sticky 失效。为保证横向滚动时操作列固定右侧，关闭该优化。 */

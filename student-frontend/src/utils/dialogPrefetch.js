@@ -22,7 +22,7 @@ function prefetch(loader) {
     try {
       if (typeof loader === 'function') loader().catch(() => {})
     } catch (e) { /* 忽略 */ }
-  }, 80)
+  }, 32)
 }
 
 export const vPreload = {

@@ -1275,3 +1275,37 @@
 :root:not(:is([data-theme="glass"], [data-theme="win11"])) .btn-search:hover {
   background-color: #fbce8e;
 }
+/* ========== 表头筛选面板（DynamicTable）==========
+   与 .bg-surface 卡片同一套配方：透明度直接吃 --glass-opacity（默认 0.4），
+   让底图透出来；通透之后可读性靠更强的模糊（28px）与略高的饱和度换取，
+   而不是靠加厚白底。内部控件只比面板浓一点，避免整块面板重新变"实"。 */
+:root:is([data-theme="glass"], [data-theme="win11"]) .dtf-panel {
+  background-color: rgba(255, 255, 255, var(--glass-opacity, 0.4)) !important;
+  border-color: var(--alpha-white-35) !important;
+  backdrop-filter: blur(28px) saturate(1.5);
+  -webkit-backdrop-filter: blur(28px) saturate(1.5);
+  box-shadow:
+    0 16px 40px rgba(15, 23, 42, 0.14),
+    0 2px 6px rgba(15, 23, 42, 0.05),
+    inset 0 1px 0 var(--alpha-white-45);
+}
+/* 内部控件：在面板透明度上叠薄薄一层，不做成实色块 */
+:root:is([data-theme="glass"], [data-theme="win11"]) .dtf-item:hover,
+:root:is([data-theme="glass"], [data-theme="win11"]) .dtf-sort-btn:hover {
+  background-color: rgba(255, 255, 255, calc(var(--glass-opacity, 0.4) + 0.2)) !important;
+}
+:root:is([data-theme="glass"], [data-theme="win11"]) .dtf-sort-btn {
+  background-color: rgba(255, 255, 255, calc(var(--glass-opacity, 0.4) + 0.08));
+}
+/* 选中态要压过上面那条（特异性更高），否则升/降序的高亮会被涂平 */
+:root:is([data-theme="glass"], [data-theme="win11"]) .dtf-sort-btn.is-on {
+  background-color: color-mix(in srgb, var(--color-primary, #22c55e) 22%, transparent);
+}
+:root:is([data-theme="glass"], [data-theme="win11"]) .dtf-search-input {
+  background-color: rgba(255, 255, 255, calc(var(--glass-opacity, 0.4) + 0.06));
+  border-color: rgba(0, 0, 0, 0.08);
+}
+:root:is([data-theme="glass"], [data-theme="win11"]) .dtf-search-input:focus {
+  background-color: rgba(255, 255, 255, calc(var(--glass-opacity, 0.4) + 0.28));
+  border-color: #3b82f6;
+}

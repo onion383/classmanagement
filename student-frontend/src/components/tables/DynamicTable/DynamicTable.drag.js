@@ -172,7 +172,8 @@ export function useDynamicTableDrag() {
 
     onRowHandleDown(event, index) {
       if (this.noRowDrag || this.readonly) return;
-      const row = this.rows[index];
+      // index 是「渲染顺序」下标（列筛选后与 rows 下标不一致），回查行对象须走 rowAt
+      const row = this.rowAt(index);
       if (!row || row._isNew || row._isSeparator) return;
       if (this.selectedRowKeys.length > 1 && !this.selectedKeySet.has(row._rowKey)) return;
       const trEl = (event.currentTarget instanceof Element && event.currentTarget.closest('tr')) || null;
@@ -344,14 +345,19 @@ export function useDynamicTableDrag() {
       this.dragIndex = null;
       this.dragOverIndex = null;
       if (from === null || to === null || from === to) { this._clearRowShiftFx(); return; }
-      const movedRow = this.rows[from];
+      const movedRow = this.rowAt(from);
+      if (!movedRow) { this._clearRowShiftFx(); return; }
       // 让位交给拖动期完成；松手只做一段「从松手位置落位」的收尾动画
       this._clearRowShiftFx();
+      // 对外抛的是 rows 原始下标（列筛选下 from/to 是渲染顺序，须换算），
+      // 否则父组件会挪错行；落位动画仍用渲染下标 to（DOM 顺序）
+      const srcFrom = this.srcIndex(from);
+      const srcTo = this.srcIndex(to);
       if (this.selectedRowKeys.length > 1 && this.selectedRowKeys.includes(movedRow._rowKey)) {
         const selectedKeys = this.selectedRowKeys.filter(key => this.rows.some(r => r._rowKey === key && !r._isSeparator));
-        this.$emit('moveSelectedRows', { selectedKeys, oldIndex: from, newIndex: to, isDownward: to > from });
+        this.$emit('moveSelectedRows', { selectedKeys, oldIndex: srcFrom, newIndex: srcTo, isDownward: srcTo > srcFrom });
       } else {
-        this.$emit('swapRows', from, to);
+        this.$emit('swapRows', srcFrom, srcTo);
       }
       if (relRow) this.$nextTick(() => this._slideInRow(to, relRow));
     },

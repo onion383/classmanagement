@@ -867,3 +867,44 @@
   background: rgba(239, 68, 68, 0.16) !important;
   border-color: rgba(239, 68, 68, 0.40) !important;
 }
+
+/* ========== 表头筛选面板（DynamicTable.filter.vue）==========
+   日间是随 --glass-opacity 变化的薄白玻璃，夜间换成同族深蓝玻璃
+   （透明度同样跟着滑块走，只比卡片略浓一点），面板内控件（hover 底、
+   搜索框、勾勾）同步提亮，避免在深底上对比度不足。 */
+:root[data-mode="night"] .dtf-panel {
+  background-color: rgba(37, 55, 90, calc(var(--glass-opacity, 0.4) + 0.12)) !important;
+  border-color: rgba(150, 180, 255, 0.18) !important;
+  color: var(--color-text, #e6ecf5);
+  backdrop-filter: blur(26px) saturate(1.35);
+  -webkit-backdrop-filter: blur(26px) saturate(1.35);
+  box-shadow:
+    0 16px 40px var(--alpha-black-40),
+    inset 0 1px 0 rgba(255, 255, 255, 0.10);
+}
+:root[data-mode="night"] .dtf-item:hover,
+:root[data-mode="night"] .dtf-sort-btn:hover {
+  background-color: rgba(255, 255, 255, 0.09) !important;
+}
+:root[data-mode="night"] .dtf-sort-btn {
+  color: var(--color-text-secondary, #a8b6cf);
+}
+:root[data-mode="night"] .dtf-sort-btn.is-on {
+  color: var(--color-primary, #4ade80);
+  background-color: color-mix(in srgb, var(--color-primary, #4ade80) 22%, transparent);
+}
+:root[data-mode="night"] .dtf-search-input {
+  background-color: rgba(255, 255, 255, 0.06) !important;
+  border-color: rgba(255, 255, 255, 0.14) !important;
+}
+:root[data-mode="night"] .dtf-search-input:focus {
+  background-color: rgba(255, 255, 255, 0.10) !important;
+  border-color: #60a5fa !important;
+  box-shadow: 0 0 0 3px rgba(96, 165, 250, 0.22);
+}
+:root[data-mode="night"] .dtf-item-check {
+  color: var(--color-primary, #4ade80);
+}
+:root[data-mode="night"] .dtf-foot {
+  border-top-color: rgba(255, 255, 255, 0.12);
+}

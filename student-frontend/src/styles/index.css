@@ -221,3 +221,237 @@ html.no-animations {
   border-color: transparent !important;
   box-shadow: none !important;
 }
+
+/* ==================== 表头筛选面板（DynamicTable） ====================
+   网状表格表头上的放大镜/漏斗面板：降序/升序 + 值搜索 + 值勾选列表。
+   类名统一 .dtf- 前缀，避免与其他样式冲突。
+   主题覆盖不在此处：毛玻璃在 theme-glass.css / theme-glass2.css，夜间在 theme-night.css。 */
+.dtf-panel {
+  position: fixed;
+  z-index: 10020;
+  width: 268px;
+  padding: 11px;
+  display: flex;
+  flex-direction: column;
+  /* 排序 / 搜索 / 值列表 / 底栏四块之间留出明显的呼吸感 */
+  gap: 12px;
+  font-size: 13px;
+  color: var(--color-text, #111827);
+  background-color: var(--color-surface, #ffffff);
+  border: 1px solid var(--color-border, #e5e7eb);
+  border-radius: 14px;
+  box-shadow:
+    0 18px 44px rgba(15, 23, 42, 0.16),
+    0 2px 8px rgba(15, 23, 42, 0.06);
+  transform-origin: top center;
+  overflow: hidden;
+  /* 面板是懒加载组件：异步解析完成时 Transition 的 enter 已落在占位注释上，
+     真实元素拿不到 enter 类，所以进入动画用 keyframe 兜底（每次挂载播一次）；
+     离开动画仍由下面的 .dtf-leave-* 负责。 */
+  animation: dtf-panel-in 0.2s cubic-bezier(0.22, 1, 0.36, 1);
+}
+@keyframes dtf-panel-in {
+  from { opacity: 0; transform: translateY(-8px) scale(0.97); }
+  to { opacity: 1; transform: translateY(0) scale(1); }
+}
+
+/* ---------- 排序：降序 / 升序 ---------- */
+.dtf-sort { display: flex; gap: 6px; }
+.dtf-sort-btn {
+  flex: 1;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 3px;
+  height: 32px;
+  padding: 0 8px;
+  font: inherit;
+  font-size: 12.5px;
+  color: var(--color-text-secondary, #6b7280);
+  background-color: color-mix(in srgb, var(--color-surface-hover, #f3f4f6) 85%, transparent);
+  border: 1px solid transparent !important;   /* 清掉毛玻璃主题给 button 的 1px 边框 */
+  border-radius: 9px;
+  box-shadow: none !important;
+  cursor: pointer;
+  transition: background-color 0.14s ease, color 0.14s ease, transform 0.12s ease;
+}
+.dtf-sort-btn::before { display: none !important; }   /* 清掉毛玻璃主题的荧光描边 */
+.dtf-sort-btn:hover {
+  color: var(--color-text, #111827);
+  background-color: var(--color-surface-hover, #f3f4f6);
+}
+.dtf-sort-btn:active { transform: scale(0.97); }
+.dtf-sort-btn.is-on {
+  color: var(--color-primary, #22c55e);
+  font-weight: 600;
+  background-color: color-mix(in srgb, var(--color-primary, #22c55e) 14%, transparent);
+}
+
+/* ---------- 值搜索框 ---------- */
+.dtf-search { position: relative; display: flex; align-items: center; }
+.dtf-search-icon {
+  position: absolute;
+  left: 9px;
+  color: var(--color-text-muted, #9ca3af);
+  pointer-events: none;
+}
+.dtf-search-input {
+  width: 100%;
+  height: 32px;
+  padding: 0 26px 0 28px;
+  font: inherit;
+  font-size: 12.5px;
+  color: inherit;
+  background-color: color-mix(in srgb, var(--color-surface-hover, #f3f4f6) 70%, transparent);
+  border: 1px solid var(--color-border, #e5e7eb);
+  border-radius: 9px;
+  outline: none;
+  transition: border-color 0.16s ease, box-shadow 0.16s ease, background-color 0.16s ease;
+}
+.dtf-search-input::placeholder { color: var(--color-text-muted, #9ca3af); }
+.dtf-search-input:focus {
+  background-color: var(--color-surface, #ffffff);
+  border-color: #3b82f6;
+  box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.18);
+}
+.dtf-search-clear {
+  position: absolute;
+  right: 6px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  padding: 0;
+  color: var(--color-text-muted, #9ca3af);
+  background: transparent;
+  border: none !important;
+  border-radius: 50%;
+  box-shadow: none !important;
+  cursor: pointer;
+  transition: color 0.14s ease, background-color 0.14s ease;
+}
+.dtf-search-clear::before { display: none !important; }
+.dtf-search-clear:hover {
+  color: var(--color-text, #111827);
+  background-color: color-mix(in srgb, var(--color-text-muted, #9ca3af) 18%, transparent);
+}
+
+/* ---------- 值列表：每项「值 (次数) ✓」 ---------- */
+.dtf-list {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  max-height: 244px;
+  margin: 0 -5px;
+  padding: 0 5px;
+  overflow-y: auto;
+  overflow-x: hidden;
+  /* 细滚动条，避免在 268px 宽的面板里显得笨重 */
+  scrollbar-width: thin;
+}
+.dtf-item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  min-height: 30px;
+  padding: 5px 9px;
+  font: inherit;
+  font-size: 12.5px;
+  text-align: left;
+  color: var(--color-text, #111827);
+  background-color: transparent;
+  border: none !important;
+  border-radius: 7px;
+  box-shadow: none !important;
+  cursor: pointer;
+  /* 逐条错开浮入：仅新建的元素播放（搜索时新出现的行） */
+  animation: dtf-item-in 0.18s ease both;
+  animation-delay: calc(min(var(--i, 0), 9) * 14ms);
+  transition: background-color 0.13s ease, color 0.13s ease;
+}
+.dtf-item::before { display: none !important; }
+.dtf-item:hover { background-color: var(--color-surface-hover, #f3f4f6); }
+.dtf-item-label {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.dtf-item.is-on .dtf-item-label { font-weight: 600; }
+.dtf-item-count {
+  flex-shrink: 0;
+  color: var(--color-text-muted, #9ca3af);
+  font-size: 11.5px;
+  font-variant-numeric: tabular-nums;
+}
+/* 勾勾：未选中时占位不可见，避免文字左右跳动；选中时回弹放大 */
+.dtf-item-check {
+  flex-shrink: 0;
+  width: 13px;
+  color: var(--color-primary, #22c55e);
+  opacity: 0;
+  transform: scale(0.6);
+  transition: opacity 0.16s ease, transform 0.22s cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+.dtf-item.is-on .dtf-item-check { opacity: 1; transform: scale(1); }
+
+@keyframes dtf-item-in {
+  from { opacity: 0; transform: translateY(3px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+.dtf-none {
+  margin: 0;
+  padding: 18px 0;
+  text-align: center;
+  font-size: 12.5px;
+  color: var(--color-text-muted, #9ca3af);
+}
+
+/* ---------- 底部：已选统计 + 清除 ---------- */
+.dtf-foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 9px 2px 0;
+  border-top: 1px solid color-mix(in srgb, var(--color-border, #e5e7eb) 75%, transparent);
+}
+.dtf-foot-info {
+  font-size: 11.5px;
+  color: var(--color-text-muted, #9ca3af);
+  font-variant-numeric: tabular-nums;
+}
+.dtf-foot-btn {
+  padding: 3px 7px;
+  font: inherit;
+  font-size: 12px;
+  color: var(--color-text-secondary, #6b7280);
+  background: transparent;
+  border: none !important;
+  border-radius: 6px;
+  box-shadow: none !important;
+  cursor: pointer;
+  transition: color 0.14s ease, background-color 0.14s ease;
+}
+.dtf-foot-btn::before { display: none !important; }
+.dtf-foot-btn:hover {
+  color: var(--color-danger, #ef4444);
+  background-color: color-mix(in srgb, var(--color-danger, #ef4444) 12%, transparent);
+}
+
+/* ---------- 面板开合过渡（贴合触发按钮的上缘缩放浮现） ---------- */
+.dtf-enter-active {
+  transition: opacity 0.16s ease, transform 0.2s cubic-bezier(0.22, 1, 0.36, 1);
+}
+.dtf-leave-active {
+  transition: opacity 0.12s ease, transform 0.14s cubic-bezier(0.4, 0, 1, 1);
+}
+.dtf-enter-from,
+.dtf-leave-to {
+  opacity: 0;
+  transform: translateY(-8px) scale(0.97);
+}

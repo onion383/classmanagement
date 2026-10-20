@@ -396,8 +396,14 @@ export function useTableCRUD(apiBase, defaultFields, options = {}) {
   }
 
   // ==================== 排序 / 搜索 ====================
-  function toggleSort(field) {
-    if (sortField.value === field) sortOrder.value = sortOrder.value === 'asc' ? 'desc' : 'asc'
+  // order 可显式传 'asc' / 'desc'（表头筛选面板的升序、降序按钮直接指定方向）；
+  // 不传时沿用「点一次翻转一次」的旧语义。
+  function toggleSort(field, order) {
+    if (order === 'asc' || order === 'desc') {
+      if (sortField.value === field && sortOrder.value === order) return
+      sortField.value = field
+      sortOrder.value = order
+    } else if (sortField.value === field) sortOrder.value = sortOrder.value === 'asc' ? 'desc' : 'asc'
     else { sortField.value = field; sortOrder.value = 'asc' }
     saveCurrentOrder()
   }

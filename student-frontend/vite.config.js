@@ -17,12 +17,14 @@ function nonBlockingCss(entries = ['index.html', 'setup.html']) {
     apply: 'build',
     closeBundle() {
       for (const name of entries) {
-        const file = path.resolve(__dirname, 'dist', name)
+        const file = path.resolve(import.meta.dirname, 'dist', name)
         if (!fs.existsSync(file)) continue
         const html = fs.readFileSync(file, 'utf8')
-        const out = html.replace(
-          /<link rel="stylesheet"([^>]*?)>/g,
-          '<link rel="stylesheet"$1 media="print" onload="this.media=\'all\'">'
+        // 幂等：已带 media="print" 的 link 原样保留，避免重复构建时层层叠加该属性
+        const out = html.replace(/<link rel="stylesheet"([^>]*?)>/g, (tag, attrs) =>
+          /media="print"/.test(attrs)
+            ? tag
+            : `<link rel="stylesheet"${attrs} media="print" onload="this.media='all'">`
         )
         if (out !== html) fs.writeFileSync(file, out)
       }
@@ -34,8 +36,8 @@ function nonBlockingCss(entries = ['index.html', 'setup.html']) {
 // 由本插件在 dev 与 build 两处都注入 splash/ 下的同一份样式与结构，避免同款加载画面维护多份。
 // 用内联 <style> + 内联 DOM，保证首帧不等任何外部 JS/CSS 下载即可绘制。
 function injectSplash() {
-  const cssFile = path.resolve(__dirname, 'splash/splash.css')
-  const htmlFile = path.resolve(__dirname, 'splash/splash.html')
+  const cssFile = path.resolve(import.meta.dirname, 'splash/splash.css')
+  const htmlFile = path.resolve(import.meta.dirname, 'splash/splash.html')
   return {
     name: 'inject-splash',
     transformIndexHtml(html) {
@@ -53,7 +55,7 @@ export default defineConfig({
   server: {
     // 允许 dev server 读取仓库根：electron/ipc-channels.json 位于 vite root 之外，
     // 由 src/electronChannels.js 直接 import（构建时会被内联，dev 下经 fs 白名单放行）。
-    fs: { allow: [path.resolve(__dirname), path.resolve(__dirname, '..')] },
+    fs: { allow: [path.resolve(import.meta.dirname), path.resolve(import.meta.dirname, '..')] },
     // 预热首屏模块图：服务器启动时即预编译入口及关键依赖，
     // 避免第一个请求才逐文件编译导致窗口白屏过长。
     warmup: {
@@ -129,11 +131,11 @@ export default defineConfig({
     // Vite 8 已用 rolldown 取代 rollup，rollupOptions 是 deprecated 别名，这里改用新名（行为不变）
     rolldownOptions: {
       input: {
-        main: path.resolve(__dirname, 'index.html'),
-        widget: path.resolve(__dirname, 'widget.html'),
-        'desktop-widget': path.resolve(__dirname, 'desktop-widget.html'),
-        migration: path.resolve(__dirname, 'migration.html'),
-        setup: path.resolve(__dirname, 'setup.html'),
+        main: path.resolve(import.meta.dirname, 'index.html'),
+        widget: path.resolve(import.meta.dirname, 'widget.html'),
+        'desktop-widget': path.resolve(import.meta.dirname, 'desktop-widget.html'),
+        migration: path.resolve(import.meta.dirname, 'migration.html'),
+        setup: path.resolve(import.meta.dirname, 'setup.html'),
       },
     }
   }

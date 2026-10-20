@@ -192,8 +192,13 @@ export default {
     },
     startEditCell(row, field) { this.editingCell = { rowKey: row._rowKey, field: field.name }; },
     saveCell(row, field) { this.editingCell = null; },
-    toggleSort(fieldName) {
-      if (this.sortField === fieldName) this.sortOrder = this.sortOrder === 'asc' ? 'desc' : 'asc';
+    // order 可显式指定方向（表头筛选面板的升序/降序按钮）；不传则沿用翻转语义
+    toggleSort(fieldName, order) {
+      if (order === 'asc' || order === 'desc') {
+        if (this.sortField === fieldName && this.sortOrder === order) return;
+        this.sortField = fieldName;
+        this.sortOrder = order;
+      } else if (this.sortField === fieldName) this.sortOrder = this.sortOrder === 'asc' ? 'desc' : 'asc';
       else { this.sortField = fieldName; this.sortOrder = 'asc'; }
       this.previewRows.sort((a, b) => {
         let va = a[fieldName] || '', vb = b[fieldName] || '';

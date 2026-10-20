@@ -216,8 +216,12 @@ export default {
       arr.splice(toIndex, 0, moved);
       this.localFields = arr;
     },
-    toggleSort(field) {
-      if (this.sortField === field) {
+    // order 可显式指定方向（表头筛选面板的升序/降序按钮）；不传则沿用翻转语义
+    toggleSort(field, order) {
+      if (order === 'asc' || order === 'desc') {
+        this.sortField = field;
+        this.sortOrder = order;
+      } else if (this.sortField === field) {
         this.sortOrder = this.sortOrder === 'asc' ? 'desc' : 'asc';
       } else {
         this.sortField = field;

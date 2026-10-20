@@ -800,6 +800,9 @@ export default {
 /* 右侧三个控制按钮及其容器必须可点击（脱离拖拽区） */
 .window-controls {
   -webkit-app-region: no-drag;
+  /* 登录页隐藏了左侧功能区，标题栏只剩这一个子项，justify-content: space-between
+     会把唯一子项排到最左边；用 margin-left:auto 恒定把它顶到最右。 */
+  margin-left: auto;
 }
 .window-controls .win-btn {
   display: inline-flex;
