@@ -183,7 +183,7 @@ import { useNotification } from './composables/useNotification'
 import { useSeatDraft } from './composables/useSeatDraft'
 import { defineAsyncComponent, h } from 'vue'
 import { prefetchRoutes } from './router'
-import { prefetchThemeStyles } from './styles/themeLoader'
+import { prefetchThemeStyles, warmNightMode, isNightWarmEnabled } from './styles/themeLoader'
 import { Minus, Square, X, Undo2, Redo2, Search, Palette, User, Settings, Info } from '@lucide/vue'
 import axios from 'axios'
 import { undoState as undo, performUndo, refreshUndoStatus } from './composables/useUndo.js'
@@ -337,6 +337,16 @@ export default {
       prefetchRoutes({ warmDeferred: this.aiEnabled !== false })
       // 其余主题/日夜间 CSS 一并空闲预热：切换主题时不再有下载/解析间隙（见 styles/themeLoader.js）
       prefetchThemeStyles()
+      // 预解码 glass 主题「另一张」内置底图：把首次切日/夜的图片解码挪到空闲期，
+      // 否则快照交叉淡入会被解码拖住，观感是「切换按钮先变、界面后变」（见 stores/theme.js）
+      this.themeStore.warmModeBackgrounds()
+      // 夜间模式的「样式预热」：把首次切日/夜的那次性样式编译成本挪到空闲期。
+      // 不预热的话，用户第一次点日/夜切换会有一次长任务（实测 ~160ms，见 themeLoader.js）。
+      // 注意：applyTheme 里也会调度同一件事（覆盖「启动时是别的主题、之后才切到玻璃」的情况），
+      //      两者靠 themeLoader 内部的 warmedThemes 去重，不会重复执行。
+      // 开关已关（见 themeLoader.js 的 NIGHT_WARM_ENABLED）：预热会把整页日→夜→日跑一遍，
+      // 用户反馈切主题时有可见闪动，故不再调用（判断放这里，模块也就不会被执行）。
+      if (isNightWarmEnabled()) warmNightMode(this.themeStore.currentTheme, this.themeStore.mode)
     }
     // 预热锚点：等首屏占位页移除（app-visible）后再等「真正空闲」才预热。
     // 不设 timeout：宁可一直不预热，也不用兜底强制把 chunk 解析插进启动/交互的忙碌期。

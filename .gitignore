@@ -48,6 +48,13 @@ Thumbs.db
 
 # 测试脚本与单元测试（入库）；仅忽略运行时测量产物（含密钥/缓存/日志）
 testjs/.startup-measure/
+# 本地性能诊断临时实验脚本（不入库，可随时删除）
+testjs/tmp/
+
+# 本地性能基准页（不入库）：dev 下手动打开测量用，需随项目源码实时改动才有意义，
+# 且不属于产品功能。与 perf-bench.html / sticky-test.html 同类。
+student-frontend/*-bench.html
+student-frontend/sticky-test.html
 
 # 问题/优化管理文档（仅本地，不入库）
 doc/problem.md

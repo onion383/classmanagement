@@ -85,7 +85,12 @@ ${css}
 // 轮询 Vite 开发服务器：用 http.get 轻量探测，不阻塞渲染进程。
 // Vite 就绪后导航到首页并打开 DevTools。
 // 重试上限留足 ~4s 预算（轮询在创建窗口后立刻开始）。
-function pollViteAndNavigate(win, retries = 40) {
+//
+// 为什么快轮询用尽后还要转低速轮询：Electron 窗口常常比 Vite 先起（Vite 冷启动要预编译依赖，
+// 实测可到 5s+），原来 40 次 ×100ms 用尽就静默放弃，窗口会永远停在 inline loading 页上，
+// 只能靠手动重启整个 dev 进程才能恢复。现在快轮询（100 次 ≈10s）用尽后转入 1s/次的低速轮询，
+// 窗口活着就一直等，Vite 迟到多久都能接上。
+function pollViteAndNavigate(win, retries = 100, slow = false) {
   const http = require('http')
   const req = http.get('http://127.0.0.1:5173/', (res) => {
     res.resume() // 消耗响应体，避免内存泄漏
@@ -102,8 +107,17 @@ function pollViteAndNavigate(win, retries = 40) {
     }
   })
   req.on('error', () => {
-    if (retries > 0 && win && !win.isDestroyed()) {
-      setTimeout(() => pollViteAndNavigate(win, retries - 1), 100)
+    if (!win || win.isDestroyed()) return
+    if (retries > 0) {
+      // 快轮询阶段每 100 次（约 10s）报一次进度，方便在启动日志里看出「Vite 到底起多慢」
+      if (!slow && retries % 100 === 0) console.log(`[Electron] 等待开发服务器就绪，剩余重试 ${retries}...`)
+      setTimeout(() => pollViteAndNavigate(win, retries - 1, slow), slow ? 1000 : 100)
+    } else if (!slow) {
+      console.log('[Electron] 开发服务器 10s 内未就绪，转入 1s/次的低速轮询继续等待…')
+      // 3600 次 ≈1 小时： finite 而不是 Infinity，这样下面的取余日志能正常打点
+      pollViteAndNavigate(win, 3600, true)
+    } else if (retries % 30 === 0) {
+      console.log('[Electron] 仍在等待开发服务器就绪（1s/次）…')
     }
   })
   req.end()

@@ -222,6 +222,17 @@
 :root[data-mode="night"][data-theme="glass"] .table-scroll-wrapper .bg-primary {
   background-color: rgba(96, 165, 250, 0.22) !important;
 }
+/* 吸顶表头遮盖层（日间同款，见 theme-glass.css）：滚动时数据行从表头下穿过，
+   半透明表头会让下层文字透上来影响可读性，夜间同样要高遮盖打底 + 蓝调染层 */
+:root[data-mode="night"][data-theme="glass"] .table-scroll-wrapper thead th.bg-primary {
+  background-color: rgba(30, 41, 59, 0.92) !important;
+  background-image: linear-gradient(rgba(96, 165, 250, 0.22), rgba(96, 165, 250, 0.22)) !important;
+  backdrop-filter: blur(22px);
+}
+/* 操作列固定右侧：同表头一样是 sticky 遮盖层，横向滚动时数据从该列底下穿过 */
+:root[data-mode="night"][data-theme="glass"] .table-scroll-wrapper tbody td.col-op {
+  background-color: rgba(30, 41, 59, 0.92) !important;
+}
 :root[data-mode="night"][data-theme="glass"] .table-scroll-wrapper .text-text-inverse {
   color: #e6ecf5 !important;
 }
@@ -244,6 +255,13 @@
   color: #e6ecf5 !important;
   border-right-color: rgba(150, 180, 255, 0.18) !important;
   border-bottom-color: rgba(150, 180, 255, 0.18) !important;
+}
+/* 吸顶表头遮盖层（日间同款，见 theme-glass.css）：表头底色半透明，
+   数据行滚到它下面时文字会透上来，夜间同样要高遮盖打底 + 蓝调染层 */
+:root[data-mode="night"][data-theme="glass"] .grid-view-container thead th {
+  background-color: rgba(30, 41, 59, 0.92) !important;
+  background-image: linear-gradient(rgba(96, 165, 250, 0.22), rgba(96, 165, 250, 0.22)) !important;
+  backdrop-filter: blur(22px);
 }
 :root[data-mode="night"][data-theme="glass"] .grid-view-container table td {
   background-color: var(--alpha-white-05) !important;
@@ -691,6 +709,24 @@
 :root[data-mode="night"][data-theme="glass2"] .table-scroll-wrapper th.bg-primary,
 :root[data-mode="night"][data-theme="glass2"] .grid-view-container th.bg-primary {
   background-color: rgba(124, 147, 255, 0.2) !important;
+}
+/* 吸顶表头遮盖层（日间同款，见 theme-glass2.css）：滚动时数据行从表头下穿过，
+   半透明表头会让下层文字透上来影响可读性，夜间同样要高遮盖打底 + 强调色染层 */
+:root[data-mode="night"][data-theme="glass2"] .table-scroll-wrapper thead th.bg-primary {
+  background-color: rgba(32, 38, 60, 0.92) !important;
+  background-image: linear-gradient(rgba(124, 147, 255, 0.22), rgba(124, 147, 255, 0.22)) !important;
+  backdrop-filter: blur(22px);
+}
+/* 操作列固定右侧：同表头一样是 sticky 遮盖层，横向滚动时数据从该列底下穿过 */
+:root[data-mode="night"][data-theme="glass2"] .table-scroll-wrapper tbody td.col-op {
+  background-color: rgba(32, 38, 60, 0.92) !important;
+}
+/* 网状表格的吸顶表头：与 .table-scroll-wrapper 同款遮盖（日间见 theme-glass2.css） */
+:root[data-mode="night"][data-theme="glass2"] .grid-view-container thead th,
+:root[data-mode="night"][data-theme="glass2"] .grid-view-container thead th.bg-primary {
+  background-color: rgba(32, 38, 60, 0.92) !important;
+  background-image: linear-gradient(rgba(124, 147, 255, 0.22), rgba(124, 147, 255, 0.22)) !important;
+  backdrop-filter: blur(22px);
 }
 :root[data-mode="night"][data-theme="glass2"] table tbody tr td {
   background-color: var(--alpha-white-05) !important;

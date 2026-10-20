@@ -525,6 +525,18 @@
 :root[data-theme="glass2"] .grid-view-container th.bg-primary {
   background-color: rgba(91, 124, 250, 0.16) !important;
 }
+/* 吸顶表头遮盖层：数据行滚动到表头下方时，半透明表头会让下层文字透上来、
+   影响表头可读性。给吸顶表头一层高遮盖底 + 强模糊，保住玻璃观感的同时挡住内容。
+   不随 --glass-opacity 变透：表头是遮盖层，可读性优先。 */
+:root[data-theme="glass2"] .table-scroll-wrapper thead th.bg-primary {
+  background-color: rgba(255, 255, 255, 0.88) !important;
+  background-image: linear-gradient(rgba(91, 124, 250, 0.22), rgba(91, 124, 250, 0.22)) !important;
+  backdrop-filter: blur(22px);
+}
+/* 操作列固定右侧：同表头一样是 sticky 遮盖层，横向滚动时数据从该列底下穿过 */
+:root[data-theme="glass2"] .table-scroll-wrapper tbody td.col-op {
+  background-color: rgba(255, 255, 255, 0.88) !important;
+}
 :root[data-theme="glass2"] table .text-text-inverse,
 :root[data-theme="glass2"] table .text-text-inverse\/70 {
   color: #3d4661 !important;
@@ -600,6 +612,16 @@
 }
 :root[data-theme="glass2"] .grid-view-container table th {
   background-color: rgba(91, 124, 250, 0.16) !important;
+}
+/* 吸顶表头遮盖：表头底色是半透明的，数据行滚到它下面时文字会透上来、影响可读性。
+   给一层高遮盖 + 强模糊，保住玻璃观感的同时挡住内容（同 .table-scroll-wrapper 的处理）。
+   放在 table th / th.bg-primary 之后：同样 !important，需靠顺序取胜；
+   thead 选择器多一层，但 th.bg-primary 带 class 更具体，故下面两条都要写。 */
+:root[data-theme="glass2"] .grid-view-container thead th,
+:root[data-theme="glass2"] .grid-view-container thead th.bg-primary {
+  background-color: rgba(255, 255, 255, 0.88) !important;
+  background-image: linear-gradient(rgba(91, 124, 250, 0.16), rgba(91, 124, 250, 0.16)) !important;
+  backdrop-filter: blur(22px);
 }
 :root[data-theme="glass2"] .grid-view-container table td {
   background-color: rgba(255, 255, 255, calc(var(--g2-a) + 0.2)) !important;

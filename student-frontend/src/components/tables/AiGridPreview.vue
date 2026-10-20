@@ -5,6 +5,7 @@
     <!-- 无法还原成网格：由调用方回退到其它展示方式（此处仅提示） -->
     <div v-else-if="error" class="rounded-lg border border-border px-3 py-2 text-xs text-text-muted">{{ error }}</div>
     <!-- 只读网格：直接复用各页面同款 GridView 组件 -->
+    <!-- maxHeight=0：本组件总是出现在弹窗/面板里（外层自带滚动），再限高会形成嵌套滚动条 -->
     <GridView
       v-else
       readonly
@@ -15,6 +16,7 @@
       :rowHeaderLabel="rowHeaderLabel"
       :showPeriodColumn="showPeriodColumn"
       :minTableHeight="120"
+      :maxHeight="0"
     />
   </div>
 </template>

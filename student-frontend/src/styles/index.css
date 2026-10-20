@@ -197,6 +197,70 @@ html.no-animations {
   scroll-behavior: auto !important;
 }
 
+/* ==================== 日/夜切换过渡（快照「先到位、再收尾」） ====================
+   切换本身由 View Transitions 承担（见 styles/themeTransition.js）：
+   浏览器在切换前后各拍一张整屏快照，两帧之间做 opacity 叠加。
+   主线程只在中间付一次样式重算，叠加本身是合成器上的单层动画，成本与表格/行数无关。
+
+   为什么不是传统交叉淡入：
+   快照本身有 1~2 帧开销，若新画面从 opacity:0 起步，点击后前 50ms 屏幕上几乎没变化，
+   手感就是「点下去没反应」。所以让新画面第一帧就直接到一个较高的不透明度（0.62，
+   约等于换了六成多），剩下四成套 ease-out 在 100ms 内收干净。
+   旧画面全程保持 opacity:1 垫底、不参与淡出，避免中途露出实时页面造成闪白。
+
+   两个可调旋钮：
+   - --theme-switch-duration：收尾时长（越小越跟手，100ms 是手感与观感的平衡点）
+   - 下面 keyframes 里的 0.62：第一帧到达的不透明度（越接近 1 越像瞬时切换） */
+:root {
+  --theme-switch-duration: 100ms;
+}
+/* 淡入期间放行指针事件。
+   View Transitions 默认在动画播放期间拦截整页点击（伪元素树盖在最上层），
+   表现就是「淡入这 100ms 里点不动、连点被吞」。把伪元素树整体设为 pointer-events:none 后，
+   点击会穿过快照落到已经切好的实时 DOM 上 —— 于是连点能立刻打断当前淡入、掉头切回去
+   （打断逻辑见 styles/themeTransition.js 的 performThemeSwap）。 */
+::view-transition,
+::view-transition-group(root),
+::view-transition-image-pair(root),
+::view-transition-old(root),
+::view-transition-new(root) {
+  pointer-events: none;
+}
+/* 默认配方是 isolate + plus-lighter 的交叉淡入。这里改成普通 alpha 叠加：
+   「旧画面不淡出 + 新画面半透明」在 plus-lighter 下会被加亮成一片白。 */
+::view-transition-image-pair(root) {
+  isolation: auto;
+}
+@keyframes theme-switch-in {
+  from { opacity: 0.62; }
+  to   { opacity: 1; }
+}
+::view-transition-old(root) {
+  animation: none;
+  mix-blend-mode: normal;
+}
+::view-transition-new(root) {
+  mix-blend-mode: normal;
+  animation: theme-switch-in var(--theme-switch-duration, 100ms) ease-out both;
+}
+/* 关了「动画效果」时不做淡入；JS 侧也会直接走瞬时切换，这里是双保险 */
+html.no-animations::view-transition-old(root),
+html.no-animations::view-transition-new(root) {
+  animation: none;
+}
+
+/* 切换事务窗口：所有元素级过渡瞬时完成。
+   由 themeTransition.js 在改 data-mode 之前加类、两帧后摘除。
+   不加这层，上千个 button / tr 会同时做 0.2s 的颜色与阴影过渡，与快照淡入叠加，
+   等于把「逐帧重绘 12 帧」再付一遍 —— 表格越多越明显。
+   注意只压 transition，不动 animation：长时间运行的动画不该被切换打断重排。 */
+html.theme-switching *,
+html.theme-switching *::before,
+html.theme-switching *::after {
+  transition-duration: 0.001ms !important;
+  transition-delay: 0ms !important;
+}
+
 /* ==================== 班干部管理 · 树状视图滚动条 ====================
    折叠/展开时内容高度剧变（展开还带轻微回弹超调），原生滚动条会随着
    scrollHeight 反复跨越容器高度而来回闪现（抽搐）。这里做两件事：

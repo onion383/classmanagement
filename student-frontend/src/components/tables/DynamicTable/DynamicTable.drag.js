@@ -40,7 +40,8 @@ export function useDynamicTableDrag() {
     },
     // 拖拽开始时一次性缓存各行与容器的几何信息，拖动过程中纯计算，避免每帧 O(n) 布局读取
     _cacheRowGeom() {
-      const trs = this.$el ? this.$el.querySelectorAll('tbody tr') : [];
+      // 只取真实数据行：虚拟滚动的上下垫片行不参与几何计算，否则下标会整体错位
+      const trs = this.$el ? this.$el.querySelectorAll('tbody tr.data-drag-item') : [];
       const arr = [];
       for (let i = 0; i < trs.length; i++) {
         const r = trs[i].getBoundingClientRect();
@@ -178,6 +179,8 @@ export function useDynamicTableDrag() {
       if (this.selectedRowKeys.length > 1 && !this.selectedKeySet.has(row._rowKey)) return;
       const trEl = (event.currentTarget instanceof Element && event.currentTarget.closest('tr')) || null;
       event.preventDefault();
+      // 拖行期间锁死虚拟滚动窗口：行在拖动中途被换掉会让 _rowGeom/_rowEls 的下标全部错位
+      this.virtualFrozen = true;
       this.dragIndex = index;
       this.dragOverIndex = index;
       this._suppressCellClick = true; // 压制从手柄冒出的 click
@@ -235,10 +238,13 @@ export function useDynamicTableDrag() {
       // 落点高亮框：包住即将落位的那一行（几何信息在此一次性缓存）
       this._cacheRowGeom();
       // 让位与自动滚动的初始状态：行元素列表 + 「空槽」高度（取被拖行自身高度）
-      this._rowEls = Array.from(this.$el.querySelectorAll('tbody tr'));
+      // 与 _cacheRowGeom 同一口径：垫片行不算行元素
+      this._rowEls = Array.from(this.$el.querySelectorAll('tbody tr.data-drag-item'));
       const g0 = this._rowGeom ? this._rowGeom[index] : null;
       this._rowSlotH = g0 ? Math.round(g0.bottom - g0.top) : 0;
-      this._rowAutoScroll = createEdgeAutoScroll(
+      // 虚拟滚动：拖行期间窗口锁死（见 DynamicTable.recalcWindow），滚出去只会看到垫片空白，
+      // 故这一轮不启用边缘自动滚动——拖放范围就是当前可见窗口。
+      this._rowAutoScroll = this.virtualOn ? null : createEdgeAutoScroll(
         () => this.$el,
         (mx, my) => this._onRowScrolled(mx, my)
       );
@@ -275,7 +281,7 @@ export function useDynamicTableDrag() {
         }
         return best;
       }
-      const trs = this.$el ? this.$el.querySelectorAll('tbody tr') : [];
+      const trs = this.$el ? this.$el.querySelectorAll('tbody tr.data-drag-item') : [];
       let best = null, min = Infinity;
       trs.forEach((tr, i) => {
         const r = tr.getBoundingClientRect();
@@ -325,6 +331,11 @@ export function useDynamicTableDrag() {
       this.updateRowDropBox();
     },
     finishRowDrag() {
+      // 解冻虚拟滚动窗口：松手后按当前滚动位置重新算可见窗口（拖行期间它是锁死的）
+      if (this.virtualFrozen) {
+        this.virtualFrozen = false;
+        this.$nextTick(() => this.recalcWindow());
+      }
       if (this._rowMove) window.removeEventListener('mousemove', this._rowMove);
       if (this._rowUp) window.removeEventListener('mouseup', this._rowUp);
       this._rowMove = null;
@@ -366,7 +377,8 @@ export function useDynamicTableDrag() {
       if (!rel) return;
       const tbody = this.$refs.tbodyRef;
       if (!tbody) return;
-      const tr = tbody.querySelectorAll('tr')[to];
+      // 只取真实数据行：虚拟滚动的垫片行会占掉下标位置
+      const tr = tbody.querySelectorAll('tr.data-drag-item')[to];
       if (!tr || typeof tr.animate !== 'function') return;
       const r = tr.getBoundingClientRect();
       if (!r.width && !r.height) return;

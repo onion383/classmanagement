@@ -1,10 +1,26 @@
 <template>
   <div class="grid-view-container" ref="gridContainer" :style="{ minHeight: rows.length ? 'auto' : minTableHeight + 'px', position: 'relative' }">
-    <div ref="gridTable" class="overflow-auto border rounded">
+    <!--
+      内层滚动容器：加 maxHeight 后内容超高即在此内部纵向滚动，不再把外层页面顶长。
+      scrollbar-gutter 仅在真正超高时预留滚动条槽位，避免「滚动条出现/消失」引起列宽抖动。
+      拖拽的边缘自动滚动（createEdgeAutoScroll）本就取这个元素作滚动容器，
+      加了高度上限后它才真正可滚，拖到边缘会自动翻行。
+    -->
+    <div
+      ref="gridTable"
+      class="overflow-auto border rounded"
+      :class="{ 'scrollbar-gutter-stable': vScroll }"
+      :style="maxHeight > 0 ? { maxHeight: maxHeight + 'px' } : null"
+    >
       <table class="w-full border-collapse select-none">
         <thead>
+          <!--
+            标题行：只在有 title 时存在（课表在用）。它与下面的列头行都在 thead 里，
+            两行都吸顶时必须错开 top，否则会叠在一起 —— 标题行 top:0、列头行 top 用
+            --grid-title-h（由 measureScrollState 量出的标题行实际高度，见样式）。
+          -->
           <tr v-if="title">
-            <th :colspan="totalColumns" class="bg-primary text-text-inverse text-center py-2 text-lg font-bold">{{ title }}</th>
+            <th :colspan="totalColumns" class="bg-primary text-text-inverse text-center py-2 text-lg font-bold grid-head-title">{{ title }}</th>
           </tr>
           <tr>
             <th v-if="showPeriodColumn && !hideMetaColumns" class="bg-primary text-text-inverse border border-border px-2 py-1 text-center" style="width: 80px;">时段</th>
@@ -217,6 +233,12 @@ export default {
     candidatePlaceholder: { type: String, default: '' },
     allowDuplicate: { type: Boolean, default: false },
     minTableHeight: { type: Number, default: 400 },
+    // 内层滚动容器的最大高度（px），内容超高即容器内纵向滚动、表头吸顶；<= 0 表示不限制
+    // （保持旧行为：表格随内容撑高，滚的是外层页面）。与 DynamicTable 的 maxHeight 同款语义。
+    // 默认 560 的取值：数据格固定 40px 高，560 ≈ 表头 + 12 行。座位表（6 行）、值日表
+    // （十几行）日常不会触发，课表满课（8~12 节）刚好不滚；再多（跨时段分隔行、大值日表）
+    // 才内部滚动 —— 即「正常表格零变化，超长才滚」。
+    maxHeight: { type: Number, default: 560 },
     rowHeaderLabel: { type: String, default: '行号' },  // 新增：行号/首列表头文案（座位用「行号」，值日用「劳动项目」）
     disableRowDrag: { type: Boolean, default: false },  // 新增：禁用行号列的整行拖拽排序（值日多行分组时关闭，避免拖单个子行）
   },
@@ -231,6 +253,8 @@ export default {
       // 行过渡容器是否启用（见模板说明）：只在行集合真正变化的短窗口内为 true，
       // 日常编辑/键入/框选时退化成 Fragment，避免 TransitionGroup 每次更新的强制同步布局。
       rowsAnimEnabled: false, _rowsAnimTimer: null,
+      // 内容是否超出 maxHeight（超出才内部滚动 + 预留滚动条槽位，见模板内层容器说明）
+      vScroll: false,
       editingCell: null, editingCellData: { course: '' }, editingMeta: null, editingMetaValue: '',
       candidateHighlightIndex: 0, showCandidatePopup: false, candidatePopupX: 0, candidatePopupY: 0,
       cellRefs: {},
@@ -299,6 +323,41 @@ export default {
   },
   methods: {
     ...useGridViewDrag(),
+    // 测量表格完整内容高度（scrollHeight 不被容器裁剪），判断是否超出 maxHeight。
+    // 只写一个布尔值给 vScroll，不参与滚动位置计算，代价可忽略。
+    measureScrollState() {
+      const wrap = this.$refs.gridTable;
+      const tbl = wrap && wrap.querySelector('table');
+      // 表格挂在 Teleport/过渡尚未完成时可能拿不到，退回「不确定」：保持旧值，下一帧再测
+      if (!tbl) return;
+      if (this.maxHeight > 0) this.vScroll = tbl.scrollHeight > this.maxHeight;
+      else if (this.vScroll) this.vScroll = false;
+      // 标题行（课表在用）若存在，量出它的高度给列头行的 sticky top，让两行吸顶不重叠。
+      // 与 maxHeight 无关：即使不限制高度，吸顶偏移也得对。
+      const titleTh = tbl.querySelector('thead .grid-head-title');
+      const h = titleTh ? Math.round(titleTh.getBoundingClientRect().height) : 0;
+      if (h !== this._titleHeadH) {
+        this._titleHeadH = h;
+        tbl.style.setProperty('--grid-title-h', h + 'px');
+      }
+    },
+    // 排到「DOM 落地之后」再量：行是 TransitionGroup 挂载的，watch 触发时表格还没画完。
+    // 双保险 = nextTick（等 Vue patch 完）+ rAF（等浏览器完成布局，量到的才是真实高度）。
+    scheduleMeasure() {
+      if (this._measureTimer) clearTimeout(this._measureTimer);
+      if (this._measureRaf) cancelAnimationFrame(this._measureRaf);
+      this.$nextTick(() => {
+        this._measureRaf = requestAnimationFrame(() => {
+          this._measureRaf = 0;
+          this.measureScrollState();
+        });
+      });
+    },
+    onWindowResize() {
+      // resize 高频，用 120ms 尾巴合并；只为了重判 vScroll，无需逐帧跟手
+      if (this._measureTimer) clearTimeout(this._measureTimer);
+      this._measureTimer = setTimeout(() => { this._measureTimer = null; this.measureScrollState(); }, 120);
+    },
     setCellRef(rowIdx, colIdx, el) { if (el) { if (!this.cellRefs[rowIdx]) this.cellRefs[rowIdx] = {}; this.cellRefs[rowIdx][colIdx] = el; } },
     // 行是否可拖（只看行本身类型；编辑中与否由 rowDragLocked 决定「锁定」而非「隐藏」）
     canDragRow(row) {
@@ -447,20 +506,29 @@ export default {
   },
   watch: {
     // 行集合变化（数据初载、增删行、换行集）才开动画窗；改格子内容不会触发
-    rowsKeySig() { this.openRowsAnimWindow(); },
+    rowsKeySig() { this.openRowsAnimWindow(); this.scheduleMeasure(); },
+    // 列头变化：讲台/时段/节次列的显隐会改总列数，进而改单元格宽度、可能改行高（换行）
+    colHeaders() { this.scheduleMeasure(); },
   },
   mounted() {
     document.addEventListener('mouseup', this.handleGlobalMouseUp);
     // 首屏：数据区整体从左往右弹入
     this.playTableEnter();
+    this.scheduleMeasure();
+    // 窗口缩放会改列宽 → 可能改行高 → 重新判定是否超高（与 DynamicTable 同款监听时机）
+    window.addEventListener('resize', this.onWindowResize);
   },
   // KeepAlive：从其它状态栏/页签切回来时重播数据区弹入动效
   activated() {
-    if (this.firstActivate) { this.firstActivate = false; return; }
+    if (this.firstActivate) { this.firstActivate = false; this.scheduleMeasure(); return; }
     this.playTableEnter();
+    this.scheduleMeasure();
   },
   beforeUnmount() {
     document.removeEventListener('mouseup', this.handleGlobalMouseUp);
+    window.removeEventListener('resize', this.onWindowResize);
+    if (this._measureRaf) cancelAnimationFrame(this._measureRaf);
+    if (this._measureTimer) clearTimeout(this._measureTimer);
     this.clearLongPress();
     this.removeCellGhost();
     // 拖拽中途被卸载：停掉自动滚动并清掉让位位移
@@ -492,6 +560,25 @@ export default {
 .drag-handle:hover { opacity: 1; }
 th .drag-handle { color: color-mix(in srgb, var(--color-text-inverse, #ffffff) 70%, transparent); }
 th:hover .drag-handle { color: var(--color-text-inverse, #ffffff); }
+/* ---- 容器超高时的内部滚动（maxHeight 上限）----
+   预留滚动条槽位：纵向滚动条随行增删出现/消失，若不预留会让整表宽度跳一下、列宽重排。 */
+.scrollbar-gutter-stable { scrollbar-gutter: stable; }
+/* 表头吸顶：内容超出 maxHeight 后，表头保持在容器顶部、只滚数据行。
+   sticky 必须加在 th 上（加 thead 在多数浏览器不生效），与 DynamicTable 同款。
+   表头自带不透明底色，滚动时遮盖下方滚上来的数据格。 */
+thead th { position: sticky; top: 0; z-index: 5; }
+/* 有标题行时（课表），列头行要让开标题行的高度，否则两行都吸在 top:0 会叠在一起。
+   --grid-title-h 由 measureScrollState 量出实际标题行高度后写入 table 的行内样式；无标题行时为 0。 */
+thead th:not(.grid-head-title) { top: var(--grid-title-h, 0px); }
+/* 标题行在列头行之上（同一列重叠时标题优先） */
+thead th.grid-head-title { z-index: 6; }
+/* 吸顶表头补边框：border-collapse 下 sticky 单元格脱离表格的边框绘制，
+   底边会随下层数据一起「穿过去」。用内阴影补一条底线，视觉与原来一致。
+   玻璃/glass2/win11 主题把表格改成了 border-collapse: separate（边框本就正常），
+   再补会变成双线，故排除。 */
+:root:not([data-theme="glass"], [data-theme="glass2"], [data-theme="win11"]) thead th {
+  box-shadow: inset 0 -1px 0 0 var(--color-border, #e5e7eb);
+}
 /* 行交换(FLIP)：松手后其它行平滑让位滑开，与动态表格保持一致 */
 .row-flip-move { transition: transform 0.32s cubic-bezier(0.34, 1.08, 0.64, 1) !important; }
 /* 内容互换型交换（网格表格的实际交换方式）的一次性过渡曲线 */

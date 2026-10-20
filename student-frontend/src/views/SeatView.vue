@@ -23,15 +23,14 @@
               <button @click="seatView === 'active' ? openActiveExport() : openMasterExport()" class="bg-warning text-text-inverse px-4 py-2 rounded flex items-center gap-1.5"><IconGlyph name="download" :size="14" tint="current" /> 导出 Excel</button>
             </div>
 
-            <!-- 临时表（当前座位） -->
+            <!-- 临时表（当前座位）：表头先渲染（列头来自 useSeatGrid 默认几何，数据到位后自动校正），
+                 行数据 activeLoaded 后再填——未就绪时不给行，避免空格子被误编辑后覆盖真实座位 -->
             <template v-if="seatView === 'active'">
-              <div v-if="!activeLoaded" class="skeleton-block"></div>
               <GridView
-                v-else
                 ref="activeGridRef"
                 :anchorPrefix="'seat'"
                 :colHeaders="activeColHeaders"
-                :rows="activeDisplayRows"
+                :rows="activeLoaded ? activeDisplayRows : []"
                 :hideMetaColumns="true"
                 :showRowNumber="true"
                 :enableCandidate="true"
@@ -48,15 +47,13 @@
               <ExportExcel v-if="activeExportMounted" :is-visible="activeExportVisible" :rows="activeExportRows" :fields="activeExportFields" defaultFilename="当前座位表" @update:is-visible="activeExportVisible = $event" />
             </template>
 
-            <!-- 模板表（座位模板） -->
+            <!-- 模板表（座位模板）：同临时表，表头先行、行后填 -->
             <template v-else>
-              <div v-if="!masterLoaded" class="skeleton-block"></div>
               <GridView
-                v-else
                 ref="masterGridRef"
                 :anchorPrefix="'seatt'"
                 :colHeaders="masterColHeaders"
-                :rows="masterDisplayRows"
+                :rows="masterLoaded ? masterDisplayRows : []"
                 :hideMetaColumns="true"
                 :showRowNumber="true"
                 :enableCandidate="true"
@@ -85,12 +82,11 @@
               <button @click="openWeightExport()" class="bg-warning text-text-inverse px-4 py-2 rounded flex items-center gap-1.5"><IconGlyph name="download" :size="14" tint="current" /> 导出 Excel</button>
             </div>
 
-            <div v-if="!weightLoaded" class="skeleton-block"></div>
+            <!-- 权重表：同上，表头先行、行后填 -->
             <GridView
-              v-else
               :anchorPrefix="'seatw'"
               :colHeaders="weightColHeaders"
-              :rows="weightDisplayRows"
+              :rows="weightLoaded ? weightDisplayRows : []"
               :hideMetaColumns="true"
               :showRowNumber="true"
               :minTableHeight="200"
@@ -136,11 +132,12 @@
           <div class="history-swap">
             <Transition :name="slideDir">
               <div :key="historyCurrentWeek" class="history-content">
-                <div v-if="historyLoading" class="skeleton-block"></div>
-                <EmptySnapshot v-else-if="!historySnapshot" />
+                <!-- 表头先行：加载中也渲染 GridView（列头未到位时兜底为当前座位表列头），
+                     仅在「加载完且无快照」时才换 EmptySnapshot，避免表格区高度撑高再回弹 -->
+                <EmptySnapshot v-if="!historyLoading && !historySnapshot" />
                 <template v-else>
                   <GridView :colHeaders="historyColHeaders" :rows="historyDisplayRows" :hideMetaColumns="true" :showRowNumber="true" />
-                  <p class="text-xs text-text-muted mt-2">代表日期：{{ historySnapDate || '—' }}</p>
+                  <p v-if="historySnapshot" class="text-xs text-text-muted mt-2">代表日期：{{ historySnapDate || '—' }}</p>
                 </template>
               </div>
             </Transition>
@@ -824,6 +821,8 @@ function onSwitchWeek(dir) { slideDir.value = dir }
 
 const historyColHeaders = computed(() => {
   const { cols: c, mode: m, showAisle: sa } = historyData.value
+  // 快照未到位（cols=0）时兜底用当前座位表列头，让表头先行渲染；快照到了再按其几何校正
+  if (!c) return activeColHeaders.value
   return activeGrid.generateColHeaders(c, m, sa)
 })
 
@@ -876,8 +875,8 @@ async function fetchHistoryWeeks(options) {
 
 async function loadHistorySnapshot(options) {
   if (!historyCurrentWeek.value) return
-  // 静默模式：不切换骨架屏（骨架屏为固定 320px 占位，会先把表格区撑高再回弹，
-  // 导致下方操作栏“闪一下”），仅原地替换数据
+  // 静默模式：不动 historyLoading（它现在只决定「空态是否敢下结论」），
+  // 加载期间沿用旧表/表头原地替换数据，避免表格区高度撑高再回弹导致下方操作栏“闪一下”
   const silent = !!(options && options.silent)
   if (!silent) historyLoading.value = true
   try {
@@ -900,7 +899,7 @@ async function loadHistorySnapshot(options) {
   await loadSeatIndex()
 }
 
-// 周切换：静默加载（不显示固定高度骨架屏），避免表格区高度先被撑高再回弹；
+// 周切换：静默加载（不动 historyLoading），避免表格区高度先被撑高再回弹；
 // 滑动过渡动画照常由 key 变化触发
 function onWeekChange(week) {
   if (week) historyCurrentWeek.value = week

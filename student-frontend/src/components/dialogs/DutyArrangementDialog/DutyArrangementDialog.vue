@@ -94,6 +94,8 @@
 
       <!-- 预览 -->
       <div class="flex-1 overflow-auto border border-border rounded mb-4" style="min-height: 200px;">
+        <!-- maxHeight=0：预览区外层已是 flex-1 overflow-auto（弹窗自身滚动），
+             这里再限高会形成嵌套滚动条 -->
         <GridView
           v-if="previewRows.length"
           :key="previewKey"
@@ -105,6 +107,7 @@
           row-header-label="劳动项目"
           :enable-candidate="false"
           :min-table-height="200"
+          :max-height="0"
         />
         <div v-else class="flex items-center justify-center h-full text-text-muted text-sm py-8">设置劳动项目后开始排表</div>
       </div>

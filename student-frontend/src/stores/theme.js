@@ -1,7 +1,8 @@
 import { defineStore } from 'pinia'
 import { ref, computed, watch } from 'vue'
 import { resourceUrl } from '../utils/apiUrl'
-import { loadThemeStyles } from '../styles/themeLoader'
+import { loadThemeStyles, warmNightMode, isNightWarmEnabled } from '../styles/themeLoader'
+import { performThemeSwap } from '../styles/themeTransition'
 import { SEND } from '../electronChannels.js'
 
 const THEME_KEY = 'app-theme'
@@ -88,6 +89,25 @@ export const useThemeStore = defineStore('theme', () => {
 
   const isPreset = computed(() => PRESETS.some(p => p.id === currentTheme.value))
 
+  // 空闲期预热夜间样式：把「首次切日/夜」的样式编译成本挪到空闲期（详见 styles/themeLoader.js）。
+  // 用 requestIdleCallback 等真正空闲再跑，避免与启动/交互抢主线程；
+  // 不设 timeout 兜底：宁可晚预热，也别把一段 50ms 的样式重算插进忙碌期。
+  // 开关关闭（isNightWarmEnabled() === false）时整段不排：预热是「空闲时偷偷把整页日→夜→日
+  // 跑一遍」，用户反馈切主题时有可见的闪动/底色跳变，视觉上不划算（2026-10-20 关）。
+  let nightWarmScheduled = false
+  const scheduleNightWarm = () => {
+    if (!isNightWarmEnabled()) return
+    if (nightWarmScheduled) return
+    nightWarmScheduled = true
+    const run = () => {
+      nightWarmScheduled = false
+      // 预热时若用户已切到夜间，则无需再预热（函数内部会自行判断）
+      warmNightMode(currentTheme.value, mode.value)
+    }
+    if (typeof window.requestIdleCallback === 'function') window.requestIdleCallback(run, { timeout: 3000 })
+    else setTimeout(run, 1000)
+  }
+
   const applyTheme = () => {
     document.documentElement.dataset.theme = currentTheme.value
     // 全局日/夜模式：写 data-mode，styles/theme-night.css 据此叠加夜间配色
@@ -95,6 +115,10 @@ export const useThemeStore = defineStore('theme', () => {
     // 按需加载当前主题/模式的样式：首次进入加载一份，切换主题或日/夜时自动补载新的一份
     // （同一份只加载一次，命中缓存；未用到的主题样式不参与首屏）
     loadThemeStyles(currentTheme.value, mode.value)
+    // 切到支持夜间配色的主题后，空闲期预热一次夜间样式：把「首次切日/夜」的那次性
+    // 样式编译成本挪到空闲期，避免用户第一次点切换卡一下（详见 styles/themeLoader.js）。
+    // 只在当前是日间时预热；已是夜间则夜间规则本来就在生效，无需预热。
+    if (mode.value !== 'night') scheduleNightWarm()
     // 标题栏/侧边栏毛玻璃配色：写 data-topbar-color，CSS 据此切深蓝/白色调
     document.documentElement.dataset.topbarColor = topbarColor.value
     // 动画总开关：关闭时给根元素打 no-animations，配合全局 CSS 瞬时化所有动效
@@ -138,6 +162,62 @@ export const useThemeStore = defineStore('theme', () => {
     if (window.electron?.send) {
       window.electron.send(SEND.THEME_CHROME, { mode: 'frameless' })
     }
+  }
+
+  // ==================== 日/夜切换的提交路径 ====================
+  // 顺序：先让目标模式的 CSS 与底图就位，再一次性改 data-mode。
+  // 反过来（先改属性、再异步加载 CSS）第一次切换会付两次全量样式重算：一次按旧 CSS，
+  // 等新 CSS 注入后再整篇重算一次 —— 这也是「首次切夜间明显更卡」的一部分原因。
+  // 已解码过的底图 URL：切换时命中即同步放行（见 preloadModeBackground）
+  const preloadedBackgrounds = new Set()
+  const preloadModeBackground = (target) => {
+    // glass 主题日夜各一张内置底图（applyTheme 里 --bg-image 会换成另一张）。
+    // 提前解码，避免快照淡入结束后底图才「啪」地跳出来。自选底图日夜同一张，无需处理。
+    if (currentTheme.value !== 'glass' || backgroundImage.value) return Promise.resolve()
+    const url = target === 'night' ? DEFAULT_GLASS_BG_NIGHT : DEFAULT_GLASS_BG
+    if (!url) return Promise.resolve()
+    // 已解码过就直接同步返回：这条路径每次切换都要走一遍，
+    // 重复 new Image() + 等 decode 会白白多压一个任务，切换因此晚起一帧。
+    if (preloadedBackgrounds.has(url)) return Promise.resolve()
+    return new Promise((resolve) => {
+      const img = new Image()
+      img.onload = () => {
+        const done = () => {
+          preloadedBackgrounds.add(url)
+          resolve()
+        }
+        if (typeof img.decode === 'function') img.decode().then(done, done)
+        else done()
+      }
+      // 失败不进缓存：下次切换再试，最坏只是底图晚一拍出现
+      img.onerror = () => resolve()
+      img.src = url
+    })
+  }
+
+  const commitMode = async () => {
+    const target = mode.value
+    await loadThemeStyles(currentTheme.value, target)
+    await preloadModeBackground(target)
+    // 等待期间用户又切了一次：交给后来那次提交，避免两次快照互相打断
+    if (mode.value !== target) return
+    // 切换本身交给快照交叉淡入，元素级过渡在事务窗口内瞬时完成（见 styles/themeTransition.js）
+    performThemeSwap(applyTheme)
+  }
+
+  // mode 状态立即变（连点不会算错方向），DOM 属性等样式就位后再落
+  const switchModeTo = (target) => {
+    if (mode.value === target) return
+    mode.value = target
+    localStorage.setItem(MODE_KEY, target)
+    commitMode()
+  }
+
+  // 空闲期预解码「另一张」内置底图：首次切换日/夜时不必再等解码。
+  // 否则快照淡入会被推迟，观感是「按钮先变、界面后变」。自选底图日夜同一张，无需处理。
+  // 由 App.vue 的首屏后空闲预热调用一次（见 startIdlePrefetch）。
+  const warmModeBackgrounds = () => {
+    preloadModeBackground(mode.value === 'night' ? 'day' : 'night')
   }
 
   const setTheme = (themeId) => {
@@ -239,35 +319,36 @@ export const useThemeStore = defineStore('theme', () => {
 
   // 系统深浅色偏好：跟随系统开启时据此决定日/夜
   const darkMedia = window.matchMedia('(prefers-color-scheme: dark)')
-  // 同步系统配色到 mode（仅在「跟随系统」开启时生效，避免被系统偏好误覆盖手动选择）
-  const syncSystemMode = () => {
+  // 系统配色变化：跟随开启时按系统偏好切换（走带快照过渡的切换流程）
+  const onSystemModeChange = () => {
     if (!followSystem.value) return
-    const next = darkMedia.matches ? 'night' : 'day'
-    if (mode.value !== next) {
-      mode.value = next
-      applyTheme()
-    }
+    switchModeTo(darkMedia.matches ? 'night' : 'day')
   }
   // 跟随系统开关：开启时立即按系统配色切换
   const setFollowSystem = (value) => {
     followSystem.value = !!value
     localStorage.setItem(FOLLOW_KEY, followSystem.value ? '1' : '0')
-    syncSystemMode()
+    if (followSystem.value) onSystemModeChange()
   }
-  // 全局日/夜模式：立即生效（写 localStorage + 重应用主题类）
-  // 手动切换视为用户显式指定，自动关闭「跟随系统」以免随后被系统偏好覆盖
+  // 全局日/夜模式：手动切换视为用户显式指定，自动关闭「跟随系统」以免随后被系统偏好覆盖
   const setMode = (value) => {
     setFollowSystem(false)
-    mode.value = value === 'night' ? 'night' : 'day'
-    localStorage.setItem(MODE_KEY, mode.value)
-    applyTheme()
+    switchModeTo(value === 'night' ? 'night' : 'day')
   }
 
   const toggleMode = () => setMode(mode.value === 'night' ? 'day' : 'night')
 
-  // 启动即同步一次系统配色（若已开启跟随），并监听系统深浅色变化
-  if (followSystem.value) syncSystemMode()
-  darkMedia.addEventListener('change', syncSystemMode)
+  // 启动即同步一次系统配色（若已开启跟随）：此时页面尚未上屏，
+  // 直接从正确的配色起步即可，不做快照过渡（也不该在启动期插一段动画）。
+  if (followSystem.value) {
+    const initial = darkMedia.matches ? 'night' : 'day'
+    if (mode.value !== initial) {
+      mode.value = initial
+      applyTheme()
+    }
+  }
+  // 监听系统深浅色变化
+  darkMedia.addEventListener('change', onSystemModeChange)
 
   watch(currentTheme, applyTheme)
   watch(backgroundImage, (val) => {
@@ -308,5 +389,6 @@ export const useThemeStore = defineStore('theme', () => {
     setMode,
     toggleMode,
     setFollowSystem,
+    warmModeBackgrounds,
   }
 })

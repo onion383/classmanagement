@@ -115,13 +115,14 @@
         <div v-else-if="activeTab === 'history'" class="relative">
           <Transition :name="slideDir">
             <div :key="historyCurrentWeek" class="history-content">
-              <div v-if="historyLoading" class="skeleton-block"></div>
-              <EmptySnapshot v-else-if="!historySnapshot" />
+              <!-- 表头先行：加载中也渲染 GridView（列头默认周一~周五，快照到了再校正），
+                   仅在「加载完且无快照」时才换 EmptySnapshot -->
+              <EmptySnapshot v-if="!historyLoading && !historySnapshot" />
               <GridView
                 v-else
                 :colHeaders="historyColHeaders"
                 :title="activeTitle"
-                :rows="historyDisplayRows"
+                :rows="historySnapshot ? historyDisplayRows : []"
                 :showPeriodColumn="true"
                 @update:cells="() => {}"
                 @swapRows="() => {}"

@@ -783,6 +783,12 @@
   border-radius: 16px;
   overflow: hidden;
 }
+/* 滚动容器内的表格例外：overflow 非 visible 会让 <table> 自己变成一个滚动容器，
+   表头 thead th 的 position:sticky 就会相对这张「永不滚动」的表格定位，吸顶直接失效。
+   圆角裁切本来由外层 .table-scroll-wrapper（border-radius + contain:paint）承担，这里交还给它。 */
+:root:is([data-theme="glass"], [data-theme="win11"]) .table-scroll-wrapper > table {
+  overflow: visible;
+}
 :root:is([data-theme="glass"], [data-theme="win11"]) table th {
   /* 单元格自身不再叠加半透明遮罩：让表层唯一遮罩由 .table-scroll-wrapper 统一承担，
      保证「有数据」与「空数据区」遮罩程度一致（表头蓝色调由下方 .bg-primary 规则提供） */
@@ -845,6 +851,20 @@
 }
 :root:is([data-theme="glass"], [data-theme="win11"]) .table-scroll-wrapper .text-text-inverse {
   color: #1e293b !important;
+}
+/* 吸顶表头遮盖层：数据行滚动到表头下方时，半透明表头会让下层文字透上来，
+   严重影响表头可读性。给吸顶表头一层高遮盖底（0.88）+ 蓝调染层 + 强模糊，
+   保住毛玻璃观感的同时把滚过来的内容糊成色块。
+   不随 --glass-opacity 变透：表头是遮盖层，可读性优先，透明度滑块再低也要挡住内容。 */
+:root:is([data-theme="glass"], [data-theme="win11"]) .table-scroll-wrapper thead th.bg-primary {
+  background-color: rgba(255, 255, 255, 0.88) !important;
+  background-image: linear-gradient(rgba(59, 130, 246, 0.3), rgba(59, 130, 246, 0.3)) !important;
+  backdrop-filter: blur(22px);
+}
+/* 操作列固定右侧：同表头一样是 sticky 遮盖层，横向滚动时数据从该列底下穿过，
+   也需要高遮盖底；不加蓝调，与数据行的白玻璃同族、仅更不透明 */
+:root:is([data-theme="glass"], [data-theme="win11"]) .table-scroll-wrapper tbody td.col-op {
+  background-color: rgba(255, 255, 255, 0.88) !important;
 }
 
 /* ========== 网状表格（GridView）毛玻璃 ========== */
@@ -917,6 +937,14 @@
   border-bottom: 1px solid rgba(15, 23, 42, 0.22) !important;
   border-left: none !important;
   border-top: none !important;
+}
+/* 吸顶表头遮盖：表头底色是半透明的，数据行滚到它下面时文字会透上来、影响可读性。
+   补一层高遮盖 + 强模糊（不随 --glass-opacity 变透：表头是遮盖层，可读性优先），
+   与 glass2 主题给行状表格吸顶表头的处理一致。 */
+:root:is([data-theme="glass"], [data-theme="win11"]) .grid-view-container thead th {
+  background-color: rgba(255, 255, 255, 0.88) !important;
+  background-image: linear-gradient(rgba(255, 255, 255, 0.35), rgba(255, 255, 255, 0.35)) !important;
+  backdrop-filter: blur(22px);
 }
 :root:is([data-theme="glass"], [data-theme="win11"]) .grid-view-container table td {
   background-color: var(--alpha-white-40);

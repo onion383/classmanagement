@@ -90,6 +90,8 @@
 
       <!-- 表格预览 -->
       <div class="flex-1 overflow-auto border border-border rounded mb-4" style="min-height: 200px;">
+        <!-- maxHeight=0：预览区外层已是 flex-1 overflow-auto（弹窗自身滚动），
+             这里再限高会形成嵌套滚动条 -->
         <GridView
           :key="previewKey"
           :colHeaders="previewColHeaders"
@@ -98,6 +100,7 @@
           :showRowNumber="true"
           :minTableHeight="200"
           :enableCandidate="false"
+          :maxHeight="0"
         />
       </div>
 

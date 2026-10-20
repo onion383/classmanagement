@@ -27,14 +27,13 @@
               <button @click="dutyView === 'active' ? openActiveExport() : openMasterExport()" class="bg-warning text-text-inverse px-4 py-2 rounded flex items-center gap-1.5"><IconGlyph name="download" :size="14" tint="current" /> 导出值日表</button>
             </div>
 
-            <!-- 当前值日 -->
+            <!-- 当前值日：表头先行渲染（settingsDays 有默认值），行数据 activeLoaded 后再填，
+                 未就绪时不给行，避免空格子被误编辑后覆盖真实值日名单 -->
             <template v-if="dutyView === 'active'">
-              <div v-if="!activeLoaded" class="skeleton-block"></div>
               <GridView
-                v-else
                 :anchor-prefix="'duty:' + dutyMode"
                 :col-headers="settingsDays"
-                :rows="dutyActiveRows"
+                :rows="activeLoaded ? dutyActiveRows : []"
                 :hide-meta-columns="true"
                 :show-row-number="true"
                 :disable-row-drag="true"
@@ -52,14 +51,12 @@
               <ExportExcel v-if="activeExportMounted" :is-visible="activeExportVisible" :rows="activeExportRows" :fields="exportFields" defaultFilename="当前值日表" @update:is-visible="activeExportVisible = $event" />
             </template>
 
-            <!-- 值日模板 -->
+            <!-- 值日模板：同当前值日，表头先行、行后填 -->
             <template v-else>
-              <div v-if="!masterLoaded" class="skeleton-block"></div>
               <GridView
-                v-else
                 :anchor-prefix="'dutyt:' + dutyMode"
                 :col-headers="settingsDays"
-                :rows="dutyMasterRows"
+                :rows="masterLoaded ? dutyMasterRows : []"
                 :hide-meta-columns="true"
                 :show-row-number="true"
                 :disable-row-drag="true"
@@ -88,12 +85,11 @@
               <button @click="refreshWeight()" class="bg-text-muted text-text-inverse px-4 py-2 rounded flex items-center gap-1.5 btn-refresh"><IconGlyph name="refresh" :size="14" tint="current" /> 刷新</button>
               <button @click="openWeightExport()" class="bg-warning text-text-inverse px-4 py-2 rounded flex items-center gap-1.5"><IconGlyph name="download" :size="14" tint="current" /> 导出 Excel</button>
             </div>
-            <div v-if="!weightLoaded" class="skeleton-block"></div>
+            <!-- 权重表：同上，表头先行、行后填 -->
             <GridView
-              v-else
               :anchor-prefix="'dutyw:' + dutyMode"
               :col-headers="settingsDays"
-              :rows="weightDisplayRows"
+              :rows="weightLoaded ? weightDisplayRows : []"
               :hide-meta-columns="true"
               :show-row-number="true"
               :disable-row-drag="true"
@@ -143,9 +139,18 @@
           <div class="history-swap">
             <Transition :name="slideDir">
               <div :key="historyCurrentWeek" class="history-content">
-                <div v-if="historyLoading" class="skeleton-block"></div>
-                <EmptySnapshot v-else-if="!historySnapshot" />
-                <GridView v-else :col-headers="historyDays" :rows="historyRows" :hide-meta-columns="true" :show-row-number="true" row-header-label="劳动项目" :min-table-height="200" />
+                <!-- 表头先行：加载中也渲染 GridView（列头未到位时兜底 settingsDays），
+                     仅在「加载完且无快照」时才换 EmptySnapshot -->
+                <EmptySnapshot v-if="!historyLoading && !historySnapshot" />
+                <GridView
+                  v-else
+                  :col-headers="historyDays.length ? historyDays : settingsDays"
+                  :rows="historySnapshot ? historyRows : []"
+                  :hide-meta-columns="true"
+                  :show-row-number="true"
+                  row-header-label="劳动项目"
+                  :min-table-height="200"
+                />
               </div>
             </Transition>
           </div>
@@ -418,9 +423,10 @@ function onDutyModeChange() {
   reloadAll()
 }
 async function reloadAll() {
-  // 静默加载：切换模式时不清空 loading 层，避免下方表格出现"加载中→内容"的闪动
+  // 加载期间行保持可见（骨架屏移除后 loaded 只在首次就绪前为假），数据到位后原地替换，
+  // 避免下方表格出现"清空→内容"的闪动
   // 四项互不依赖，一并并发，省掉原先 fetchSettings 单独先跑的一个来回
-  await Promise.all([fetchSettings(), loadActive(true), loadMaster(true), loadWeight()])
+  await Promise.all([fetchSettings(), loadActive(), loadMaster(), loadWeight()])
 }
 
 // 跨页定位：标题栏全局搜索 / AI 改动明细点「值日」结果跳转 /duty?focus=duty:<mode>:<行>:<列>
@@ -496,9 +502,10 @@ async function syncCellsNames(cellsObj) {
 
 // ==================== 当前值日表 ====================
 const activeCells = ref({})
+// loaded 只表示「首次数据已就绪」（供行后填与跨页定位判断），刷新/重载不再回退成假，
+// 避免加载期间行被清空闪一下；模式切换路径会显式置假（见 _applyRowFocus）
 const activeLoaded = ref(false)
-const loadActive = async (silent = false) => {
-  if (!silent) activeLoaded.value = false
+const loadActive = async () => {
   try {
     const res = await axios.get(`${API_BASE}/duty?mode=${dutyMode.value}`)
     activeCells.value = res.data.cells || {}
@@ -513,8 +520,7 @@ const dutyActiveRows = computed(() => reuseActiveRows(buildGridRows(activeCells.
 // ==================== 值日模板 ====================
 const masterCells = ref({})
 const masterLoaded = ref(false)
-const loadMaster = async (silent = false) => {
-  if (!silent) masterLoaded.value = false
+const loadMaster = async () => {
   try {
     const res = await axios.get(`${API_BASE}/duty/template?mode=${dutyMode.value}`)
     masterCells.value = res.data.cells || {}
@@ -569,8 +575,8 @@ const onMasterCellsUpdate = makeCellsUpdate(masterCells, persistMaster, 'duty_te
 
 // Ctrl+Z / Ctrl+Shift+Z / Ctrl+Y 撤销/重做值日（当前页，含当前+模板两张表）
 useUndoShortcut('值日表', {
-  onAfterUndo: async (label) => { await loadActive(true); await loadMaster(true); notifySuccess(label ? `已撤销：${label}` : '已撤销') },
-  onAfterRedo: async (label) => { await loadActive(true); await loadMaster(true); notifySuccess(label ? `已重做：${label}` : '已重做') }
+  onAfterUndo: async (label) => { await loadActive(); await loadMaster(); notifySuccess(label ? `已撤销：${label}` : '已撤销') },
+  onAfterRedo: async (label) => { await loadActive(); await loadMaster(); notifySuccess(label ? `已重做：${label}` : '已重做') }
 })
 
 async function persistActive() {
@@ -677,8 +683,8 @@ function pruneCells(cells) {
 }
 
 // ==================== 刷新 / 从模板导入 ====================
-async function refreshActive() { await loadActive(true); notifySuccess('已刷新值日表') }
-async function refreshMaster() { await loadMaster(true); notifySuccess('已刷新值日表模板') }
+async function refreshActive() { await loadActive(); notifySuccess('已刷新值日表') }
+async function refreshMaster() { await loadMaster(); notifySuccess('已刷新值日表模板') }
 
 // 导入确认弹窗（从模板导入 / 从实行导入 共用内置样式）
 const importConfirmVisible = ref(false)
@@ -782,7 +788,6 @@ const weightLoaded = ref(false)
 const WEIGHT_MIN = 0
 const WEIGHT_MAX = 1
 async function loadWeight() {
-  weightLoaded.value = false
   try {
     const res = await axios.get(`${API_BASE}/duty/weight?mode=${dutyMode.value}`)
     const w = (res.data && res.data.weights) || {}
@@ -1033,7 +1038,8 @@ async function fetchHistoryWeeks(options = {}) {
 
 async function loadHistorySnapshot(options = {}) {
   if (!historyCurrentWeek.value) return
-  // 静默刷新：跳过骨架屏切换，避免表格重建触发进场/生长动画，仅替换数据
+  // 静默刷新：不动 historyLoading（它现在只决定「空态是否敢下结论」），仅替换数据，
+  // 避免表格重建触发动画
   const silent = !!(options && options.silent)
   if (!silent) historyLoading.value = true
   try {
@@ -1054,7 +1060,7 @@ async function loadHistorySnapshot(options = {}) {
   } catch (e) { console.error(e) } finally { if (!silent) historyLoading.value = false }
 }
 
-// 周切换：静默加载（不显示固定高度骨架屏），避免表格区高度先被 320px 占位撑高、
+// 周切换：静默加载（不动 historyLoading），避免表格区高度先被撑高、
 // 数据返回后又回弹，导致下方操作栏出现“往下闪一下”。滑动过渡动画照常由 key 变化触发。
 function onWeekChange(week) {
   if (week) historyCurrentWeek.value = week
@@ -1121,7 +1127,7 @@ function openHistorySettings() { historySettingsVisible.value = true }
 function openBackfill() { historyBackfillVisible.value = true }
 async function refreshHistory() {
   try {
-    // 静默刷新：只重取数据，不触发骨架屏/表格重建，避免重绘动画
+    // 静默刷新：只重取数据，不动 historyLoading / 表格结构，避免重绘动画
     await fetchHistoryWeeks({ silent: true })
     notifySuccess('已刷新值日记录')
   } catch (e) { /* 错误已在 fetchHistoryWeeks 内部处理 */ }

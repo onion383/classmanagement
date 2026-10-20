@@ -1,9 +1,11 @@
 <template>
   <div class="dynamic-table">
   <div
+    ref="scrollWrapper"
     class="table-scroll-wrapper overflow-x-auto overflow-y-auto"
     :class="{ 'is-scrollable': vScroll, 'scrollbar-gutter-stable': vScroll }"
     :style="{ height: fixedMaxHeight + 'px' }"
+    @scroll.passive="onBodyScroll"
   >
     <table class="w-full border-separate border-spacing-0 mt-0">
       <thead>
@@ -98,8 +100,12 @@
           @leave="staggerLeave"
           @after-leave="staggerAfterLeave"
         >
+          <!-- 虚拟滚动上垫片：只撑高度、不参与交互（不渲染真实行，滚动条长度仍与总高度一致） -->
+          <tr v-if="padTop" key="__vpad_top" class="dt-vpad" aria-hidden="true">
+            <td :colspan="tableColSpan" :style="{ height: padTop + 'px' }"></td>
+          </tr>
           <tr
-            v-for="(row, rowIndex) in bodyRows"
+            v-for="(row, rowIndex) in renderRows"
             :key="row._rowKey"
             :data-row-id="row.id"
             @contextmenu.prevent="$emit('contextmenu', $event, row._isNew ? 'newRow' : 'row', row)"
@@ -206,7 +212,11 @@
           </tr>
           <!-- 筛选后无结果：给一行提示，避免整表空白让人以为数据丢了 -->
           <tr v-if="filterNoResult" key="__dt-filter-empty" class="dt-filter-empty">
-            <td :colspan="readonly ? fields.length : fields.length + 2">没有符合筛选条件的数据</td>
+            <td :colspan="tableColSpan">没有符合筛选条件的数据</td>
+          </tr>
+          <!-- 虚拟滚动下垫片 -->
+          <tr v-if="padBottom" key="__vpad_bottom" class="dt-vpad" aria-hidden="true">
+            <td :colspan="tableColSpan" :style="{ height: padBottom + 'px' }"></td>
           </tr>
         </component>
       </tbody>
@@ -299,7 +309,21 @@ export default {
     protectedColumns: { type: Array, default: () => [] },  // 受保护字段：表头名后加 *，提示不可删除
     // 与 rows 对齐的序号数组（可选）。由数据源统一派生，避免把序号写回行对象而破坏行引用复用。
     displayIndexes: { type: Array, default: null },
-    searchActive: { type: Boolean, default: false }        // 搜索过滤进行中：行进入/离开时启用上下级联动画方向
+    searchActive: { type: Boolean, default: false },       // 搜索过滤进行中：行进入/离开时启用上下级联动画方向
+    // 行虚拟滚动阈值（滞后双阈值）：行数 ≥ virtualFrom 开启「只渲染可视窗口」，传 0 可整体关闭（走整表 DOM）；
+    // 行数 ≤ virtualOffBelow 退回整表，两者之间维持当前状态，防止行数在阈值附近增删时整表 ↔ 窗口来回切换。
+    // 【定稿】default = 1（全面虚拟）：实测（testjs/virtual-bench，2026-10-20）挂载 30 行起即快于整表，
+    // 80~150 行全表重渲染仅慢 2~4ms（不可感知），2500 行滚动卡顿帧 0 vs 19。
+    // 阈值机制保留：个别场景想回整表渲染时传 0（或调大阈值）即可，代码路径不动。
+    // 小表下行为差异仅两处：搜索/筛选错峰动画在窗口截断时自动关闭（反馈更快）；
+    // 拖行期间窗口冻结、不可拖出可视区（小表窗口本就包住全部行，不受影响）。
+    // 【2026-10-20 晚】曾因体感「加载延迟」改成 160/140 滞后阈值；随后定位真根因是窗口重算晚一帧
+    // （bodyRows watch 里 recalcWindow 在 $nextTick，数据到位后首帧按旧窗口出空表），已改同步重算。
+    // 修复后实测全部虚拟明显更快，故 default 保持 1（全面虚拟）；160/140 机制保留，想回阈值策略改 default 即可。
+    virtualFrom: { type: Number, default: 1 },
+    // 退回整表的行数阈值（≤ 该值关虚拟）。必须 < virtualFrom（syncVirtualActive 内夹紧）
+    virtualOffBelow: { type: Number, default: 140 },
+    virtualOverscan: { type: Number, default: 8 }          // 缓冲行数下限；实际按视口高度动态放大到两整屏（见 recalcWindow）
   },
   emits: [
     'contextmenu', 'search', 'toggleSort', 'saveNewRow', 'cancelNewRow',
@@ -346,6 +370,18 @@ export default {
       filterOptions: [],
       // 面板定位锚点（表头上的那个放大镜/漏斗按钮）
       filterAnchorEl: null,
+      // ===== 行虚拟滚动 =====
+      // 当前渲染窗口 [virtualStart, virtualEnd)（下标针对 bodyRows）
+      virtualStart: 0,
+      virtualEnd: 0,
+      // 滞后开关的当前状态（由 syncVirtualActive 维护）：≥virtualFrom 置真、≤virtualOffBelow 置假、
+      // 中间区间维持现状。不能用纯 computed——「维持现状」需要记住上一次的状态。
+      virtualActive: false,
+      // 拖行期间锁死窗口：行在拖动中途被卸载会直接打乱几何缓存与落点判定
+      virtualFrozen: false,
+      // 实测行高缓存：{ rowKey → 高度 }。未测到的行用 estRowH 估算
+      rowHeights: new Map(),
+      estRowH: 33,
     };
   },
   computed: {
@@ -374,6 +410,48 @@ export default {
     },
     // 筛选后一行都不剩：提示用
     filterNoResult() { return this.columnFilterActive && this.bodyRows.length === 0; },
+    // ===== 行虚拟滚动 =====
+    // 是否启用窗口化渲染：走滞后开关 virtualActive（见 syncVirtualActive），小表格保持整表 DOM。
+    // virtualFrom <= 0 时整体关闭（走整表 DOM），与旧行为一致。
+    virtualOn() { return this.virtualFrom > 0 && this.virtualActive; },
+    // 真正的渲染列表：窗口化时是 bodyRows 的一段切片，否则就是 bodyRows 本身（零拷贝）
+    renderRows() {
+      if (!this.virtualOn) return this.bodyRows;
+      return this.bodyRows.slice(this.virtualStart, this.virtualEnd);
+    },
+    // 渲染下标 → bodyRows 下标的偏移量。
+    // 模板里的 rowIndex 是「渲染顺序」，窗口化时必须加回窗口起点才能对回真实数据。
+    winOffset() { return this.virtualOn ? this.virtualStart : 0; },
+    // 行高前缀和：pre[i] = 前 i 行的累计高度。实测过的行用真实高度，其余用均值估算。
+    // 只依赖 rowHeights / estRowH / bodyRows，滚动时不会重算（窗口定位走二分查找）。
+    rowPrefix() {
+      const rows = this.bodyRows;
+      const n = rows.length;
+      const pre = new Array(n + 1);
+      pre[0] = 0;
+      const est = this.estRowH;
+      for (let i = 0; i < n; i++) {
+        const h = this.rowHeights.get(rows[i]._rowKey);
+        pre[i + 1] = pre[i] + (h != null ? h : est);
+      }
+      return pre;
+    },
+    // 上垫片高度 = 窗口之前所有行的高度和；下垫片 = 窗口之后的高度和。
+    // 两段垫片保证 <table> 的总高度与真实全量渲染一致，滚动条长度不会随窗口变化而跳动。
+    // 行数骤减时窗口下标可能暂时越界（浏览器还没把 scrollTop 夹回范围内），这里统一夹住。
+    padTop() {
+      if (!this.virtualOn) return 0;
+      const pre = this.rowPrefix;
+      return pre[Math.min(Math.max(0, this.virtualStart), pre.length - 1)];
+    },
+    padBottom() {
+      if (!this.virtualOn) return 0;
+      const pre = this.rowPrefix;
+      const end = Math.min(Math.max(0, this.virtualEnd), pre.length - 1);
+      return Math.max(0, pre[pre.length - 1] - pre[end]);
+    },
+    // 垫片行 / 空状态行的跨列数
+    tableColSpan() { return this.fields.length + (this.readonly ? 0 : 2); },
     // 面板里的排序高亮态：只有当前列就是排序列时才显示升/降序选中
     filterSortOrder() {
       return this.filterField && this.sortField === this.filterField ? this.sortOrder : '';
@@ -382,7 +460,13 @@ export default {
     // 为什么不用「有筛选就开」：TransitionGroup 每次更新都要强制读写布局，而在有筛选的情况下
     // 用户还会继续双击编辑单元格，那时动画毫无收益。故只在「筛选面板打开」这个窗口内开启，
     // 面板关掉 600ms 后自动退化回 Fragment，日常编辑依旧零额外开销。
-    rowAnimEnabled() { return !!this.searchActive || this.filterAnimating; },
+    // 虚拟滚动下直接关掉：滚动本身就在不停换行，播进出动画只会变成整屏闪。
+    // 注意判据是「窗口真的截断了行」而不是「virtualOn」——行全都在窗口里时虚拟滚动等同没开，
+    // 这时动画照旧（否则把阈值调小做验证时，小表格的筛选动画会被无辜关掉）。
+    rowAnimEnabled() {
+      const truncating = this.virtualOn && (this.virtualEnd - this.virtualStart) < this.bodyRows.length;
+      return !truncating && (!!this.searchActive || this.filterAnimating);
+    },
     // 行容器组件：错峰动画窗口内（搜索中 / 筛选面板打开）用 TransitionGroup，否则用 RowsFragment 做「透明包裹」，
     // 让 <tr> 始终是 <tbody> 的直接子节点。两者都必须能在实例上取到（模板表达式不会
     // 自动解析 components 选项，直接写 TransitionGroup 会得到 undefined 而整表不渲染）。
@@ -406,6 +490,8 @@ export default {
       if (!val) this.addRowAnimated = true;
     },
     'rows.length'() {
+      // 就地增删（数组引用没变）也会走到这里：滞后开关要跟进行数，否则跨阈值不切换
+      this.syncVirtualActive();
       this.$nextTick(() => {
         this.updateVScroll();
         // 仅当确实存在新增行时才聚焦其数据输入框；
@@ -416,6 +502,21 @@ export default {
     // 列筛选只改变渲染行，不改变 rows 长度，这里单独跟进底部渐隐条/纵向滚动的判定
     'bodyRows.length'() {
       this.$nextTick(() => this.updateVScroll());
+    },
+    // 行集合（增删/筛选/排序）变化：总高度变了，窗口要重算，行高也要重测。
+    // 重算必须同步跑（不能塞进 $nextTick）：数据到位后的首帧就要用正确的窗口渲染，
+    // 否则会先按旧窗口 [0,0) 出一帧空表、下一帧才补行——这就是虚拟滚动的「加载延迟」观感。
+    // 量高要读 DOM，只能等渲染后（$nextTick）。
+    bodyRows() {
+      this.syncVirtualActive();
+      this.recalcWindow();
+      this.$nextTick(() => this.measureRows());
+    },
+    // 阈值/行数跨过开关点时，窗口模式会切换（整表 ↔ 窗口化），重新算一次并重新量高。
+    // 同理同步重算，避免切换模式的首帧按旧窗口渲染。
+    virtualOn() {
+      this.recalcWindow();
+      this.$nextTick(() => this.measureRows());
     },
     editingCell: {
       handler(newVal) {
@@ -488,10 +589,22 @@ export default {
   created() {
     // 收据数量缓存：WeakMap 键为行对象，避免每次渲染逐行 JSON.parse（不参与响应式）
     this._receiptCache = new WeakMap();
+    // 虚拟滚动用的滚动位置/视口高度/ResizeObserver：纯运行时值，不进响应式
+    this._scrollTop = 0;
+    this._viewportH = 0;
+    this._ro = null;
+    // 估算行高是否已锁定（只取第一次实测均值，之后不再漂移，见 measureRows）
+    this._estLocked = false;
+    // 首帧之前就先按容器固定高度估一次窗口——否则第一帧会把全部行都画出来，
+    // 正好抵消掉虚拟滚动想省的那次整表渲染（挂载后再收缩窗口已经晚了）。
+    this._viewportH = this.fixedMaxHeight;
+    this.syncVirtualActive();
+    this.recalcWindow();
   },
   mounted() {
     this.focusNewRowInput();
     this.updateVScroll();
+    this.initVirtual();
     // 首屏：数据区整体从左往右弹入
     this.playTableEnter();
     // 整表 Enter 保存新增行：焦点不在输入框时按回车也触发保存
@@ -514,8 +627,11 @@ export default {
     this.colAnimDone = false;
     if (this._colAnimTimer) clearTimeout(this._colAnimTimer);
     this._colAnimTimer = setTimeout(() => { this.colAnimDone = true; }, 400);
+    // 缓存的 DOM 尺寸可能已随页签切换变化，重新量一次窗口
+    this.$nextTick(() => { this.initVirtual(); });
   },
   beforeUnmount() {
+    if (this._ro) { this._ro.disconnect(); this._ro = null; }
     document.removeEventListener('click', this.handleClickOutside);
     document.removeEventListener('keydown', this.handleGlobalEnter);
     document.removeEventListener('click', this.onFilterDocClick);
@@ -549,6 +665,141 @@ export default {
     ...useDynamicTableDrag(),
     // 判断字段是否受保护（受保护字段在表头显示 * 提示）
     isProtectedField(field) { return this.protectedColumns.includes(field.name); },
+
+    // ==================== 行虚拟滚动 ====================
+    // 滞后开关（防抖）：行数 ≥ virtualFrom 才开虚拟，≤ virtualOffBelow 才退回整表，
+    // 两者之间维持现状——否则行数在阈值附近增删（加一行/删一行/筛一下）会整表 ↔ 窗口来回切，
+    // 每次切换都要重建 DOM。每次切模式的代价远大于中间区间多算几行，故用双阈值锁住。
+    syncVirtualActive() {
+      if (this.virtualFrom <= 0) { this.virtualActive = false; return; }
+      const n = this.bodyRows.length;
+      const onAt = this.virtualFrom;
+      // offAt 至少比 onAt 小 1，防调用方把两个阈值配成同一个数（否则恰好等于阈值时抖动）
+      const offAt = Math.min(this.virtualOffBelow, onAt - 1);
+      if (n >= onAt) this.virtualActive = true;
+      else if (n <= offAt) this.virtualActive = false;
+      // 中间区间：维持现状
+    },
+    // 滚动：同步重算窗口，只有窗口真的变了才触发渲染。
+    // 不走 rAF：rAF 会晚一帧出新行，快速滑动/甩动时那一帧就露出垫片空白、下一帧「突然出字」；
+    // 同步算完 + Vue 微任务补丁在同一帧内绘制，滚动全程不露白。
+    // recalcWindow 只是二分查找 + 写两个响应式值（O(log n)），放进滚动事件里开销可忽略。
+    // 视口高由 initVirtual / ResizeObserver 维护，不在滚动事件里读 clientHeight（避免触发布局）。
+    onBodyScroll(e) {
+      if (!e.target) return;
+      this._scrollTop = e.target.scrollTop;
+      if (!this.virtualOn) return;
+      this.recalcWindow();
+    },
+    // 按当前滚动位置算渲染窗口；窗口没变就什么都不做（滚动过程中的绝大部分帧走这条路）
+    recalcWindow() {
+      const n = this.bodyRows.length;
+      if (!this.virtualOn) {
+        if (this.virtualStart !== 0 || this.virtualEnd !== n) { this.virtualStart = 0; this.virtualEnd = n; }
+        return;
+      }
+      // 拖行期间窗口锁死：行在拖动中途被卸载会打乱 _rowGeom / _rowEls 的下标对应
+      if (this.virtualFrozen) return;
+      const pre = this.rowPrefix;
+      const top = this._scrollTop;
+      const bottom = top + (this._viewportH || this.fixedMaxHeight);
+      // 二分：第一个累计高度 > top 的行下标，即当前可视窗口的起点
+      let s = this.lowerBound(pre, top) - 1;
+      let e = this.lowerBound(pre, bottom);
+      // 缓冲行数动态取大：固定 8 行在高视口/矮行高下不够（400px ÷ 33px ≈ 12 行可视，缓冲不足一屏），
+      // 至少留「两整屏」的缓冲——窗口切换更稀、甩动/触控板惯性滚动的跳跃也落在已渲染范围内。
+      // DOM 量仍远小于整表（400px 视口 → 约 60 行 vs 全量 2500 行）。
+      const overscan = Math.max(this.virtualOverscan, Math.ceil((this._viewportH || this.fixedMaxHeight) / (this.estRowH || 33)) * 2);
+      s = Math.max(0, s - overscan);
+      e = Math.min(n, e + overscan);
+      if (e < s) e = s;
+      if (s === this.virtualStart && e === this.virtualEnd) return;
+      // 编辑中的单元格所在行即将被卸载：输入框消失不会触发 blur，得先落盘再换窗口
+      this.commitEditIfLeaving(s, e);
+      this.virtualStart = s;
+      this.virtualEnd = e;
+      this.$nextTick(() => this.measureRows());
+    },
+    // 返回第一个 arr[i] > value 的下标（arr 单调不减）
+    lowerBound(arr, value) {
+      let lo = 0, hi = arr.length - 1;
+      while (lo < hi) {
+        const mid = (lo + hi) >> 1;
+        if (arr[mid] <= value) lo = mid + 1;
+        else hi = mid;
+      }
+      return lo;
+    },
+    // 窗口切换会把「正在编辑的行」卸载掉：先按失焦语义提交，避免改了的值丢失
+    commitEditIfLeaving(start, end) {
+      const key = this.editingCell ? this.editingCell.rowKey
+        : (this.internalEditCell ? this.internalEditCell.rowKey : null);
+      if (!key) return;
+      const idx = this.bodyRows.findIndex(r => r._rowKey === key);
+      if (idx >= start && idx < end) return;
+      if (this.editingCell) this.emitSaveAndClear();
+      if (this.internalEditCell) { this.internalEditCell = null; this._clearActiveCell(); }
+    },
+    // 量一次当前渲染行的真实高度，更新缓存；行高变了还要补偿滚动位置避免跳一下。
+    // 估算行高只在「第一次量到行」时锁定一次：若让它跟着每次测量漂移，
+    // 垫片上方的未测行总高度会跟着变，滚动位置就会莫名其妙地跳。
+    measureRows() {
+      if (!this.virtualOn) return;
+      const tbody = this.$refs.tbodyRef;
+      const list = this.renderRows;
+      if (!tbody || !list.length) return;
+      const trs = tbody.querySelectorAll('tr.data-drag-item');
+      // 数量对不上说明有行正在离场动画里，这一帧跳过，下一帧再量
+      if (trs.length !== list.length) return;
+      // 先记下当前 padTop（改缓存之前读），测量后用它算位移补偿
+      const winStart = this.virtualStart;
+      const before = this.rowPrefix[winStart];
+      let sum = 0, cnt = 0, changed = false;
+      for (let i = 0; i < trs.length; i++) {
+        const h = Math.round(trs[i].getBoundingClientRect().height);
+        if (h <= 0) continue;
+        sum += h; cnt++;
+        if (this.rowHeights.get(list[i]._rowKey) !== h) {
+          this.rowHeights.set(list[i]._rowKey, h);
+          changed = true;
+        }
+      }
+      if (cnt && !this._estLocked) {
+        this.estRowH = Math.round(sum / cnt);
+        this._estLocked = true;
+      }
+      if (!changed) return;
+      // 上面的行变高/变矮会让可视内容整体位移，用 padTop 的差值把滚动位置补回去
+      this.$nextTick(() => {
+        if (this.virtualFrozen) return;
+        // 测量期间窗口已被重算（滚动/换窗口）：此时 rowPrefix[virtualStart] 变的是窗口起点而不是行高，
+        // 再补偿就会把 scrollTop 二次顶飞（曾表现为首屏直接滚到表格末尾）
+        if (this.virtualStart !== winStart) return;
+        const after = this.rowPrefix[winStart];
+        const delta = after - before;
+        const wrap = this.$refs.scrollWrapper;
+        if (!delta || !wrap) return;
+        wrap.scrollTop += delta;
+        this._scrollTop = wrap.scrollTop;
+      });
+    },
+    // 初始化：先按容器固定高度估一次窗口（首帧就不能把全部行画出来），再把滚动/尺寸接上
+    initVirtual() {
+      const wrap = this.$refs.scrollWrapper;
+      if (!wrap) return;
+      this._viewportH = wrap.clientHeight || this.fixedMaxHeight;
+      this._scrollTop = wrap.scrollTop;
+      this.recalcWindow();
+      this.$nextTick(() => this.measureRows());
+      if (typeof ResizeObserver !== 'undefined' && !this._ro) {
+        this._ro = new ResizeObserver(() => {
+          this._viewportH = wrap.clientHeight;
+          this.recalcWindow();
+          this.$nextTick(() => this.measureRows());
+        });
+        this._ro.observe(wrap);
+      }
+    },
 
     // ==================== 列筛选（表头放大镜/漏斗） ====================
     // 供 v-preload 使用：把懒加载 loader 包成实例方法，模板里才能引用到
@@ -637,12 +888,14 @@ export default {
       if (aNum !== bNum) return aNum ? -1 : 1;   // 数字排在文字前
       return a.localeCompare(b, 'zh');
     },
-    // 渲染下标 → rows 原始下标（未筛选时恒等）
+    // 渲染下标 → rows 原始下标（未筛选且未窗口化时恒等）
     srcIndex(i) {
+      // 先加回窗口偏移：模板里的下标是「渲染顺序」，而 bodyRows 是完整列表
+      const j = i + this.winOffset;
       const list = this.srcIndexList;
-      if (!list) return i;
-      const v = list[i];
-      return v == null || v < 0 ? i : v;
+      if (!list) return j;
+      const v = list[j];
+      return v == null || v < 0 ? j : v;
     },
     // 按渲染下标取到真实行对象（拖拽内部按渲染顺序处理，回查行数据时必须走这里）
     rowAt(i) { return this.rows[this.srcIndex(i)]; },
@@ -912,17 +1165,31 @@ export default {
       setTimeout(finish, 140);
     },
     focusNewRowInput() {
+      // 没有新增行就不做任何事：下面的「滚到底部」兜底是给新增行准备的，
+      // 若在挂载时无条件走到那里，整张表会在首帧被直接滚到末页（表头/首行看起来「没固定」）
+      if (!this.hasNewRow) return;
       this.$nextTick(() => {
-        // 通过 :ref="'newRowInput'" 精确取新增行的数据输入框，不用宽泛的 querySelector，
-        // 避免在搜索过滤导致行数变化时误聚焦到普通行的复选框而抢走搜索框焦点
-        const inputs = this.$refs.newRowInput;
-        const el = Array.isArray(inputs) ? inputs[0] : inputs;
-        if (el) {
-          // 容器固定高度时新增行可能在底部被遮住：滚入视口让用户立即看到新行
-          el.scrollIntoView({ block: 'nearest', inline: 'nearest' });
-          el.focus();
-        }
+        if (this._focusNewRowEl()) return;
+        // 虚拟滚动下新增行可能落在窗口之外（根本没被渲染）：先把容器滚到底，重算窗口后再聚焦
+        if (!this.virtualOn) return;
+        const wrap = this.$refs.scrollWrapper;
+        if (!wrap) return;
+        wrap.scrollTop = wrap.scrollHeight;
+        this._scrollTop = wrap.scrollTop;
+        this.recalcWindow();
+        this.$nextTick(() => { this._focusNewRowEl(); });
       });
+    },
+    // 通过 :ref="'newRowInput'" 精确取新增行的数据输入框，不用宽泛的 querySelector，
+    // 避免在搜索过滤导致行数变化时误聚焦到普通行的复选框而抢走搜索框焦点
+    _focusNewRowEl() {
+      const inputs = this.$refs.newRowInput;
+      const el = Array.isArray(inputs) ? inputs[0] : inputs;
+      if (!el) return false;
+      // 容器固定高度时新增行可能在底部被遮住：滚入视口让用户立即看到新行
+      el.scrollIntoView({ block: 'nearest', inline: 'nearest' });
+      el.focus();
+      return true;
     },
     // 固定高度判断纵向滚动：测量表格完整内容高度（scrollHeight 不被容器裁剪），
     // 超过 fixedMaxHeight 即启用纵向滚动，表头随之吸顶。多行/换行行高不同也适用。
@@ -1030,6 +1297,15 @@ th.col-header {
   text-align: center;
   color: var(--color-text-muted, #9ca3af);
   font-size: 13px;
+}
+/* 虚拟滚动垫片行：只负责把总高度撑出来，不能有边框/内边距/背景，否则会多出横线 */
+.dt-vpad { pointer-events: none; }
+.dt-vpad td {
+  padding: 0 !important;
+  border: none !important;
+  background: transparent !important;
+  line-height: 0;
+  font-size: 0;
 }
 /* 注意：不再对数据行使用 content-visibility —— 它会对行应用包含裁剪，导致行内
    操作列的 position:sticky 失效。为保证横向滚动时操作列固定右侧，关闭该优化。 */
