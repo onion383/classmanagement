@@ -77,8 +77,10 @@ export function clearShift(root) {
  * @param {number|null} from 源索引
  * @param {number|null} to 目标索引
  * @param {Array<{top:number,bottom:number}>|number} geom 各行的几何缓存（左右边界/top），或回退用的统一高度
+ * @param {((el:HTMLElement)=>HTMLElement|null)|null} counterOf 取「需要反向位移」的子元素（如序号列内容）：
+ *        行往上让位时它往下补同样的距离，净位移为 0，看起来固定不动
  */
-export function applyRowShift(rows, from, to, geom, fallback = 0) {
+export function applyRowShift(rows, from, to, geom, fallback = 0, counterOf = null) {
   if (!rows || !rows.length) return
   const active = from !== null && to !== null && from !== to
   const uniform = typeof geom === 'number' ? geom : fallback
@@ -99,8 +101,15 @@ export function applyRowShift(rows, from, to, geom, fallback = 0) {
         dy = (a != null && b != null) ? a - b : uniform
       }
     }
-    if (dy) markShift(el, 0, dy)
-    else unmarkShift(el)
+    const counter = counterOf ? counterOf(el) : null
+    if (dy) {
+      markShift(el, 0, dy)
+      // 序号等内容做反向位移：跟着行一起走的话，会显得序号整体错了一行
+      if (counter) markShift(counter, 0, -dy)
+    } else {
+      unmarkShift(el)
+      if (counter) unmarkShift(counter)
+    }
   }
 }
 

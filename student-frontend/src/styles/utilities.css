@@ -120,6 +120,12 @@
   cursor: pointer;
   transition: background-color 0.15s ease, color 0.15s ease, opacity 0.15s ease;
 }
+/* 日/夜切换按钮单独作为一层快照：整页交叉淡入时它能当帧切到新状态，
+   不至于「图标换了、颜色还在慢慢淡」（对应伪元素规则见 index.css）。
+   注意只给这一个按钮，折叠按钮同名会在同一文档里撞名、导致整段过渡被跳过。 */
+:root .bg-sidebar .mode-toggle-theme {
+  view-transition-name: theme-toggle;
+}
 /* 关掉 glass 主题给 button::before 加的荧光描边环 */
 :root .bg-sidebar .mode-toggle-btn::before {
   display: none;

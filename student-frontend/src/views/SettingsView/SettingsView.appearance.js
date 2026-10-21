@@ -121,21 +121,9 @@ export function useSettingsAppearance() {
       this.toolboxEnabled = e.target.checked
       if (!this.loaded) return
       this.saveWidgetSettings()
-    },
-    async loadSession() {
-      try {
-        this.sessionEnabled = await window.electron?.invoke(INVOKE.GET_SESSION_WIDGET_VISIBLE)
-      } catch (_) {}
-      if (this.sessionEnabled === null || this.sessionEnabled === undefined) {
-        this.sessionEnabled = this.toolboxEnabled
-        window.electron?.send(SEND.WIDGET_SET_SESSION_VISIBLE, this.sessionEnabled)
-      }
-      this.sessionLoaded = true
-    },
-    onSessionChange(e) {
-      this.sessionEnabled = e.target.checked
-      if (!this.sessionLoaded) return
-      window.electron?.send(SEND.WIDGET_SET_SESSION_VISIBLE, this.sessionEnabled)
+      // 立即生效（不再有「本次启用」这个会话开关）：
+      // true 会重建/显示浮窗，false 会直接销毁浮窗释放渲染进程。
+      window.electron?.send(SEND.WIDGET_SET_SESSION_VISIBLE, this.toolboxEnabled)
     },
     async loadUsbAutoOpen() {
       try {
@@ -148,6 +136,24 @@ export function useSettingsAppearance() {
       this.desktopWidgetEnabled = e.target.checked
       try { localStorage.setItem('desktopWidgetEnabled', this.desktopWidgetEnabled ? '1' : '0') } catch (_) {}
       window.electron?.send(SEND.DESKTOP_WIDGET_ENABLED, this.desktopWidgetEnabled)
+    },
+    // 读取「桌面组件关闭最底层」的真实状态：该状态由主进程持有（连续启动崩溃时会被自动关闭），
+    // 设置页的开关只是镜像，加载时必须同步，否则界面显示和实际层级会不一致。
+    async loadDesktopLayerState() {
+      try {
+        const st = await window.electron?.invoke(INVOKE.GET_DESKTOP_LAYER_STATE)
+        if (st) {
+          this.noDesktopLayer = !!st.desktopLayerDisabled
+          this.desktopLayerAutoDisabled = !!st.autoDisabled
+        }
+      } catch (_) {}
+    },
+    // 切换「桌面组件关闭最底层」：主进程改状态并重启组件子进程
+    // （窗口层级在创建时决定，只能重启才生效；用户手动改过后清掉「自动降级」提示）
+    onNoDesktopLayerChange(e) {
+      this.noDesktopLayer = e.target.checked
+      if (!this.noDesktopLayer) this.desktopLayerAutoDisabled = false
+      window.electron?.send(SEND.DESKTOP_WIDGET_DESKTOP_LAYER, !this.noDesktopLayer)
     },
     async onUsbAutoOpenChange(e) {
       this.usbAutoOpen = e.target.checked

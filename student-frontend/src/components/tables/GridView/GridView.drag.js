@@ -67,6 +67,8 @@ export function useGridViewDrag() {
       }
       this._colGeom = arr;
       this._colGeomHeaderTop = ths.length ? ths[0].parentElement.getBoundingClientRect().top : null;
+      // 数据区顶端（表头下沿）：列虚影按这个位置对齐，表头不投影
+      this._colGeomDataTop = ths.length ? ths[0].parentElement.getBoundingClientRect().bottom : null;
       const tbl = this.$el ? this.$el.querySelector('table') : null;
       this._colGeomTblBottom = tbl ? tbl.getBoundingClientRect().bottom : null;
       const c = this.$refs.gridTable;
@@ -137,8 +139,25 @@ export function useGridViewDrag() {
       const geom = this._colGeom;
       const g = (geom && this.colDragOverIdx !== null) ? geom[this.colDragOverIdx] : null;
       if (!g || this._colGeomHeaderTop == null) { hide(); return; }
-      // 用按下时缓存的几何，拖动过程中不再读取布局
-      let { left, right } = g;
+      // 还停在源列上（尚未发生让位）时不显示落点框与落点虚影：
+      // 否则源列被隐藏后，原位置反而会留下一层「影子」，正是要避免的观感。
+      if (this.colDragIdx !== null && this.colDragOverIdx === this.colDragIdx) { hide(); return; }
+      // 空位大小按「让位后真正空出来的宽度」算：向右拖时数据列整体左移到前一列，
+      // 空位贴在目标列原区域右端、宽度等于前一列（跳过走廊这类固定列）；向左拖时空位就是目标列原区域。
+      const from = this.colDragIdx;
+      const to = this.colDragOverIdx;
+      let left, right;
+      if (from !== null && to > from) {
+        let p = to - 1;
+        while (p >= 0 && (!geom[p] || geom[p].aisle)) p--;
+        const prev = p >= 0 ? geom[p] : null;
+        const slotW = prev ? prev.right - prev.left : g.right - g.left;
+        left = g.right - slotW;
+        right = g.right;
+      } else {
+        left = g.left;
+        right = g.right;
+      }
       let top = this._colGeomHeaderTop;
       let bottom = this._colGeomTblBottom;
       const c = this._colGeomContainer;
@@ -163,12 +182,24 @@ export function useGridViewDrag() {
       box.style.transform = `translate(${left}px, ${top}px)`;
       box.style.width = w + 'px';
       box.style.height = h + 'px';
-      // 落点虚影：半透明列副本贴在目标格上（表头不动，所以虚影从表头下沿开始）
+      // 落点虚影只贴数据区：蓝框从表头顶端开始框，但影子不能把表头/讲台也投影一份，
+      // 所以位置对齐到数据区顶端、高度按数据区裁到容器内。
       if (ghost) {
-        ghost.style.display = 'block';
-        ghost.style.transform = `translate(${left}px, ${top}px)`;
-        ghost.style.width = w + 'px';
-        ghost.style.height = h + 'px';
+        let gTop = this._colGeomDataTop != null ? this._colGeomDataTop : top;
+        let gBottom = bottom;
+        if (c) {
+          gTop = Math.max(gTop, c.top);
+          gBottom = Math.min(gBottom, c.bottom);
+        }
+        const gh = gBottom - gTop;
+        if (gh > 0) {
+          ghost.style.display = 'block';
+          ghost.style.transform = `translate(${left}px, ${gTop}px)`;
+          ghost.style.width = w + 'px';
+          ghost.style.height = gh + 'px';
+        } else {
+          ghost.style.display = 'none';
+        }
       }
     },
     // ==================== 交换动画（内容互换型 FLIP） ====================
@@ -281,26 +312,84 @@ export function useGridViewDrag() {
       return this.showRowNumber ? 1 : 0;
     },
     colHeaderEls() { return this.$el ? this.$el.querySelectorAll('thead tr:last-child th') : []; },
-    // 克隆整张表格后按矩形切片，得到与原件像素一致的半透明虚影（保留行高/边框/字体/走廊跨行）
-    createSliceGhost(region, opacity, radius) {
-      const table = this.$el ? this.$el.querySelector('table') : null;
-      if (!table || !region.width || !region.height) return null;
-      const tblRect = table.getBoundingClientRect();
-      const clone = table.cloneNode(true);
-      // 保留 content-visibility:auto 会让屏外行按内在尺寸折叠，导致切片错位
-      clone.querySelectorAll('.content-visibility-auto').forEach(el => el.classList.remove('content-visibility-auto'));
-      clone.style.width = tblRect.width + 'px';
-      clone.style.position = 'absolute';
-      clone.style.left = (-(region.left - tblRect.left)) + 'px';
-      clone.style.top = (-(region.top - tblRect.top)) + 'px';
+    // 统一创建虚影的外层容器：fixed + overflow:hidden，滚动区外的像素本来就被裁掉
+    _ghostWrapper(width, height, opacity, radius) {
       const wrapper = document.createElement('div');
-      wrapper.style.cssText = 'position:fixed;left:0;top:0;z-index:100000;pointer-events:none;overflow:hidden;will-change:transform;box-shadow:0 6px 18px rgba(0,0,0,0.18);';
+      wrapper.style.cssText = 'position:fixed;left:0;top:0;z-index:100000;pointer-events:none;overflow:hidden;will-change:transform;contain:layout paint;box-shadow:0 6px 18px rgba(0,0,0,0.18);';
       wrapper.style.opacity = opacity;
       if (radius) wrapper.style.borderRadius = radius;
-      wrapper.style.width = region.width + 'px';
-      wrapper.style.height = region.height + 'px';
-      wrapper.appendChild(clone);
+      wrapper.style.width = width + 'px';
+      wrapper.style.height = height + 'px';
       document.body.appendChild(wrapper);
+      return wrapper;
+    },
+    // 行虚影：只克隆被拖的那一行（原来克隆整表，屏外行也会参与样式/布局计算）。
+    // 列宽按原件实测宽度显式固定，避免单行自动布局重新分配列宽。
+    createRowSliceGhost(rowIdx, opacity, radius) {
+      const table = this.$el ? this.$el.querySelector('table') : null;
+      const tr = this.$el ? this.$el.querySelectorAll('tbody tr')[rowIdx] : null;
+      if (!table || !tr) return null;
+      const tblRect = table.getBoundingClientRect();
+      const trRect = tr.getBoundingClientRect();
+      if (!tblRect.width || !trRect.height) return null;
+      const gTr = tr.cloneNode(true);
+      gTr.classList.remove('content-visibility-auto', 'opacity-30');
+      gTr.style.transition = 'none';
+      const srcCells = Array.from(tr.children);
+      Array.from(gTr.children).forEach((td, i) => {
+        const w = srcCells[i] ? srcCells[i].getBoundingClientRect().width : 0;
+        td.style.transition = 'none';
+        if (w) td.style.width = w + 'px';
+        td.style.overflow = 'hidden';
+      });
+      const gTable = document.createElement('table');
+      gTable.style.cssText = 'border-collapse:collapse;table-layout:fixed;width:' + tblRect.width + 'px;';
+      const gTbody = document.createElement('tbody');
+      gTbody.appendChild(gTr);
+      gTable.appendChild(gTbody);
+      const wrapper = this._ghostWrapper(tblRect.width, trRect.height, opacity, radius);
+      wrapper.appendChild(gTable);
+      return wrapper;
+    },
+    // 列虚影：只渲染滚动容器可视范围内的行（视口外的行不克隆），
+    // 内容以「第一条保留的行」为锚点整体偏移，行高全部按原件固定。
+    // 讲台/分隔/合并行没有这一列的数据格，只补一条等高的空白行占位：
+    // 位置保持准确，但不会把表头或名字的影子投到讲台格上。
+    createColSliceGhost(colIndex, colWidth, dataTop, dataBottom, opacity, radius) {
+      if (!colWidth) return null;
+      const view = this.$refs.gridTable;
+      const vr = view ? view.getBoundingClientRect() : null;
+      const bandTop = vr ? Math.max(dataTop, vr.top) : dataTop;
+      const bandBottom = vr ? Math.min(dataBottom, vr.bottom) : dataBottom;
+      if (bandBottom <= bandTop) return null;
+      const gTable = document.createElement('table');
+      gTable.style.cssText = 'position:absolute;left:0;border-collapse:collapse;table-layout:fixed;width:' + colWidth + 'px;';
+      const gTbody = document.createElement('tbody');
+      const trs = this.$el ? this.$el.querySelectorAll('tbody tr') : [];
+      let firstTop = null;
+      for (let r = 0; r < trs.length; r++) {
+        const tr = trs[r];
+        const rect = tr.getBoundingClientRect();
+        if (rect.bottom <= bandTop || rect.top >= bandBottom) continue;
+        const refs = this.cellRefs[r];
+        const srcCell = (refs && refs[colIndex]) || null;
+        if (firstTop == null) firstTop = rect.top;
+        const gTr = document.createElement('tr');
+        gTr.style.height = rect.height + 'px';
+        const gTd = srcCell ? srcCell.cloneNode(true) : document.createElement('td');
+        gTd.style.transition = 'none';
+        gTd.style.width = colWidth + 'px';
+        gTd.style.overflow = 'hidden';
+        gTr.appendChild(gTd);
+        gTbody.appendChild(gTr);
+      }
+      if (firstTop == null) return null;
+      // 首行可能被表头遮住一部分：整表按首行的真实位置偏移，遮挡部分由容器裁掉，
+      // 后面的行才会和原件严丝合缝（不能用等高占位行补，负偏移补不出来）。
+      gTable.style.top = (firstTop - dataTop) + 'px';
+      gTable.appendChild(gTbody);
+      const wrapper = this._ghostWrapper(colWidth, bandBottom - dataTop, opacity, radius);
+      wrapper.appendChild(gTable);
       return wrapper;
     },
     placeGhost(ghost, grab, clientX, clientY) {
@@ -319,9 +408,7 @@ export function useGridViewDrag() {
       event.preventDefault();
       const trRect = tr.getBoundingClientRect();
       const tblRect = table.getBoundingClientRect();
-      const ghost = this.createSliceGhost(
-        { left: tblRect.left, top: trRect.top, width: tblRect.width, height: trRect.height }, 0.85, '4px'
-      );
+      const ghost = this.createRowSliceGhost(rowIdx, 0.85, '4px');
       if (!ghost) return;
       this.rowDragIdx = rowIdx;
       this.rowDragOverIdx = rowIdx;
@@ -509,9 +596,7 @@ export function useGridViewDrag() {
       const dataH = Math.max(0, tblRect.bottom - dataTop);
       const useDataOnly = dataH > 4;
       const ghostTop = useDataOnly ? dataTop : rowRect.top;
-      const ghost = this.createSliceGhost(
-        { left: thRect.left, top: ghostTop, width: thRect.width, height: Math.max(0, tblRect.bottom - ghostTop) }, 0.85
-      );
+      const ghost = this.createColSliceGhost(colIndex, thRect.width, ghostTop, tblRect.bottom, 0.85);
       if (!ghost) return;
       this.colDragIdx = colIndex;
       this.colDragOverIdx = colIndex;

@@ -1327,7 +1327,8 @@
 }
 /* 选中态要压过上面那条（特异性更高），否则升/降序的高亮会被涂平 */
 :root:is([data-theme="glass"], [data-theme="win11"]) .dtf-sort-btn.is-on {
-  background-color: color-mix(in srgb, var(--color-primary, #22c55e) 22%, transparent);
+  background-color: var(--color-primary, #22c55e) !important;
+  color: #fff !important;
 }
 :root:is([data-theme="glass"], [data-theme="win11"]) .dtf-search-input {
   background-color: rgba(255, 255, 255, calc(var(--glass-opacity, 0.4) + 0.06));

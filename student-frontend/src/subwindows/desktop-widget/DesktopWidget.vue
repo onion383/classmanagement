@@ -1,7 +1,7 @@
 <template>
   <div class="desktop-widget">
-    <!-- 时钟区域（拖动手柄，用 Electron 原生窗口拖动） -->
-    <div class="clock-area glass-panel drag-handle">
+    <!-- 时钟区域（拖动手柄：桌面层子窗口用不了 app-region，改为自实现拖动，见 onDragStart） -->
+    <div class="clock-area glass-panel drag-handle" @pointerdown="onWindowDragStart">
       <AnimatedClock date-format="{Y}-{M}-{D}  星期{W}" />
     </div>
 
@@ -419,12 +419,42 @@ async function loadAll() {
   }
 }
 
+// ========== 窗口拖动（自实现） ==========
+// 桌面组件挂到 Windows 桌面层（Progman 子窗口）后，-webkit-app-region: drag 立即失效
+// （系统把 SC_MOVE 转发给父窗 Progman），只能由渲染层上报鼠标屏幕坐标、主进程 SetWindowPos 搬窗口。
+// screenX/screenY 是屏幕绝对坐标，不随窗口自身移动变化，故拖动不会自我叠加。
+let windowDragging = false
+
+function onWindowDragStart(e) {
+  if (e.button !== 0 || !window.electron || !window.electron.send) return
+  windowDragging = true
+  e.preventDefault()
+  // 捕获指针：鼠标被甩出窗口时仍能收到 pointermove，否则快速拖动会中途断连
+  try { e.currentTarget.setPointerCapture(e.pointerId) } catch (_) {}
+  window.electron.send('desktop-widget-drag-start', { screenX: e.screenX, screenY: e.screenY })
+}
+
+function onWindowDragMove(e) {
+  if (!windowDragging) return
+  window.electron.send('desktop-widget-drag-move', { screenX: e.screenX, screenY: e.screenY })
+}
+
+function onWindowDragEnd() {
+  if (!windowDragging) return
+  windowDragging = false
+  window.electron.send('desktop-widget-drag-end')
+}
+
 // ========== 生命周期 ==========
 let refreshClock = null
 
 onMounted(() => {
   loadAll()
   loadApps()
+  // 窗口拖动：pointermove/up 挂在 window 上，拖动中窗口自身在移动也不会丢事件
+  window.addEventListener('pointermove', onWindowDragMove)
+  window.addEventListener('pointerup', onWindowDragEnd)
+  window.addEventListener('pointercancel', onWindowDragEnd)
   // every 5 分钟刷新数据；now 仅驱动倒计时/课程等分钟级状态，秒级走 AnimatedClock
   refreshTimer = setInterval(loadAll, 5 * 60 * 1000)
   refreshClock = setInterval(() => { now.value = new Date() }, 60000)
@@ -433,6 +463,9 @@ onMounted(() => {
 onUnmounted(() => {
   if (refreshTimer) clearInterval(refreshTimer)
   if (refreshClock) clearInterval(refreshClock)
+  window.removeEventListener('pointermove', onWindowDragMove)
+  window.removeEventListener('pointerup', onWindowDragEnd)
+  window.removeEventListener('pointercancel', onWindowDragEnd)
 })
 </script>
 
@@ -457,9 +490,9 @@ onUnmounted(() => {
   color: #1f2937;
 }
 
-/* 拖动手柄：交给 Electron 原生窗口拖动（app-region） */
+/* 拖动手柄：桌面组件已挂到 Windows 桌面层（Progman 子窗口），app-region: drag 在子窗口上失效
+   （系统把 SC_MOVE 转发给父窗 Progman，表现为完全拖不动），改由 pointerdown + IPC 自实现。 */
 .drag-handle {
-  -webkit-app-region: drag;
   cursor: move;
 }
 

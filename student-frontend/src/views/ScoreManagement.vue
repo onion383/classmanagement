@@ -76,27 +76,28 @@
 
     <!-- ==================== 加分统计 ==================== -->
     <div v-if="activeTab === 'stats'">
-      <!-- 按个人 / 按小组统计 -->
-      <div class="bg-surface border border-border rounded-xl p-5 mb-6">
-        <div class="flex flex-wrap items-center justify-between gap-3 mb-5">
-          <h3 class="text-base font-bold text-text">{{ isGroup ? '📊 按小组统计' : '📊 按个人统计' }}</h3>
-          <AppSelect v-model="statMode" :options="statModeOptions" class="w-32" />
-        </div>
+      <!-- 子标题 + 工具栏（统计范围切换右对齐） -->
+      <h3 class="text-xl font-semibold text-text mb-4 flex items-center gap-2 min-h-7"><IconGlyph name="chart" :size="20" /> 加分统计</h3>
+      <div class="mb-4 flex flex-wrap items-center gap-3 opbar">
+        <button @click="refreshStats" class="bg-text-muted hover:bg-text-secondary text-text-inverse px-4 py-2 rounded flex items-center gap-1.5 btn-refresh">
+          <IconGlyph name="refresh" :size="14" tint="current" /> 刷新
+        </button>
+        <button @click="openStatsExport" class="bg-warning hover:bg-warning-hover text-text-inverse px-4 py-2 rounded flex items-center gap-1.5">
+          <IconGlyph name="download" :size="14" tint="current" /> 导出 Excel
+        </button>
+        <AppSelect v-model="statMode" :options="statModeOptions" class="w-32 ml-auto" />
+      </div>
 
-        <div v-if="statRows.length" class="space-y-2.5">
-          <div v-for="(row, idx) in statRows" :key="statMode + '-' + row.name" class="flex items-center gap-3">
-            <span class="w-20 text-sm text-text truncate text-right shrink-0">{{ row.name }}</span>
-            <div class="flex-1 h-5 bg-surface-hover rounded overflow-hidden">
-              <div
-                class="h-full rounded bar-grow"
-                :class="barColor(row)"
-                :style="{ width: barWidth(row) + '%', animationDelay: (idx * 90) + 'ms' }"
-              ></div>
-            </div>
-            <span class="w-14 text-sm font-bold text-right shrink-0" :class="valueColor(row)">{{ valueText(row) }}</span>
-          </div>
-        </div>
-        <div v-else class="text-center text-text-muted py-8 text-sm">暂无{{ isGroup ? '小组' : '个人' }}加分记录</div>
+      <div class="bg-surface border border-border rounded-xl p-5 mb-6">
+        <StatBarList
+          :rows="statRows"
+          :bar-width="barWidth"
+          :bar-class="barColor"
+          :value-text="valueText"
+          :value-class="valueColor"
+          :row-key="(row) => statMode + '-' + row.name"
+          :empty-text="'暂无' + (isGroup ? '小组' : '个人') + '加分记录'"
+        />
       </div>
 
       <!-- 加分记录 -->
@@ -115,7 +116,11 @@
           @delete-row="onDeleteRow"
           @swap-rows="onSwapRows"
           @swap-columns="onSwapColumns"
-        />
+        >
+          <template #row-actions-extra="{ row }">
+            <button v-if="!row._isNew" @click="openEditRow(row)" class="bg-info hover:bg-blue-700 text-text-inverse px-1.5 py-0.5 rounded mr-1">编辑</button>
+          </template>
+        </DynamicTable>
       </div>
     </div>
 
@@ -150,7 +155,7 @@
       :rows="exportRows"
       :fields="exportFields"
       :selectedRowKeys="[]"
-      :default-filename="isGroup ? '今日小组加分' : '今日个人加分'"
+      :default-filename="exportFilename"
       @export-finish="() => {}"
       @update:is-visible="exportVisible = $event"
     />
@@ -163,6 +168,7 @@ import { defineAsyncComponent, getCurrentInstance } from 'vue'
 import AppSelect from '../components/base/AppSelect.vue'
 import Tabs from '../components/base/Tabs.vue'
 import LeaveTimeline from '../components/base/LeaveTimeline.vue'
+import StatBarList from '../components/base/StatBarList.vue'
 import DynamicTable from '../components/tables/DynamicTable/DynamicTable.vue'
 import { useNotification } from '../composables/useNotification.js'
 import { recordCellUndo, recordRowInsert, recordRowDelete, recordRowUpdate, useUndoShortcut } from '../composables/useUndo.js'
@@ -180,7 +186,7 @@ const API = '/api'
 
 export default {
   name: 'ScoreManagement',
-  components: { AppSelect, Tabs, AddScoreDialog, LeaveTimeline, ConfirmDialog, ExportExcel, DynamicTable },
+  components: { AppSelect, Tabs, AddScoreDialog, LeaveTimeline, StatBarList, ConfirmDialog, ExportExcel, DynamicTable },
   // Ctrl+Z / Ctrl+Shift+Z / Ctrl+Y 撤销、重做加分表
   setup() {
     const inst = getCurrentInstance()
@@ -215,6 +221,7 @@ export default {
       editingRecord: null,
       exportVisible: false,
       exportMounted: false,
+      exportKind: 'today',   // today 今日加分记录 / stats 加分统计
       confirm: { visible: false, message: '', ok: null },
       confirmMounted: false,
       // 加分记录表（DynamicTable）：行数据 / 列顺序 / 当前编辑单元格
@@ -334,13 +341,25 @@ export default {
       return rows
     },
     exportRows() {
+      if (this.exportKind === 'stats') {
+        const col = this.statMode === 'add' ? '加分' : this.statMode === 'sub' ? '扣分' : '净分'
+        return this.statRows.map(r => ({ [this.isGroup ? '小组' : '姓名']: r.name, [col]: r.value }))
+      }
       const base = r => ({ id: r.id, 项目: r.项目, 分值: r.分值, 加分时间: r.加分时间, 原因: r.原因 })
       if (this.isGroup) return this.todayRecords.map(r => ({ 小组: r.group_name, 成员数: r.成员数 ?? '', 类型: r.类型, ...base(r) }))
       return this.todayRecords.map(r => ({ 姓名: r.姓名, 学号: r.学号, 类型: r.类型, ...base(r) }))
     },
     exportFields() {
+      if (this.exportKind === 'stats') {
+        const col = this.statMode === 'add' ? '加分' : this.statMode === 'sub' ? '扣分' : '净分'
+        return [{ name: this.isGroup ? '小组' : '姓名' }, { name: col }]
+      }
       if (this.isGroup) return [{ name: '小组' }, { name: '成员数' }, { name: '类型' }, { name: '项目' }, { name: '分值' }, { name: '加分时间' }, { name: '原因' }]
       return [{ name: '姓名' }, { name: '学号' }, { name: '类型' }, { name: '项目' }, { name: '分值' }, { name: '加分时间' }, { name: '原因' }]
+    },
+    exportFilename() {
+      if (this.exportKind === 'stats') return this.isGroup ? '小组加分统计' : '个人加分统计'
+      return this.isGroup ? '今日小组加分' : '今日个人加分'
     },
     // 加分记录表的列定义（列顺序可从表头拖拽调整）
     scoreFields() {
@@ -401,14 +420,34 @@ export default {
         useNotification().error('刷新失败')
       }
     },
+    async refreshStats() {
+      try {
+        await this.loadAll()
+        useNotification().success('已刷新 加分统计 数据')
+      } catch (err) {
+        useNotification().error('刷新失败')
+      }
+    },
     openAdd() {
       this.editingRecord = null
       this.addDialogVisible = true
     },
     // 导出今日加分：无数据时直接提示，不弹导出选项弹窗
     openExport() {
+      this.exportKind = 'today'
       if (this.exportRows.length === 0) return useNotification().info('暂无数据可导出')
       this.exportVisible = true
+    },
+    // 导出加分统计（当前统计范围）
+    openStatsExport() {
+      this.exportKind = 'stats'
+      if (this.exportRows.length === 0) return useNotification().info('暂无加分统计可导出')
+      this.exportVisible = true
+    },
+    // 记录行编辑：从原始记录中取完整对象交给弹窗
+    openEditRow(row) {
+      const rec = this.activeData.find(r => r.id === row.id)
+      if (rec) this.openEdit(rec)
     },
     recordByKey(key) {
       return this.recordMap[key]
@@ -417,9 +456,13 @@ export default {
     // 由当前模式的记录构建行数据（含 _rowKey / id，供拖拽与删除）
     buildScoreRows() {
       const group = this.isGroup
-      this.scoreCols = group
-        ? ['小组', '成员数', '类型', '项目', '分值', '加分时间', '加分原因']
-        : ['姓名', '学号', '类型', '项目', '分值', '加分时间', '加分原因']
+      // 列顺序只在切换个人/小组时重置，保留用户拖拽后的顺序
+      if (this._colsMode !== this.scoreMode || this.scoreCols.length === 0) {
+        this.scoreCols = group
+          ? ['小组', '成员数', '类型', '项目', '分值', '加分时间', '加分原因']
+          : ['姓名', '学号', '类型', '项目', '分值', '加分时间', '加分原因']
+        this._colsMode = this.scoreMode
+      }
       this.scoreRows = this.allRecords.map(r => ({
         id: r.id,
         _rowKey: 'sr' + r.id,
@@ -552,15 +595,3 @@ export default {
   }
 }
 </script>
-
-<style scoped>
-/* 加分统计柱状图：从左往右非线性生长进场动画 */
-.bar-grow {
-  transform-origin: left center;
-  animation: score-bar-grow 0.5s cubic-bezier(0.22, 1, 0.36, 1) both;
-}
-@keyframes score-bar-grow {
-  from { transform: scaleX(0); }
-  to { transform: scaleX(1); }
-}
-</style>

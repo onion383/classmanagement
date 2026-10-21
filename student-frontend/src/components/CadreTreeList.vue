@@ -2,8 +2,8 @@
   <div>
     <!-- 职务行：母/子职务统一用蓝色标记，靠缩进区分层级 -->
     <div
-      class="flex flex-wrap items-center gap-2 px-3 py-1.5 my-1.5 rounded-md bg-primary text-text-inverse text-sm cursor-default transition-shadow duration-150"
-      :class="[selectedId === node.id ? 'row-selected' : '']"
+      class="flex flex-wrap items-center gap-2 px-3 py-1.5 my-1.5 rounded-md text-text-inverse text-sm cursor-default transition-shadow duration-150"
+      :class="[level === 0 ? 'row-root' : 'bg-primary', selectedId === node.id ? 'row-selected' : '']"
       @mousedown="onRowMouseDown"
       @dragover.prevent
       @drop.prevent.stop="onDropRow($event)"
@@ -344,6 +344,14 @@ export default {
 .collapse-enter-from,
 .collapse-leave-to {
   opacity: 0;
+}
+
+/* 一级职务行：日间沿用主题蓝；夜间把主题蓝与深灰蓝混合，降低蓝色浓度（下级职务始终用纯 primary） */
+.row-root {
+  background-color: var(--color-primary, #3b82f6);
+}
+:root[data-mode="night"]:is([data-theme="glass"], [data-theme="glass2"]) .row-root {
+  background-color: color-mix(in srgb, var(--color-primary, #3b82f6) 40%, #475569);
 }
 
 /* 选中行：白色内圈 + 蓝色外圈（蓝底行上也能看清） */

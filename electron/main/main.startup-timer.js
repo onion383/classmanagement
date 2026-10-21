@@ -31,9 +31,10 @@ try {
   }
 } catch (_) { /* 信息不可用则跳过校正 */ }
 
-// 「启动完成」锚点：首个窗口首次显示时由 startWindowEnd() 定死。
+// 「启动完成」锚点：首个窗口首次显示时由 main.js 的 revealWindow() 调 end() 定死。
 // 一旦设定，getTimeline().total 便固定为此刻耗时，不再被「用户在引导页停留」「引导完成后
-// 才创建的窗口/小组件」等更晚的 mark 抬高——即口径为「纯启动耗时」，不含用户交互停留时间。
+// 才创建的窗口/小组件」「后端就绪 / 首屏数据就绪」等更晚的 mark 抬高——即口径为「纯启动耗时」，
+// 只算到用户看到窗口画面的那一刻，不含交互停留与数据等待。
 let endElapsed = null
 
 function mark(name) {
@@ -60,13 +61,11 @@ function msFromStart() {
   return Date.now() - startTime
 }
 
-// 标记「启动完成」：首个窗口首次显示时调用，仅第一次生效（幂等）。
-// epochMs 可选：由渲染层自报的锚点时刻，越界时退回本机送达时刻（引导场景由此定锚点）。
-function end(name = '', epochMs = null) {
+// 标记「启动完成」：首个窗口首次显示（main.js revealWindow）时调用，仅第一次生效（幂等）。
+// 口径 = 进程启动 → 窗口首次显示；后端就绪、首屏数据等更晚事件不影响总耗时。
+function end(name = '') {
   if (endElapsed !== null) return
-  const at = Number(epochMs)
-  const valid = Number.isFinite(at) && at >= startTime && at <= startTime + 600000
-  endElapsed = valid ? Math.round(at - startTime) : msFromStart()
+  endElapsed = msFromStart()
   console.log(`[startup] +${endElapsed}ms  启动完成${name ? '：' + name : ''}`)
 }
 

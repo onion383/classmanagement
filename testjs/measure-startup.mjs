@@ -2,7 +2,9 @@
 // measure-startup.mjs —— 启动耗时测量脚本
 //
 // 目的：量化启动各阶段耗时，回答「后端慢还是前端慢」——
-//   关键口径 = max(后端就绪, 占位页移除（界面可见）)，谁更晚谁就是瓶颈。
+//   应用「总耗时」口径 = ready-to-show（窗口首次显示，由 main.js revealWindow 定锚点，
+//   即 startup.log 的「总耗时」与性能面板「上次启动耗时」）；
+//   诊断口径 = max(后端就绪, 占位页移除（界面可见）)，谁更晚谁就是瓶颈。
 //
 // 用法：
 //   node testjs/measure-startup.mjs                  # 正式版整体启动（默认 3 次）
@@ -389,7 +391,7 @@ async function runApp() {
 
       const backendReady = pick(merged, '后端就绪')
       // 「界面可见」候选：主窗口路径为「占位页移除」，引导/设置窗口路径为「引导界面挂载完成」。
-      // 不要用「首屏可见」，它会误匹配到合并打点「启动完成：后端就绪且首屏可见」。
+      // 不要用「首屏可见」，它会误匹配到合并打点「启动完成：窗口首次显示」一类的汇总行。
       const visible = pick(merged, '占位页移除', '引导界面挂载完成')
       const done = pick(merged, '启动完成') ?? (totalFromLog ? totalFromLog.at : null)
       rows.push({ backendReady, visible, done, reason: r.reason, srcCount: { file: fileMarks.length, stdout: r.marks.length }, marks: merged })

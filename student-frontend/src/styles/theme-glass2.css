@@ -812,6 +812,11 @@
 :root[data-theme="glass2"] .dtf-sort-btn:hover {
   background-color: var(--g2-glass-strong) !important;
 }
+/* 选中态保持实心主题蓝：hover 规则带 !important，这里必须同样提级，否则悬停会被涂回玻璃底 */
+:root[data-theme="glass2"] .dtf-sort-btn.is-on {
+  background-color: var(--color-primary, #5b7cfa) !important;
+  color: #fff !important;
+}
 :root[data-theme="glass2"] .dtf-search-input {
   background-color: var(--g2-glass-soft);
   border-color: var(--g2-hair);

@@ -2,7 +2,7 @@ import { defineStore } from 'pinia'
 import { ref, computed, watch } from 'vue'
 import { resourceUrl } from '../utils/apiUrl'
 import { loadThemeStyles, warmNightMode, isNightWarmEnabled } from '../styles/themeLoader'
-import { performThemeSwap } from '../styles/themeTransition'
+import { performThemeSwap, isThemeSwapInFlight } from '../styles/themeTransition'
 import { SEND } from '../electronChannels.js'
 
 const THEME_KEY = 'app-theme'
@@ -66,8 +66,13 @@ export const useThemeStore = defineStore('theme', () => {
   })
   const persisted = readPersisted()
   const currentTheme = ref(persisted.theme)
+  // 已落地的日/夜模式：与根元素 data-mode 一致，只在真正上屏的那一刻才变
   const mode = ref(persisted.mode)
+  // 用户点选后立刻变化的目标模式：按钮/开关绑它，与页面落地解耦。
+  // 这样点下去按钮当帧就翻，页面配色仍等样式就位后再落（见 commitMode）。
+  const pendingMode = ref(persisted.mode)
   const isNight = computed(() => mode.value === 'night')
+  const isNightPending = computed(() => pendingMode.value === 'night')
   const followSystem = ref(persisted.followSystem)
   // 当前主题是否已实现夜间配色（决定切换按钮是否可用）
   const nightSupported = computed(() => NIGHT_THEMES.includes(currentTheme.value))
@@ -195,22 +200,28 @@ export const useThemeStore = defineStore('theme', () => {
     })
   }
 
-  const commitMode = async () => {
-    const target = mode.value
+  const commitMode = async (target) => {
     await loadThemeStyles(currentTheme.value, target)
     await preloadModeBackground(target)
-    // 等待期间用户又切了一次：交给后来那次提交，避免两次快照互相打断
-    if (mode.value !== target) return
-    // 切换本身交给快照交叉淡入，元素级过渡在事务窗口内瞬时完成（见 styles/themeTransition.js）
-    performThemeSwap(applyTheme)
+    // 等待期间用户又点了一次：交给后来那次提交，避免两次快照互相打断
+    if (pendingMode.value !== target) return
+    // 目标与已落地一致、且没有过渡在途（快速点两下又回到原模式）：无需再跑一段过渡。
+    // 有过渡在途时不能省：那次回调还没把 mode 落下去，省掉会和它打架（mode 与 pending 脱节）。
+    if (mode.value === target && !isThemeSwapInFlight()) return
+    // 切换本身交给快照交叉淡入，元素级过渡在事务窗口内瞬时完成（见 styles/themeTransition.js）。
+    // mode 在快照回调里才落地：按钮早已靠 pendingMode 翻过去了，这里只负责页面配色。
+    performThemeSwap(() => {
+      mode.value = target
+      applyTheme()
+    })
   }
 
-  // mode 状态立即变（连点不会算错方向），DOM 属性等样式就位后再落
+  // 按钮/开关立即响应（写 pendingMode），页面配色等样式就位后再落
   const switchModeTo = (target) => {
-    if (mode.value === target) return
-    mode.value = target
+    if (pendingMode.value === target) return
+    pendingMode.value = target
     localStorage.setItem(MODE_KEY, target)
-    commitMode()
+    commitMode(target)
   }
 
   // 空闲期预解码「另一张」内置底图：首次切换日/夜时不必再等解码。
@@ -232,6 +243,7 @@ export const useThemeStore = defineStore('theme', () => {
     const p = readPersisted()
     currentTheme.value = p.theme
     mode.value = p.mode
+    pendingMode.value = p.mode
     followSystem.value = p.followSystem
     customColors.value = p.customColors
     customThemes.value = p.customThemes
@@ -336,7 +348,7 @@ export const useThemeStore = defineStore('theme', () => {
     switchModeTo(value === 'night' ? 'night' : 'day')
   }
 
-  const toggleMode = () => setMode(mode.value === 'night' ? 'day' : 'night')
+  const toggleMode = () => setMode(pendingMode.value === 'night' ? 'day' : 'night')
 
   // 启动即同步一次系统配色（若已开启跟随）：此时页面尚未上屏，
   // 直接从正确的配色起步即可，不做快照过渡（也不该在启动期插一段动画）。
@@ -344,6 +356,7 @@ export const useThemeStore = defineStore('theme', () => {
     const initial = darkMedia.matches ? 'night' : 'day'
     if (mode.value !== initial) {
       mode.value = initial
+      pendingMode.value = initial
       applyTheme()
     }
   }
@@ -358,7 +371,9 @@ export const useThemeStore = defineStore('theme', () => {
   return {
     currentTheme,
     mode,
+    pendingMode,
     isNight,
+    isNightPending,
     nightSupported,
     followSystem,
     customColors,

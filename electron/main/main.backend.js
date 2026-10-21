@@ -42,9 +42,6 @@ let backendProcess = null
 let backendReady = false
 // 主进程侧的「等后端就绪」等待者：就绪上报到来时统一唤醒（见 waitForBackendReadySignal）
 const backendReadyWaiters = new Set()
-// 首次就绪回调（供启动计时锚点使用）：只在「本次进程生命周期内第一次就绪」时触发一次，
-// 运行期重启后再次就绪不再触发（重启属于运行期，不算启动）。
-let firstReadyCb = null
 // 启动失败兜底：后端长时间起不来（看门狗超时）或自动重启用尽后置位，
 // 向所有窗口广播 from-main{type:'backend-failed'}，由启动占位页给出「重启后端 / 退出应用」。
 let backendFailed = false
@@ -355,8 +352,6 @@ function onBackendMessage(msg) {
   if (SIM_BACKEND_CRASH) armSimCrash()
   // 唤醒主进程侧「等后端就绪」的等待者（引导页的 detectFirstRun / runSetupWarmup 等）
   for (const fn of [...backendReadyWaiters]) fn()
-  // 首次就绪回调（启动计时锚点）：只触发一次，随后清空
-  if (firstReadyCb) { const fn = firstReadyCb; firstReadyCb = null; fn() }
   broadcast({ type: 'backend-ready' })
 }
 
@@ -599,14 +594,6 @@ function isBackendReady() {
   return backendReady
 }
 
-// 注册「首次就绪」回调：已就绪立即触发；否则登记，待第一次 backend-ready 上报时触发一次。
-// 仅供启动计时锚点使用（运行期重启的就绪不再触发）。
-function onFirstReady(fn) {
-  if (typeof fn !== 'function') return
-  if (backendReady) { fn(); return }
-  firstReadyCb = fn
-}
-
 function registerBackendIpc(opts = {}) {
   if (typeof opts.getMainWindow === 'function') getMainWindow = opts.getMainWindow
   if (typeof opts.getWidgetWindow === 'function') getWidgetWindow = opts.getWidgetWindow
@@ -668,5 +655,4 @@ module.exports = {
   getBootStatusText,
   getBackendProcess,
   isBackendReady,
-  onFirstReady,
 }

@@ -30,7 +30,7 @@
             <th
               v-for="(col, colIdx) in colHeaders"
               :key="colIdx"
-              :class="['bg-primary text-text-inverse border border-border px-2 py-1 text-center', col !== '走廊' ? 'cursor-pointer' : 'cursor-default bg-text-muted', { 'opacity-30': colDragIdx === colIdx }]"
+              :class="['bg-primary text-text-inverse border border-border px-2 py-1 text-center', col !== '走廊' ? 'cursor-pointer' : 'cursor-default bg-text-muted', { 'dt-col-src-hidden': colDragIdx === colIdx }]"
               :style="col === '走廊' ? 'width: 60px;' : ''"
             >
               <div v-if="col !== '走廊'" class="flex items-center justify-center gap-1">
@@ -114,7 +114,7 @@
                     v-else
                     :data-row-id="anchorPrefix && row._lessonIdx != null ? anchorPrefix + ':' + row._lessonIdx + ':' + colIdx : undefined"
                     :ref="el => setCellRef(rowIdx, colIdx, el)"
-                    :class="['border border-border px-2 py-2 text-center transition-colors relative', isDragTarget(rowIdx, colIdx) ? 'bg-info/10 outline outline-2 outline-info' : '', isCellSelected(rowIdx, colIdx) && !isEditing(rowIdx, colIdx) ? 'bg-info/10 outline outline-2 outline-info' : '', isEditing(rowIdx, colIdx) ? 'ring-2 ring-info ring-inset' : '', row._isReadonly ? '' : 'cursor-pointer', cell._bg != null ? 'cell-heat' : '', isEditing(rowIdx, colIdx) ? 'cell-editing' : '']"
+                    :class="['border border-border px-2 py-2 text-center transition-colors relative', colDragIdx === colIdx ? 'dt-col-src-hidden' : '', isDragTarget(rowIdx, colIdx) ? 'bg-info/10 outline outline-2 outline-info' : '', isCellSelected(rowIdx, colIdx) && !isEditing(rowIdx, colIdx) ? 'bg-info/10 outline outline-2 outline-info' : '', isEditing(rowIdx, colIdx) ? 'ring-2 ring-info ring-inset' : '', row._isReadonly ? '' : 'cursor-pointer', cell._bg != null ? 'cell-heat' : '', isEditing(rowIdx, colIdx) ? 'cell-editing' : '']"
                     :style="{
                       '--cell-heat-bg': cell._bg != null ? cell._bg : undefined,
                       '--cell-heat-fg': cell._fg != null ? cell._fg : undefined,
@@ -558,6 +558,9 @@ export default {
 <style scoped>
 .drag-handle { font-size: 14px; user-select: none; opacity: 0.6; }
 .drag-handle:hover { opacity: 1; }
+/* 列拖拽的源列（表头与数据格）：整列直接留空（visibility 保留占位宽度与列宽），
+   不留下半透明副本，避免原位置看起来还有一层影子 */
+.dt-col-src-hidden { visibility: hidden; }
 th .drag-handle { color: color-mix(in srgb, var(--color-text-inverse, #ffffff) 70%, transparent); }
 th:hover .drag-handle { color: var(--color-text-inverse, #ffffff); }
 /* ---- 容器超高时的内部滚动（maxHeight 上限）----

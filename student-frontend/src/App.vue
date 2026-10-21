@@ -642,6 +642,24 @@ export default {
     },
 
     // ---- 关闭选择弹窗（复用现有弹窗动画，替代主进程原生菜单） ----
+    // 工具箱右键「关闭工具箱」：先读完整设置、再整体写回。
+    // 后端 PUT /api/widget-settings 是整体覆盖，只传 toolboxEnabled 会把两个保存路径清空。
+    async persistToolboxDisabled() {
+      try {
+        const res = await axios.get('/api/widget-settings')
+        const d = (res.data && res.data.data) || {}
+        await axios.put('/api/widget-settings', {
+          toolboxEnabled: false,
+          noteSavePath: d.noteSavePath || '',
+          screenshotSavePath: d.screenshotSavePath || '',
+        })
+        // 通知浮窗按最新设置刷新（此时它已被主进程隐藏，这里只是同步状态）
+        window.electron?.send(SEND.TO_WIDGET, { type: 'settings-changed' })
+        useNotification().success('工具箱已关闭，可在「设置 → 工具箱设置」重新启用')
+      } catch (_) {
+        useNotification().error('关闭工具箱失败，请重试')
+      }
+    },
     setupShutdownIpc() {
       // 告知主进程：渲染层已就绪，可接管关闭菜单（弹窗生命周期内有 IPC 时此标记生效）
       window.electron?.send(SEND.SHUTDOWN_ACTION, { type: 'ready' })
@@ -658,6 +676,11 @@ export default {
         // AI 网页抽屉里网页触发的下载被主进程拦截：提示改用本地浏览器打开
         if (data.type === 'link-download-blocked') {
           useNotification().info('下载文件请打开本地浏览器')
+          return
+        }
+        // 工具箱浮窗右键菜单选了「关闭工具箱」：把持久化开关一并置 false
+        if (data.type === 'toolbox-close-request') {
+          this.persistToolboxDisabled()
           return
         }
         // AI 悬浮图标右键菜单选了「本次退出」：本次运行隐藏悬浮图标与浮窗（重启恢复）

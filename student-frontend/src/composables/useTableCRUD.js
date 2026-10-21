@@ -244,7 +244,7 @@ export function useTableCRUD(apiBase, defaultFields, options = {}) {
         recordUndo(row.id, field.name, oldVal, val)
       }
     } catch {
-      showAlert('修改失败')
+      notifyError('修改失败')
     }
     editingCell.value = null
   }
@@ -550,7 +550,7 @@ export function useTableCRUD(apiBase, defaultFields, options = {}) {
     rows.value.splice(insertIdx, 0, ...clipRows)
     const newIds = rows.value.map(r => r.id)
     axios.post(`${apiBase}/reorder`, { ids: newIds }).catch(() => {
-      showAlert('粘贴失败')
+      notifyError('粘贴失败')
       fetchRows()
     })
     clipboard.value = null
@@ -568,7 +568,7 @@ export function useTableCRUD(apiBase, defaultFields, options = {}) {
     rows.value = otherRows
     const ids = otherRows.map(r => r.id)
     axios.post(`${apiBase}/reorder`, { ids }).catch(() => {
-      showAlert('移动失败')
+      notifyError('移动失败')
       fetchRows()
     })
   }
@@ -613,7 +613,7 @@ export function useTableCRUD(apiBase, defaultFields, options = {}) {
     try {
       await axios.post(`${apiBase}/reorder`, { ids })
     } catch (err) {
-      showAlert('排序更新失败')
+      notifyError('排序更新失败')
       await fetchRows()
     }
   }
@@ -643,7 +643,7 @@ export function useTableCRUD(apiBase, defaultFields, options = {}) {
       // 移动列不改变行数据，不需要重新拉取
     } catch (err) {
       fields.value = originalFields
-      showAlert('列移动失败')
+      notifyError('列移动失败')
     }
   }
 

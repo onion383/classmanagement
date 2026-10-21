@@ -4,9 +4,17 @@ const { db, renumber } = require('../db');
 const { now, cleanUp, maxPosition, buildInsert, buildUpdate } = require('../utils/sql');
 const { sanitizeField } = require('../services/sanitize');
 const { validateRow } = require('../services/businessRules');
+const { reorderRows } = require('../services/tableService');
 
 // 允许前端更新的字段白名单
 const EDITABLE = ['姓名', '类型', '开始时间', '结束时间', '家长联系电话', '学生联系电话', '状态', '返校时间', '备注'];
+
+// 今日到班两张只读表的列顺序存储名（复用 table_meta，不改表结构）
+const TODAY_COLUMN_TABLES = {
+  active: 'leave_today_active',
+  returned: 'leave_today_returned',
+  records: 'leave_records_columns'
+};
 
 function listOrders() {
   return db.prepare('SELECT * FROM leave_records ORDER BY position, id').all();
@@ -70,6 +78,56 @@ router.put('/:id', (req, res) => {
     if (Object.keys(row).length === 0) return res.status(400).json({ error: '没有可更新的字段' });
     buildUpdate('leave_records', row, req.params.id);
     res.json({ message: '修改成功' });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// POST /api/leaves/reorder 保存整表行顺序（前端传全量 id 顺序）
+router.post('/reorder', (req, res) => {
+  try {
+    const ids = (req.body && req.body.ids) || [];
+    if (!Array.isArray(ids) || ids.length === 0) return res.status(400).json({ error: 'ids 不能为空' });
+    reorderRows('leave_records', ids.map(Number));
+    res.json({ message: '排序成功' });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// GET /api/leaves/today-columns 读取今日到班两张表的列顺序
+router.get('/today-columns', (req, res) => {
+  try {
+    const rows = db.prepare(
+      'SELECT table_name, column_name FROM table_meta WHERE table_name IN (?, ?, ?) ORDER BY sort_order'
+    ).all(TODAY_COLUMN_TABLES.active, TODAY_COLUMN_TABLES.returned, TODAY_COLUMN_TABLES.records);
+    const out = { active: [], returned: [], records: [] };
+    rows.forEach(r => {
+      if (r.table_name === TODAY_COLUMN_TABLES.active) out.active.push(r.column_name);
+      else if (r.table_name === TODAY_COLUMN_TABLES.returned) out.returned.push(r.column_name);
+      else out.records.push(r.column_name);
+    });
+    res.json(out);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// POST /api/leaves/today-columns 保存某张表的列顺序 { table: 'active'|'returned', order: [...] }
+router.post('/today-columns', (req, res) => {
+  try {
+    const { table, order } = req.body || {};
+    const tableName = TODAY_COLUMN_TABLES[table];
+    if (!tableName || !Array.isArray(order) || order.length === 0) {
+      return res.status(400).json({ error: '参数不合法' });
+    }
+    const del = db.prepare('DELETE FROM table_meta WHERE table_name = ?');
+    const ins = db.prepare('INSERT INTO table_meta (table_name, column_name, data_type, sort_order) VALUES (?, ?, ?, ?)');
+    db.transaction(() => {
+      del.run(tableName);
+      order.forEach((name, i) => ins.run(tableName, String(name), '文字', i + 1));
+    })();
+    res.json({ message: '列顺序已保存' });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }

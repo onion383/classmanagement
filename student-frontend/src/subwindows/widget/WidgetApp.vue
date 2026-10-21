@@ -7,7 +7,7 @@
 
     <!-- 功能菜单：展开/收起用 Transition 做宽度过渡，从图标右侧展开、收拢回图标 -->
     <Transition :name="menuTransition">
-      <div v-if="state === 'menu'" class="panel menu-panel">
+      <div v-if="state === 'menu'" class="panel menu-panel" :class="{ 'confirm-mode': exitConfirm }">
         <div class="drag-bar" @mousedown="onDragMouseDown">
           <div class="drag-indicator"></div>
         </div>
@@ -15,15 +15,29 @@
           <span class="title">工具箱</span>
           <button class="close-btn" @click="closeToIcon"><IconGlyph name="close" :size="14" tint="current" /></button>
         </div>
-        <div class="menu-grid">
-          <div
-            v-for="tool in tools"
-            :key="tool.id"
-            class="menu-item"
-            @click="openTool(tool.id)"
-          >
-            <IconGlyph :name="tool.id" :size="24" class="menu-icon" />
-            <span class="menu-name">{{ tool.name }}</span>
+        <template v-if="!exitConfirm">
+          <div class="menu-grid">
+            <div
+              v-for="tool in tools"
+              :key="tool.id"
+              class="menu-item"
+              @click="openTool(tool.id)"
+            >
+              <IconGlyph :name="tool.id" :size="24" class="menu-icon" />
+              <span class="menu-name">{{ tool.name }}</span>
+            </div>
+          </div>
+          <div class="menu-footer">
+            <button class="menu-exit-btn" @click="requestExitToolbox">退出工具箱</button>
+          </div>
+        </template>
+
+        <!-- 退出确认：面板内两块独立毛玻璃（文案 / 两个按钮），不改窗口尺寸 -->
+        <div v-else class="exit-confirm">
+          <div class="exit-confirm-text">确认退出工具箱吗？下次启动需要在设置里重新启用。</div>
+          <div class="exit-confirm-actions">
+            <button class="exit-btn" @click="cancelExitToolbox">取消</button>
+            <button class="exit-btn exit-btn-danger" @click="confirmExitToolbox">退出</button>
           </div>
         </div>
       </div>
@@ -95,6 +109,12 @@ const tools = [
   { id: 'note', name: '注释' },
 ]
 
+// 菜单面板「退出工具箱」的二次确认是否显示
+const exitConfirm = ref(false)
+
+// 菜单态窗口尺寸（确认视图不改变窗口大小，只是把面板内容换掉）
+const MENU_SIZE = [284, 360]
+
 let toolCloseTimer = null
 let toolOpenTimer = null
 
@@ -105,6 +125,22 @@ function cancelPendingToolOpen() {
     toolOpenTimer = null
   }
   wrapperFading.value = false
+}
+
+// ===== 退出工具箱（菜单面板底部按钮，与右键「关闭工具箱」同一动作）=====
+// 二次确认直接占用菜单面板的空间（不另开弹窗、也不改窗口大小）。
+function requestExitToolbox() {
+  exitConfirm.value = true
+}
+
+function cancelExitToolbox() {
+  exitConfirm.value = false
+}
+
+function confirmExitToolbox() {
+  // 窗口马上销毁，无需复位状态：主进程销毁浮窗并通知主窗口把持久化开关置 false
+  // （设置页「是否启用工具箱」同步变关闭，下次启动不再出现）
+  window.electron.send(SEND.WIDGET_EXIT)
 }
 
 function openTool(id) {
@@ -247,14 +283,15 @@ async function checkToolboxEnabled() {
   try {
     const res = await axios.get('/api/widget-settings')
     if (!res.data.success) return
-    // 持久「是否启用工具箱」作为本次会话的默认值，注入一次后即由会话开关独立控制
+    // 持久「是否启用工具箱」即本次会话的开关（设置页已去掉独立的「本次启用」）。
+    // 每次 settings-changed 都按持久值同步一次，这样在设置里开关能立刻生效；
+    // 首次（会话值还是 null）注入持久值。
     const persistent = res.data.data.toolboxEnabled
-    let session = await window.electron.invoke(INVOKE.GET_SESSION_WIDGET_VISIBLE)
-    if (session === null) {
-      session = persistent
-      window.electron.send(SEND.WIDGET_SET_SESSION_VISIBLE, session)
+    const session = await window.electron.invoke(INVOKE.GET_SESSION_WIDGET_VISIBLE)
+    if (session !== persistent) {
+      window.electron.send(SEND.WIDGET_SET_SESSION_VISIBLE, persistent)
     }
-    window.electron.send(SEND.WIDGET_SET_VISIBLE, session)
+    window.electron.send(SEND.WIDGET_SET_VISIBLE, persistent)
   } catch (_) {
     // 读取失败则保持默认可见
   }
@@ -295,6 +332,9 @@ watch(
       iconShrinkTimer = null
     }
 
+    // 回到图标态时复位「退出确认」，否则下次展开菜单会直接停在确认视图
+    if (newState === 'icon') exitConfirm.value = false
+
     let size
     if (newState === 'icon') {
       if (oldState === 'menu') {
@@ -315,7 +355,7 @@ watch(
       }
     } else if (newState === 'menu') {
       fabReady.value = true
-      size = [284, 300]
+      size = MENU_SIZE
     } else if (newState === 'tool') {
       if (newTool === 'note') {
         // 注释工具：先居中显示小窗口加载，等 Note 准备好再全屏
@@ -469,6 +509,119 @@ watch(
   display: grid;
   grid-template-columns: 1fr 1fr;
   gap: 10px;
+}
+
+/* 菜单底部「退出工具箱」：整行居中按钮。
+   颜色全部走主题变量（--color-danger 在 glass/glass2 的夜间会被换成更亮的红），
+   背景/描边用 color-mix 半透明叠加，毛玻璃面板上能透出磨砂，日夜模式都不会突兀。 */
+.menu-footer {
+  margin-top: 12px;
+  padding-top: 10px;
+  border-top: 1px solid var(--color-border, #e5e7eb);
+}
+
+.menu-exit-btn {
+  display: block;
+  width: 100%;
+  padding: 8px 0;
+  font-size: 12px;
+  font-family: inherit;
+  line-height: 1.4;
+  text-align: center;
+  color: var(--color-danger, #ef4444);
+  background: color-mix(in srgb, var(--color-danger, #ef4444) 8%, transparent);
+  border: 1px solid color-mix(in srgb, var(--color-danger, #ef4444) 22%, transparent);
+  border-radius: 10px;
+  cursor: pointer;
+  transition: background 0.15s ease, border-color 0.15s ease, color 0.15s ease;
+}
+
+.menu-exit-btn:hover {
+  color: var(--color-danger-hover, var(--color-danger, #ef4444));
+  background: color-mix(in srgb, var(--color-danger, #ef4444) 16%, transparent);
+  border-color: color-mix(in srgb, var(--color-danger, #ef4444) 34%, transparent);
+}
+
+/* 确认态：整块面板也降成玻璃底。否则面板 92% 白会把背景图挡死，
+   里面再叠多透的玻璃都只能"看到白色"，出不来玻璃质感。 */
+.menu-panel.confirm-mode {
+  background: color-mix(in srgb, var(--color-surface, #ffffff) 45%, transparent);
+  backdrop-filter: var(--sidebar-glass-blur, blur(24px) saturate(1.4));
+  -webkit-backdrop-filter: var(--sidebar-glass-blur, blur(24px) saturate(1.4));
+  transition: background 0.15s ease;
+  /* 窗口尺寸不动（360 高），确认态内容更矮：用 min-height 撑到与菜单视图接近的高度
+     （菜单视图实测约 310：padding32 + 拖动条20 + 标题40 + 两行功能项162 + 底部按钮58），
+     否则面板会缩成一小条、窗口下方留出一大片透明区。别设成窗口可用高度 328，
+     那样会比菜单视图高一截，看着"确认框比面板大"。 */
+  display: flex;
+  flex-direction: column;
+  min-height: 310px;
+}
+
+.menu-panel.confirm-mode .exit-confirm {
+  flex: 1;
+  justify-content: center;
+}
+
+/* 退出确认：文案块与两个按钮各是一块独立毛玻璃，比面板玻璃更实一点形成层次。
+   模糊与内高光沿用主题同一组变量，日夜自动跟随。 */
+.exit-confirm {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+/* 标题块：图标 + 「工具箱」上下居中，独立一块毛玻璃 */
+
+.exit-confirm-text {
+  padding: 13px 15px;
+  font-size: 14px;
+  line-height: 1.65;
+  color: var(--color-text, #111827);
+  background: color-mix(in srgb, var(--color-surface, #ffffff) 72%, transparent);
+  backdrop-filter: var(--sidebar-glass-blur, blur(24px) saturate(1.4));
+  -webkit-backdrop-filter: var(--sidebar-glass-blur, blur(24px) saturate(1.4));
+  border: 1px solid var(--color-border, #e5e7eb);
+  border-radius: 10px;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.35);
+}
+
+.exit-confirm-actions {
+  display: flex;
+  gap: 10px;
+}
+
+.exit-btn {
+  flex: 1;
+  padding: 10px 0;
+  font-size: 13px;
+  font-family: inherit;
+  line-height: 1.4;
+  text-align: center;
+  cursor: pointer;
+  color: var(--color-text-secondary, #6b7280);
+  background: color-mix(in srgb, var(--color-surface, #ffffff) 62%, transparent);
+  backdrop-filter: var(--sidebar-glass-blur, blur(24px) saturate(1.4));
+  -webkit-backdrop-filter: var(--sidebar-glass-blur, blur(24px) saturate(1.4));
+  border: 1px solid var(--color-border, #e5e7eb);
+  border-radius: 10px;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.35);
+  transition: background 0.15s ease, color 0.15s ease, border-color 0.15s ease;
+}
+
+.exit-btn:hover {
+  background: color-mix(in srgb, var(--color-surface, #ffffff) 80%, transparent);
+}
+
+.exit-btn-danger {
+  color: var(--color-danger, #ef4444);
+  border-color: color-mix(in srgb, var(--color-danger, #ef4444) 30%, transparent);
+}
+
+.exit-btn-danger:hover {
+  color: var(--color-danger-hover, var(--color-danger, #ef4444));
+  background: color-mix(in srgb, var(--color-danger, #ef4444) 16%, transparent);
+  border-color: color-mix(in srgb, var(--color-danger, #ef4444) 40%, transparent);
 }
 
 .menu-item {
@@ -730,3 +883,4 @@ watch(
   color: var(--color-primary, #3b82f6);
 }
 </style>
+

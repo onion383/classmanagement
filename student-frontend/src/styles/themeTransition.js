@@ -23,6 +23,12 @@
 // 切换事务窗口的类名，对应的 CSS 见 styles/index.css（过渡时长归零）
 const SWITCHING_CLASS = 'theme-switching'
 
+// 「新快照层起始不透明度」与「本次动画时长」的自定义属性名，CSS 见 styles/index.css。
+// 平时不设，走 CSS 里的默认 0.62 / 100ms；连点打断时前者设成当前混合度的补数、
+// 后者设成「这次切换已经过去了多久」，让反向从这一帧接着走、且用时与进来时等长。
+const FROM_VAR = '--theme-switch-from'
+const DURATION_VAR = '--theme-switch-duration'
+
 // 是否用「快照 + 收尾」的方式做切换过渡。
 //   true  = 有过渡：整页从旧配色收到新配色（CSS 见 index.css 的 theme-switch-in）
 //   false = 瞬时切换：点下去当帧就换完色，最跟手，但没有任何渐变
@@ -78,71 +84,135 @@ function snapshotTransitionAllowed() {
   return true
 }
 
-// 正在播放的那次快照过渡。用于「连点时立刻掉头」：
-// 新的一次切换到来时先把它掐掉，不让用户等上一次淡完。
+// 正在播放的那次快照过渡。用于「连点时接着当前混合度掉头」：
+// 读它新快照层的当前不透明度与已播放时长，反向那一层从「1 − 该值」起步、用等长的时长退回。
 let inflight = null
+// 本次过渡的发起时刻：读不到动画对象时用它兜底估算已过去的时长
+let inflightStartedAt = 0
+// 在播动画的起始不透明度（首次切换是 CSS 默认的 0.62，反向则是当时算出的 1 − r）。
+// 用来判断「这一程真正走了多远」，返回时长按这个距离等比缩短。
+let inflightFrom = 0.62
 
-function skipInflight() {
-  const prev = inflight
-  inflight = null
-  if (!prev) return false
+// 读在播快照「新画面层」的当前不透明度 r（页面视觉 = 新快照×r + 旧快照×(1−r)）。
+// 读不到（过渡已结束 / 浏览器不给伪元素算样式）时返回 null，调用方退回默认观感。
+function readInflightOpacity() {
+  if (!inflight) return null
   try {
-    prev.skipTransition()
+    const style = window.getComputedStyle(document.documentElement, '::view-transition-new(root)')
+    const value = parseFloat(style.opacity)
+    if (Number.isFinite(value)) return Math.min(1, Math.max(0, value))
   } catch (_) {}
-  return true
+  return null
+}
+
+// 读在播快照动画已经播放了多久（毫秒）：反向就用这个时长退回，
+// 做到「进来用了多久，返回就用多久」。拿不到动画对象时退回「发起时刻到现在」的估算值。
+function readInflightElapsed() {
+  if (!inflight) return null
+  try {
+    const animations = typeof document.getAnimations === 'function' ? document.getAnimations() : []
+    for (const animation of animations) {
+      const pseudo = animation.effect && animation.effect.pseudoElement
+      if (!pseudo || pseudo.indexOf('view-transition-new') === -1) continue
+      const raw = animation.currentTime
+      if (raw == null) continue // 尚未开始计时（还没排上帧）：别当成 0
+      const time = Number(raw)
+      if (Number.isFinite(time) && time >= 0) return time
+    }
+  } catch (_) {}
+  const fallback = performance.now() - inflightStartedAt
+  return Number.isFinite(fallback) && fallback >= 0 ? fallback : null
+}
+
+/**
+ * 当前是否有快照过渡正在播（含刚发起、回调还没跑的那一帧）。
+ * 供调用方判断「模式值与目标一致」时是否真的可以省掉这一次过渡。
+ */
+export function isThemeSwapInFlight() {
+  return inflight !== null
 }
 
 /**
  * 执行一次日/夜切换，并对「切换」本身做过渡。
  *
- * 打断语义：如果上一次的淡入还没播完（用户在连续点击），这次不排新的一段 dissolve，
- * 而是先掐掉旧的、再把新配色「瞬时」落地。原因：
- *   快照过渡的「旧快照」只能从 DOM 拍，而 DOM 在回调里已经改成目标色了，
- *   所以新的一段 dissolve 拍不到「当前混合到一半」的画面，硬做会先跳一下再淡一次，
- *   看起来像卡了一下。瞬时落地反而最像「立刻掉头」。
+ * 打断语义：上一次的淡入还没播完（用户在连点）时，不掐掉它、也不排一段全新 dissolve，
+ * 而是「接着当前混合度往回走」：
+ *   页面在任意时刻的视觉 = 新快照 × r + 旧快照 × (1 − r)。
+ *   反向时上一段的「旧快照」正好变成新一段的「新快照」，所以只要把新快照的起始
+ *   不透明度设成 1 − r，第一帧就与当前画面完全一致，之后照常收到 1 ——
+ *   观感上就是从「淡到一半」平滑地原路退回去，而不是硬切一刀。
+ *   反向时长取「这一程已经走了多久 × 真正走过的比例」：80ms 时约 76ms 退回，
+ *   10ms 时几乎瞬间退回（那 0.62 的跳起不算走过），时间与视觉距离都对得上。
+ *   反向动画依然只动快照层的 opacity（合成器单层动画，成本与 DOM 规模无关），
+ *   逐元素过渡仍在事务窗口里瞬时化。
  *
  * @param {() => void} swap 真正改状态、改 DOM 的同步函数（由调用方保证幂等）
  */
 export function performThemeSwap(swap) {
-  // ① 打断上一次还没播完的过渡：立刻掐掉，本次瞬时落地（不等上一次淡完）
-  if (skipInflight()) {
-    withInstantStyles(swap)
-    return
-  }
-  // ② 不支持 / 用户关了动画：退化为瞬时切换，功能不受影响
+  // ① 不支持 / 用户关了动画：退化为瞬时切换，功能不受影响
   if (!snapshotTransitionAllowed()) {
+    inflight = null
     withInstantStyles(swap)
     return
   }
+  // ② 上一段还在播：读出当前 r 与已播时长，反向就从这个混合度、用这段时长退回去
+  const current = readInflightOpacity()
+  const from = current == null ? null : Math.max(0, Math.min(1, 1 - current))
+  const elapsed = current == null ? null : readInflightElapsed()
+  // 返回时长 = 已用时长 × 这一程真正走过的比例：
+  //   (r − 起始值) / (1 − 起始值) 就是动画实际推进的进度。
+  // 这样 80ms 时反向约用 76ms；10ms 时几乎瞬间退回（首次切换那 0.62 是「跳起」的，
+  // 不算走过），不会出现「只前进了一点、却要花整段时间退」。下限 16ms 兜一帧。
+  const advanced = current == null ? 0 : (current - inflightFrom) / Math.max(0.001, 1 - inflightFrom)
+  const ratio = Math.min(1, Math.max(0, advanced))
+  const duration = elapsed == null ? null : Math.max(16, Math.round(elapsed * ratio))
   let ran = false
   const run = () => {
     if (ran) return
     ran = true
-    withInstantStyles(swap)
+    withInstantStyles(() => {
+      // 与 swap 里的 data-mode 写在同一次样式更新里，不额外付一次全量重排。
+      // 不设时 CSS 用默认 0.62 / 100ms（首次切换的「先到位、再收尾」）。
+      if (from != null) {
+        document.documentElement.style.setProperty(FROM_VAR, String(from))
+        if (duration != null) document.documentElement.style.setProperty(DURATION_VAR, `${duration}ms`)
+      }
+      swap()
+    })
   }
+  let transition
   try {
-    const transition = document.startViewTransition(run)
-    inflight = transition
-    const clear = () => {
-      if (inflight === transition) inflight = null
-    }
-    // 被后续切换打断（skipTransition）或快照失败都不影响最终状态：
-    // swap 已在回调里同步执行完毕，DOM 只会落在正确的那一态。
-    if (transition.finished && typeof transition.finished.then === 'function') {
-      transition.finished.then(clear, clear)
-    } else {
-      clear()
-    }
-    if (transition.ready && typeof transition.ready.catch === 'function') {
-      transition.ready.catch(() => {})
-    }
-    if (transition.updateCallbackDone && typeof transition.updateCallbackDone.catch === 'function') {
-      // swap 内部若抛错，别留下未处理的 rejection
-      transition.updateCallbackDone.catch(() => {})
-    }
+    // 已有在播过渡时，浏览器会自动把上一段 skip 掉再拍新快照，无需手动掐。
+    inflightStartedAt = performance.now()
+    // 记下这一次动画的起点：连点时用它算「真正走了多远」
+    inflightFrom = from == null ? 0.62 : from
+    transition = document.startViewTransition(run)
   } catch (err) {
     // 极端情况（并发调用、文档不可见等）：退化为无过渡切换
     inflight = null
     run()
+    return
+  }
+  inflight = transition
+  const done = () => {
+    // 已被后来的一次切换接管：起点与时长变量由最新的那次负责清理
+    if (inflight !== transition) return
+    inflight = null
+    document.documentElement.style.removeProperty(FROM_VAR)
+    document.documentElement.style.removeProperty(DURATION_VAR)
+  }
+  // 被后续切换打断（自动 skip）或快照失败都不影响最终状态：
+  // swap 已在回调里同步执行完毕，DOM 只会落在正确的那一态。
+  if (transition.finished && typeof transition.finished.then === 'function') {
+    transition.finished.then(done, done)
+  } else {
+    done()
+  }
+  if (transition.ready && typeof transition.ready.catch === 'function') {
+    transition.ready.catch(() => {})
+  }
+  if (transition.updateCallbackDone && typeof transition.updateCallbackDone.catch === 'function') {
+    // swap 内部若抛错，别留下未处理的 rejection
+    transition.updateCallbackDone.catch(() => {})
   }
 }

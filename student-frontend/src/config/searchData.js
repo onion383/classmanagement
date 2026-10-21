@@ -39,6 +39,7 @@ export const SETTINGS_ITEMS = [
   { label: '本次启用工具箱',           section: 'toolbox',  py: 'bcqygjx' },
   { label: '新U盘插入自动打开',        section: 'toolbox',  py: 'xupcrzddk' },
   { label: '启用桌面小组件',           section: 'widget',   py: 'qyzmxjjs' },
+  { label: '桌面组件关闭最底层',       section: 'widget',   py: 'zmzjgbzdc' },
   { label: '注释截屏保存位置',         section: 'savepath', py: 'zsjpbcwz' },
   { label: '一键截屏保存位置',         section: 'savepath', py: 'yjjpbcwz' },
   { label: '数据库目录',               section: 'datadir',  py: 'sjkml' },

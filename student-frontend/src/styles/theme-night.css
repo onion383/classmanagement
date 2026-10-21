@@ -528,12 +528,13 @@
 :root[data-mode="night"][data-theme="glass"] .search-panel .bg-surface-hover {
   background-color: var(--alpha-white-08) !important;
 }
-/* 视图切换：未选中标签的浅色字 */
-:root[data-mode="night"][data-theme="glass"] .view-switch-btn {
-  color: #a7b4c9;
+/* 视图切换（表格/时间轴）：夜间未选中标签与选中标签同色（白色）。
+   !important 用于压过 glass2 深蓝顶栏的未选中配色（同特异性，样式注入顺序不保证）。 */
+:root[data-mode="night"]:is([data-theme="glass"], [data-theme="glass2"]) .view-switch-btn {
+  color: #ffffff !important;
 }
-:root[data-mode="night"][data-theme="glass"] .view-switch-btn.on {
-  color: #ffffff;
+:root[data-mode="night"]:is([data-theme="glass"], [data-theme="glass2"]) .view-switch-btn.on {
+  color: #ffffff !important;
 }
 
 /* A11. 通知吐司 */
@@ -926,8 +927,9 @@
   color: var(--color-text-secondary, #a8b6cf);
 }
 :root[data-mode="night"] .dtf-sort-btn.is-on {
-  color: var(--color-primary, #4ade80);
-  background-color: color-mix(in srgb, var(--color-primary, #4ade80) 22%, transparent);
+  /* 夜间也保持蓝色实底：主题蓝压深一档，配白字保证对比度 */
+  color: #fff !important;
+  background-color: color-mix(in srgb, var(--color-primary, #60a5fa) 65%, #0b1a33) !important;
 }
 :root[data-mode="night"] .dtf-search-input {
   background-color: rgba(255, 255, 255, 0.06) !important;

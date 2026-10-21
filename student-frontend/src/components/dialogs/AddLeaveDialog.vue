@@ -1,7 +1,7 @@
 <template>
   <DialogShell :visible="visible" :z-index="10001" @overlay="$emit('cancel')">
     <div class="bg-surface p-5 rounded-xl w-[520px] max-w-full shadow-lg dialog-card">
-      <h3 class="text-lg font-bold mb-4 text-text">{{ isEdit ? '编辑请假' : '请假登记' }}</h3>
+      <h3 class="text-lg font-bold mb-4 text-text">{{ isEdit ? '编辑请假记录' : '请假登记' }}</h3>
 
       <!-- 编辑模式：只读学生姓名 -->
       <div v-if="isEdit" class="mb-3">

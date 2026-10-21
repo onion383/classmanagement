@@ -107,16 +107,7 @@
               <span class="text-xs text-text-muted">按每人所坐位置的权重逐天累加 · 截至 {{ historySnapDate || '—' }}</span>
             </div>
             <div class="bg-surface rounded-lg border border-border p-6">
-              <div v-if="seatIndexRows.length" class="space-y-2.5">
-                <div v-for="(row, idx) in seatIndexRows" :key="row.name" class="flex items-center gap-3">
-                  <span class="w-20 text-sm text-text truncate text-right shrink-0">{{ row.name }}</span>
-                  <div class="flex-1 h-5 bg-surface-hover rounded overflow-hidden">
-                    <div class="h-full rounded bar-grow bg-primary" :style="{ width: seatIndexBarWidth(row) + '%', animationDelay: (idx * 90) + 'ms' }"></div>
-                  </div>
-                  <span class="w-14 text-sm font-bold text-right shrink-0 text-text">{{ row.value.toFixed(2) }}</span>
-                </div>
-              </div>
-              <div v-else class="text-center text-text-muted py-8 text-sm">暂无座位指数数据</div>
+              <StatBarList :rows="seatIndexRows" :bar-width="seatIndexBarWidth" :value-text="(row) => row.value.toFixed(2)" empty-text="暂无座位指数数据" />
             </div>
           </div>
 
@@ -278,6 +269,7 @@ import EmptySnapshot from '../components/base/EmptySnapshot.vue'
 import Tabs from '../components/base/Tabs.vue'
 import ViewSwitch from '../components/base/ViewSwitch.vue'
 import WeekSwitcher from '../components/base/WeekSwitcher.vue'
+import StatBarList from '../components/base/StatBarList.vue'
 import { useSeatGrid, buildSeatLikeRows, isAisleCol, getDisplayColCount } from '../composables/useSeatGrid.js'
 import { createRowReuseCache } from '../utils/rowReuse.js'
 import { useUndoShortcut, recordGridSnapshotUndo } from '../composables/useUndo.js'
@@ -1128,14 +1120,4 @@ onMounted(async () => {
 /* 上一周：向左推进（新表从右侧跟进向左移动，旧表向左滑出，同方向） */
 .prev-enter-from { transform: translateX(60px); opacity: 0; }
 .prev-leave-to   { transform: translateX(-60px); opacity: 0; }
-
-/* 座位指数柱状图：从左往右非线性生长进场动画（与加分统计一致） */
-.bar-grow {
-  transform-origin: left center;
-  animation: score-bar-grow 0.5s cubic-bezier(0.22, 1, 0.36, 1) both;
-}
-@keyframes score-bar-grow {
-  from { transform: scaleX(0); }
-  to { transform: scaleX(1); }
-}
 </style>

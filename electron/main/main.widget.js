@@ -3,8 +3,12 @@
 //
 // 汇总主进程里与「工具箱浮窗 / 桌面小组件」相关的窗口生命周期与 IPC：
 //   - 工具箱浮窗：创建/隐藏/显示、拖动、缩放、全屏、鼠标穿透、右键菜单、会话级显隐
-//   - 桌面小组件：创建/按启用状态建关（scheduleCreateDesktop / setDesktopEnabled）
+//   - 桌面小组件：**窗口已搬到独立进程**（electron/desktop-widget-host.js）。本模块只负责
+//     按启用状态拉起/停止那个子进程，崩溃由 main.desktop-widget-process.js 自动重建。
+//     原因：组件窗口要挂在桌面层（Progman 子窗口），Explorer 重启会级联销毁子窗口并让
+//     挂载方 Electron 原生崩溃，独立进程可把影响限制在那个子进程内。
 //   - 相关 IPC：widgets-ready / desktop-widget-enabled / widget-* / to-widget / to-main 等
+//     （desktop-widget-drag-* 已随窗口移到 host 进程内处理）
 //
 // 依赖注入：窗口引用与「开发服务器就绪后再导航」工具由 main.js 通过 registerWidgetIpc 注入
 // （getter/闭包，调用时取当前值）。本模块自有的可变状态（两个窗口引用、拖动/缩放/全屏临时态、
@@ -17,6 +21,9 @@ const { app, BrowserWindow, ipcMain, Menu, screen } = require('electron')
 const startupTimer = require('./main.startup-timer')
 const { applyBackgroundMaterial } = require('./main.window-material')
 const { buildWebPreferences } = require('./main.web-prefs')
+// 桌面小组件跑在独立进程里（见 main.desktop-widget-process.js 顶部注释）：
+// 本模块只保留工具箱浮窗的窗口逻辑，桌面组件的建/关/拖动都交给该进程。
+const desktopWidgetProcess = require('./main.desktop-widget-process')
 
 const isDev = !app.isPackaged
 
@@ -138,76 +145,50 @@ function showWidgetWindow() {
   if (widgetWindow && !widgetWindow.isDestroyed()) widgetWindow.show()
 }
 
-// ===== 桌面小组件「常驻桌面最底层」：暂时搁置 =====
-// 目标（未达成）：小组件始终在所有应用窗口之下，点击它也不会被抬到最前面，同时仍可点击、可拖动。
+// 退出工具箱（右键菜单与菜单面板里的「退出工具箱」按钮共用）：
+// 关闭浮窗 + 通知主窗口把持久化开关 toolboxEnabled 置 false。
+// 主窗口负责调后端（后端 PUT 是整体覆盖，由它读完整设置再写回，避免清空保存路径），
+// 因此设置页的「是否启用工具箱」会同步变为关闭，下次启动也不再出现。
+function exitToolbox() {
+  sessionWidgetEnabled = false
+  hideWidgetWindow()
+  const mainWindow = getMainWindow()
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    mainWindow.webContents.send('from-main', { type: 'toolbox-close-request' })
+  }
+}
+
+// ===== 桌面小组件「常驻桌面最底层」：已落地（第三条路）=====
+// 目标：小组件始终在所有应用窗口之下，点击它也不会被抬到最前面，同时仍可点击、可拖动。
 // 已实测的两条死路，别再重复踩：
 //   1) focusable:false —— Electron 会加 WS_EX_NOACTIVATE，该状态下窗口收不到鼠标输入，
 //      图标/按钮/拖动全部失效；
 //   2) SetWindowPos 到 HWND_BOTTOM —— 窗口被压到桌面 shell 窗口之下（桌面 shell 盖满全屏、
 //      对鼠标输入不透明）：窗口还看得见（shell 客户区透明），但点击全被 shell 吃掉，
 //      图标/按钮/拖动一并失效。
-// 待验证的第三条路（Rainmeter 等桌面挂件的做法，改日再试）：把窗口 SetParent 到桌面窗口
-// （Progman）使其成为「桌面层」子窗口——理论上天然位于所有应用窗口之下、点击不被抬到前台且
-// 仍可交互；挂载后需 SetWindowPos(HWND_TOP) 提到桌面层内部 z 序顶端（否则会落在桌面图标层
-// SHELLDLL_DefView/SysListView32 之下、点不动），并用 WindowFromPoint 沿父链校验，失败则
-// SetParent(hwnd, 0) 解挂退回普通窗口。当前按普通窗口显示（可点击、可拖动，但会盖住别的窗口）。
+// 现用方案（Rainmeter 等桌面挂件的做法，实现集中在 main.desktop-layer.js）：把窗口 SetParent
+// 到桌面窗口（Progman）使其成为「桌面层」子窗口——天然位于所有应用窗口之下、点击不被抬到前台
+// 且仍可交互；**必须同时把窗口样式改成 WS_CHILD**（只 SetParent 不改样式时，点击会先走激活流程，
+// 而桌面子窗口永远无法成为前台窗口，这次激活会把点击吞掉，表现为整块点不动、拖不动）；
+// 挂载后需 SetWindowPos(HWND_TOP) 提到桌面层内部 z 序顶端（否则会落在桌面图标层
+// SHELLDLL_DefView/SysListView32 之下、点不动）；挂载失败则自动恢复样式 + SetParent(hwnd, 0)
+// 解挂退回普通窗口（可点击、可拖动，但会盖住别的窗口）。
+// 注意：挂到桌面层后 -webkit-app-region: drag 立即失效（系统把 SC_MOVE 转发给父窗 Progman），
+// 拖动改由渲染层上报 screenX/screenY、主进程 SetWindowPos 自实现（desktop-widget-drag-*）。
 
 // 创建桌面小组件：常驻桌面、不挡应用
+//
+// 现在窗口跑在**独立进程**里（electron/desktop-widget-host.js）：Explorer 重启会销毁桌面壳
+// Progman、级联销毁挂在其下的子窗口，导致挂载方 Electron 原生崩溃（实测整个进程瞬间消失）。
+// 与主应用进程隔离后，崩溃只影响那个子进程，由 main.desktop-widget-process.js 自动重建。
+// 这里只负责拉起子进程；窗口参数、桌面层挂载、拖动 IPC 全在 host 进程内。
 function createDesktopWidgetWindow() {
-  if (desktopWidgetWindow && !desktopWidgetWindow.isDestroyed()) return
-  desktopWidgetWindow = new BrowserWindow({
-    width: 320,
-    height: 540,
-    frame: false,
-    // 不用 transparent（透明窗口会禁用系统背景材质）；改用不透明 + backgroundMaterial，
-    // 系统材质绘制在窗口背景上，渲染层半透明元素透出磨砂，与主窗口方案一致。
-    transparent: false,
-    backgroundMaterial: 'acrylic',
-    backgroundColor: '#f0f4f8',
-    alwaysOnTop: false,
-    skipTaskbar: true,
-    resizable: false,
-    hasShadow: false,
-    maximizable: false,
-    minimizable: false,
-    fullscreenable: false,
-    show: true,
-    // 注意：这里不能用 focusable:false。Windows 下它会加 WS_EX_NOACTIVATE，实测该状态下窗口
-    // 收不到任何鼠标输入（软件图标、按钮全点不动，拖动也失效）。当前小组件按普通窗口显示，
-    // 保证可点击、可拖动（「常驻最底层」的尝试见上方注释，暂时搁置）。
-    // 渲染进程安全配置见 web-prefs.js。桌面组件常驻需持续重绘，关闭后台节流
-    webPreferences: buildWebPreferences({ devTools: true, backgroundThrottling: false })
-  })
-
-  // Windows 系统原生背景材质：BackgroundMaterial 已随窗口创建时配置，此处再次确认应用。
-  if (process.platform === 'win32') {
-    applyBackgroundMaterial(desktopWidgetWindow, 'acrylic')
-  }
-  // 初始位置：屏幕右上角，高度接近屏幕高度
-  const { width: screenW, height: screenH } = screen.getPrimaryDisplay().workAreaSize
-  const widgetHeight = Math.round(screenH * 0.95)
-  desktopWidgetWindow.setContentSize(320, widgetHeight)
-  desktopWidgetWindow.setPosition(screenW - 340, Math.round((screenH - widgetHeight) / 2))
-
-  if (process.platform === 'darwin') {
-    desktopWidgetWindow.setWindowButtonVisibility(false)
-  }
-
-  if (isDev) {
-    desktopWidgetWindow.loadURL('http://127.0.0.1:5173/desktop-widget.html')
-  } else {
-    desktopWidgetWindow.loadURL('app://local/desktop-widget.html')
-  }
-
-  const self = desktopWidgetWindow
-  desktopWidgetWindow.on('closed', () => {
-    if (desktopWidgetWindow === self) desktopWidgetWindow = null
-  })
+  desktopWidgetProcess.start()
 }
 
 function scheduleCreateDesktop() {
   if (!desktopEnabled) return
-  if (!desktopWidgetWindow || desktopWidgetWindow.isDestroyed()) {
+  if (!desktopWidgetProcess.isRunning()) {
     createDesktopWidgetWindow()
     startupTimer.mark('桌面组件创建完成')
   }
@@ -217,9 +198,9 @@ function setDesktopEnabled(enabled) {
   desktopEnabled = !!enabled
   if (desktopEnabled) {
     scheduleCreateDesktop()
-  } else if (desktopWidgetWindow && !desktopWidgetWindow.isDestroyed()) {
-    // 关闭桌面小组件窗口（不影响主窗口与后端，不触发 window-all-closed 退出）
-    desktopWidgetWindow.close()
+  } else {
+    // 关闭桌面小组件子进程（不影响主窗口与后端，不触发 window-all-closed 退出）
+    desktopWidgetProcess.stop()
   }
 }
 
@@ -246,6 +227,18 @@ function registerWidgetIpc(opts = {}) {
     if (event.sender !== mainWindow.webContents) return
     setDesktopEnabled(enabled)
   })
+
+  // 「桌面组件关闭最底层（提升稳定性）」开关：改完需要重启组件子进程才生效。
+  // 入参 layerEnabled=true 表示启用常驻最底层；false 时组件按普通顶层窗口创建。
+  ipcMain.on('desktop-widget-desktop-layer', (event, layerEnabled) => {
+    const mainWindow = getMainWindow()
+    if (!mainWindow || mainWindow.isDestroyed()) return
+    if (event.sender !== mainWindow.webContents) return
+    desktopWidgetProcess.setDesktopLayerEnabled(!!layerEnabled)
+  })
+
+  // 读取桌面层状态：设置页加载时同步开关初值，并显示「是否因连续崩溃被自动关闭」
+  ipcMain.handle('get-desktop-layer-state', () => desktopWidgetProcess.getDesktopLayerState())
 
   // 调整小组件窗口大小（带边界保护，防止超出屏幕）
   // 入参 [width, height] 为「视觉内容」尺寸；窗口实际会比它大 2*M，四周多出的部分用于绘制阴影。
@@ -360,21 +353,25 @@ function registerWidgetIpc(opts = {}) {
     }
   })
 
-  // 工具箱浮窗右键菜单：当前提供「本次退出」，仅关闭浮窗（隐藏 widget），主程序与后端保留运行
+  // 工具箱浮窗右键菜单：「关闭工具箱」= 连同持久化开关一起关掉（设置页的「是否启用工具箱」
+  // 会同步变为关闭，下次启动也不再出现）。
+  // 注意：渲染层菜单面板里的「退出工具箱」按钮走同一个 exitToolbox（见下方 widget-exit）。
   ipcMain.on('widget-context-menu', (event) => {
     const win = BrowserWindow.fromWebContents(event.sender)
     const menu = Menu.buildFromTemplate([
       {
-        label: '本次退出',
-        click: () => {
-          sessionWidgetEnabled = false
-          hideWidgetWindow()
-          // 通知设置页同步「本次启用工具箱」开关为关闭
-          getMainWindow()?.webContents.send('from-main', { type: 'session-widget-changed' })
-        },
+        label: '关闭工具箱',
+        click: () => exitToolbox(),
       },
     ])
     menu.popup({ window: win || undefined })
+  })
+
+  // 菜单面板里的「退出工具箱」按钮（二次确认在渲染层做，确认后才会发这条）
+  ipcMain.on('widget-exit', (event) => {
+    if (!widgetWindow || widgetWindow.isDestroyed()) return
+    if (event.sender !== widgetWindow.webContents) return
+    exitToolbox()
   })
 
   // 会话级「本次启用工具箱」：仅影响本次运行浮窗显隐，不持久化
@@ -396,6 +393,9 @@ function registerWidgetIpc(opts = {}) {
     }
     return null
   })
+
+  // 桌面小组件的拖动 IPC 已随窗口一起搬到独立进程（electron/desktop-widget-host.js）：
+  // 窗口不在本进程里，SetWindowPos 只能由创建它的进程执行。
 
   // 拖动中：使用 setContentBounds 与 setContentSize 保持一致，避免 setBounds/setSize 边界计算差异
   ipcMain.on('widget-drag-move', (event, { screenX, screenY }) => {
@@ -448,7 +448,10 @@ module.exports = {
   showWidgetWindow,
   createDesktopWidgetWindow,
   getWidgetWindow: () => widgetWindow,
-  getDesktopWidgetWindow: () => desktopWidgetWindow,
+  // 桌面组件窗口不在本进程里：返回伪窗口对象，让 tray / perf 既有的
+  // `w && !w.isDestroyed()` 判断与 close/destroy 调用继续可用。
+  getDesktopWidgetWindow: () => desktopWidgetWindow || desktopWidgetProcess.getProxy(),
   setDesktopWidgetWindow: (w) => { desktopWidgetWindow = w },
   isDesktopEnabled: () => desktopEnabled,
+  isDesktopWidgetRunning: () => desktopWidgetProcess.isRunning(),
 }

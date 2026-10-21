@@ -210,7 +210,15 @@ html.no-animations {
 
    两个可调旋钮：
    - --theme-switch-duration：收尾时长（越小越跟手，100ms 是手感与观感的平衡点）
-   - 下面 keyframes 里的 0.62：第一帧到达的不透明度（越接近 1 越像瞬时切换） */
+   - 下面 keyframes 里的 0.62：第一帧到达的不透明度（越接近 1 越像瞬时切换）
+
+   连点打断（见 themeTransition.js 的 performThemeSwap）：
+   页面视觉恒等于「新快照 × r + 旧快照 × (1 − r)」。反向时不新排一段 dissolve，
+   而是把新一段的新快照起始不透明度设成 1 − r（由 JS 写入 --theme-switch-from），
+   于是第一帧与当前画面完全一致，之后照常收到 1 —— 相当于原路平滑退回。
+   时长同样由 JS 写入 --theme-switch-duration，取「已用时长 × 真正走过的比例」，
+   所以进来用了多久、走了多远，返回就按同样的比例缩短。
+   动画依旧只动快照层 opacity，仍是合成器单层动画，成本与 DOM 规模无关。 */
 :root {
   --theme-switch-duration: 100ms;
 }
@@ -232,7 +240,8 @@ html.no-animations {
   isolation: auto;
 }
 @keyframes theme-switch-in {
-  from { opacity: 0.62; }
+  /* 首次切换用默认 0.62；连点反向时由 JS 写 --theme-switch-from 覆盖为 1 − 当前混合度 */
+  from { opacity: var(--theme-switch-from, 0.62); }
   to   { opacity: 1; }
 }
 ::view-transition-old(root) {
@@ -247,6 +256,23 @@ html.no-animations {
 html.no-animations::view-transition-old(root),
 html.no-animations::view-transition-new(root) {
   animation: none;
+}
+
+/* 日/夜切换按钮不参与整页交叉淡入，单独成层并「当帧切到新状态」：
+   否则点下去后图标虽已换，按钮的颜色/背景仍跟着整页在 100ms 里慢慢淡，
+   观感就是「按钮有延迟」。给它 view-transition-name 后（见 utilities.css），
+   旧层直接隐藏、新层直接全显，按钮从第一帧起就是目标态。 */
+::view-transition-group(theme-toggle) {
+  animation: none;
+}
+::view-transition-old(theme-toggle) {
+  animation: none;
+  opacity: 0;
+}
+::view-transition-new(theme-toggle) {
+  animation: none;
+  opacity: 1;
+  mix-blend-mode: normal;
 }
 
 /* 切换事务窗口：所有元素级过渡瞬时完成。
@@ -346,9 +372,9 @@ html.theme-switching *::after {
 }
 .dtf-sort-btn:active { transform: scale(0.97); }
 .dtf-sort-btn.is-on {
-  color: var(--color-primary, #22c55e);
+  color: #fff;
   font-weight: 600;
-  background-color: color-mix(in srgb, var(--color-primary, #22c55e) 14%, transparent);
+  background-color: var(--color-primary, #22c55e);
 }
 
 /* ---------- 值搜索框 ---------- */

@@ -8,12 +8,10 @@
       <button @click="onAddRoot" class="bg-primary hover:bg-primary-hover text-text-inverse px-4 py-2 rounded transition-theme flex items-center gap-1.5 cursor-pointer">＋ 添加职务</button>
       <button @click="onAddChildSelected" :disabled="!selectedNode" class="bg-primary hover:bg-primary-hover text-text-inverse px-4 py-2 rounded transition-theme flex items-center gap-1.5 cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed">＋ 增加下级</button>
       <button @click="onRefresh" class="bg-text-muted text-text-inverse px-4 py-2 rounded flex items-center gap-1.5 btn-refresh"><IconGlyph name="refresh" :size="14" tint="current" /> 刷新</button>
-      <!-- 视图切换：ml-auto 把它推到工具栏最右侧 -->
-      <ViewSwitch v-model="view" :options="viewOptions" class="ml-auto" />
     </div>
 
-    <!-- ====== 树状视图（默认，智能排表式嵌套列表） ====== -->
-    <div v-if="view === 'tree'" class="tree-scroll bg-surface shadow-md rounded-xl border border-border p-4 flex-1 min-h-0 overflow-y-auto overflow-x-hidden" @click.self="selectedId = null">
+    <!-- ====== 树状视图（智能排表式嵌套列表） ====== -->
+    <div class="tree-scroll bg-surface shadow-md rounded-xl border border-border p-4 flex-1 min-h-0 overflow-y-auto overflow-x-hidden" @click.self="selectedId = null">
       <!-- 空状态 -->
       <div v-if="!loading && tree.length === 0" class="text-center text-text-muted py-12">
         <p class="text-lg mb-2">还没有任何职务</p>
@@ -39,17 +37,6 @@
           @remove-member="onRemoveMember"
           @drop-move="handleMove"
         />
-      </div>
-    </div>
-
-    <!-- ====== 组织图视图（只读展示） ====== -->
-    <div v-else class="bg-surface shadow-md rounded-xl border border-border px-6 py-5 flex-1 min-h-0 overflow-auto">
-      <div v-if="!loading && tree.length === 0" class="text-center text-text-muted py-12">
-        <p class="text-lg mb-2">还没有任何职务</p>
-        <p class="text-sm">切换到「树状」视图，或点击上方「＋ 添加职务」。</p>
-      </div>
-      <div v-else class="flex flex-col items-center pt-4 pb-10">
-        <cadre-tree-node v-for="root in tree" :key="root.id" :node="root" :readonly="true" />
       </div>
     </div>
 
@@ -93,9 +80,7 @@
 <script setup>
 import { ref, reactive, computed, onMounted } from 'vue'
 import axios from 'axios'
-import CadreTreeNode from './CadreTreeNode.vue'
 import CadreTreeList from './CadreTreeList.vue'
-import ViewSwitch from './base/ViewSwitch.vue'
 import { useNotification } from '../composables/useNotification'
 
 const { success, error, info } = useNotification()
@@ -108,13 +93,6 @@ const allStudents = ref([])
 // 当前选中的职务行（选中后高亮蓝框，供工具栏「增加下级 / 设置」使用）
 const selectedId = ref(null)
 const selectedNode = computed(() => (selectedId.value == null ? null : findNode(tree.value, selectedId.value)))
-
-// 视图切换：树状（默认） / 组织图（只读）
-const view = ref('tree')
-const viewOptions = [
-  { value: 'tree', label: '树状' },
-  { value: 'chart', label: '组织图' }
-]
 
 const api = (options = {}) => {
   const opts = {

@@ -266,7 +266,7 @@
           <div v-if="nightSupported" class="py-6 my-8 space-y-4">
             <div class="flex items-center gap-4">
               <label class="text-sm font-medium text-text w-16 flex-shrink-0">日夜模式</label>
-              <ViewSwitch :modelValue="mode" :options="modeSwitchOptions" @update:modelValue="onSelectMode" />
+              <ViewSwitch :modelValue="pendingMode" :options="modeSwitchOptions" @update:modelValue="onSelectMode" />
               <span class="text-xs text-text-muted">当前主题支持夜间配色</span>
             </div>
             <div class="flex items-center gap-4">
@@ -372,15 +372,7 @@
             <span class="ml-2 text-sm text-text-secondary">{{ toolboxEnabled ? '已启用' : '已禁用' }}</span>
           </label>
         </div>
-        <p class="text-xs text-text-muted mt-2 ml-40">下次启动时是否显示工具箱（本次运行不受此开关影响）</p>
-        <div class="flex items-center gap-4 mt-6">
-          <label class="text-sm font-medium text-text w-40 flex-shrink-0">本次启用工具箱</label>
-          <label class="inline-flex items-center cursor-pointer">
-            <input type="checkbox" :checked="sessionEnabled" @change="onSessionChange" class="w-4 h-4 rounded border-border text-primary focus:ring-primary cursor-pointer" />
-            <span class="ml-2 text-sm text-text-secondary">{{ sessionEnabled ? '已启用' : '已禁用' }}</span>
-          </label>
-        </div>
-        <p class="text-xs text-text-muted mt-2 ml-40">仅本次运行立即显示/隐藏工具箱；重启后按上方「是否启用」决定</p>
+        <p class="text-xs text-text-muted mt-2 ml-40">关闭后立即隐藏工具箱并释放其窗口，下次启动也不再显示；开启立即显示</p>
         <div class="flex items-center gap-4 mt-6">
           <label class="text-sm font-medium text-text w-40 flex-shrink-0">新U盘插入自动打开</label>
           <label class="inline-flex items-center cursor-pointer">
@@ -404,6 +396,17 @@
           </label>
         </div>
         <p class="text-xs text-text-muted mt-2 ml-40">关闭后启动不创建桌面小组件窗口（更省资源），并可立即关闭当前窗口；开启立即显示</p>
+        <div class="flex items-center gap-4 mt-5 pt-5 border-t border-border">
+          <label class="text-sm font-medium text-text w-40 flex-shrink-0">桌面组件关闭最底层<span class="text-text-muted font-normal">（提升稳定性）</span></label>
+          <label class="inline-flex items-center cursor-pointer">
+            <input type="checkbox" :checked="noDesktopLayer" @change="onNoDesktopLayerChange" :disabled="!desktopWidgetEnabled" class="w-4 h-4 rounded border-border text-primary focus:ring-primary cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed" />
+            <span class="ml-2 text-sm text-text-secondary">{{ noDesktopLayer ? '已关闭（稳定模式）' : '已开启' }}</span>
+          </label>
+        </div>
+        <p class="text-xs text-text-muted mt-2 ml-40">
+          勾选后组件不再常驻所有窗口之下：不挂到桌面层，稳定性更高，但会盖在其他窗口上面、点击可能被抬到最前面。切换后组件会自动重启一次。
+          <span v-if="desktopLayerAutoDisabled" class="block text-danger mt-1">上次启动时组件连续崩溃，已自动切换到稳定模式；确认无误后可在上面取消勾选重新开启。</span>
+        </p>
       </div>
     </div>
 
@@ -467,7 +470,7 @@
 
         <!-- 上次启动耗时 -->
         <div class="border-t border-border pt-6 mt-6 flex items-center gap-4">
-          <span class="text-sm text-text-muted">上次启动耗时</span>
+          <span class="text-sm text-text-muted" title="口径：进程启动到窗口首次显示（ready-to-show），不含数据加载等待">上次启动耗时</span>
           <span class="text-sm font-medium text-text" style="font-variant-numeric: tabular-nums;">{{ (perfStartupTotal / 1000).toFixed(3) }} s</span>
         </div>
       </div>
@@ -693,7 +696,7 @@ export default {
   },
   data() {
     const themeStore = useThemeStore()
-    const { currentTheme, bgMaskOpacity, glassOpacity, iconStyle, topbarColor, animationsEnabled, mode, nightSupported, followSystem } = storeToRefs(themeStore)
+    const { currentTheme, bgMaskOpacity, glassOpacity, iconStyle, topbarColor, animationsEnabled, pendingMode, nightSupported, followSystem } = storeToRefs(themeStore)
 
     return {
       themeStore,
@@ -703,7 +706,7 @@ export default {
       iconStyle,
       topbarColor,
       animationsEnabled,
-      mode,
+      pendingMode,
       nightSupported,
       followSystem,
       // 设置项搜索：输入即匹配，结果以悬浮弹窗显示在搜索框下方，点击滚动到对应设置区
@@ -745,6 +748,7 @@ export default {
         { label: '本次启用工具箱',           section: 'toolbox',  py: 'bcqygjx' },
         { label: '新U盘插入自动打开',        section: 'toolbox',  py: 'xupcrzddk' },
         { label: '启用桌面小组件',           section: 'widget',   py: 'qyzmxjjs' },
+        { label: '桌面组件关闭最底层',       section: 'widget',   py: 'zmzjgbzdc' },
         { label: '注释截屏保存位置',         section: 'savepath', py: 'zsjpbcwz' },
         { label: '一键截屏保存位置',         section: 'savepath', py: 'yjjpbcwz' },
         { label: '数据库目录',               section: 'datadir',  py: 'sjkml' },
@@ -802,14 +806,17 @@ export default {
       deleteTimer: null,
       // 工具箱设置
       toolboxEnabled: true,
-      sessionEnabled: true,
-      sessionLoaded: false,
       noteSavePath: '',
       screenshotSavePath: '',
       screenshotDir: '',
       usbAutoOpen: false,
       // 桌面小组件启用状态：localStorage 持久化，默认启用（主进程据此按需创建桌面小组件窗口）
       desktopWidgetEnabled: (localStorage.getItem('desktopWidgetEnabled') ?? '1') !== '0',
+      // 「桌面组件关闭最底层」：真实状态存在主进程（连续崩溃时会被自动关闭），这里只是界面镜像，
+      // mounted 时用 IPC 同步初值
+      noDesktopLayer: false,
+      // 是否由「连续启动崩溃」自动降级而来（用于在设置页给出原因说明）
+      desktopLayerAutoDisabled: false,
       loaded: false,
       _fromMainHandler: null,
       // 数据目录 / 缓存目录
@@ -956,7 +963,7 @@ export default {
     this.loadUndo()
     this.loadSemesterSettings()
     this.loadWidgetSettings()
-    this.loadSession()
+    this.loadDesktopLayerState()
     this.loadUsbAutoOpen()
     this.loadDataDirs()
     this.loadDbEncryption()
@@ -964,7 +971,10 @@ export default {
     this.loadStartup()
     this._startPerfPolling()
     this._fromMainHandler = window.electron?.on(RECEIVE.FROM_MAIN, (data) => {
-      if (data && data.type === 'session-widget-changed') this.loadSession()
+      // 浮窗右键「关闭工具箱」会把持久化开关置 false，这里刷新一下开关状态
+      if (data && data.type === 'toolbox-close-request') this.loadWidgetSettings()
+      // 组件连续崩溃被自动降级时刷新开关与提示（用户不必手动去查状态）
+      if (data && data.type === 'desktop-layer-auto-disabled') this.loadDesktopLayerState()
     })
   },
   // 设置页被 KeepAlive 缓存：切走页面走 deactivated 而非 beforeUnmount，

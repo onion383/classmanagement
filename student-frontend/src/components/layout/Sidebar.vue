@@ -10,12 +10,12 @@
       <img src="/logo.webp" alt="logo" class="w-7 h-7 object-contain shrink-0" />
       <span v-if="!collapsed" class="truncate">班集</span>
       <button
-        class="mode-toggle-btn"
+        class="mode-toggle-btn mode-toggle-theme"
         :disabled="!nightSupported"
-        :title="!nightSupported ? '当前主题暂不支持夜间模式' : (isNight ? '切换到日间模式' : '切换到夜间模式')"
+        :title="!nightSupported ? '当前主题暂不支持夜间模式' : (isNightPending ? '切换到日间模式' : '切换到夜间模式')"
         @click="toggleMode"
       >
-        <Sun v-if="isNight" :size="15" stroke-width="1.8" />
+        <Sun v-if="isNightPending" :size="15" stroke-width="1.8" />
         <Moon v-else :size="15" stroke-width="1.8" />
       </button>
       <button
@@ -84,7 +84,7 @@ function isSelected(to) {
 
 // 图标样式跟随主题设置：'lucide' 线性图标 | 'emoji' 表情
 const themeStore = useThemeStore()
-const { iconStyle, isNight, nightSupported } = storeToRefs(themeStore)
+const { iconStyle, isNightPending, nightSupported } = storeToRefs(themeStore)
 // 全局日/夜切换（仅 glass / glass2 支持，见 theme-night.css）
 const { toggleMode } = themeStore
 

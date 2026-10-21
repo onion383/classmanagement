@@ -17,6 +17,7 @@ const bcrypt = {
 };
 const { SECRET, auth, TOKEN_SIGN_OPTS, TOKEN_COOKIE_MAX_AGE } = require('../middleware/auth');
 const { pickPhrase, deriveRestoreHash, formatPhrase } = require('../services/recoveryKey');
+const sessions = require('../services/sessions');
 
 // 重置恢复密钥：为当前登录账号生成一组新的 12 词恢复密钥并保存哈希。
 // 生成的密钥只在本次响应返回一次（前端提示先保存再确认）。
@@ -183,7 +184,7 @@ router.post('/restore-offline', (req, res) => {
     if (typeof memory === 'string') dbManager.writeMemory(result.slug || slug, memory);
     // 恢复成功后直接签发登录态，前端据此跳转首页，无需再次手动登录
     const token = useJwt().sign(
-      { userId: 1, username, role: 'teacher', dbSlug: result.slug || slug },
+      { userId: 1, username, role: 'teacher', dbSlug: result.slug || slug, sid: sessions.create(1) },
       SECRET,
       TOKEN_SIGN_OPTS
     );
@@ -260,6 +261,7 @@ router.delete('/', auth(), (req, res) => {
     const rec = dbManager.registryFindBySlug(slug);
     if (!rec) return res.status(404).json({ error: '账号不存在或已被删除' });
     dbManager.deleteTeacher(slug);
+    sessions.revoke(req.user && req.user.sid);
     res.clearCookie('token');
     res.json({ message: '账号已删除' });
   } catch (err) {

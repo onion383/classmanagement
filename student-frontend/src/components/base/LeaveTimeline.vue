@@ -1,5 +1,5 @@
 <template>
-  <div class="leave-timeline bg-surface border border-border rounded-xl p-5">
+  <div class="leave-timeline bg-surface border border-border rounded-xl p-5" :class="{ 'tl-fill': fillHeight }">
     <!-- 标题（title 为空时不渲染，供页面把标题外置为子标题） -->
     <div v-if="title" class="flex items-center justify-between mb-4">
       <h3 class="text-base font-bold text-text">{{ title }}</h3>
@@ -18,7 +18,7 @@
     </div>
 
     <!-- 时间轴 -->
-    <div class="timeline" v-if="visibleNodes.length" :style="{ maxHeight: maxHeight + 'px' }">
+    <div class="timeline" v-if="visibleNodes.length" :style="fillHeight ? null : { maxHeight: maxHeight + 'px' }">
       <div
         v-for="node in visibleNodes"
         :key="node.key"
@@ -77,6 +77,8 @@ export default {
     alignRight: { type: Boolean, default: false },
     // 时间轴列表最大高度（px），默认 420，业务方可按需调高
     maxHeight: { type: Number, default: 420 },
+    // 撑满外层容器高度：外层给固定高度时，卡片与时间轴区域一起填满（用于和表格同高切换）
+    fillHeight: { type: Boolean, default: false },
     // 节点类型配置：{ value, label, colorKey: 'info'|'success'|'danger', color: hex }
     nodeTypes: {
       type: Array,
@@ -147,14 +149,26 @@ export default {
 <style scoped>
 .timeline {
   position: relative;
-  padding-left: 15px;
+  padding-left: 16px;
   max-height: 420px;
   overflow-y: auto;
+}
+/* fillHeight：卡片撑满外层，时间轴区域吃掉剩余高度并内部滚动（与表格同高切换时不跳动） */
+.tl-fill {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+}
+.tl-fill .timeline {
+  flex: 1 1 auto;
+  min-height: 0;
+  max-height: none;
 }
 .timeline::before {
   content: '';
   position: absolute;
-  left: 21px;
+  left: 28px;
   top: 6px;
   bottom: 6px;
   width: 2px;
@@ -165,8 +179,10 @@ export default {
   position: relative;
   display: flex;
   align-items: center;
-  gap: 12px;
-  padding: 0 0 18px;
+  /* 行内留出左侧内边距：行带 content-visibility:auto（绘制裁剪），
+     圆点外圈描边必须落在行盒子内，否则会被裁掉 */
+  padding: 0 0 18px 6px;
+  gap: 2px;
 }
 .timeline-row:last-child {
   padding-bottom: 4px;

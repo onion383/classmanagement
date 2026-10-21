@@ -112,16 +112,7 @@
               <span class="text-xs text-text-muted">按每人所做值日项目的权重逐天累加 · 截至 {{ historySnapDate || '—' }}</span>
             </div>
             <div class="bg-surface rounded-lg border border-border p-6">
-              <div v-if="dutyIndexRows.length" class="space-y-2.5">
-                <div v-for="(row, idx) in dutyIndexRows" :key="row.name" class="flex items-center gap-3">
-                  <span class="w-20 text-sm text-text truncate text-right shrink-0">{{ row.name }}</span>
-                  <div class="flex-1 h-5 bg-surface-hover rounded overflow-hidden">
-                    <div class="h-full rounded bar-grow bg-primary" :style="{ width: dutyIndexBarWidth(row) + '%', animationDelay: (idx * 90) + 'ms' }"></div>
-                  </div>
-                  <span class="w-14 text-sm font-bold text-right shrink-0 text-text">{{ row.value.toFixed(2) }}</span>
-                </div>
-              </div>
-              <div v-else class="text-center text-text-muted py-8 text-sm">暂无值日指数数据</div>
+              <StatBarList :rows="dutyIndexRows" :bar-width="dutyIndexBarWidth" :value-text="(row) => row.value.toFixed(2)" empty-text="暂无值日指数数据" />
             </div>
           </div>
 
@@ -267,6 +258,7 @@ import EmptySnapshot from '../components/base/EmptySnapshot.vue'
 import GridView from '../components/tables/GridView/GridView.vue'
 import WeekSwitcher from '../components/base/WeekSwitcher.vue'
 import AppSelect from '../components/base/AppSelect.vue'
+import StatBarList from '../components/base/StatBarList.vue'
 import { useNotification } from '../composables/useNotification.js'
 import { useUndoShortcut, recordGridSnapshotUndo } from '../composables/useUndo.js'
 import { syncStudentNamesFromRows, syncStudentNames } from '../composables/useSyncStudentNames.js'
@@ -1174,16 +1166,6 @@ onMounted(async () => {
 </script>
 
 <style scoped>
-/* 值日指数柱状图：从左往右非线性生长进场动画（与座位指数一致） */
-.bar-grow {
-  transform-origin: left center;
-  animation: score-bar-grow 0.5s cubic-bezier(0.22, 1, 0.36, 1) both;
-}
-@keyframes score-bar-grow {
-  from { transform: scaleX(0); }
-  to { transform: scaleX(1); }
-}
-
 /* 历史表格周切换滑动动画：新旧表同向并行滑动（推拉感），不影响 WeekSwitcher */
 .history-content { width: 100%; }
 /* 过渡容器：grid 叠放新旧表（同一格），容器高度取两者较大值，切换时高度不塌陷、下方操作栏不跳动；

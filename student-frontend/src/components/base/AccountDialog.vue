@@ -43,6 +43,7 @@
 import { ref, computed, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { User } from '@lucide/vue'
+import axios from 'axios'
 import ConfirmDialog from './ConfirmDialog.vue'
 
 const props = defineProps({ visible: { type: Boolean, default: false } })
@@ -60,6 +61,8 @@ watch(() => props.visible, (v) => {
 const roleText = computed(() => (user.value.role === 'teacher' ? '班主任' : '科任老师'))
 
 function doLogout() {
+  // 通知后端吊销本次会话（原 token 立即失效），再清本地登录态
+  axios.post('/api/auth/logout').catch(() => {})
   localStorage.removeItem('token')
   localStorage.removeItem('currentUser')
   confirmOpen.value = false

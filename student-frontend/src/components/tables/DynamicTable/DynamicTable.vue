@@ -3,17 +3,17 @@
   <div
     ref="scrollWrapper"
     class="table-scroll-wrapper overflow-x-auto overflow-y-auto"
-    :class="{ 'is-scrollable': vScroll, 'scrollbar-gutter-stable': vScroll }"
-    :style="{ height: fixedMaxHeight + 'px' }"
+    :class="{ 'is-scrollable': vScroll }"
+    :style="fitContent ? { maxHeight: fixedMaxHeight + 'px' } : { height: fixedMaxHeight + 'px' }"
     @scroll.passive="onBodyScroll"
   >
     <table class="w-full border-separate border-spacing-0 mt-0">
       <thead>
         <tr ref="theadRow">
           <TransitionGroup :name="colAnimDone ? 'col-flip' : 'static-col'" tag="">
-          <!-- 全选复选框（可通过 hideSelectAll 隐藏，但列始终存在） -->
+          <!-- 全选复选框（可通过 hideSelectAll 隐藏，但列始终存在；noSelect 可整列隐藏） -->
           <th
-            v-if="!readonly"
+            v-if="!readonly && !noSelect"
             key="col-checkbox"
             class="bg-primary text-text-inverse border border-border px-1 py-1 text-center w-8 col-static"
           >
@@ -35,7 +35,7 @@
             @contextmenu.prevent="$emit('contextmenu', $event, 'header', field)"
             :class="[
               'bg-primary text-text-inverse border border-border px-2 py-1 text-center cursor-context-menu select-none',
-              { 'opacity-30': colDragIndex === colIndex }
+              { 'dt-col-src-hidden': colDragIndex === colIndex }
             ]"
             class="col-header"
           >
@@ -48,7 +48,7 @@
                 @contextmenu.stop.prevent
               >⠿</span>
               <span @click.stop="$emit('search', field.name)" class="cursor-pointer">
-                {{ field.name === 'id' ? 'ID' : field.name }}<span v-if="isProtectedField(field)" class="text-warning ml-0.5" title="核心字段，禁止删除">*</span>
+                {{ field.label || (field.name === 'id' ? 'ID' : field.name) }}<span v-if="isProtectedField(field)" class="text-warning ml-0.5" title="核心字段，禁止删除">*</span>
               </span>
               <!-- 筛选入口：未筛选=放大镜，已筛选=漏斗；排序/值筛选都在面板里。
                    面板是懒加载 chunk，悬停按钮即预取，点开无需等待。 -->
@@ -66,13 +66,13 @@
             </div>
           </th>
 
-          <!-- 操作列（固定） -->
+          <!-- 操作列（固定）：只读表可通过 actionsHeader + #row-actions 插槽自定义操作内容 -->
           <th
-            v-if="!readonly"
+            v-if="!readonly || actionsHeader"
             key="col-op"
             class="bg-primary text-text-inverse border border-border px-2 py-1 text-center col-op"
           >
-            操作
+            {{ actionsHeader || '操作' }}
           </th>
           </TransitionGroup>
         </tr>
@@ -119,12 +119,12 @@
             class="transition-[opacity,background-color,transform] duration-200 ease-in-out"
           >
             <!-- 分隔行：只显示一个跨列的空单元格 -->
-            <td v-if="row._isSeparator" :colspan="(fields ? fields.length : 0) + 2"></td>
+            <td v-if="row._isSeparator" :colspan="tableColSpan"></td>
 
             <!-- 普通行 -->
             <template v-else>
               <!-- 复选框 -->
-              <td v-if="!readonly" class="border border-border px-1 text-center align-middle w-8" @click.stop>
+              <td v-if="!readonly && !noSelect" class="border border-border px-1 text-center align-middle w-8" @click.stop>
                 <input
                   type="checkbox"
                   :checked="selectedKeySet.has(row._rowKey)"
@@ -140,6 +140,7 @@
                 :key="field.name"
                 :data-col="field.name"
                 class="border border-border px-2 py-1 text-center relative pl-6"
+                :class="{ 'dt-col-src-hidden': colDragIndex === fieldIndex }"
                 @click="onCellClick($event, row, field)"
               >
                 <!-- 拖拽手柄（仅在非去重模式或允许移动时显示，按住拖行） -->
@@ -151,8 +152,9 @@
                   @contextmenu.stop.prevent
                 >⠿</span>
 
+                <slot :name="field.slot || ('cell-' + field.name)" :row="row" :field="field" :value="row[field.name]" :index="rowIndex" :editing="isEditing(row, field.name)">
                 <template v-if="field.name === 'id'">{{ row._isNew ? '自动' : row.id }}</template>
-                <template v-else-if="field.name === 'position'">{{ row._isNew ? '-' : positionOf(rowIndex) }}</template>
+                <template v-else-if="field.name === 'position'"><span class="dt-index-fix">{{ row._isNew ? '-' : positionOf(rowIndex) }}</span></template>
                 <template v-else-if="field.name === '收据'">
                   <button @click="$emit('manageReceipt', { row, isNew: row._isNew })" class="bg-primary text-text-inverse border-none py-1 px-2 rounded text-xs cursor-pointer">管理收据{{ row._isNew ? '' : ' (' + getReceiptCount(row) + ')' }}</button>
                 </template>
@@ -182,13 +184,17 @@
                   />
                   <span v-else @dblclick="$emit('startEdit', row, field)" class="dcell block w-full min-h-[24px] leading-6 px-1 cursor-default">{{ row[field.name] != null ? row[field.name] : '' }}</span>
                 </template>
+                </slot>
               </td>
 
               <!-- 操作列 -->
-              <td v-if="!readonly" class="col-op border border-border px-1.5 py-1 text-center whitespace-nowrap">
+              <td v-if="!readonly || actionsHeader" class="col-op border border-border px-1.5 py-1 text-center whitespace-nowrap">
+                <!-- 额外操作按钮：插在默认操作按钮（新增行保存/取消、↑↓/删除）之前 -->
+                <slot name="row-actions-extra" :row="row" :index="rowIndex"></slot>
+                <slot name="row-actions" :row="row" :index="rowIndex">
                 <template v-if="row._isNew">
                   <button @click="$emit('saveNewRow')" class="bg-info text-text-inverse border-none py-0.5 px-2 mr-1 cursor-pointer rounded">保存</button>
-                  <button @click="animateCancelNewRow" class="bg-text-muted text-text-inverse border-none py-0.5 px-2 cursor-pointer rounded">取消</button>
+                  <button @click="requestCancelNewRow" class="bg-text-muted text-text-inverse border-none py-0.5 px-2 cursor-pointer rounded">取消</button>
                 </template>
                 <template v-else>
                   <!-- 上移 / 下移（仅在非去重模式显示） -->
@@ -207,8 +213,13 @@
                   <!-- 删除按钮始终保留 -->
                   <button @click="$emit('deleteRow', row.id)" class="bg-danger text-text-inverse border-none py-0.5 px-1.5 cursor-pointer rounded">删除</button>
                 </template>
+                </slot>
               </td>
             </template>
+          </tr>
+          <!-- 空表提示：仅父组件显式传入 emptyText 时渲染（默认保持原样，不影响其他表格） -->
+          <tr v-if="emptyText && !bodyRows.length" key="__dt-empty">
+            <td :colspan="tableColSpan" class="px-3 py-8 text-center text-text-muted">{{ emptyText }}</td>
           </tr>
           <!-- 筛选后无结果：给一行提示，避免整表空白让人以为数据丢了 -->
           <tr v-if="filterNoResult" key="__dt-filter-empty" class="dt-filter-empty">
@@ -223,14 +234,15 @@
     </table>
   </div>
 
-  <!-- 添加一行：放在滚动容器下方，始终固定可见（数据滚动时不随之滚走） -->
+  <!-- 添加一行：放在滚动容器下方，始终固定可见（数据滚动时不随之滚走）
+       存在新增行时按钮切换为「取消添加一行」，点击可放弃本次新增 -->
   <transition name="add-row-flip" :duration="addRowAnimated ? undefined : 0">
     <div
       v-if="!readonly && !hideAddRow"
       :key="'add-row-' + addRowAnimKey"
-      :class="['add-row-bar bg-bg text-center py-2 mt-2 text-primary font-medium rounded-xl', hasNewRow ? 'cursor-default text-text-muted opacity-60 pointer-events-none' : 'cursor-pointer']"
-      @click="$emit('addNewRowAtBottom')"
-    >＋ 点击添加一行</div>
+      :class="['add-row-bar bg-bg text-center py-2 mt-2 font-medium rounded-xl cursor-pointer', hasNewRow ? 'text-text-secondary' : 'text-primary']"
+      @click="onAddRowBarClick"
+    >{{ hasNewRow ? '取消添加一行' : '＋ 点击添加一行' }}</div>
   </transition>
 
   <!-- 表头筛选面板：Teleport 到 body，避免被表格滚动容器的 overflow 裁掉 -->
@@ -251,11 +263,23 @@
       />
     </Transition>
   </Teleport>
+
+  <!-- 放弃新增行确认：新增行已填写数据时，取消新增前先确认 -->
+  <ConfirmDialog
+    :visible="discardConfirmVisible"
+    title="放弃新增行"
+    message="新增行已填写数据，放弃后不会保存，确定要放弃吗？"
+    type="confirm"
+    :show-cancel="true"
+    @confirm="confirmDiscardNewRow"
+    @cancel="discardConfirmVisible = false"
+  />
   </div>
 </template>
 
 <script>
 import AppSelect from '../../base/AppSelect.vue'
+import ConfirmDialog from '../../base/ConfirmDialog.vue'
 import { TransitionGroup, defineAsyncComponent } from 'vue'
 import { Search, Filter } from '@lucide/vue'
 import { useDynamicTableDrag } from './DynamicTable.drag.js'
@@ -288,7 +312,7 @@ const RowsFragment = {
 
 export default {
   name: 'DynamicTable',
-  components: { AppSelect, TransitionGroup, Search, Filter, ColumnFilter },
+  components: { AppSelect, ConfirmDialog, TransitionGroup, Search, Filter, ColumnFilter },
   // v-preload 在主窗口是全局指令；这里本地再注册一次，保证本组件在任意窗口/单测里都能解析
   directives: { preload: vPreload },
   props: {
@@ -301,10 +325,19 @@ export default {
     maxRows: { type: Number, default: 10 },
     hideSelectAll: { type: Boolean, default: false },
     hideMoveButtons: { type: Boolean, default: false },   // 新增：控制移动按钮和拖拽手柄的显示
+    // 操作列固定宽度（px）：默认 135 容纳 ↑↓/删除；使用 row-actions-extra 增加按钮时可调大
+    opColumnWidth: { type: Number, default: 135 },
     hideAddRow: { type: Boolean, default: false },        // 新增：隐藏底部「点击添加一行」
     noRowDrag: { type: Boolean, default: false },         // 新增：禁用整行拖拽（避免与双击内联编辑冲突）
     editOnClick: { type: Boolean, default: false },       // 新增：单击单元格直接进入编辑（配合失焦保存）
     readonly: { type: Boolean, default: false },          // 新增：纯只读展示（历史快照等）
+    // 只读表的自定义操作列：传入表头文字即显示该列，内容由 #row-actions 插槽提供
+    actionsHeader: { type: String, default: '' },
+    emptyText: { type: String, default: '' },              // 只读空表提示文案（不传则不渲染空行）
+    // 高度随内容自适应（maxHeight 变成上限而不是固定高度），适合小数据量只读表
+    fitContent: { type: Boolean, default: false },
+    // 隐藏整列勾选框（保留行操作，不需要批量选择时使用）
+    noSelect: { type: Boolean, default: false },
     maxHeight: { type: Number, default: 400 },             // 容器最大高度（px），内容超出即纵向滚动
     protectedColumns: { type: Array, default: () => [] },  // 受保护字段：表头名后加 *，提示不可删除
     // 与 rows 对齐的序号数组（可选）。由数据源统一派生，避免把序号写回行对象而破坏行引用复用。
@@ -351,6 +384,8 @@ export default {
       addRowAnimated: true,
       // 底部行 key：切换状态栏重新激活时递增，强制重建以重播上浮动画
       addRowAnimKey: 0,
+      // 放弃新增行确认弹窗：仅当新增行已填写数据时弹出
+      discardConfirmVisible: false,
       // 列交换 FLIP 动画是否就绪：页面进入/数据初载时不播放，避免表头乱跳；
       // 仅当首次数据渲染稳定后才启用，此后真实拖列换位才平滑滑动
       colAnimDone: false,
@@ -386,6 +421,16 @@ export default {
   },
   computed: {
     hasNewRow() { return this.rows && this.rows.some(r => r._isNew); },
+    // 新增行是否已填写数据（用于取消新增前确认，id/position 属自动列不计入）
+    newRowHasData() {
+      const nr = this.newRow || (this.rows || []).find(r => r._isNew);
+      if (!nr) return false;
+      return (this.fields || []).some(f => {
+        if (f.name === 'id' || f.name === 'position') return false;
+        const v = nr[f.name];
+        return v != null && String(v).trim() !== '';
+      });
+    },
     // 是否有任何列处于筛选状态
     columnFilterActive() { return Object.keys(this.columnFilters).length > 0; },
     // 实际渲染的行：columns 筛选后的结果。未筛选时直接返回原数组引用（零开销、不破坏行对象复用）
@@ -451,7 +496,10 @@ export default {
       return Math.max(0, pre[pre.length - 1] - pre[end]);
     },
     // 垫片行 / 空状态行的跨列数
-    tableColSpan() { return this.fields.length + (this.readonly ? 0 : 2); },
+    tableColSpan() {
+      if (this.readonly) return this.fields.length + (this.actionsHeader ? 1 : 0);
+      return this.fields.length + (this.noSelect ? 1 : 2);
+    },
     // 面板里的排序高亮态：只有当前列就是排序列时才显示升/降序选中
     filterSortOrder() {
       return this.filterField && this.sortField === this.filterField ? this.sortOrder : '';
@@ -510,7 +558,12 @@ export default {
     bodyRows() {
       this.syncVirtualActive();
       this.recalcWindow();
-      this.$nextTick(() => this.measureRows());
+      this.$nextTick(() => {
+        this.measureRows();
+        // 数据整体替换（如刷新）后按当前容器宽度重钉列宽：
+        // 纵向滚动条状态可能在这一帧才稳定，旧列宽会让表格短暂溢出、横向滚动条闪一下
+        this.snapshotWidths();
+      });
     },
     // 阈值/行数跨过开关点时，窗口模式会切换（整表 ↔ 窗口化），重新算一次并重新量高。
     // 同理同步重算，避免切换模式的首帧按旧窗口渲染。
@@ -965,8 +1018,8 @@ export default {
         // 操作列固定统一宽度：新增行（保存/取消）与普通行（↑↓/删除）按钮宽度不同，
         // 按实测会随行态滑动；统一固定常量保证任何行态下列宽一致、无水平位移。
         if (th.classList.contains('col-op')) {
-          th.style.width = '135px';
-          th.style.minWidth = '135px';
+          th.style.width = this.opColumnWidth + 'px';
+          th.style.minWidth = this.opColumnWidth + 'px';
           return;
         }
         const w = widths[i];
@@ -988,8 +1041,8 @@ export default {
         // 避免新增行（保存/取消）与普通行（↑↓/删除）按钮宽不同导致水平位移
         if (th.classList.contains('col-op')) {
           if (th._frozenWidth == null) th._frozenWidth = th.style.width || '';
-          th.style.width = '135px';
-          th.style.minWidth = '135px';
+          th.style.width = this.opColumnWidth + 'px';
+          th.style.minWidth = this.opColumnWidth + 'px';
           return;
         }
         const w = th.getBoundingClientRect().width;
@@ -1138,6 +1191,26 @@ export default {
           } catch (_) { /* 忽略 */ }
         });
       } catch (_) { /* 忽略 */ }
+    },
+    // 底部「添加一行 / 取消添加一行」按钮
+    onAddRowBarClick() {
+      if (!this.hasNewRow) {
+        this.$emit('addNewRowAtBottom');
+        return;
+      }
+      this.requestCancelNewRow();
+    },
+    // 取消新增行：已填写数据时先确认放弃，未填数据直接收起
+    requestCancelNewRow() {
+      if (this.newRowHasData) {
+        this.discardConfirmVisible = true;
+        return;
+      }
+      this.animateCancelNewRow();
+    },
+    confirmDiscardNewRow() {
+      this.discardConfirmVisible = false;
+      this.animateCancelNewRow();
     },
     // 取消（关闭）新增行：先播放「向上加速淡出」的收起动画，动画结束后才真正移除该行，
     // 否则父组件会立即卸载该行，关闭时没有任何过渡。
@@ -1312,14 +1385,16 @@ th.col-header {
 .data-drag-item {
   contain-intrinsic-size: auto 32px;
 }
-/* 预留滚动条空间（仅开启纵向滚动时）：新增/删除行导致纵向滚动条出现/消失时，内容宽度稳定，表头不会横向偏移 */
-.table-scroll-wrapper.scrollbar-gutter-stable { scrollbar-gutter: stable; }
 /* 底部渐隐雾面条：可滚动（行数超过 maxRows）时淡入，随行增删非线性（过冲回弹）淡入淡出 */
 /* 表格容器统一表面底色：玻璃/win11 主题下 --color-surface 为半透明，
    若不加底色，下方空数据区与有数据的操作列（同样取 surface 半透明遮罩）遮罩程度不一致，观感不和谐 */
 .table-scroll-wrapper {
   position: relative;
   background-color: var(--color-surface, #ffffff);
+  /* 恒定预留纵向滚动条槽位：数据刷新时纵向滚动条可能瞬时出现/消失，
+     若内容宽度随之变化，已钉住的列宽会短暂超出容器 → 横向滚动条闪一下。
+     预留后内容宽度恒定，不再出现该闪烁。槽位与表格底色一致，观感无变化。 */
+  scrollbar-gutter: stable;
 }
 .table-scroll-wrapper.is-scrollable::after {
   content: '';
@@ -1338,6 +1413,12 @@ th.col-header {
   opacity: 1;
   transform: translateY(0);
 }
+/* 序号列内容：必须是非行内元素才能做 transform —— 行让位时它反向位移，
+   留在原来的格子上，避免拖动中序号看起来整体错一行 */
+.dt-index-fix { display: inline-block; }
+/* 列拖拽的源列：整列直接留空（visibility 保留占位宽度），
+   不留下半透明副本，避免原位置看起来还有一层影子 */
+.dt-col-src-hidden { visibility: hidden; }
 .drag-handle { font-size: 14px; line-height: 1; user-select: none; opacity: 0.6; }
 .drag-handle:hover { opacity: 1; }
 th .drag-handle { color: rgba(255,255,255,0.7); }

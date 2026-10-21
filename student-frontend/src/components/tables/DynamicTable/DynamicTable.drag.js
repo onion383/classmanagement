@@ -8,6 +8,10 @@
 
 import { applyRowShift, applyColShift, clearShift, createEdgeAutoScroll } from '../../../composables/tableDragFx';
 
+// 表头/行内「数据列」的起始下标：有勾选框列时是 1，no-select 时勾选框整列不渲染，必须从 0 开始。
+// 若一律按 1 算，no-select 的表（今日到班两张表）列拖拽的落点框与虚影会整体错开一列。
+const thOffsetOf = (vm) => (!vm.readonly && !vm.noSelect ? 1 : 0);
+
 export function useDynamicTableDrag() {
   return {
 
@@ -55,9 +59,10 @@ export function useDynamicTableDrag() {
     _cacheColGeom() {
       const ths = this.$el ? this.$el.querySelectorAll('thead th') : [];
       const hasOp = !!this.$el && !!this.$el.querySelector('th.col-op');
+      const off = thOffsetOf(this);
       const arr = [];
-      for (let i = 1; i < ths.length; i++) {
-        const colIndex = i - 1;
+      for (let i = off; i < ths.length; i++) {
+        const colIndex = i - off;
         if (i === ths.length - 1 && hasOp) { arr[colIndex] = null; continue; } // 跳过操作列
         const r = ths[i].getBoundingClientRect();
         arr[colIndex] = { left: r.left, right: r.right };
@@ -136,8 +141,28 @@ export function useDynamicTableDrag() {
       const geom = this._colGeom;
       const g = (geom && this.colDragOverIndex !== null) ? geom[this.colDragOverIndex] : null;
       if (!g || this._colGeomHeaderTop == null) { hide(); return; }
-      // 用按下时缓存的几何，拖动过程中不再读取布局
-      let { left, right } = g;
+      // 还停在源列上（尚未发生让位）时不显示落点框与落点虚影：
+      // 否则源列被隐藏后，原位置反而会留下一层「影子」，正是要避免的观感。
+      // 蓝框与影子只在拖到别的列、真正腾出空位后才出现。
+      if (this.colDragIndex !== null && this.colDragOverIndex === this.colDragIndex) { hide(); return; }
+      // 用按下时缓存的几何，拖动过程中不再读取布局。
+      // 空位大小要按「让位后真正空出来的宽度」算，不能直接套目标列的原宽度：
+      //  · 向右拖：from..to 的列整体左移到前一列的左边界，空位贴在目标列原区域右端，
+      //    宽度 = 目标列前一列的宽度（列宽不等时，它与目标列宽度并不相同）。
+      //  · 向左拖：to..from-1 的列整体右移到后一列的左边界，空位就是目标列原区域。
+      // 列宽相等时，两者都与「目标列原矩形」完全一致，表现不变。
+      const from = this.colDragIndex;
+      const to = this.colDragOverIndex;
+      let left, right;
+      if (from !== null && to > from) {
+        const prev = geom[to - 1];
+        const slotW = prev ? prev.right - prev.left : g.right - g.left;
+        left = g.right - slotW;
+        right = g.right;
+      } else {
+        left = g.left;
+        right = g.right;
+      }
       let top = this._colGeomHeaderTop;
       let bottom = this._colGeomTblBottom;
       const c = this._colGeomContainer;
@@ -309,8 +334,13 @@ export function useDynamicTableDrag() {
       if (this._rowAutoScroll) this._rowAutoScroll.update(ev.clientX, ev.clientY);
     },
     // 行让位（移动语义）：按几何逐行补偿，行高不等也不会错位
+    // 序号列（#）内容反向位移：序号留在原来的格子里，只有行内容在滑动，
+    // 否则让位时序号跟着行走，看上去像整体错了一行。
     _syncRowShift() {
-      applyRowShift(this._rowEls, this.dragIndex, this.dragOverIndex, this._rowGeom, this._rowSlotH);
+      applyRowShift(
+        this._rowEls, this.dragIndex, this.dragOverIndex, this._rowGeom, this._rowSlotH,
+        (el) => el.querySelector('td[data-col="position"] > span.dt-index-fix')
+      );
     },
     // 清让位位移（拖拽结束/取消）：transform 与 transition 一起清掉，避免出现回弹动画
     _clearRowShiftFx() {
@@ -435,7 +465,7 @@ export function useDynamicTableDrag() {
       {
         const tbl = this.$el.querySelector('table');
         const thsH = tbl ? tbl.querySelectorAll('thead th') : [];
-        const thOff = this.readonly ? 0 : 1;
+        const thOff = thOffsetOf(this);
         const srcTh = thsH[colIndex + thOff] || null;
         if (srcTh) {
           const colWidth = srcTh.getBoundingClientRect().width;
@@ -448,7 +478,7 @@ export function useDynamicTableDrag() {
           const gThead = document.createElement('thead');
           const gThRow = document.createElement('tr');
           const gTh = srcTh.cloneNode(true);
-          gTh.classList.remove('opacity-30');
+          gTh.classList.remove('opacity-30', 'dt-col-src-hidden');
           gTh.style.transition = 'none';
           gTh.style.width = colWidth + 'px';
           gTh.style.overflow = 'hidden';
@@ -457,10 +487,21 @@ export function useDynamicTableDrag() {
           ghostTable.appendChild(gThead);
           const gTbody = document.createElement('tbody');
           if (tbl) {
+            // 只克隆滚动容器可视范围内的行：视口外的行本来就会被裁掉，
+            // 克隆它们只会多出节点与样式/布局计算（虚拟滚动的窗口还带两屏 overscan）。
+            const wrapRect = this.$refs.scrollWrapper ? this.$refs.scrollWrapper.getBoundingClientRect() : null;
+            const bandTop = wrapRect ? wrapRect.top : -Infinity;
+            const bandBottom = wrapRect ? wrapRect.bottom : Infinity;
+            const headerBottom = srcTh.parentElement.getBoundingClientRect().bottom;
+            let firstTop = null;
             tbl.querySelectorAll('tbody tr').forEach(tr => {
               const td = tr.children[colIndex + thOff];
               if (!td) return;
+              const r = tr.getBoundingClientRect();
+              if (r.bottom <= bandTop || r.top >= bandBottom) return;
+              if (firstTop == null) firstTop = r.top;
               const gTr = document.createElement('tr');
+              gTr.style.height = r.height + 'px';
               const gTd = td.cloneNode(true);
               gTd.style.transition = 'none';
               gTd.style.width = colWidth + 'px';
@@ -468,6 +509,15 @@ export function useDynamicTableDrag() {
               gTr.appendChild(gTd);
               gTbody.appendChild(gTr);
             });
+            // 视口上方被裁掉的行用一条等高占位行补齐，保证留下的行与原件位置一致
+            const spacer = firstTop != null ? firstTop - headerBottom : 0;
+            if (spacer > 0.5) {
+              const spTr = document.createElement('tr');
+              const spTd = document.createElement('td');
+              spTd.style.height = spacer + 'px';
+              spTr.appendChild(spTd);
+              gTbody.insertBefore(spTr, gTbody.firstChild);
+            }
           }
           ghostTable.appendChild(gTbody);
           const wrap = document.createElement('div');
@@ -484,7 +534,7 @@ export function useDynamicTableDrag() {
       }
       // 让位：每列 = 表头 th + 各行该列 td（按 data-col 分组，顺序与 fields 一致）
       const ths0 = this.$el.querySelectorAll('thead th');
-      const thOff = this.readonly ? 0 : 1;
+      const thOff = thOffsetOf(this);
       const colEls = [];
       const tbody0 = this.$refs.tbodyRef;
       if (tbody0) {
@@ -588,13 +638,14 @@ export function useDynamicTableDrag() {
       const hasOp = !!this.$el && !!this.$el.querySelector('th.col-op');
       let best = null;
       let minDist = Infinity;
-      for (let i = 1; i < ths.length; i++) {
+      const off = thOffsetOf(this);
+      for (let i = off; i < ths.length; i++) {
         if (i === ths.length - 1 && hasOp) continue; // 跳过操作列
         const r = ths[i].getBoundingClientRect();
-        if (clientX >= r.left - 2 && clientX <= r.right + 2) return i - 1; // 直接命中该列
+        if (clientX >= r.left - 2 && clientX <= r.right + 2) return i - off; // 直接命中该列
         const center = (r.left + r.right) / 2;
         const d = Math.abs(clientX - center);
-        if (d < minDist) { minDist = d; best = i - 1; }
+        if (d < minDist) { minDist = d; best = i - off; }
       }
       return best; // 落在间隙，取最近邻列
     },
@@ -636,7 +687,7 @@ export function useDynamicTableDrag() {
     _slideInCol(to, rel) {
       if (!rel) return;
       const ths = this.$el.querySelectorAll('thead th');
-      const thOff = this.readonly ? 0 : 1;
+      const thOff = thOffsetOf(this);
       const th = ths[to + thOff];
       if (!th) return;
       const r = th.getBoundingClientRect();

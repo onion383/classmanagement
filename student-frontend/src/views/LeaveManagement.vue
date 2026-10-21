@@ -47,42 +47,43 @@
         <div class="px-5 py-3 border-b border-border font-bold text-text flex items-center gap-2">
           <span class="w-2 h-2 rounded-full bg-danger inline-block"></span> 当前请假中（{{ activeLeaves.length }}人）
         </div>
-        <table class="w-full border-collapse">
-          <thead>
-            <tr class="bg-primary text-text-inverse">
-              <th class="px-3 py-2 text-center w-10">#</th>
-              <th class="px-3 py-2 text-center">姓名</th>
-              <th class="px-3 py-2 text-center">类型</th>
-              <th class="px-3 py-2 text-center">请假时段</th>
-              <th class="px-3 py-2 text-center">家长联系方式</th>
-              <th class="px-3 py-2 text-center">学生联系方式</th>
-              <th class="px-3 py-2 text-center">备注</th>
-              <th class="px-3 py-2 text-center w-28">操作</th>
-            </tr>
-          </thead>
-          <tbody>
-            <tr
-              v-for="(item, idx) in activeLeaves"
-              :key="item.id"
-              class="border-t border-border hover:bg-surface-hover content-visibility-auto"
-            >
-              <td class="px-3 py-2 text-center text-text-muted">{{ idx + 1 }}</td>
-              <td class="px-3 py-2 text-center text-text">{{ item.姓名 }}</td>
-              <td class="px-3 py-2 text-center"><span class="px-2 py-0.5 rounded text-xs bg-danger/10 text-danger">{{ item.类型 }}</span></td>
-              <td class="px-3 py-2 text-center text-text whitespace-nowrap">{{ rangeOf(item) }}</td>
-              <td class="px-3 py-2 text-center text-text">{{ item.家长联系电话 || '—' }}</td>
-              <td class="px-3 py-2 text-center text-text">{{ item.学生联系电话 || '—' }}</td>
-              <td class="px-3 py-2 text-center text-text">{{ item.备注 || '—' }}</td>
-              <td class="px-3 py-2 text-center whitespace-nowrap">
-                <button @click="openEditLeave(item)" class="bg-info hover:bg-blue-700 text-text-inverse px-3 py-1 rounded text-xs mr-1">编辑</button>
-                <button @click="returnLeave(item)" class="bg-success hover:bg-green-700 text-text-inverse px-3 py-1 rounded text-xs">销假</button>
-              </td>
-            </tr>
-            <tr v-if="!activeLeaves.length" class="border-t border-border">
-              <td colspan="8" class="px-3 py-8 text-center text-text-muted">当前无请假学生</td>
-            </tr>
-          </tbody>
-        </table>
+        <DynamicTable
+          fit-content
+          no-select
+          hide-add-row
+          class="leave-today-table"
+          :fields="activeLeaveFields"
+          :rows="activeLeaveRows"
+          :editing-cell="editingCell"
+          actionsHeader="操作"
+          emptyText="当前无请假学生"
+          @startEdit="startEdit"
+          @saveCell="saveCell"
+          @swapRows="(from, to) => saveRowOrder('active', from, to)"
+          @swapColumns="(from, to) => saveColumnOrder('active', from, to)"
+        >
+          <template #cell-type="{ row, field, editing }">
+            <AppSelect v-if="editing" v-model="row.类型" :options="leaveTypeOptions" @change="saveCell(row, field)" class="w-full" />
+            <span v-else @dblclick="startEdit(row, field)" class="px-2 py-0.5 rounded text-xs bg-danger/10 text-danger cursor-text">{{ row.类型 }}</span>
+          </template>
+          <template #cell-range="{ row }">
+            <span class="whitespace-nowrap">{{ row._range }}</span>
+          </template>
+          <template #cell-dash="{ row, field, value, editing }">
+            <input
+              v-if="editing"
+              v-model="row[field.name]"
+              @blur="saveCell(row, field)"
+              @keyup.enter="saveCell(row, field)"
+              class="w-full h-6 leading-6 px-1 py-0 border border-transparent bg-warning/10 focus:outline-none focus:border-primary box-border"
+            />
+            <span v-else @dblclick="startEdit(row, field)" class="cursor-text">{{ value || '—' }}</span>
+          </template>
+          <template #row-actions="{ row }">
+            <button @click="openEditLeave(row)" class="bg-info hover:bg-blue-700 text-text-inverse px-3 py-1 rounded text-xs mr-1">编辑</button>
+            <button @click="returnLeave(row)" class="bg-success hover:bg-green-700 text-text-inverse px-3 py-1 rounded text-xs">销假</button>
+          </template>
+        </DynamicTable>
       </div>
 
       <!-- 今日已返校 -->
@@ -90,51 +91,66 @@
         <div class="px-5 py-3 border-b border-border font-bold text-text flex items-center gap-2">
           <span class="w-2 h-2 rounded-full bg-success inline-block"></span> 今日已返校（{{ todayReturned.length }}人）
         </div>
-        <table class="w-full border-collapse">
-          <thead>
-            <tr class="bg-primary text-text-inverse">
-              <th class="px-3 py-2 text-center w-10">#</th>
-              <th class="px-3 py-2 text-center">姓名</th>
-              <th class="px-3 py-2 text-center">请假时段</th>
-              <th class="px-3 py-2 text-center">家长联系方式</th>
-              <th class="px-3 py-2 text-center">学生联系方式</th>
-              <th class="px-3 py-2 text-center">原因（类型）</th>
-              <th class="px-3 py-2 text-center">返校时间</th>
-              <th class="px-3 py-2 text-center">操作</th>
-            </tr>
-          </thead>
-          <tbody>
-            <tr
-              v-for="(item, idx) in todayReturned"
-              :key="item.id"
-              class="border-t border-border hover:bg-surface-hover content-visibility-auto"
-            >
-              <td class="px-3 py-2 text-center text-text-muted">{{ idx + 1 }}</td>
-              <td class="px-3 py-2 text-center text-text">{{ item.姓名 }}</td>
-              <td class="px-3 py-2 text-center text-text whitespace-nowrap">{{ rangeOf(item) }}</td>
-              <td class="px-3 py-2 text-center text-text">{{ item.家长联系电话 || '—' }}</td>
-              <td class="px-3 py-2 text-center text-text">{{ item.学生联系电话 || '—' }}</td>
-              <td class="px-3 py-2 text-center"><span class="px-2 py-0.5 rounded text-xs bg-info/10 text-info">{{ item.类型 }}</span></td>
-              <td class="px-3 py-2 text-center text-text">{{ item.返校时间 }}</td>
-              <td class="px-3 py-2 text-center whitespace-nowrap">
-                <button @click="openEditLeave(item)" class="bg-info hover:bg-blue-700 text-text-inverse px-3 py-1 rounded text-xs mr-1">编辑</button>
-                <button @click="unreturnLeave(item)" class="bg-warning hover:bg-yellow-600 text-text-inverse px-3 py-1 rounded text-xs">撤销销假</button>
-              </td>
-            </tr>
-            <tr v-if="!todayReturned.length" class="border-t border-border">
-              <td colspan="8" class="px-3 py-8 text-center text-text-muted">今日暂无返校记录</td>
-            </tr>
-          </tbody>
-        </table>
+        <DynamicTable
+          fit-content
+          no-select
+          hide-add-row
+          class="leave-today-table"
+          :fields="returnedLeaveFields"
+          :rows="returnedLeaveRows"
+          :editing-cell="editingCell"
+          actionsHeader="操作"
+          emptyText="今日暂无返校记录"
+          @startEdit="startEdit"
+          @saveCell="saveCell"
+          @swapRows="(from, to) => saveRowOrder('returned', from, to)"
+          @swapColumns="(from, to) => saveColumnOrder('returned', from, to)"
+        >
+          <template #cell-range="{ row }">
+            <span class="whitespace-nowrap">{{ row._range }}</span>
+          </template>
+          <template #cell-type-info="{ row, field, editing }">
+            <AppSelect v-if="editing" v-model="row.类型" :options="leaveTypeOptions" @change="saveCell(row, field)" class="w-full" />
+            <span v-else @dblclick="startEdit(row, field)" class="px-2 py-0.5 rounded text-xs bg-info/10 text-info cursor-text">{{ row.类型 }}</span>
+          </template>
+          <template #cell-dash="{ row, field, value, editing }">
+            <input
+              v-if="editing"
+              v-model="row[field.name]"
+              @blur="saveCell(row, field)"
+              @keyup.enter="saveCell(row, field)"
+              class="w-full h-6 leading-6 px-1 py-0 border border-transparent bg-warning/10 focus:outline-none focus:border-primary box-border"
+            />
+            <span v-else @dblclick="startEdit(row, field)" class="cursor-text">{{ value || '—' }}</span>
+          </template>
+          <template #row-actions="{ row }">
+            <button @click="openEditLeave(row)" class="bg-info hover:bg-blue-700 text-text-inverse px-3 py-1 rounded text-xs mr-1">编辑</button>
+            <button @click="unreturnLeave(row)" class="bg-warning hover:bg-yellow-600 text-text-inverse px-3 py-1 rounded text-xs">撤销销假</button>
+          </template>
+        </DynamicTable>
       </div>
     </div>
 
-    <!-- 请假记录 -->
+    <!-- 请假记录页签：请假统计 + 请假记录（表格 / 时间轴） -->
     <div v-if="activeTab === 'records'">
-      <!-- 子标题 -->
-      <h3 class="text-xl font-semibold text-text mb-4 flex items-center gap-2 min-h-7"><IconGlyph name="clipboard" :size="20" /> 请假记录</h3>
+      <!-- 请假统计 -->
+      <h3 class="text-xl font-semibold text-text mb-4 flex items-center gap-2 min-h-7"><IconGlyph name="chart" :size="20" /> 请假统计</h3>
+      <div class="mb-4 flex flex-wrap items-center gap-3 opbar">
+        <button @click="refreshStats" class="bg-text-muted hover:bg-text-secondary text-text-inverse px-4 py-2 rounded flex items-center gap-1.5 btn-refresh">
+          <IconGlyph name="refresh" :size="14" tint="current" /> 刷新
+        </button>
+        <button v-preload="loadExportExcel" @click="openStatsExport" class="bg-warning hover:bg-warning-hover text-text-inverse px-4 py-2 rounded flex items-center gap-1.5">
+          <IconGlyph name="download" :size="14" tint="current" /> 导出 Excel
+        </button>
+      </div>
+      <div class="bg-surface border border-border rounded-xl p-5">
+        <StatBarList :rows="leaveStatRows" name-key="姓名" value-key="合计" :bar-width="statBarWidth" empty-text="暂无请假统计" />
+      </div>
 
-      <!-- 工具栏 -->
+      <!-- 请假记录子标题 -->
+      <h3 class="text-xl font-semibold text-text mt-8 mb-4 flex items-center gap-2 min-h-7"><IconGlyph name="clipboard" :size="20" /> 请假记录</h3>
+
+      <!-- 工具栏：视图切换右对齐 -->
       <div class="mb-4 flex items-center gap-3 opbar">
         <button v-preload="loadAddLeaveDialog" @click="openAddLeave" class="bg-primary hover:bg-primary-hover text-text-inverse px-5 py-2 rounded">
           ＋ 添加请假
@@ -145,35 +161,42 @@
         <button v-preload="loadExportExcel" @click="openRecordsExport" class="bg-warning hover:bg-warning-hover text-text-inverse px-4 py-2 rounded flex items-center gap-1.5">
           <IconGlyph name="download" :size="14" tint="current" /> 导出 Excel
         </button>
+        <ViewSwitch v-model="recordsView" :options="recordsViewOptions" class="ml-auto" />
       </div>
 
-      <div class="mb-5">
-        <DynamicTable
-          ref="dynamicTable"
-          :fields="leaveFields"
-          :rows="displayLeaves"
-          :newRow="newRow"
-          :editingCell="editingCell"
-          :hideMoveButtons="true"
-          :hideSelectAll="true"
-          :maxRows="10"
-          @startEdit="startEdit"
-          @saveCell="saveCell"
-          @deleteRow="deleteLeave"
-          @addNewRowAtBottom="addNewRowAtBottom"
-          @updateNewRow="onUpdateNewRow"
-          @saveNewRow="saveNewRow"
-          @cancelNewRow="cancelNewRow"
-          @contextmenu.prevent="() => {}"
-          @selectionChange="() => {}"
-        />
+      <!-- 同一固定高度容器：v-show 切换，两个视图都保持挂载，切换不闪动、不改变页面高度 -->
+      <div class="records-panel h-[400px] min-h-0">
+        <div v-show="recordsView === 'table'" class="h-full">
+          <DynamicTable
+            ref="dynamicTable"
+            :fields="leaveFields"
+            :rows="displayLeaves"
+            :newRow="newRow"
+            :editingCell="editingCell"
+            :hideMoveButtons="true"
+            :hideSelectAll="true"
+            :maxRows="10"
+            :opColumnWidth="190"
+            @startEdit="startEdit"
+            @saveCell="saveCell"
+            @swapColumns="(from, to) => saveColumnOrder('records', from, to)"
+            @deleteRow="deleteLeave"
+            @addNewRowAtBottom="addNewRowAtBottom"
+            @updateNewRow="onUpdateNewRow"
+            @saveNewRow="saveNewRow"
+            @cancelNewRow="cancelNewRow"
+            @contextmenu.prevent="() => {}"
+            @selectionChange="() => {}"
+          >
+            <template #row-actions-extra="{ row }">
+              <button v-if="!row._isNew" @click="openEditLeave(row)" class="bg-info hover:bg-blue-700 text-text-inverse px-1.5 py-0.5 rounded mr-1">编辑</button>
+            </template>
+          </DynamicTable>
+        </div>
+        <div v-show="recordsView === 'timeline'" class="h-full">
+          <LeaveTimeline fill-height :nodes="timelineNodes" :type-options="leaveTypeOptions" title="" />
+        </div>
       </div>
-
-      <!-- 子标题 -->
-      <h3 class="text-xl font-semibold text-text mb-4 flex items-center gap-2 min-h-7"><IconGlyph name="calendar" :size="20" /> 请假时间轴</h3>
-
-      <!-- 时间轴 -->
-      <LeaveTimeline :nodes="timelineNodes" :type-options="leaveTypeOptions" title="" />
     </div>
 
     <!-- 添加请假弹窗 -->
@@ -228,8 +251,11 @@
 import axios from 'axios'
 import { defineAsyncComponent, getCurrentInstance } from 'vue'
 import Tabs from '../components/base/Tabs.vue'
+import ViewSwitch from '../components/base/ViewSwitch.vue'
+import AppSelect from '../components/base/AppSelect.vue'
 import DynamicTable from '../components/tables/DynamicTable/DynamicTable.vue'
 import LeaveTimeline from '../components/base/LeaveTimeline.vue'
+import StatBarList from '../components/base/StatBarList.vue'
 import { useNotification } from '../composables/useNotification.js'
 import { recordCellUndo, useUndoShortcut } from '../composables/useUndo.js'
 import { formatDate, formatDateTime } from '../utils/dateTime.js'
@@ -248,7 +274,7 @@ const API = '/api'
 export default {
   name: 'LeaveManagement',
   components: {
-    Tabs, DynamicTable, AddLeaveDialog, LeaveTimeline, ExportExcel, ConfirmDialog, OverdueLeaveDialog
+    Tabs, ViewSwitch, DynamicTable, AppSelect, AddLeaveDialog, LeaveTimeline, StatBarList, ExportExcel, ConfirmDialog, OverdueLeaveDialog
   },
   // Ctrl+Z / Ctrl+Shift+Z / Ctrl+Y 撤销、重做请假表
   setup() {
@@ -273,6 +299,12 @@ export default {
   data() {
     return {
       activeTab: 'today',
+      // 请假记录页签的视图：表格 / 时间轴
+      recordsView: 'table',
+      recordsViewOptions: [
+        { value: 'table', label: '表格' },
+        { value: 'timeline', label: '时间轴' }
+      ],
       loading: false,
       students: [],
       leaves: [],
@@ -283,6 +315,8 @@ export default {
       newRow: null,
       exportVisible: false,
       exportMounted: false,
+      // 导出内容来源：today 今日到班 / records 请假记录 / stats 请假统计
+      exportKind: 'records',
       confirm: { visible: false, message: '', ok: null },
       confirmMounted: false,
       leaveTypeOptions: ['病假', '事假', '其他'],
@@ -302,6 +336,14 @@ export default {
         { name: '状态' },
         { name: '返校时间' }
       ],
+      // 请假统计导出列
+      leaveStatExportFields: [
+        { name: '姓名' },
+        { name: '病假' },
+        { name: '事假' },
+        { name: '其他' },
+        { name: '合计' }
+      ],
       leaveFields: [
         { name: '姓名', type: '文字' },
         { name: '类型', type: '文字', control: 'select', options: ['病假', '事假', '其他'] },
@@ -311,6 +353,26 @@ export default {
         { name: '学生联系电话', type: '文字' },
         { name: '状态', type: '文字', control: 'select', options: ['请假中', '已返校', '已取消'] },
         { name: '备注', type: '文字' }
+      ],
+      // 今日到班两张表的列定义（顺序可拖动并保存到后端；slot 指向模板里的自定义单元格）
+      leaveTypeOptions: ['病假', '事假', '其他'],
+      activeLeaveFields: [
+        { name: 'position', label: '#' },
+        { name: '姓名' },
+        { name: '类型', slot: 'cell-type' },
+        { name: '请假时段', slot: 'cell-range' },
+        { name: '家长联系电话', slot: 'cell-dash' },
+        { name: '学生联系电话', slot: 'cell-dash' },
+        { name: '备注', slot: 'cell-dash' }
+      ],
+      returnedLeaveFields: [
+        { name: 'position', label: '#' },
+        { name: '姓名' },
+        { name: '请假时段', slot: 'cell-range' },
+        { name: '家长联系电话', slot: 'cell-dash' },
+        { name: '学生联系电话', slot: 'cell-dash' },
+        { name: '原因（类型）', slot: 'cell-type-info' },
+        { name: '返校时间' }
       ],
       tabs: [
         { value: 'today', label: '今日到班' },
@@ -328,6 +390,13 @@ export default {
     todayReturned() {
       const todayStr = formatDate(new Date())
       return this.leaves.filter(l => l.状态 === '已返校' && l.返校时间 && l.返校时间.startsWith(todayStr))
+    },
+    // 只读表格行：补 DynamicTable 必需的 _rowKey/_displayIndex，并预算好请假时段文案
+    activeLeaveRows() {
+      return this.activeLeaves.map((l, i) => ({ ...l, _rowKey: l.id, _displayIndex: i + 1, _range: this.rangeOf(l) }))
+    },
+    returnedLeaveRows() {
+      return this.todayReturned.map((l, i) => ({ ...l, _rowKey: l.id, _displayIndex: i + 1, _range: this.rangeOf(l) }))
     },
     inSchool() {
       return this.totalStudents - this.activeLeaves.length
@@ -353,16 +422,42 @@ export default {
     todayTableEl() {
       return null
     },
-    // 导出内容随当前 tab 切换：今日到班导出今日表，请假记录导出记录表（排除未保存的新增行）
+    // 导出内容随来源切换：今日到班 / 请假记录（排除未保存的新增行）/ 请假统计
     exportRows() {
-      if (this.activeTab === 'today') return this.todayExportRows
+      if (this.exportKind === 'today') return this.todayExportRows
+      if (this.exportKind === 'stats') return this.leaveStatRows
       return this.displayLeaves.filter(r => !r._isNew)
     },
     exportFields() {
-      return this.activeTab === 'today' ? this.todayExportFields : this.leaveFields
+      if (this.exportKind === 'today') return this.todayExportFields
+      if (this.exportKind === 'stats') return this.leaveStatExportFields
+      return this.leaveFields
     },
     exportFilename() {
-      return this.activeTab === 'today' ? '今日请假表' : '请假记录'
+      if (this.exportKind === 'today') return '今日请假表'
+      if (this.exportKind === 'stats') return '请假统计'
+      return '请假记录'
+    },
+    // 请假统计：按学生汇总请假次数（病假 / 事假 / 其他），合计降序、同数按姓名排
+    leaveStatRows() {
+      const map = new Map()
+      this.leaves.forEach(l => {
+        const name = l.姓名 || '未知'
+        let row = map.get(name)
+        if (!row) {
+          row = { 姓名: name, 病假: 0, 事假: 0, 其他: 0, 合计: 0 }
+          map.set(name, row)
+        }
+        if (l.类型 === '病假') row.病假++
+        else if (l.类型 === '事假') row.事假++
+        else row.其他++
+        row.合计++
+      })
+      return [...map.values()].sort((a, b) => b.合计 - a.合计 || a.姓名.localeCompare(b.姓名, 'zh'))
+    },
+    // 统计条长度基准：出现次数最多的学生
+    maxLeaveStat() {
+      return this.leaveStatRows.reduce((m, r) => Math.max(m, r.合计), 0)
     },
     timelineNodes() {
       const arr = []
@@ -384,6 +479,7 @@ export default {
   },
   async created() {
     await this.loadAll()
+    await this.loadColumnOrder()
     // 打开页面后检测一次超时未销假
     this.checkOverdue()
     // 每 10 分钟低频检测一次（纯前端比较时间，成本极低）
@@ -585,6 +681,61 @@ export default {
     startEdit(row, field) {
       this.editingCell = { rowKey: row._rowKey, field: field.name }
     },
+    // 行拖动：今日到班是筛选后的子集，先把被拖行按「目标位置相邻行」插回整表顺序，再整表保存
+    async saveRowOrder(table, from, to) {
+      const subset = table === 'active' ? this.activeLeaves : this.todayReturned
+      if (from === to || !subset[from]) return
+      const moved = subset[from]
+      const rest = subset.filter((_, i) => i !== from)
+      const ids = this.leaves.map(l => l.id).filter(id => id !== moved.id)
+      const neighbor = rest[to]
+      let insertAt
+      if (neighbor) insertAt = ids.indexOf(neighbor.id)
+      else {
+        const last = rest[rest.length - 1]
+        insertAt = last ? ids.indexOf(last.id) + 1 : ids.length
+      }
+      if (insertAt < 0) insertAt = ids.length
+      ids.splice(insertAt, 0, moved.id)
+      try {
+        await axios.post(`${API}/leaves/reorder`, { ids })
+        await this.loadAll()
+      } catch (err) {
+        useNotification().error('排序保存失败')
+      }
+    },
+    // 列拖动：本地立即重排，并把列顺序保存到后端（下次进入按保存的顺序渲染）
+    async saveColumnOrder(table, from, to) {
+      if (from === to) return
+      const keys = { active: 'activeLeaveFields', returned: 'returnedLeaveFields', records: 'leaveFields' }
+      const key = keys[table]
+      const arr = [...this[key]]
+      const [moved] = arr.splice(from, 1)
+      if (!moved) return
+      arr.splice(to, 0, moved)
+      this[key] = arr
+      try {
+        await axios.post(`${API}/leaves/today-columns`, { table, order: arr.map(f => f.name) })
+      } catch (err) {
+        useNotification().error('列顺序保存失败')
+      }
+    },
+    // 读取后端保存的列顺序；未登记过的列保持原有相对位置追加在末尾
+    async loadColumnOrder() {
+      try {
+        const { data } = await axios.get(`${API}/leaves/today-columns`)
+        const apply = (fields, order) => {
+          if (!Array.isArray(order) || order.length === 0) return fields
+          const map = new Map(fields.map(f => [f.name, f]))
+          const out = order.map(n => map.get(n)).filter(Boolean)
+          fields.forEach(f => { if (!order.includes(f.name)) out.push(f) })
+          return out
+        }
+        this.activeLeaveFields = apply(this.activeLeaveFields, data.active)
+        this.returnedLeaveFields = apply(this.returnedLeaveFields, data.returned)
+        this.leaveFields = apply(this.leaveFields, data.records)
+      } catch (_) { /* 读取失败时保持默认列顺序 */ }
+    },
     async saveCell(row, field) {
       const val = row[field.name]
       // 旧值来源：编辑前的请假记录
@@ -651,13 +802,52 @@ export default {
     // 导出今日请假表：无数据时直接提示，不弹导出选项弹窗
     openExportToday() {
       if (this.todayExportRows.length === 0) return useNotification().info('暂无请假数据可导出')
+      this.exportKind = 'today'
       this.exportVisible = true
     },
     // 导出请假记录：无数据时直接提示，不弹导出选项弹窗
     openRecordsExport() {
       if (this.leaves.length === 0) return useNotification().info('暂无请假记录可导出')
+      this.exportKind = 'records'
+      this.exportVisible = true
+    },
+    // 统计条长度：按最大次数归一到百分之百，最小保留 4% 以便零头也可见
+    statBarWidth(row) {
+      if (!this.maxLeaveStat) return 0
+      return Math.max(4, Math.round(row.合计 / this.maxLeaveStat * 100))
+    },
+    // 刷新请假统计：与表格共用同一份请假数据
+    async refreshStats() {
+      try {
+        await this.loadAll()
+        useNotification().success('已刷新 请假统计 数据')
+      } catch (err) {
+        useNotification().error('刷新失败')
+      }
+    },
+    // 导出请假统计：无数据时直接提示
+    openStatsExport() {
+      if (this.leaveStatRows.length === 0) return useNotification().info('暂无请假统计可导出')
+      this.exportKind = 'stats'
       this.exportVisible = true
     }
   }
 }
 </script>
+
+<style scoped>
+/* 今日到班两张只读表：表头保持「纯蓝底 + 白字」，不跟随内置表格的浅蓝吸顶底。
+   日间用主题蓝实底；深色沿用班干部一级行的低浓度蓝（40% 主题蓝 + 60% 深灰蓝）。 */
+:root:not([data-mode="night"]) .leave-today-table :deep(.table-scroll-wrapper thead th.bg-primary) {
+  background-color: var(--color-primary) !important;
+  background-image: none !important;
+  color: #fff !important;
+  backdrop-filter: none;
+}
+:root[data-mode="night"] .leave-today-table :deep(.table-scroll-wrapper thead th.bg-primary) {
+  background-color: color-mix(in srgb, var(--color-primary, #3b82f6) 40%, #475569) !important;
+  background-image: none !important;
+  color: #fff !important;
+  backdrop-filter: none;
+}
+</style>

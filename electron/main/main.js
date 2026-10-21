@@ -1,3 +1,12 @@
+// ===== 桌面组件独立进程分流（必须在任何主应用逻辑之前）=====
+// Explorer 重启会销毁桌面壳 Progman、级联销毁挂在其下的子窗口，Electron 随之原生崩溃；
+// 因此桌面组件跑在独立进程里，由本入口通过 --desktop-widget-host 拉起后直接进入 host 模块，
+// 不再执行单实例锁 / 后端 / 主窗口等主应用逻辑。详见 desktop-widget-host.js 顶部注释。
+if (process.argv.includes('--desktop-widget-host')) {
+  require('../desktop-widget-host')
+  return
+}
+
 // 只保留 main.js 自身还在用的出口：托盘/菜单/通知/快捷键随各自模块迁出后不再需要
 // （Menu/Tray/nativeImage/globalShortcut/Notification → tray.js 等，screen → widget.js）
 const { app, BrowserWindow, ipcMain, shell, protocol, Menu, clipboard } = require('electron')
@@ -94,24 +103,13 @@ const FORCE_OS_WARN = 0
 // 首屏占位共享来源（splash/splash.css、splash/splash.html）与 dev 加载器
 // 已迁至 dev-loader.js：见 devLoadingHtml / pollViteAndNavigate / loadUrlWithRetry
 
-// ============ 启动耗时锚点：「后端就绪」+「首屏可见」============
-// 「上次启动耗时」的口径：主进程启动 → 后端就绪与「首屏真正可见」两者都满足的那一刻。
-// 主窗口以「占位页移除（界面可见）」为准：此刻用户才真正看到首屏（首页数据已到 + 首次绘制完成），
-// 即体感上的可用时刻。引导场景下引导界面挂载即视为首屏可见，从而天然剔除用户在引导页的停留。
-let backendStartupReady = false
-let firstScreenVisible = false
-// 首屏可见事件的自报时刻（渲染层 epoch ms）：非空时用它定锚点，剔除跨进程投递延迟；
-// 引导场景由主进程直接定锚点，保持 null 走本机时刻。
-let firstScreenVisibleAt = null
-function tryEndStartup() {
-  if (backendStartupReady && firstScreenVisible) {
-    startupTimer.end('后端就绪且首屏可见', firstScreenVisibleAt)
-  }
-}
-backend.onFirstReady(() => {
-  backendStartupReady = true
-  tryEndStartup()
-})
+// ============ 启动耗时锚点：「窗口首次显示」============
+// 「上次启动耗时」的口径：主进程启动 → 第一个窗口真正显示出来的那一刻（用户看到画面的时刻）。
+// 所有窗口的显示都走 revealWindow()，锚点定死在那里（startupTimer.end 幂等，仅首次生效）：
+// 主窗口是 ready-to-show（首帧绘制完成，未触发时走 1500ms 兜底 reveal）；引导窗口是
+// setup-ready（dev 下此刻才 reveal；prod 下创建即显示，锚点顺延到 setup-ready 的 reveal）。
+// 后端就绪、首屏数据就绪等更晚的事件不再抬高总耗时——「点开就看到窗口」即启动完成，
+// 「点开就能用」（数据到位、占位页移除）另由时间线上的 mark 体现，两者可能是同一秒的不同时刻。
 
 // U盘自动打开 IPC：与原先一致在模块加载阶段注册（不依赖 app ready）
 usb.registerUsbIpc()
@@ -304,12 +302,6 @@ function createMainWindow() {
       if (isSplashDrop) splashDropLogged = true
       if (at !== null) startupTimer.markAt(label, at)
       else startupTimer.mark(label)
-      // 首屏可见：占位移除的下一帧就是首屏被绘制的时刻（启动锚点条件之一，见 tryEndStartup）
-      if (isSplashDrop) {
-        firstScreenVisibleAt = at
-        firstScreenVisible = true
-        tryEndStartup()
-      }
     }
   })
   // 非 data: 页面（真正的应用首屏）加载完成 → 首屏日志已收完，之后的重载不再计入启动时间线
@@ -327,7 +319,7 @@ function createMainWindow() {
   // 用局部 win 判断/显示，避免重建时 mainWindow 被旧窗口 closed 置空导致新窗口无法显示。
   win.once('ready-to-show', () => {
     startupTimer.mark('ready-to-show（窗口首次显示）')
-    // 启动锚点不在此处：改为「后端就绪 + 首屏渲染完成」两者满足时（见 tryEndStartup）。
+    // 启动锚点即此处：下面 revealWindow() 内定死「窗口首次显示」（startupTimer.end 幂等）。
     clearTimeout(win.__revealTimer)
     // 显示前再次确认系统亚克力材质（隐藏状态下创建时材质可能尚未生效），
     // 确保窗口出现的那一刻就是「毛玻璃 + 内容」，而不是一层空底色。
@@ -836,10 +828,13 @@ async function runSetupWarmup() {
 
 // 显示窗口（主窗口 / 引导窗口共用）：显示前再次确认系统亚克力材质（隐藏状态下创建时材质
 // 可能尚未生效），确保窗口出现的那一刻就是「毛玻璃 + 内容」，而不是一层空底色。
+// 同时是「启动完成」锚点：第一个被显示的窗口即用户看到画面的时刻（startupTimer.end 幂等，
+// 仅首次调用生效），此后后端就绪、首屏数据等更晚事件都不再抬高「上次启动耗时」。
 function revealWindow(win) {
   if (!win || win.isDestroyed()) return
   if (process.platform === 'win32') applyBackgroundMaterial(win, 'acrylic')
   win.show()
+  startupTimer.end('窗口首次显示')
 }
 
 // 创建引导窗口：固定尺寸、无边框、系统亚克力，引导期间禁止关闭。
@@ -920,11 +915,9 @@ ipcMain.on('setup-ready', (event) => {
   setupUiReady = true
   // 引导界面已挂载：dev 下此刻显示窗口（毛玻璃与引导界面同时出现）；prod 下窗口本就已显示
   clearTimeout(setupWindow.__revealTimer)
-  revealWindow(setupWindow)
   startupTimer.mark('引导界面挂载完成')
-  // 引导界面即本场景的「首屏」：引导界面挂载后窗口立即显示，视为首屏可见，配合后端就绪定锚点（引导页停留不计入启动耗时）。
-  firstScreenVisible = true
-  tryEndStartup()
+  // 引导窗口的显示时刻即启动锚点（revealWindow 内定死）；用户在引导页的停留不计入启动耗时。
+  revealWindow(setupWindow)
   // 界面完全加载完成后，再让出一次事件循环，随后才在后台开始预热（不与首帧显示抢资源）。
   // 纯低版本提示（plan.setup 为假）没有引导流程，无需预热。
   if (launchPlan.setup) setTimeout(() => { runSetupWarmup() }, 0)

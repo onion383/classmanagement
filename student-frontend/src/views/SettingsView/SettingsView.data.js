@@ -230,7 +230,9 @@ export function useSettingsData() {
       }
     },
     confirmLogout() {
-      this.showConfirm('确认退出登录？', () => {
+      this.showConfirm('确认退出登录？', async () => {
+        // 通知后端吊销本次会话：原 token 立即失效（先发请求再清本地，token 已清会 401）
+        try { await axios.post('/api/auth/logout') } catch (_) {}
         localStorage.removeItem('token')
         localStorage.removeItem('currentUser')
         this.$router.push('/login')
