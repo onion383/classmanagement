@@ -44,7 +44,6 @@
     "!**/node_modules/trash/lib/macos-trash",
     "!**/node_modules/pdf-parse/dist/pdf-parse/cjs/pdf.worker.mjs",
     "!**/node_modules/codepage/bin/**",
-    "!**/node_modules/koffi/src/**",
     "!**/node_modules/koffi/vendor/**",
     "!**/node_modules/koffi/cnoke.cjs",
     "!**/node_modules/**/*.h",
@@ -67,6 +66,14 @@
     "mirror": "https://npmmirror.com/mirrors/electron/"
   },
   "compression": "maximum",
+  "electronFuses": {
+    "runAsNode": true,
+    "enableCookieEncryption": true,
+    "enableNodeCliInspectArguments": false,
+    "enableNodeOptionsEnvironmentVariable": false,
+    "grantFileProtocolExtraPrivileges": false,
+    "onlyLoadAppFromAsar": true
+  },
   "afterPack": "electron/afterPack.js",
   "npmRebuild": false,
   "win": {

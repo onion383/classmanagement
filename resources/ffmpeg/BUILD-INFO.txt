@@ -3,8 +3,8 @@ FFmpeg 精简构建信息 / Build Information
 
 产物 / Artifact
   文件:   ffmpeg.exe
-  sha256: 7D5E0533ED0976DAC670CB0A932A6556B84A45330A227D72A596A72B076272F8
-  大小:   6742016 字节
+  sha256: F61B4B8B5B9D05319976746BD430B7E3D559DCE8A2A88239E1CE7041A01C88F2
+  大小:   8438784 字节
 
 许可 / License
   FFmpeg 8.1.3，LGPL version 2.1 or later。
@@ -29,5 +29,13 @@ FFmpeg 精简构建信息 / Build Information
 工具链 / Toolchain
   mingw-w64 GCC 8.1.0 (x86_64-w64-mingw32, posix-seh)
   GNU Make 4.2.1
+  nasm 2.16.03（x86asm 汇编优化，必开，见 build.sh「裁剪警告」）
   静态链接（-static），产物仅依赖 Windows 系统 DLL：
   KERNEL32 / msvcrt / USER32 / SHELL32 / bcrypt / PSAPI
+
+修订记录 / Changelog
+  2026-10-22  重编并开启 x86asm。此前 build.sh 带 --disable-x86asm，libswscale 缩放滤镜
+              落回的 C 实现被 GCC 8.1.0 编坏（多抽头滤波系数路径），视频封面抽帧输出
+              全部花屏（品红/绿色横条纹；解码与 MJPEG 编码正常，flags=neighbor 点采样
+              因不走滤波路径幸免）。功能白名单不变，仅 x86asm 开关变化；
+              体积 6742016 -> 8438784。许可结论不变（LGPL 2.1+，无 GPL/nonfree 组件）。

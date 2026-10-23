@@ -15,7 +15,8 @@ const bcrypt = {
   compareSync: (...a) => useBcrypt().compareSync(...a),
   hashSync: (...a) => useBcrypt().hashSync(...a),
 };
-const { SECRET, auth, TOKEN_SIGN_OPTS, TOKEN_COOKIE_MAX_AGE } = require('../middleware/auth');
+const { SECRET, auth, TOKEN_SIGN_OPTS, TOKEN_COOKIE_MAX_AGE, signMediaToken } = require('../middleware/auth');
+const secureChannel = require('../services/secureChannel');
 const { pickPhrase, deriveRestoreHash, formatPhrase } = require('../services/recoveryKey');
 const sessions = require('../services/sessions');
 
@@ -105,6 +106,10 @@ router.post('/export', auth(), (req, res) => {
 // 校验库身份：仅允许与当前登录账号一致的备份包。
 router.post('/restore', auth(), (req, res) => {
   try {
+    // 超级隐私模式：恢复会用主密钥重新包裹库钥匙，等于绕过隐私保护，必须先关闭
+    if (dbManager.isProtected(req.user.username)) {
+      return res.status(400).json({ error: '请先在系统设置中关闭超级隐私模式，再恢复备份' });
+    }
     const { data, wrappedByPassword, wrappedByMnemonic, password, mnemonic, key, encrypted, memory } = req.body || {};
     const curSlug = req.user && req.user.dbSlug ? req.user.dbSlug : 'default';
     // 备份包未标注 encrypted 时按旧格式（加密库）处理，保证兼容
@@ -144,6 +149,11 @@ router.post('/db-encryption', auth(), async (req, res) => {
   res.setHeader('X-Accel-Buffering', 'no');
   const write = (obj) => { try { res.write(JSON.stringify(obj) + '\n'); } catch (_) { /* 连接已断，忽略 */ } };
   try {
+    // 超级隐私模式：明文/加密转换会重写 wrapped_key（主密钥包裹），等于关闭保护
+    if (dbManager.isProtected(req.user.username)) {
+      write({ type: 'done', ok: false, message: '超级隐私模式下不支持切换落盘加密，请先关闭超级隐私模式' });
+      return res.end();
+    }
     const result = await dbManager.convertDbEncryption(slug, targetEncrypted, (p) => {
       write({ type: 'progress', phase: p.phase, detail: p.detail, percent: p.percent });
     });
@@ -172,6 +182,10 @@ router.post('/restore-offline', (req, res) => {
 
     // 已存在同一 slug 的库，且尚未确认覆盖 -> 先拒绝并让前端弹确认
     const existing = dbManager.registryFindBySlug(slug);
+    // 超级隐私模式：离线恢复会用主密钥重新包裹库钥匙，必须先在原机登录并关闭保护
+    if (existing && existing.protect === 1) {
+      return res.status(400).json({ error: '该账号已开启超级隐私模式，请先登录并在系统设置中关闭后再恢复备份' });
+    }
     if (existing && !req.body.confirm) {
       return res.status(409).json({
         needConfirm: true,
@@ -183,11 +197,12 @@ router.post('/restore-offline', (req, res) => {
     // 一并恢复 AI 长期记忆（旧包无该字段则跳过，不影响恢复）
     if (typeof memory === 'string') dbManager.writeMemory(result.slug || slug, memory);
     // 恢复成功后直接签发登录态，前端据此跳转首页，无需再次手动登录
-    const token = useJwt().sign(
-      { userId: 1, username, role: 'teacher', dbSlug: result.slug || slug, sid: sessions.create(1) },
-      SECRET,
-      TOKEN_SIGN_OPTS
-    );
+    const sid = sessions.create(1);
+    const payload = { userId: 1, username, role: 'teacher', dbSlug: result.slug || slug, sid };
+    const token = useJwt().sign(payload, SECRET, TOKEN_SIGN_OPTS);
+    // 绑定到本次加密信道会话：之后前端只需发不含 token 的信道凭据
+    secureChannel.bindAuth(req.sessionId, token);
+    const mediaToken = signMediaToken(payload);
     res.cookie('token', token, {
       httpOnly: true,
       sameSite: 'lax',
@@ -199,6 +214,7 @@ router.post('/restore-offline', (req, res) => {
       slug: result.slug,
       username: result.username || username,
       token,
+      mediaToken,
       user: { id: 1, username, role: 'teacher', dbSlug: result.slug || slug },
     });
   } catch (err) {
@@ -235,21 +251,51 @@ router.put('/username', auth(), (req, res) => {
 // 修改密码
 router.put('/password', auth(), (req, res) => {
   try {
-    const { oldPassword, newPassword } = req.body;
-    if (!oldPassword || !newPassword) {
-      return res.status(400).json({ error: '请输入原密码和新密码' });
+    const { oldPassword, newPassword } = req.body || {};
+    if (!newPassword) {
+      return res.status(400).json({ error: '请输入新密码' });
     }
 
     const user = db.prepare('SELECT * FROM users WHERE id = ?').get(req.user.userId);
-    if (!bcrypt.compareSync(oldPassword, user.password)) {
+    if (!user) return res.status(401).json({ error: '账号不存在' });
+
+    // 本次是用恢复词登录的隐私库：旧密码已忘记，内存里的库钥匙就是所有者证明，免输旧密码
+    const isPrivacy = dbManager.isProtected(req.user.username);
+    const byMnemonic = isPrivacy && dbManager.getUnlockSource(req.user.dbSlug) === 'mnemonic';
+    // 「本机信息恢复」签发的 token 带 recover 标记：本机文件即凭证，允许免旧密码直接设置新密码
+    const byLocalRecover = req.user.recover === true && !isPrivacy;
+    if (!byMnemonic && !byLocalRecover && (!oldPassword || !bcrypt.compareSync(oldPassword, user.password))) {
       return res.status(400).json({ error: '原密码错误' });
+    }
+
+    // 先换密码包裹：包裹更新失败就不改 users 里的密码，避免新旧密码都解不开库
+    if (isPrivacy) {
+      dbManager.rewrapPassword(req.user.username, {
+        oldPassword,
+        newPassword,
+        useMemoryKey: byMnemonic,
+      });
     }
 
     const hashed = bcrypt.hashSync(newPassword, 10);
     db.prepare('UPDATE users SET password = ? WHERE id = ?').run(hashed, req.user.userId);
+    // 「本机信息恢复」的 token 只授权这一次改密码：改完立即换发不含 recover 的常规 token，
+    // 否则它在 30 天内都能免旧密码再次改密码。
+    if (byLocalRecover) {
+      const payload = {
+        userId: req.user.userId, username: req.user.username, role: req.user.role,
+        dbSlug: req.user.dbSlug, sid: req.user.sid,
+      };
+      const token = useJwt().sign(payload, SECRET, TOKEN_SIGN_OPTS);
+      if (req.sessionId) secureChannel.bindAuth(req.sessionId, token);
+      res.cookie('token', token, {
+        httpOnly: true, sameSite: 'lax', path: '/', maxAge: TOKEN_COOKIE_MAX_AGE,
+      });
+      return res.json({ message: '密码修改成功', token, mediaToken: signMediaToken(payload) });
+    }
     res.json({ message: '密码修改成功' });
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    res.status(err.code === 'PRIVACY_UNLOCK' ? 400 : 500).json({ error: err.message });
   }
 });
 
@@ -266,6 +312,135 @@ router.delete('/', auth(), (req, res) => {
     res.json({ message: '账号已删除' });
   } catch (err) {
     res.status(500).json({ error: err.message });
+  }
+});
+
+// 当前账号的安全等级：plain 明文 / nopass 免密加密 / password 普通密码 / privacy 超级隐私
+function currentSecurityLevel(req) {
+  const rec = dbManager.registryFindBySlug(req.user.dbSlug);
+  if (rec && rec.encrypted === 0) return 'plain';
+  if (dbManager.isProtected(req.user.username)) return 'privacy';
+  const u = db.prepare('SELECT password FROM users WHERE id = ?').get(req.user.userId);
+  return u && u.password ? 'password' : 'nopass';
+}
+
+router.get('/security-level', auth(), (req, res) => {
+  try {
+    res.json({ level: currentSecurityLevel(req) });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// 切换安全等级：明文 / 免密 / 普通密码 / 超级隐私。
+// 只动当前登录账号；明文可再升级为任意加密等级。
+router.post('/security-level', auth(), async (req, res) => {
+  try {
+    const target = ['plain', 'nopass', 'password', 'privacy'].includes((req.body || {}).level)
+      ? req.body.level
+      : '';
+    if (!target) return res.status(400).json({ error: '未知的安全等级' });
+
+    const from = currentSecurityLevel(req);
+    if (from === target) return res.json({ level: from, changed: false });
+
+    const { password = '', newPassword = '' } = req.body || {};
+    const username = req.user.username;
+    const user = db.prepare('SELECT id, password FROM users WHERE id = ?').get(req.user.userId);
+    if (!user) return res.status(401).json({ error: '账号不存在' });
+
+    // 当前有登录密码（含隐私模式）时，任何变更都要先验证当前密码
+    const needsCurrent = from === 'password' || from === 'privacy';
+    if (needsCurrent) {
+      if (!password) return res.status(400).json({ error: '请输入当前登录密码' });
+      if (!bcrypt.compareSync(password, user.password)) return res.status(400).json({ error: '密码错误' });
+    }
+
+    // 目标需要登录密码但当前没有：先写入新密码（必须在库连接还可用时改）
+    let effectivePwd = password;
+    if (!needsCurrent && (target === 'password' || target === 'privacy')) {
+      if (String(newPassword).length < 6) return res.status(400).json({ error: '新密码长度至少 6 位' });
+      effectivePwd = String(newPassword);
+      db.prepare('UPDATE users SET password = ? WHERE id = ?').run(bcrypt.hashSync(effectivePwd, 10), user.id);
+    } else if (target === 'plain' || target === 'nopass') {
+      // 明文库与免密登录都不能保留密码
+      db.prepare('UPDATE users SET password = ? WHERE id = ?').run('', user.id);
+    }
+
+    // 退出隐私：先把库钥匙改回主密钥包裹，再处理免密/明文
+    if (from === 'privacy' && target !== 'privacy') {
+      dbManager.disablePrivacy(username, { password });
+    }
+
+    // 加密 -> 明文：转换会驱逐本次请求的连接，必须放在所有库读写之后
+    if (target === 'plain') {
+      await dbManager.convertDbEncryption(req.user.dbSlug, false);
+    }
+    // 明文 -> 加密：先转成加密库，下面开启隐私才有库钥匙可包裹
+    if (from === 'plain') {
+      await dbManager.convertDbEncryption(req.user.dbSlug, true);
+    }
+
+    // 开启隐私：库钥匙只由登录密码 + 恢复词包裹
+    let phrase = '';
+    if (target === 'privacy') {
+      phrase = pickPhrase();
+      dbManager.enablePrivacy(username, { password: effectivePwd, mnemonic: phrase });
+    }
+
+    res.json({
+      level: target,
+      changed: true,
+      phrase: phrase ? formatPhrase(phrase) : '',
+      recoveryKey: phrase,
+    });
+  } catch (err) {
+    res.status(err.code === 'PRIVACY_UNLOCK' ? 400 : 500).json({ error: err.message });
+  }
+});
+
+// 超级隐私模式状态（供系统设置展示）
+router.get('/privacy', auth(), (req, res) => {
+  try {
+    res.json({ enabled: dbManager.isProtected(req.user.username) });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// 开启超级隐私模式：用当前登录密码确认身份，并生成一份 12 词恢复词（仅此次返回）。
+// 开启后库钥匙只由「登录密码 / 恢复词」包裹，主密钥再也解不开；忘记两者即不可恢复。
+router.post('/privacy/enable', auth(), (req, res) => {
+  try {
+    const { password } = req.body || {};
+    const user = db.prepare('SELECT * FROM users WHERE id = ?').get(req.user.userId);
+    if (!user) return res.status(401).json({ error: '账号不存在' });
+    if (!user.password) return res.status(400).json({ error: '当前账号未设置登录密码，请先设置密码' });
+    if (!password || !bcrypt.compareSync(password, user.password)) {
+      return res.status(400).json({ error: '密码错误' });
+    }
+
+    const phrase = pickPhrase();
+    dbManager.enablePrivacy(req.user.username, { password, mnemonic: phrase });
+    res.json({
+      enabled: true,
+      recoveryKey: phrase,
+      phrase: formatPhrase(phrase),
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// 关闭超级隐私模式：需要再次输入登录密码解出库钥匙，改回主密钥自动解锁。
+router.post('/privacy/disable', auth(), (req, res) => {
+  try {
+    const { password } = req.body || {};
+    if (!password) return res.status(400).json({ error: '请输入登录密码' });
+    dbManager.disablePrivacy(req.user.username, { password });
+    res.json({ enabled: false });
+  } catch (err) {
+    res.status(err.code === 'PRIVACY_UNLOCK' ? 400 : 500).json({ error: err.message });
   }
 });
 

@@ -228,32 +228,87 @@ export function useSettingsAppearance() {
         }
       })
     },
-    // 读取本账号数据库的加密状态
-    async loadDbEncryption() {
+    // 读取本账号的安全等级
+    async loadSecurityLevel() {
       try {
-        const { data } = await axios.get('/api/account/db-encryption')
-        this.dbEncrypted = !!data.encrypted
-      } catch (_) { /* 读取失败保持默认（加密） */ } finally {
-        this.dbEncryptionLoading = false
+        const { data } = await axios.get('/api/account/security-level')
+        this.securityLevel = data.level || ''
+      } catch (_) { /* 读取失败保持空值 */ } finally {
+        this.securityLevelLoading = false
       }
     },
-    // 切换本账号数据库加密方式：复用数据目录迁移那套流程（关闭其它窗口 → 独立进度窗口转换 → 重开主界面）
-    toggleDbEncryption() {
-      const turningOff = this.dbEncrypted
-      const msg = turningOff
-        ? '确定关闭数据库加密吗？关闭后本账号数据库将以明文保存，任何能访问该文件的程序都能直接读取其中数据（仅影响本账号，不影响其它账号）。转换期间所有窗口会暂时关闭并显示进度，请勿强行停止程序，完成后会自动重开主界面。'
-        : '确定启用数据库加密吗？启用后本账号数据库将以随机密钥加密保存。转换期间所有窗口会暂时关闭并显示进度，请勿强行停止程序，完成后会自动重开主界面。'
-      this.showConfirm(msg, async () => {
-        this.busyDbEncryption = true
-        try {
-          // 主窗口即将被关闭并重开，转换结果由主进程提示条反馈
-          await window.electron.invoke(INVOKE.SET_DB_ENCRYPTION, { encrypt: !turningOff })
-        } catch (err) {
-          this.showAlert(err?.message || '操作失败')
-        } finally {
-          this.busyDbEncryption = false
+    // 下拉切换安全等级：先弹确认框（按需收集当前密码 / 新密码），确认后再真正切换
+    onSecurityLevelChange(target) {
+      if (!target || target === this.securityLevel) return
+      this.securityDialog = { open: true, target, password: '', newPassword: '', error: '' }
+    },
+    closeSecurityDialog() {
+      if (this.busySecurityLevel) return
+      this.securityDialog.open = false
+    },
+    async confirmSecurityLevel() {
+      const d = this.securityDialog
+      if (this.securityNeedsCurrent && !d.password) {
+        d.error = '请输入当前登录密码'
+        return
+      }
+      if (this.securityNeedsNew && String(d.newPassword).length < 6) {
+        d.error = '新密码长度至少 6 位'
+        return
+      }
+      this.busySecurityLevel = true
+      d.error = ''
+      try {
+        const { data } = await axios.post('/api/account/security-level', {
+          level: d.target,
+          password: this.securityNeedsCurrent ? d.password : '',
+          newPassword: this.securityNeedsNew ? d.newPassword : '',
+        })
+        this.securityLevel = data.level || d.target
+        if (data.phrase) {
+          this.privacyPhrase = data.phrase
+          this.syncPrivacyPhraseGuard(true)
         }
-      })
+        d.open = false
+        d.password = ''
+        d.newPassword = ''
+        this.notifySuccess('安全等级已更新')
+      } catch (err) {
+        d.error = err.response?.data?.error || '切换失败'
+      } finally {
+        this.busySecurityLevel = false
+      }
+    },
+    // 恢复词展示期间把窗口排除在屏幕捕获之外；离开设置页/关闭展示时恢复
+    syncPrivacyPhraseGuard(on) {
+      try {
+        window.electron?.invoke(INVOKE.SET_CONTENT_PROTECTION, !!on)
+      } catch (_) { /* 非 Electron 环境忽略 */ }
+    },
+    clearPrivacyPhrase() {
+      this.privacyPhrase = ''
+      this.syncPrivacyPhraseGuard(false)
+    },
+    async copyPrivacyPhrase() {
+      try {
+        if (window.electron?.invoke) {
+          // 主进程写剪贴板并定时清空：避免恢复词长期留在系统剪贴板
+          const ok = await window.electron.invoke(INVOKE.COPY_SENSITIVE_TEXT, {
+            text: this.privacyPhrase,
+            ttlMs: 60000,
+          })
+          if (!ok) throw new Error('copy failed')
+        } else {
+          await navigator.clipboard.writeText(this.privacyPhrase)
+        }
+        this.showAlert(
+          window.electron?.invoke
+            ? '恢复词已复制，60 秒后会自动清空剪贴板'
+            : '恢复词已复制，请妥善离线保存'
+        )
+      } catch (_) {
+        this.showAlert('复制失败，请手动抄写')
+      }
     },
     async pickDir() {
       try {

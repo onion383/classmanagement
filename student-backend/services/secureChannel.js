@@ -19,6 +19,13 @@ const CIPHER = 'aes-256-gcm';
 const CURVE = 'prime256v1';        // P-256（Node ECDH 与 Chromium WebCrypto 均支持）
 const SESSION_TTL_MS = 15 * 60 * 1000; // 会话有效期 15 分钟
 
+// 信道凭据（X-Auth-Proof）：客户端用会话密钥加密 { token?, ts, n } 放进请求头，
+// 明文 Authorization / Cookie / 查询串在安全模式下不再被接受——被动抓包拿不到可复用的凭据。
+// ts 容差与 nonce 记忆窗口：本机前后端同源时钟，60 秒足够覆盖一次往返；nonce 记 120 秒防重放。
+const AUTH_TS_SKEW_MS = 60 * 1000;
+const AUTH_NONCE_TTL_MS = 120 * 1000;
+const usedNonces = new Map(); // nonce -> 首次出现时间
+
 // 64 位 hex(32 bytes) 主密钥
 const KM_RE = /^[0-9a-f]{64}$/;
 let K_MASTER = '';
@@ -81,7 +88,9 @@ function performHandshake(clientPubB64) {
   const shared = deriveEcdhShared(clientPubB64, ecdh);
   const key = deriveSessionKey(shared);
   const sessionId = crypto.randomBytes(16).toString('hex');
-  sessions.set(sessionId, { key, createdAt: Date.now() });
+  // authToken：该信道会话绑定的登录 token（首次收到带 token 的凭据时写入），
+  // 之后客户端只发不含 token 的信道凭据即可，登录 token 不再随每次请求上线。
+  sessions.set(sessionId, { key, createdAt: Date.now(), authToken: null });
   cleanupSessions();
   return { sessionId, pub: pubRaw };
 }
@@ -91,6 +100,23 @@ function getSessionKey(sessionId) {
   return s ? s.key : null;
 }
 function destroySession(sessionId) { sessions.delete(sessionId); }
+
+// 会话 ↔ 登录 token 绑定：后端在收到带 token 的信道凭据（或登录成功）时登记。
+// 绑定态被 auth 中间件判定失效时会解绑，让前端换一份带 token 的凭据重试一次。
+function bindAuth(sessionId, token) {
+  const s = sessionId && sessions.get(sessionId);
+  if (!s || !token) return false;
+  s.authToken = token;
+  return true;
+}
+function getBoundAuth(sessionId) {
+  const s = sessionId && sessions.get(sessionId);
+  return s ? s.authToken : null;
+}
+function unbindAuth(sessionId) {
+  const s = sessionId && sessions.get(sessionId);
+  if (s) s.authToken = null;
+}
 
 // ======================== Express 中间件 ========================
 // 加密只对「业务 JSON API」生效；静态图片/<img> 资源与握手路径走明文（见 Exempt）。
@@ -142,6 +168,66 @@ function responseEncrypt(req, res, next) {
   return next();
 }
 
+// 信道凭据中间件：解 X-Auth-Proof（sid.iv.tag.ct）为 req.channelToken / req.channelBound。
+// 报文由前端用会话密钥加密，明文里只有密文——本机抓包拿不到可复用的登录 token。
+// 凭据里的 sid 必须与请求体加密用的会话一致，避免「凭据用一个会话、回包用另一个会话」。
+function requestAuthProof(req, res, next) {
+  if (!hasMaster()) return next();
+  const raw = req.headers['x-auth-proof'];
+  if (!raw) return next();
+
+  const fail = (status, payload) => res.status(status).set('X-Auth-Required', '1').json(payload);
+  const parts = String(raw).split('.');
+  if (parts.length !== 4) return fail(401, { error: '凭据格式错误' });
+
+  const [sid, iv, tag, ct] = parts;
+  const key = getSessionKey(sid);
+  if (!key) return res.status(401).json({ d: 'session-expired' });
+  if (req.sessionId && req.sessionId !== sid) return fail(400, { error: '会话不一致' });
+
+  let payload;
+  try {
+    payload = JSON.parse(open(key, [iv, tag, ct].join('.')).toString('utf8'));
+  } catch (_) {
+    return fail(401, { error: '凭据无效' });
+  }
+
+  const ts = Number(payload && payload.ts);
+  if (!Number.isFinite(ts) || Math.abs(Date.now() - ts) > AUTH_TS_SKEW_MS) {
+    return fail(401, { error: '凭据已过期' });
+  }
+
+  const n = payload && payload.n ? String(payload.n) : '';
+  if (!n) return fail(401, { error: '凭据缺少随机数' });
+  cleanupNonces();
+  if (usedNonces.has(n)) return fail(401, { error: '凭据重放' });
+  usedNonces.set(n, Date.now());
+
+  req.sessionId = sid;
+  if (payload.token) {
+    // 带 token：登记绑定，后续请求可以只发不含 token 的凭据
+    bindAuth(sid, String(payload.token));
+    req.channelToken = String(payload.token);
+  }
+  return next();
+}
+
+// 清理过期会话
+function cleanupSessions() {
+  const now = Date.now();
+  for (const [id, s] of sessions) {
+    if (now - s.createdAt > SESSION_TTL_MS) sessions.delete(id);
+  }
+}
+
+// 清理重放记忆（窗口外的 nonce 不再需要拦截）
+function cleanupNonces() {
+  const now = Date.now();
+  for (const [n, at] of usedNonces) {
+    if (now - at > AUTH_NONCE_TTL_MS) usedNonces.delete(n);
+  }
+}
+
 // 流式响应分帧加密（SSE 场景）：SSE 是逐帧 res.write，无法用 res.json 统一包装，
 // 故在此按「单帧」封装。仅当本请求来自加密会话（req.sessionId 已由 requestDecrypt 置位）
 // 时，把事件对象封成与 responseEncrypt 同形的 { d: 'iv.tag.ct' }；否则原样返回，明文直通。
@@ -154,19 +240,12 @@ function encodeStreamEvent(req, data) {
   return data;
 }
 
-// 清理过期会话
-function cleanupSessions() {
-  const now = Date.now();
-  for (const [id, s] of sessions) {
-    if (now - s.createdAt > SESSION_TTL_MS) sessions.delete(id);
-  }
-}
-
 module.exports = {
   initMaster, hasMaster, sessionCount,
   genServerEphemeral, deriveEcdhShared, deriveSessionKey,
   seal, open, performHandshake, getSessionKey, destroySession,
-  requestDecrypt, responseEncrypt, encodeStreamEvent,
+  bindAuth, getBoundAuth, unbindAuth,
+  requestDecrypt, responseEncrypt, requestAuthProof, encodeStreamEvent,
   SESSION_TTL_MS,
 };
 

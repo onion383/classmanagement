@@ -46,6 +46,12 @@
 #### `useSeatGrid.js`座位表的通用逻辑
 - 座位表的处理的核心逻辑
 
+#### `usePhotoTimeline.js` 相册照片网格虚拟滚动
+- 按日期分组为窗口单元，只挂载视口附近分组
+
+#### `useThumbBatch.js` 缩略图批量预取
+- 可视区变化时批量取回缩略图（转 objectURL），省掉逐个请求
+
 ### `components`组件文件夹
 
 #### `ConfirmDialog.vue`通用弹窗
@@ -68,6 +74,7 @@
 #### `ExportExcel.vue` 导出表格组件
 - 将表格数据导出为excel，pdf，csv，HTML网页
 - 弹窗选择导出
+- 变体：相册索引导出 `ExportAlbumIndex.vue`——复用同一弹窗，只换掉「选列 / 选行」区（`hideFieldPicker` + `extraOptions` 插槽），输出 序号 / 文件名 / 目录，按天/月/年出子表标题行，并屏蔽图片格式（长表截图会崩）
 
 #### `GridView.vue`通用网状表格组件
 1. 网状表格的基本逻辑
@@ -97,3 +104,12 @@
 #### 
 
 ## 后端 `student-backend`
+
+### 相册相关模块
+- `routes/album.js`：相册 CRUD、照片浏览、缩略图与批量缩略图接口；**扫描已下沉到子进程**，本文件只负责派活/查状态 + 零星补图（缩略图**读**留主进程，**生成**按量分流）
+- `albumScan.js`：扫描引擎（主/子进程共用）：清单收集、断点推进（带 token 归属限定）、缩略图生成与写库攒批、分批删除、暂停等待
+- `scanWorker.js`：扫描子进程管理器（主进程侧）：懒启动、派活/暂停/停止、补图需求转发、空闲退出、崩溃重建
+- `worker.scan.js`：扫描子进程本体（IPC 协议实现，跑扫描与补图队列）
+- `albumThumbs.js`：缩略图缓存（按库隔离目录 + 内存索引 + buffer LRU + 批量二进制读取）
+- `albumOps.js`：相册文件操作（应用内回收站、缩略图删除）
+- `routes/undo/undo.executors.js`：相册相关的撤销/重做执行器

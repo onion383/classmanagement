@@ -17,6 +17,7 @@
 //   localStorage 与主窗口是同一份——token、主题、玻璃/日夜等设置全部自动继承，渲染层不需要改。
 // =========================================================================
 
+const fs = require('fs')
 const { app, BrowserWindow, ipcMain, screen, protocol } = require('electron')
 
 const desktopLayer = require('./main/main.desktop-layer')
@@ -62,6 +63,18 @@ protocol.registerSchemesAsPrivileged([
 let win = null
 // 是否已成功挂到桌面层（false = 降级为普通顶层窗口）
 let attached = false
+
+// 桌面层挂载失败诊断：host 进程以 stdio:'ignore' 启动，console.warn 一行都看不到，
+// 「组件变成普通窗口」这类降级在用户侧就是完全静默的（曾因koffi 未打进包、
+// require('koffi') 抛错而排查很久）。这里把失败原因落到userData 下的日志文件。
+function logDiag(msg) {
+  try {
+    const p = require('path').join(app.getPath('userData'), 'desktop-layer.log')
+    fs.appendFileSync(p, '[' + new Date().toISOString() + '] ' + msg + '\n')
+  } catch (_) {
+    /* 忽略 */
+  }
+}
 // 拖动起点：窗口矩形 + 鼠标位置，均为「屏幕物理像素」
 let dragStartRect = null
 let dragStartMouse = null
@@ -106,6 +119,12 @@ function createWindow() {
   // 失败时自动恢复样式 + 解挂，退回普通顶层窗口。
   if (useDesktopLayer) {
     attached = desktopLayer.attach(win)
+    logDiag(
+      (attached ? '已挂到桌面层' : '挂载失败，已退回普通窗口') +
+        '（FFI 可用=' + String(desktopLayer.isAvailable()) + '）'
+    )
+  } else {
+    logDiag('收到 --no-desktop-layer，按普通窗口创建')
   }
 
   // 挂载完成后再显示：此时窗口已经是桌面层子窗口，不会在启动瞬间跑到最前面闪一下。
@@ -128,7 +147,7 @@ function createWindow() {
     ? 'http://127.0.0.1:5173/desktop-widget.html'
     : 'app://local/desktop-widget.html'
   win.loadURL(url).catch((e) => {
-    console.warn('[desktop-widget-host] 页面加载失败：', e && e.message)
+    logDiag('页面加载失败：' + url + ' — ' + ((e && e.message) || e))
   })
 }
 

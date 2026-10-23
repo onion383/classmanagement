@@ -19,6 +19,9 @@ const BASE = 'http://localhost:3000'
 let kMaster = null
 let sessionKey = null
 let sessionId = null
+// 本会话是否已把登录身份绑定到后端：绑定后凭据里不再携带 token，
+// 被动抓包只能拿到「不可复用」的一次性密文。
+let authBound = false
 
 export function safe() {
   if (typeof window !== 'undefined' && window.__SECURE_CHANNEL__ === true) return true
@@ -37,7 +40,56 @@ async function getMasterKey() {
   return kMaster
 }
 
-// --- base64 / hex 工具 ---
+// --- 信道凭据（X-Auth-Proof）---
+// 把 { token?, ts, n } 用会话密钥加密后放进请求头：被动抓包只看到密文，
+// 且 ts+nonce 让密文无法重放。会话已绑定身份后不再携带 token（只发 ts/n）。
+function randomNonce() {
+  const b = new Uint8Array(12)
+  crypto.getRandomValues(b)
+  return b64(b)
+}
+
+export async function encryptAuthProof(token) {
+  const { sessionId: sid, sessionKey: key } = await ensureSession()
+  const payload = { ts: Date.now(), n: randomNonce() }
+  if (token) payload.token = token
+  const iv = new Uint8Array(12); crypto.getRandomValues(iv)
+  const ct = new Uint8Array(await subtle.encrypt({ name: 'AES-GCM', iv }, key, utf8(JSON.stringify(payload))))
+  const tag = ct.subarray(ct.length - 16)
+  const body = ct.subarray(0, ct.length - 16)
+  return [sid, b64(iv), b64(tag), b64(body)].join('.')
+}
+
+// 会话身份绑定状态：首次带 token 的请求成功后置位；后端回 auth-required 时清除。
+export function isAuthBound() { return authBound }
+export function markAuthBound() { authBound = true }
+export function resetAuthBinding() { authBound = false }
+
+// 把登录凭据写进请求头，返回「本次是否携带了登录 token」：
+//   安全模式 → X-Auth-Proof 密文凭据（已绑定且未强制时凭据内不含 token）
+//   明文模式 → Authorization: Bearer（兼容未启用安全通道的环境）
+// forceToken：绑定失效后重试时必须带 token 重新建立绑定。
+export async function applyAuthHeader(headers, token, { forceToken = false } = {}) {
+  const h = headers || {}
+  delete h.Authorization
+  delete h['X-Auth-Proof']
+  if (!token) return false
+  if (safe()) {
+    try {
+      const withToken = forceToken || !authBound
+      h['X-Auth-Proof'] = await encryptAuthProof(withToken ? token : '')
+      return withToken
+    } catch (_) {
+      // 握手异常时退化为明文头：后端会以 auth-required 拒绝并触发一次重建会话的重试
+      h.Authorization = `Bearer ${token}`
+      return true
+    }
+  }
+  h.Authorization = `Bearer ${token}`
+  return true
+}
+
+
 function b64(bytes) {
   let s = ''
   for (let i = 0; i < bytes.length; i += 0x8000) {
@@ -58,35 +110,42 @@ function hexToBytes(hex) {
 }
 const utf8 = (s) => new TextEncoder().encode(s)
 
-// 协商会话：若已有会话密钥则直接返回
+// 协商会话：若已有会话密钥则直接返回。
+// 并发请求共用同一个握手 promise：否则首屏并发请求各自握手会互相覆盖会话，
+// 导致「请求体用一个会话、凭据用另一个会话」的不一致。
+let pendingSession = null
 async function ensureSession() {
   if (sessionKey) return { sessionId, sessionKey }
-  const master = await getMasterKey()
-  if (!master) throw new Error('secure channel: no master key')
+  if (pendingSession) return pendingSession
+  pendingSession = (async () => {
+    const master = await getMasterKey()
+    if (!master) throw new Error('secure channel: no master key')
 
-  // 前端 ephemeral P-256
-  const kp = await subtle.generateKey({ name: 'ECDH', namedCurve: 'P-256' }, true, ['deriveBits'])
-  const pub = b64(new Uint8Array(await subtle.exportKey('raw', kp.publicKey)))
+    // 前端 ephemeral P-256
+    const kp = await subtle.generateKey({ name: 'ECDH', namedCurve: 'P-256' }, true, ['deriveBits'])
+    const pub = b64(new Uint8Array(await subtle.exportKey('raw', kp.publicKey)))
 
-  // 裸握手（握手不能加密，用 fetch 避免触发 axios 拦截器）
-  const resp = await fetch(BASE + '/api/secure/handshake', {
-    method: 'POST',
-    headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ pub }),
-  })
-  if (!resp.ok) throw new Error('secure channel: handshake failed ' + resp.status)
-  const peer = await resp.json()
+    // 裸握手（握手不能加密，用 fetch 避免触发 axios 拦截器）
+    const resp = await fetch(BASE + '/api/secure/handshake', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ pub }),
+    })
+    if (!resp.ok) throw new Error('secure channel: handshake failed ' + resp.status)
+    const peer = await resp.json()
 
-  const peerPub = await subtle.importKey('raw', unb64(peer.pub), { name: 'ECDH', namedCurve: 'P-256' }, false, [])
-  const shared = await subtle.deriveBits({ name: 'ECDH', public: peerPub }, kp.privateKey, 256)
-  const ikm = await subtle.importKey('raw', shared, 'HKDF', false, ['deriveBits'])
-  const ke = await subtle.deriveBits(
-    { name: 'HKDF', hash: 'SHA-256', salt: hexToBytes(master), info: utf8('campus-secure-v1') },
-    ikm, 256,
-  )
-  sessionKey = await subtle.importKey('raw', ke, { name: 'AES-GCM' }, false, ['encrypt', 'decrypt'])
-  sessionId = peer.sessionId
-  return { sessionId, sessionKey }
+    const peerPub = await subtle.importKey('raw', unb64(peer.pub), { name: 'ECDH', namedCurve: 'P-256' }, false, [])
+    const shared = await subtle.deriveBits({ name: 'ECDH', public: peerPub }, kp.privateKey, 256)
+    const ikm = await subtle.importKey('raw', shared, 'HKDF', false, ['deriveBits'])
+    const ke = await subtle.deriveBits(
+      { name: 'HKDF', hash: 'SHA-256', salt: hexToBytes(master), info: utf8('campus-secure-v1') },
+      ikm, 256,
+    )
+    sessionKey = await subtle.importKey('raw', ke, { name: 'AES-GCM' }, false, ['encrypt', 'decrypt'])
+    sessionId = peer.sessionId
+    return { sessionId, sessionKey }
+  })().finally(() => { pendingSession = null })
+  return pendingSession
 }
 
 export async function encryptBody(obj) {
@@ -141,4 +200,6 @@ export async function decodeStreamEvent(raw) {
 export function clearSession() {
   sessionKey = null
   sessionId = null
+  // 新会话在后端没有任何绑定，下一次请求必须重新携带 token 建立身份
+  authBound = false
 }

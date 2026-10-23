@@ -91,8 +91,12 @@
 
 /* 弹窗遮罩：透明底（不加纯色压暗）+ 背景模糊（基础/极简主题），磨砂虚化下层页面；
    与毛玻璃/Win11 的处理一致。
-   排除 bg-black/9(深色查看器遮罩，如相册全屏看图需保持深底)。 */
-:root:not([data-theme="glass"]):not([data-theme="win11"]) [class*="inset-0"][class*="bg-black/"]:not([class*="bg-black/9"]) {
+   排除 bg-black/9(深色查看器遮罩，如相册全屏看图需保持深底)。
+   注意：必须同时带 fixed 才匹配——这条规则本来是给「整屏弹窗遮罩」用的，
+   若只用 [class*="inset-0"][class*="bg-black/"]，内容层里那种
+   「绝对定位铺满某个格子的 hover 压暗层」也会被命中，被加上 backdrop-filter: blur()，
+   表现为图片本身清晰但显示整片发虚（相册缩略图曾经踩过这个坑）。 */
+:root:not([data-theme="glass"]):not([data-theme="win11"]) [class*="fixed"][class*="inset-0"][class*="bg-black/"]:not([class*="bg-black/9"]) {
   background-color: rgba(0, 0, 0, 0) !important;
   backdrop-filter: blur(18px) saturate(1.1);
 }

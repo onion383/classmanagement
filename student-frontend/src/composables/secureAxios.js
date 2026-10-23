@@ -6,7 +6,10 @@
 // 会话过期（15 分钟）导致解密失败时，清空会话并重试一次（重新握手），
 // 避免一次请求因为被动过期而失败。
 
-import { safe, encryptBody, decryptBody, clearSession } from './secureChannel'
+import {
+  safe, encryptBody, decryptBody, clearSession,
+  markAuthBound, resetAuthBinding,
+} from './secureChannel'
 
 export function setupSecureAxios(axios) {
   if (!safe()) return
@@ -18,6 +21,9 @@ export function setupSecureAxios(axios) {
     if (config.__retrySecure === true) return config
     const d = config.data
     if (d == null) return config
+    // 已是密文信封（后端未就绪重试等场景复用同一 config）：不能再加密一次，
+    // 否则后端只解一层，路由拿到的是 { session, d } 而不是真实请求体。
+    if (typeof d === 'object' && typeof d.session === 'string' && typeof d.d === 'string') return config
     if (typeof FormData !== 'undefined' && d instanceof FormData) return config
     if (typeof d === 'string') return config // 已是序列化表单/查询串，非 JSON 对象
     try {
@@ -33,6 +39,9 @@ export function setupSecureAxios(axios) {
 
   // 响应解密：失败一次视为会话过期，清空会话重试一次
   axios.interceptors.response.use(async res => {
+    // 请求确实带了登录 token 且成功：标记本会话已绑定身份，
+    // 之后普通请求只发不含 token 的信道凭据。
+    if (res.config && res.config.__authProofToken) markAuthBound()
     const d = res.data
     if (d && typeof d === 'object' && typeof d.d === 'string') {
       try {
@@ -56,6 +65,19 @@ export function setupSecureAxios(axios) {
     // 避免用户被误判为「登录过期」踢回登录页（与 aiChat 流式请求的重试行为保持一致）。
     const sd = err.response && err.response.data
     const cfg = err.config
+    // 信道身份未绑定/绑定失效：后端要求带 token 重新认证。清掉绑定标记，
+    // 用「强制携带 token」的凭据把原请求重发一次（body 已是密文，原样复用）。
+    const authRequired = err.response && err.response.status === 401
+      && String(err.response.headers?.['x-auth-required'] || '') === '1'
+    if (authRequired && cfg && cfg.__retryAuth !== true) {
+      cfg.__retryAuth = true
+      cfg.__forceAuthToken = true
+      if (cfg.__origData) cfg.__retrySecure = true // 已加密，勿二次封装
+      resetAuthBinding()
+      try {
+        return axios(cfg)
+      } catch (_) { /* 重发失败：按原错误返回 */ }
+    }
     if (err.response && err.response.status === 401 && sd && typeof sd === 'object'
       && sd.d === 'session-expired' && cfg && cfg.__origData && cfg.__retrySecure !== true) {
       cfg.__retrySecure = true

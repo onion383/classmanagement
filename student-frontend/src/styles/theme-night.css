@@ -789,10 +789,10 @@
 :root[data-mode="night"][data-theme="glass2"] .nt-close:hover { background-color: var(--alpha-white-08) !important; color: #e7eaf6 !important; }
 
 /* B7. 视图切换（分段控件）轨道 */
-:root[data-mode="night"][data-topbar-color="light"][data-theme="glass2"] .view-switch {
+:root[data-mode="night"]:is([data-theme="glass"], [data-theme="glass2"])[data-topbar-color="light"] .view-switch {
   background-color: rgba(38, 45, 72, 0.62) !important;
 }
-:root[data-mode="night"][data-topbar-color="blue"][data-theme="glass2"] .view-switch {
+:root[data-mode="night"]:is([data-theme="glass"], [data-theme="glass2"])[data-topbar-color="blue"] .view-switch {
   background-color: rgba(48, 56, 108, 0.58) !important;
 }
 

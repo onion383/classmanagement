@@ -36,6 +36,14 @@ module.exports = {
   deleteTeacher: account.deleteTeacher,
   resolveByUsername: account.resolveByUsername,
   resolveByDbFile: account.resolveByDbFile,
+  isProtected: account.isProtected,
+  enablePrivacy: account.enablePrivacy,
+  disablePrivacy: account.disablePrivacy,
+  rewrapPassword: account.rewrapPassword,
+  // 超级隐私模式：解锁后的库钥匙只在内存；锁库用于登出
+  getUnlockedKey: base.getUnlockedKey,
+  getUnlockSource: base.getUnlockSource,
+  lockDb: conn.lockDb,
   registryFindByUsername: base.registryFindByUsername,
   registryFindBySlug: base.registryFindBySlug,
   wrapKey: base.wrapKey,
@@ -43,6 +51,7 @@ module.exports = {
   wrapKeyBySecret: base.wrapKeyBySecret,
   decryptBundleKey: base.decryptBundleKey,
   current: conn.current,
+  currentSlug: conn.currentSlug,
   withDb: conn.withDb,
   exportBundle: backup.exportBundle,
   restoreBundle: backup.restoreBundle,
@@ -50,6 +59,9 @@ module.exports = {
   registrySetEncrypted: base.registrySetEncrypted,
   registryDelete: base.registryDelete,
   evictConn: conn.evictConn,
+  // 扫描子进程（worker.scan.js）要自己开一个独立连接开库 —— 它没有请求上下文 ALS，
+  // 不能走 withDb，故需要 openFile 这个底层原语。
+  openFile: base.openFile,
   // 快照/还原用：库文件路径（按 slug）与快照目录
   dbFilePath: backup.dbFilePath,
   snapshotsDir: base.snapshotsDir,

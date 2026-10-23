@@ -26,7 +26,7 @@
         </div>
         <div class="flex items-center gap-4 shrink-0">
           <div class="stat-link flex items-baseline gap-1.5" @click="goTo('/students')" title="跳转：学生管理">
-            <span class="text-lg font-bold text-text leading-none">{{ attendance.present }}</span>
+            <span class="text-lg font-bold text-success leading-none">{{ attendance.present }}</span>
             <span class="text-xs text-text-muted">在校</span>
           </div>
           <div class="w-px h-6 bg-border"></div>

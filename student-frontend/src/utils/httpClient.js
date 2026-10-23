@@ -1,6 +1,8 @@
 import axios from 'axios'
 import { setupSecureAxios } from '../composables/secureAxios'
+import { applyAuthHeader } from '../composables/secureChannel'
 import { waitForBackendReady, isBackendUnreachable } from './backendReady'
+import { storeMediaToken } from './apiUrl'
 
 // 安全通道「会话过期」不是登录态失效：加密会话 15 分钟被动过期时，后端在请求解密阶段
 // 直接回 401 且 body 为 { d:'session-expired' }（不是密文，也非登录 token 问题）。
@@ -10,27 +12,47 @@ function isSecureSessionExpired(error) {
   return !!d && typeof d === 'object' && d.d === 'session-expired'
 }
 
+// 信道凭据缺失/绑定失效：后端置 X-Auth-Required，由 secureAxios 带 token 重试一次，
+// 这里同样不能按「登录过期」处理，否则重试还没发生用户就先被踢回登录页。
+function isAuthRequired(error) {
+  const r = error.response
+  return !!r && r.status === 401 && String(r.headers?.['x-auth-required'] || '') === '1'
+}
+
 // 各窗口入口（主窗口 / 引导窗口 / 悬浮组件 / 桌面组件）共用同一套 axios 装配：
 // baseURL、登录态注入、401 登录失效处理、后端未就绪时的探针与退避重试、安全通道加密。
 // 各窗口差异只用可选项表达，不传即保持「token 注入 + 未就绪重试 + 加密」的最小行为：
 //   - baseURL：是否需要指定后端地址（主窗口生产态 / 桌面组件指定，其余走 Vite 代理）
 //   - getToken：token 获取方式（桌面组件经 IPC 异步取）
+//   - onTokenRenewed：滑动续期拿到新 token 时的回调（缓存了 token 的窗口需同步更新）
 //   - onAuthExpired：收到「登录态失效」401 时如何处理（清 token / 提示 / 跳登录）
 //   - onUnreachable：请求判定为「后端不可达」时的探测回调（每次失败触发一次）
 //   - writeRetryGuard：重连期间是否允许自动重发该请求（写请求禁重发，避免重复落库）
 export function setupApiClient({
   baseURL,
   getToken = () => localStorage.getItem('token'),
+  onTokenRenewed,
   onAuthExpired,
   onUnreachable,
   writeRetryGuard = () => true,
 } = {}) {
   if (baseURL) axios.defaults.baseURL = baseURL
 
-  // 请求拦截器：自动附加登录 Token
+  // 安全通道先装配：请求拦截器按「后注册先执行」的顺序运行，
+  // 先注册加密层可保证「凭据注入」在「请求体加密」之前完成（两者共用同一会话）。
+  // 响应侧同理，加密层的 401 重试要先于下面的登录失效判定执行。
+  setupSecureAxios(axios)
+
+  // 请求拦截器：登录凭据统一走信道（X-Auth-Proof 密文凭据；未启用安全通道时才用明文头）
   axios.interceptors.request.use(async (config) => {
     const token = await getToken()
-    if (token) config.headers.Authorization = `Bearer ${token}`
+    config.headers = config.headers || {}
+    if (!token) return config
+    const carriedToken = await applyAuthHeader(config.headers, token, {
+      forceToken: config.__forceAuthToken === true,
+    })
+    // 记录了「本次确实携带 token」，响应成功后据此把会话标记为已绑定身份
+    if (carriedToken) config.__authProofToken = true
     return config
   })
 
@@ -42,12 +64,23 @@ export function setupApiClient({
   //     有 HTTP 响应（4xx/5xx）的错误不重试，避免重复提交等副作用——但 502/503/504 网关错误
   //     例外（dev 下 Vite 代理对「上游未就绪」的包装，与「连接被拒」同义），见 isBackendUnreachable。
   axios.interceptors.response.use(
-    res => res,
+    res => {
+      // 滑动续期：后端在 token 快到期时随响应下发新的 30 天 token / 媒体凭据，落盘后生效
+      const renewed = res.headers && res.headers['x-renewed-token']
+      if (renewed) {
+        try { localStorage.setItem('token', renewed) } catch (_) {}
+        onTokenRenewed?.(renewed)
+      }
+      const renewedMedia = res.headers && res.headers['x-renewed-media']
+      if (renewedMedia) storeMediaToken(renewedMedia)
+      return res
+    },
     async (error) => {
       const config = error.config
 
-      // 登录态失效（401，且非安全通道会话过期）：交调用方决定是否清 token 并跳登录
-      if (error.response && error.response.status === 401 && !isSecureSessionExpired(error)) {
+      // 登录态失效（401，且非安全通道会话过期 / 信道凭据待重试）：交调用方决定是否清 token 并跳登录
+      if (error.response && error.response.status === 401
+        && !isSecureSessionExpired(error) && !isAuthRequired(error)) {
         onAuthExpired?.(error, config)
       }
 
@@ -75,9 +108,6 @@ export function setupApiClient({
       return Promise.reject(error)
     }
   )
-
-  // 安全通道：请求体加密 + 响应体解密（仅 JSON API；无开关时直通）
-  setupSecureAxios(axios)
   return axios
 }
 

@@ -14,7 +14,8 @@ const bcrypt = {
   compareSync: (...a) => useBcrypt().compareSync(...a),
   hashSync: (...a) => useBcrypt().hashSync(...a),
 };
-const { SECRET, auth, TOKEN_SIGN_OPTS, TOKEN_COOKIE_MAX_AGE } = require('../middleware/auth');
+const { SECRET, auth, TOKEN_SIGN_OPTS, TOKEN_COOKIE_MAX_AGE, signMediaToken } = require('../middleware/auth');
+const secureChannel = require('../services/secureChannel');
 const sessions = require('../services/sessions');
 const { pickPhrase, deriveRestoreHash, normalizePhrase, formatPhrase, safeEqualHash } = require('../services/recoveryKey');
 const dbManager = require('../dbManager/dbManager');
@@ -30,6 +31,27 @@ function putDraft(draft) {
   setTimeout(() => { if (pendingRegs.get(id) === draft) pendingRegs.delete(id); }, PENDING_TTL_MS);
   return id;
 }
+
+// 签发登录态：登录 token + 媒体凭据，并把 token 绑定到本次加密信道会话。
+// 绑定后前端后续请求只需发送不含 token 的信道凭据，登录 token 不再随每次请求上线；
+// mediaToken 只用于 <img>/CSS 这类无法携带自定义头的静态资源，且不能调用业务 API。
+function issueSession(req, user, extra = {}) {
+  const sid = sessions.create(user.userId);
+  const payload = { userId: user.userId, username: user.username, role: user.role, dbSlug: user.dbSlug, sid, ...extra };
+  const token = useJwt().sign(payload, SECRET, TOKEN_SIGN_OPTS);
+  if (req.sessionId) secureChannel.bindAuth(req.sessionId, token);
+  return { token, mediaToken: signMediaToken(payload) };
+}
+
+function setAuthCookie(res, token) {
+  res.cookie('token', token, {
+    httpOnly: true,
+    sameSite: 'lax',
+    path: '/',
+    maxAge: TOKEN_COOKIE_MAX_AGE
+  });
+}
+
 
 // 账号列表：登录页「从数据库注册」加载已登记的班主任账号（无需登录）。
 // 仅返回数据库有效的账号——解不开/打不开/账号行缺失的无效库直接隐藏。
@@ -47,12 +69,28 @@ router.get('/me', auth(), (req, res) => {
   res.json({ username: req.user.username, role: req.user.role, dbSlug: req.user.dbSlug });
 });
 
+// 刷新媒体凭据：媒体凭据过期或换号后，前端用普通 API 调用取一份新的，
+// 不必让用户重新登录（登录 token 仍有效即可）。
+router.get('/media-token', auth(), (req, res) => {
+  try {
+    res.json({ mediaToken: signMediaToken(req.user) });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // ---------------------------------------------------------------------------
 // POST /logout  —— 主动退出登录
 // 把当前 token 的会话（sid）从名单里移除，原 token 立即失效：即使旧 token 被留用也验不过。
 // 只吊销本次登录的这一条会话，同账号在其它设备上的登录态不受影响。
 router.post('/logout', auth(), (req, res) => {
   sessions.revoke(req.user && req.user.sid);
+  // 解绑信道会话：换号登录后同一信道不会继续沿用上一个账号的 token
+  secureChannel.unbindAuth(req.sessionId);
+  // 超级隐私模式：登出即关闭库连接并丢弃内存里的库钥匙，下次使用必须重新输入密码/恢复词
+  dbManager.lockDb(req.user && req.user.dbSlug);
+  // 扫描子进程也可能持有该库连接，一并关闭
+  try { require('../scanWorker').lockDb(req.user && req.user.dbSlug); } catch (_) { /* 子进程未启动 */ }
   res.clearCookie('token', { path: '/' });
   res.json({ ok: true });
 });
@@ -71,18 +109,49 @@ router.post('/db-login', (req, res) => {
   }
 });
 
+// 「本机信息恢复」：忘记密码时选中本机 .db 文件，凭本机登记表 + 主密钥直接签发登录态，
+// 但 token 带 recover 标记，只能先改密码（见 PUT /account/password）。
+// 超级隐私库没有主密钥包裹，本接口不适用（会抛错，引导改用恢复词）。
+router.post('/db-recover', (req, res) => {
+  const file = req.body && typeof req.body.file === 'string' ? req.body.file.split(/[\\/]/).pop() : '';
+  if (!file) return res.status(400).json({ error: '缺少数据库文件' });
+  try {
+    const r = dbManager.resolveByDbFile(file);
+    const resolved = dbManager.resolveByUsername(r.username);
+    if (!resolved) return res.status(400).json({ error: '数据库内没有可用账号' });
+    const user = resolved.conn.prepare('SELECT id, username, role FROM users WHERE username = ?').get(r.username);
+    if (!user) return res.status(400).json({ error: '数据库内没有可用账号' });
+    const { token, mediaToken } = issueSession(req, {
+      userId: user.id, username: user.username, role: user.role, dbSlug: r.slug,
+    }, { recover: true });
+    setAuthCookie(res, token);
+    res.json({
+      mustChangePassword: true,
+      token,
+      mediaToken,
+      user: { id: user.id, username: user.username, role: user.role, dbSlug: r.slug, hasPassword: true },
+    });
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
 // ---------------------------------------------------------------------------
 // POST /login
 // ---------------------------------------------------------------------------
 router.post('/login', (req, res) => {
-  const { username, password } = req.body;
+  const { username, password, mnemonic } = req.body;
   if (!username) return res.status(400).json({ error: '请输入账号' });
 
   // 用 index.db 定位账号对应的班主任库，打开它并校验密码（账号存于各库内的 users）
   let resolved;
   try {
-    resolved = dbManager.resolveByUsername(String(username));
+    resolved = dbManager.resolveByUsername(String(username), { password, mnemonic });
   } catch (err) {
+    if (err.code === 'PRIVACY_UNLOCK') {
+      // 超级隐私模式：库钥匙解不开就到此为止，不泄露账号是否存在
+      return res.status(401).json({ error: err.message, code: 'PRIVACY_UNLOCK' });
+    }
     console.warn('[login] 打开账号库失败:', err.message);
     return res.status(401).json({ error: '账号或密码错误' });
   }
@@ -96,40 +165,35 @@ router.post('/login', (req, res) => {
     console.warn('[login] 库内查无此账号:', username, 'slug:', resolved.slug);
     return res.status(401).json({ error: '账号或密码错误' });
   }
+  // 恢复词解锁本身就是所有者证明：不再校验登录密码（可用于忘记密码时登录后重设）
+  const unlockedByMnemonic = resolved.unlockedBy === 'mnemonic';
   // 无密码用户：直接放行；有密码用户：校验密码哈希
-  if (user.password && !bcrypt.compareSync(password, user.password)) {
+  if (!unlockedByMnemonic && user.password && !bcrypt.compareSync(password, user.password)) {
     console.warn('[login] 密码校验失败:', username);
     return res.status(401).json({ error: '账号或密码错误' });
   }
 
-  const token = useJwt().sign(
-    {
-      userId: user.id, username: user.username, role: user.role,
-      dbSlug: user.db_slug || resolved.slug,
-      sid: sessions.create(user.id), // 会话名单：主动退出时吊销，原 token 立即失效
-    },
-    SECRET,
-    TOKEN_SIGN_OPTS
-  );
-  res.cookie('token', token, {
-    httpOnly: true,
-    sameSite: 'lax',
-    path: '/',
-    maxAge: TOKEN_COOKIE_MAX_AGE
+  const dbSlug = user.db_slug || resolved.slug;
+  const { token, mediaToken } = issueSession(req, {
+    userId: user.id, username: user.username, role: user.role, dbSlug,
   });
+  setAuthCookie(res, token);
   res.json({
     token,
-    user: { id: user.id, username: user.username, role: user.role, dbSlug: user.db_slug || resolved.slug, hasPassword: !!user.password }
+    mediaToken,
+    protect: resolved.protect === true,
+    unlockedBy: resolved.unlockedBy || 'password',
+    user: { id: user.id, username: user.username, role: user.role, dbSlug, hasPassword: !!user.password }
   });
 });
 
 // ---------------------------------------------------------------------------
 // POST /register  —— 班主任注册
 // 仅班主任可用；科任老师 / 学生 返回「正在开发中」。
-// 注册即新建一个独立的加密班主任库，并返回 12 词恢复密钥。
+// 注册即新建一个独立的班主任库；仅超级隐私模式会先生成 12 词恢复词并要求抄写确认。
 // ---------------------------------------------------------------------------
 router.post('/register', (req, res) => {
-  const { username, password, role, encrypted } = req.body || {};
+  const { username, password, role, encrypted, privacy, level } = req.body || {};
 
   // 仅班主任开放
   if (role !== 'teacher') {
@@ -137,8 +201,10 @@ router.post('/register', (req, res) => {
     return res.status(403).json({ error: '该角色正在开发中，请先使用「班主任」注册' });
   }
 
+  // 安全等级（新）：plain / nopass / password / privacy；未传时回退旧的 encrypted / privacy 参数
+  const lvl = ['plain', 'nopass', 'password', 'privacy'].includes(level) ? level : '';
   // 保存方式：缺省加密（兼容现有调用）；显式 false/0/'0' 视为明文保存
-  const wantEncrypted = !(encrypted === false || encrypted === 0 || encrypted === '0');
+  const wantEncrypted = lvl ? lvl !== 'plain' : !(encrypted === false || encrypted === 0 || encrypted === '0');
 
   const uname = String(username || '').trim();
   if (uname.length < 2 || uname.length > 30) {
@@ -155,6 +221,12 @@ router.post('/register', (req, res) => {
     console.warn('[register] 明文保存模式禁止设置密码:', uname);
     return res.status(400).json({ error: '明文保存模式下不允许设置密码' });
   }
+  // 超级隐私模式：必须加密且必须设置登录密码（密码参与库钥匙派生）
+  const wantPrivacy = privacy === true || privacy === 1 || privacy === '1' || lvl === 'privacy';
+  if (wantPrivacy) {
+    if (!wantEncrypted) return res.status(400).json({ error: '明文模式无法开启超级隐私模式' });
+    if (!password) return res.status(400).json({ error: '超级隐私模式需要设置登录密码' });
+  }
 
   // 密码为空视为无密码登录，不加密；有密码则校验长度并加密存储
   const passwordHash = !password ? '' : (
@@ -170,28 +242,21 @@ router.post('/register', (req, res) => {
     return res.status(409).json({ error: '该账号已被注册' });
   }
 
-  const hasPassword = !!passwordHash;
-  if (!hasPassword) {
-    // 无密码账号无恢复密钥可抄写，直接创建（明文或密文均可）。
-    // 注册即签发登录态，便于首次引导继续设置班级信息并进入首页。
+  // 只有超级隐私模式需要恢复词：它是库钥匙的第二把钥匙。
+  // 其余等级（明文 / 无密码 / 普通密码）不再生成恢复词草稿，直接建库并签发登录态。
+  if (!wantPrivacy) {
     try {
       const { slug } = dbManager.createTeacher(uname, passwordHash, 'teacher', wantEncrypted);
-      console.log('[register] 无密码注册成功:', uname, 'slug:', slug, 'encrypted:', wantEncrypted);
-      const token = useJwt().sign(
-        { userId: 1, username: uname, role: 'teacher', dbSlug: slug, sid: sessions.create(1) },
-        SECRET,
-        TOKEN_SIGN_OPTS
-      );
-      res.cookie('token', token, {
-        httpOnly: true,
-        sameSite: 'lax',
-        path: '/',
-        maxAge: TOKEN_COOKIE_MAX_AGE
+      console.log('[register] 注册成功:', uname, 'slug:', slug, 'encrypted:', wantEncrypted, 'hasPassword:', !!passwordHash);
+      const { token, mediaToken } = issueSession(req, {
+        userId: 1, username: uname, role: 'teacher', dbSlug: slug,
       });
+      setAuthCookie(res, token);
       return res.json({
         message: '注册成功',
         token,
-        user: { id: 1, username: uname, role: 'teacher', dbSlug: slug, hasPassword: false },
+        mediaToken,
+        user: { id: 1, username: uname, role: 'teacher', dbSlug: slug, hasPassword: !!passwordHash },
       });
     } catch (err) {
       console.error('[register] 注册抛异常:', uname, err.stack || err.message);
@@ -200,10 +265,10 @@ router.post('/register', (req, res) => {
     }
   }
 
-  // 有密码账号（必然加密）：先生成恢复密钥，存草稿；抄写通过后由 /api/register/confirm 真正建库。
+  // 超级隐私模式：先生成恢复密钥，存草稿；抄写通过后由 /api/register/confirm 真正建库。
   const phrase = pickPhrase();
   const restoreHash = deriveRestoreHash(phrase);
-  const draftId = putDraft({ username: uname, passwordHash, role: 'teacher', restoreHash });
+  const draftId = putDraft({ username: uname, passwordHash, role: 'teacher', restoreHash, privacy: wantPrivacy });
   console.log('[register] 生成待确认草稿:', uname, 'draftId:', draftId);
   res.json({
     message: '注册进行中，请抄写前 3 个恢复词完成确认',
@@ -217,10 +282,21 @@ router.post('/register', (req, res) => {
 // 完成确认注册：前端在「抄写前 3 词」校验通过后调用，此时才真正创建账号库。
 // ---------------------------------------------------------------------------
 router.post('/register/confirm', (req, res) => {
-  const { draftId } = req.body || {};
+  const { draftId, password, phrase } = req.body || {};
   const draft = draftId && pendingRegs.get(draftId);
   if (!draft) {
     return res.status(400).json({ error: '确认已过期，请重新注册' });
+  }
+
+  // 超级隐私模式：复用注册时展示的恢复词作为隐私恢复词。
+  // 确认时必须提交同一密码与恢复词，否则账号建出来却解不开。
+  if (draft.privacy) {
+    if (!password || !bcrypt.compareSync(String(password), draft.passwordHash)) {
+      return res.status(400).json({ error: '密码不正确' });
+    }
+    if (!phrase || !safeEqualHash(deriveRestoreHash(normalizePhrase(phrase)), draft.restoreHash)) {
+      return res.status(400).json({ error: '恢复词不正确' });
+    }
   }
 
   // 确认前再次校验唯一（防止等待期间被他人注册占用）
@@ -236,28 +312,29 @@ router.post('/register/confirm', (req, res) => {
     if (resolved && draft.restoreHash) {
       resolved.conn.prepare('UPDATE users SET recovery_hash = ? WHERE username = ?').run(draft.restoreHash, draft.username);
     }
+    // 建库后立刻开启超级隐私模式：主密钥包裹被抹掉，钥匙只留给密码与恢复词
+    if (draft.privacy) {
+      try {
+        dbManager.enablePrivacy(draft.username, { password: String(password), mnemonic: normalizePhrase(phrase) });
+      } catch (err) {
+        // 开启失败则回滚这次建库，避免留下一个“半隐私”的账号
+        dbManager.deleteTeacher(slug);
+        throw err;
+      }
+    }
     pendingRegs.delete(draftId);
-    console.log('[register/confirm] 确认注册成功:', draft.username, 'slug:', slug);
+    console.log('[register/confirm] 确认注册成功:', draft.username, 'slug:', slug, 'privacy:', !!draft.privacy);
     // 签发登录态，注册成功即自动进入系统，无需再回登录页手动登录
     const userRow = resolved.conn.prepare('SELECT id, username, role FROM users WHERE username = ?').get(draft.username);
-    const token = useJwt().sign(
-      {
-        userId: userRow.id, username: userRow.username, role: userRow.role,
-        dbSlug: slug,
-        sid: sessions.create(userRow.id),
-      },
-      SECRET,
-      TOKEN_SIGN_OPTS
-    );
-    res.cookie('token', token, {
-      httpOnly: true,
-      sameSite: 'lax',
-      path: '/',
-      maxAge: TOKEN_COOKIE_MAX_AGE
+    const { token, mediaToken } = issueSession(req, {
+      userId: userRow.id, username: userRow.username, role: userRow.role, dbSlug: slug,
     });
+    setAuthCookie(res, token);
     res.json({
       message: '注册成功',
       token,
+      mediaToken,
+      protect: !!draft.privacy,
       user: { id: userRow.id, username: draft.username, role: draft.role, dbSlug: slug, hasPassword: true },
     });
   } catch (err) {
@@ -272,17 +349,70 @@ router.post('/register/confirm', (req, res) => {
 // ---------------------------------------------------------------------------
 // POST /recover-password  —— 用恢复密钥重置密码
 // ---------------------------------------------------------------------------
+// 按恢复词在本机已登记账号中定位：恢复词本身就是凭证，所以忘记账号时可以只凭恢复词恢复。
+// 隐私库用恢复词直接试解锁（词不对会抛错）；非隐私库打开后比对 users.recovery_hash。
+function findAccountsByPhrase(phrase) {
+  const inputHash = deriveRestoreHash(normalizePhrase(phrase));
+  const hits = [];
+  for (const rec of dbManager.registryList()) {
+    try {
+      if (rec.protect === 1) {
+        if (dbManager.resolveByUsername(rec.username, { mnemonic: phrase })) hits.push(rec.username);
+        continue;
+      }
+      const resolved = dbManager.resolveByUsername(rec.username);
+      if (!resolved) continue;
+      const row = resolved.conn.prepare('SELECT recovery_hash FROM users WHERE username = ?').get(rec.username);
+      if (row && row.recovery_hash && safeEqualHash(inputHash, row.recovery_hash)) hits.push(rec.username);
+    } catch (_) { /* 打不开 / 词不匹配：跳过 */ }
+  }
+  return hits;
+}
+
 router.post('/recover-password', (req, res) => {
   const { username, phrase, newPassword } = req.body || {};
-  if (!username || !phrase || !newPassword) {
-    return res.status(400).json({ error: '请提供账号、恢复密钥和新密码' });
+  if (!phrase || !newPassword) {
+    return res.status(400).json({ error: '请提供恢复密钥和新密码' });
   }
   if (String(newPassword).length < 6) return res.status(400).json({ error: '新密码长度至少 6 位' });
 
-  const resolved = dbManager.resolveByUsername(String(username).trim());
+  let name = username ? String(username).trim() : '';
+  if (!name) {
+    const hits = findAccountsByPhrase(phrase);
+    if (hits.length === 0) return res.status(404).json({ error: '本机没有与该恢复词匹配的账号，请填写账号后重试' });
+    if (hits.length > 1) return res.status(400).json({ error: '恢复词匹配到多个账号，请填写账号' });
+    name = hits[0];
+  }
+
+  // 超级隐私模式：恢复词就是第二把解锁钥匙。用它解出库钥匙 → 换密码包裹 → 更新密码哈希。
+  if (dbManager.isProtected(name)) {
+    let resolved;
+    try {
+      resolved = dbManager.resolveByUsername(name, { mnemonic: phrase });
+    } catch (_) {
+      return res.status(403).json({ error: '恢复词不正确' });
+    }
+    if (!resolved) return res.status(404).json({ error: '账号不存在' });
+    try {
+      // 先换密码包裹，再改 users 里的密码；顺序反了会出现新旧密码都解不开库
+      dbManager.rewrapPassword(name, { newPassword: String(newPassword), useMemoryKey: true });
+      resolved.conn.prepare('UPDATE users SET password = ? WHERE username = ?')
+        .run(bcrypt.hashSync(String(newPassword), 10), name);
+    } catch (err) {
+      return res.status(500).json({ error: err.message });
+    }
+    return res.json({ message: '密码已重置，可用新密码登录', username: name });
+  }
+
+  let resolved;
+  try {
+    resolved = dbManager.resolveByUsername(name);
+  } catch (err) {
+    return res.status(500).json({ error: err.message });
+  }
   if (!resolved) return res.status(404).json({ error: '账号不存在' });
 
-  const user = resolved.conn.prepare('SELECT username, recovery_hash FROM users WHERE username = ?').get(String(username).trim());
+  const user = resolved.conn.prepare('SELECT username, recovery_hash FROM users WHERE username = ?').get(name);
   if (!user || !user.recovery_hash) return res.status(404).json({ error: '该账号未设置恢复密钥' });
 
   // 归一化输入：仅保留汉字，兼容用户粘贴带序号（1.水 …）或带空格的格式
@@ -293,7 +423,7 @@ router.post('/recover-password', (req, res) => {
 
   const passwordHash = bcrypt.hashSync(String(newPassword), 10);
   resolved.conn.prepare('UPDATE users SET password = ? WHERE username = ?').run(passwordHash, user.username);
-  res.json({ message: '密码已重置，请重新登录' });
+  res.json({ message: '密码已重置，请重新登录', username: user.username });
 });
 
 module.exports = router;

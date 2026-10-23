@@ -181,6 +181,7 @@ import ConfirmDialog from './components/base/ConfirmDialog.vue'
 import { useThemeStore } from './stores/theme'
 import { useNotification } from './composables/useNotification'
 import { useSeatDraft } from './composables/useSeatDraft'
+import { useAlbumTaskResume } from './composables/useAlbumTaskResume'
 import { defineAsyncComponent, h } from 'vue'
 import { prefetchRoutes } from './router'
 import { prefetchThemeStyles, warmNightMode, isNightWarmEnabled } from './styles/themeLoader'
@@ -263,6 +264,8 @@ export default {
       // 挪到占位页移除后（app-visible，见下方 reportWidgetsOnce）再挂载，
       // 把约 14KB JS + 5.7KB CSS 移出首屏窗口；关闭态不渲染，观感无任何变化。
       chromeReady: false,
+      // 启动后恢复「上次没跑完」的相册扫描任务（在小组件就绪 + 延迟 4 秒后触发）
+      albumTaskResume: null,
     }
   },
   computed: {
@@ -326,6 +329,9 @@ export default {
       // 让它们的 chunk 下载/解析落在首屏之后。
       this.chromeReady = true
       reportWidgetsReady()
+      // 小组件就绪之后再延迟 4 秒，才去恢复「上次没跑完」的相册扫描。
+      // 恢复扫描是重活（读目录 + 生成缩略图），绝不能压在启动关键路径上。
+      this.albumTaskResume.schedule()
     }
     window.addEventListener('app-visible', reportWidgetsOnce)
     widgetsFallback = setTimeout(reportWidgetsOnce, 5000)
@@ -364,6 +370,8 @@ export default {
   },
   created() {
     this.themeStore = useThemeStore()
+    // 恢复「上次没跑完」的相册扫描任务：延后到小组件就绪 + 4 秒后才触发（见 mounted 的 reportWidgetsOnce）
+    this.albumTaskResume = useAlbumTaskResume()
     this.setupShutdownIpc()
     this.fetchPendingNotification()
     // 兜住「就绪广播早于本组件创建」的竞态：查一次当前状态，确保之后运行期异常能接管提示。
@@ -376,6 +384,7 @@ export default {
     window.removeEventListener('resize', this.onWindowResize)
     window.removeEventListener('ai-config-changed', this.onAiConfigChanged)
     document.removeEventListener('mousedown', this.onDocMouseDown)
+    this.albumTaskResume?.cancel()
     this.stopUnitDrag()
     this.teardownShutdownIpc()
   },

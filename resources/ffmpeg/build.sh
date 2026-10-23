@@ -17,6 +17,13 @@
 # 本脚本属 LGPL 定义的 "Corresponding Source"（用于控制编译和安装的脚本），
 # 必须与 ffmpeg.exe 一并提供。许可全文见同目录 COPYING.LGPLv2.1。
 #
+# 裁剪警告（勿再把 x86asm 关掉）：
+#   `--disable-x86asm` 会让 libswscale 的缩放滤镜（scale 滤镜的 bilinear/bicubic/area/
+#   lanczos 等多抽头插值核）落回 C 实现，而该 C 实现被本项目工具链 mingw-w64 GCC 8.1.0
+#   编坏（2026-10-22 实测：抽帧输出大面积品红/绿色横条纹花屏；解码与 MJPEG 编码正常，
+#   flags=neighbor 因不走滤波路径幸免；同一源码树开启 nasm 汇编后输出完全正常）。
+#   因此本构建必须保留 x86asm（nasm），构建环境需自带 nasm（如 tools/nasm-2.16.03）。
+#
 # 用法：
 #   SRC_TARBALL=/path/to/ffmpeg-8.1.3.tar.xz ./build.sh
 #
@@ -27,6 +34,7 @@
 #   MINGW_BIN  mingw-w64 工具链 bin 目录，可含多个（冒号分隔）。
 #              注意：务必用不含空格的路径（Windows 上建议 8.3 短路径，如 C:/PROGRA~2/mingw64/bin），
 #              否则 windres 内部调用 gcc 时会因路径含空格而失败。
+#              此外必须能找到 nasm（x86asm 汇编器，见上方「裁剪警告」），可一并放进该列表。
 #   SRC_DIR    复用已解压的源码目录（离线/无 xz 环境用），给出则跳过 tarball 解压
 # =============================================================================
 set -euo pipefail
@@ -86,7 +94,7 @@ cd "$BUILD_DIR"
   --enable-muxer=image2,image2pipe \
   --enable-filter=scale,format,null,setpts,trim,crop,transpose,fps,buffersrc,buffersink \
   --enable-protocol=file \
-  --disable-iconv --disable-bzlib --disable-zlib --disable-lzma --disable-x86asm \
+  --disable-iconv --disable-bzlib --disable-zlib --disable-lzma \
   --extra-ldflags=-static
 
 # --- mingw 原生工具链适配（仅在 Windows + 原生 make/gcc 下需要）---

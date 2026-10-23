@@ -8,7 +8,7 @@ const path = require('path');
 const { initSchema } = require('../schema/schema');
 const {
   dataDir, als, connCache, touchConn, setCachedConn, ensureIndex,
-  openFile, registryFindBySlug, unwrapKey,
+  openFile, registryFindBySlug, unwrapKey, getUnlockedKey, clearUnlockedKey,
 } = require('./dbManager.base');
 
 // 打开（或打开后初始化）某个 slug 对应的库并缓存
@@ -40,14 +40,43 @@ function current() {
   throw new Error('未绑定数据库连接');
 }
 
+// 当前请求绑定的库标识（slug）。
+// 用途：相册缩略图按库隔离目录 —— 各库的 album_photos.id 都从 1 开始自增，
+// 若缩略图文件只按 {photoId}.jpg 命名并共用一个目录，不同库会互相覆盖（串图）。
+// slug 在 withDb 里写入 ALS 上下文，故请求内随时可取。
+function currentSlug() {
+  const ctx = als.getStore();
+  return (ctx && ctx.slug) || '';
+}
+
 // 绑定：在请求上下文内设置当前班主任库 slug，并解析出连接放入上下文缓存
 function withDb(slug, fn) {
   const rec = registryFindBySlug(slug);
   if (!rec) throw new Error('库不存在');
   const encrypted = rec.encrypted !== 0;
-  const passphrase = encrypted ? unwrapKey(rec.wrapped_key) : null;
+  let passphrase = null;
+  if (encrypted) {
+    if (rec.protect === 1) {
+      // 超级隐私模式：库钥匙只能来自本次登录解锁的内存表，主密钥拿不到
+      passphrase = getUnlockedKey(slug);
+      if (!passphrase) {
+        const err = new Error('数据库已锁定，请重新登录');
+        err.code = 'DB_LOCKED';
+        throw err;
+      }
+    } else {
+      passphrase = unwrapKey(rec.wrapped_key);
+    }
+  }
   const conn = getConn(slug, passphrase, encrypted);
   return als.run({ slug, conn }, () => fn({ slug, conn }));
+}
+
+// 锁定某库：关闭连接缓存并丢弃内存里的库钥匙（登出时调用）
+function lockDb(slug) {
+  if (!slug) return;
+  evictConn(slug);
+  clearUnlockedKey(slug);
 }
 
 // 后端就绪后的后台暖机：把一次性冷启动成本（require 原生 sqlite 模块、打开 index.db）
@@ -59,4 +88,4 @@ function warmup() {
   } catch (_) { /* 暖机失败不影响正常懒加载路径 */ }
 }
 
-module.exports = { getConn, evictConn, current, withDb, warmup };
+module.exports = { getConn, evictConn, current, currentSlug, withDb, lockDb, warmup };

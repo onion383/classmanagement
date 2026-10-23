@@ -44,7 +44,19 @@ const app = express();
 // 仅用于在同一台机器上并行起一个「隔离数据目录」的测试后端做性能测量。
 const PORT = Number(process.env.PORT) || 3000;
 
-app.use(cors());
+// CORS 白名单：只允许应用自身来源（Electron 自定义协议 / file://）与本机回环页面访问。
+// 之前裸 cors() 会回显任意站点的 Origin，任意网页都能把响应读走，配合本机明文凭据会扩大攻击面。
+const CORS_ORIGIN_RE = /^(?:app:\/\/|file:\/\/|https?:\/\/(?:localhost|127\.0\.0\.1|\[::1\])(?::\d+)?$)/;
+app.use(cors({
+  origin(origin, cb) {
+    // 无 Origin：Electron 主进程 / Node 客户端 / 同源请求；'null'：file:// 页面
+    if (!origin || origin === 'null') return cb(null, true);
+    return cb(null, CORS_ORIGIN_RE.test(origin));
+  },
+  credentials: true,
+  allowedHeaders: ['Content-Type', 'Authorization', 'X-Auth-Proof'],
+  exposedHeaders: ['X-Auth-Required', 'X-Renewed-Token', 'X-Renewed-Media'],
+}));
 
 // Host 校验：仅接受本机回环地址的请求，阻断「任意网页/DNS rebinding 探测 localhost API」。
 // 本服务是本地单用户后端，且 Token 可通过 Header/Cookie/Query 携带，
@@ -62,6 +74,9 @@ app.use(express.json({ limit: '200mb' }));
 if (secureChannel.hasMaster()) {
   app.use(secureChannel.requestDecrypt);
   app.use(secureChannel.responseEncrypt);
+  // 信道凭据：解 X-Auth-Proof 为 req.channelToken / 会话绑定身份。
+  // 必须排在 requestDecrypt 之后：凭据的 sid 要与请求体加密用的会话一致（见中间件内校验）。
+  app.use(secureChannel.requestAuthProof);
   // 握手端点：前置公开，不要求认证
   const secureRouter = express.Router();
   secureRouter.post('/handshake', (req, res) => {
@@ -238,6 +253,14 @@ function startServer(port) {
 
   // 优雅退出：收到 SIGTERM 时关闭服务器
   process.on('SIGTERM', () => server.close(() => process.exit(0)));
+
+  // 退出前先叫醒扫描子进程。
+  // 为什么必须主动做：worker 是 fork 出来的子进程，父进程 exit() 后它会**继续活着**
+  //（Windows 上更是彻底没人管），变成一个孤儿进程继续扫库写库 —— 磁盘 IO 与 CPU 全被它占着，
+  // 而前端已经显示「后端已关闭」。所以退出前发一条 shutdown 让它自己收工退出。
+  process.on('exit', () => {
+    try { require('./scanWorker').shutdown(); } catch (_) { /* 模块未加载过就算了 */ }
+  });
 }
 
 // 心跳应答：主进程周期性发 ping，这里的回调只有在事件循环空闲时才会被执行。

@@ -27,6 +27,11 @@ function getToken() {
 // 共用 axios 装配：登录态（此处经 IPC 取 token）、网络错误退避重试、安全通道加密。
 // 打包版桌面组件加载自 app://local/desktop-widget.html（见 electron/main.widget.js），
 // 相对路径会被解析到该协议而拿不到后端，故与其它窗口一样补全后端地址；开发模式仍走 Vite 代理的相对路径。
-setupApiClient({ baseURL: backendBaseUrl(), getToken })
+setupApiClient({
+  baseURL: backendBaseUrl(),
+  getToken,
+  // 滑动续期拿到新 token 后同步本窗口缓存，避免常驻组件一直用旧 token 到过期
+  onTokenRenewed: (token) => { tokenPromise = Promise.resolve(token) },
+})
 
 createApp(DesktopWidget).mount('#desktop-widget-app')

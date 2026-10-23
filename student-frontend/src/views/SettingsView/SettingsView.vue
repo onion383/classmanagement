@@ -67,8 +67,54 @@
             <button @click="confirmLogout" class="bg-danger hover:bg-danger-hover text-text-inverse px-4 py-2 rounded transition-theme">退出登录</button>
           </div>
         </div>
+
+        <!-- 安全等级：明文 / 免密 / 普通密码 / 超级隐私（明文可升级为加密） -->
+        <div class="mt-6 pt-5 border-t border-border">
+          <div class="flex items-center gap-4">
+            <label class="text-sm font-medium text-text w-40 flex-shrink-0">安全等级</label>
+            <div class="w-80">
+              <AppSelect
+                :model-value="securityLevel"
+                :options="securityLevelOptions"
+                :disabled="securityLevelLoading || busySecurityLevel"
+                @change="onSecurityLevelChange"
+              />
+            </div>
+            <span class="text-xs text-text-muted">{{ securityLevelHint }}</span>
+          </div>
+          <p class="text-xs text-text-muted mt-2 ml-44">明文不加密；无密码仅免登录但仍加密；普通密码用密码登录；超级隐私模式需密码或恢复词才能解锁库密钥。</p>
+
+          <!-- 恢复词：仅超级隐私模式开启时返回一次 -->
+          <div v-if="privacyPhrase" class="ml-44 mt-3 border border-warning bg-bg p-3 rounded-lg">
+            <p class="text-sm font-medium text-text mb-2">恢复词（仅显示这一次，请抄写并离线保存）</p>
+            <p class="text-sm tracking-wide text-text-secondary select-all">{{ privacyPhrase }}</p>
+            <div class="flex gap-2 mt-3">
+              <button @click="copyPrivacyPhrase" class="bg-surface-hover px-3 py-1.5 rounded text-sm">复制</button>
+              <button @click="clearPrivacyPhrase" class="bg-surface-hover px-3 py-1.5 rounded text-sm">我已抄写</button>
+            </div>
+          </div>
+        </div>
       </div>
     </div>
+
+    <!-- 内嵌弹窗：切换安全等级 -->
+    <Teleport to="body">
+    <Transition name="dialog">
+      <div v-if="securityDialog.open" class="fixed inset-0 bg-black/50 flex items-center justify-center z-[10001]" @click.self="closeSecurityDialog">
+        <div class="dialog-card bg-surface rounded-lg p-6 w-[26rem] border border-border shadow-lg">
+          <h3 class="text-lg font-bold text-text mb-3">切换安全等级</h3>
+          <p class="text-sm text-text-secondary mb-4">{{ securityDialogMessage }}</p>
+          <input v-if="securityNeedsCurrent" v-model="securityDialog.password" type="password" placeholder="当前登录密码" autocomplete="current-password" class="border border-border bg-surface text-text p-2 w-full mb-3 rounded" />
+          <input v-if="securityNeedsNew" v-model="securityDialog.newPassword" type="password" placeholder="新登录密码（至少 6 位）" autocomplete="new-password" class="border border-border bg-surface text-text p-2 w-full mb-3 rounded" />
+          <p v-if="securityDialog.error" class="text-sm text-danger mb-3">{{ securityDialog.error }}</p>
+          <div class="flex justify-end gap-2">
+            <button @click="closeSecurityDialog" class="bg-surface-hover text-text px-4 py-2 rounded border border-border transition-theme">取消</button>
+            <button @click="confirmSecurityLevel" :disabled="busySecurityLevel" class="bg-primary hover:bg-primary-hover text-text-inverse px-4 py-2 rounded transition-theme disabled:opacity-50">{{ busySecurityLevel ? '切换中…' : '确认切换' }}</button>
+          </div>
+        </div>
+      </div>
+    </Transition>
+    </Teleport>
 
     <!-- ========== 学期设置 ========== -->
     <div class="mb-6">
@@ -556,20 +602,6 @@
           </div>
           <p class="text-xs text-text-muted ml-40">AI 技能 md 文件的存放目录（按老师分文件夹）。修改会把现有技能文件搬迁到新目录并重启应用服务；AI 记忆文件不在此目录，不受影响。</p>
         </div>
-        <div>
-          <div class="flex items-center gap-4 mb-2">
-            <label class="text-sm font-medium text-text w-40 flex-shrink-0">数据库加密</label>
-            <div class="flex-1 min-w-0">
-              <div class="truncate text-sm text-text-secondary border border-border bg-bg px-3 py-2 rounded-lg" :title="dbEncrypted ? '已加密（推荐）' : '未加密（明文存储）'">
-                {{ dbEncryptionLoading ? '加载中…' : (dbEncrypted ? '已加密（推荐）' : '未加密（明文存储）') }}
-              </div>
-            </div>
-            <button @click="toggleDbEncryption" :disabled="busyDbEncryption || dbEncryptionLoading" class="bg-info hover:bg-info-hover text-text-inverse px-4 py-2 rounded transition-theme disabled:opacity-50 whitespace-nowrap">
-              {{ busyDbEncryption ? '转换中…' : (dbEncrypted ? '关闭加密' : '启用加密') }}
-            </button>
-          </div>
-          <p class="text-xs text-text-muted ml-40">控制本账号数据库文件的落盘加密。关闭后数据库以明文保存，任何能访问该文件的程序都可直接读取其中数据；仅影响本账号，不影响其它账号。</p>
-        </div>
       </div>
     </div>
 
@@ -754,7 +786,7 @@ export default {
         { label: '数据库目录',               section: 'datadir',  py: 'sjkml' },
         { label: '相册缩略图缓存',           section: 'datadir',  py: 'xcsltch' },
         { label: '技能文件目录',             section: 'datadir',  py: 'jnwjml' },
-        { label: '数据库加密',               section: 'datadir',  py: 'sjkjm' },
+        { label: '安全等级',                 section: 'account',  py: 'aqdj' },
       ],
       // 图标样式选项：彩色图标 / Emoji
       iconStyleOptions: [
@@ -826,10 +858,12 @@ export default {
       busyDataDir: false,
       busyThumbsDir: false,
       busySkillsDir: false,
-      // 数据库加密（仅当前账号）
-      dbEncrypted: true,
-      dbEncryptionLoading: true,
-      busyDbEncryption: false,
+      // 安全等级（仅当前账号）：plain / nopass / password / privacy
+      securityLevel: '',
+      securityLevelLoading: true,
+      busySecurityLevel: false,
+      securityDialog: { open: false, target: '', password: '', newPassword: '', error: '' },
+      privacyPhrase: '',
       // 撤销记录
       undoGroups: [],
       busyUndo: false,
@@ -872,6 +906,46 @@ export default {
   computed: {
     user() {
       return JSON.parse(localStorage.getItem('currentUser') || '{}')
+    },
+    // 安全等级下拉选项（与引导页同一套文案）
+    securityLevelOptions() {
+      return [
+        { value: 'plain', label: '明文模式（不加密）' },
+        { value: 'nopass', label: '无密码模式（加密，免密登录）' },
+        { value: 'password', label: '普通密码模式（加密 + 登录密码）' },
+        { value: 'privacy', label: '超级隐私模式（密码 + 恢复词）' },
+      ]
+    },
+    securityLevelHint() {
+      if (this.securityLevelLoading) return '加载中…'
+      if (this.busySecurityLevel) return '切换中…'
+      if (this.securityLevel === 'plain') return '当前为明文，可升级为加密'
+      return ''
+    },
+    // 兼容导出弹窗：除明文外都视为加密库
+    dbEncrypted() {
+      return this.securityLevel !== 'plain'
+    },
+    securityNeedsCurrent() {
+      return this.securityLevel === 'password' || this.securityLevel === 'privacy'
+    },
+    securityNeedsNew() {
+      const t = this.securityDialog.target
+      return !this.securityNeedsCurrent && (t === 'password' || t === 'privacy')
+    },
+    securityDialogMessage() {
+      switch (this.securityDialog.target) {
+        case 'plain':
+          return '关闭加密后，数据库将以明文保存，任何能访问该文件的程序都能直接读取其中数据；此操作不可逆。'
+        case 'nopass':
+          return '改为无密码模式：数据库仍然加密，但登录不再需要密码，换机或换 Windows 账户后仍无法打开。'
+        case 'password':
+          return '改为普通密码模式：使用登录密码登录，数据库由本机主密钥自动解锁，不再需要恢复词。'
+        case 'privacy':
+          return '开启超级隐私模式后，库密钥只由「登录密码 + 12 词恢复词」包裹，忘记两者将永久无法恢复数据。'
+        default:
+          return ''
+      }
     },
     themeOptions() {
       return this.presetThemes.map(t => ({ value: t.id, label: t.name }))
@@ -966,7 +1040,7 @@ export default {
     this.loadDesktopLayerState()
     this.loadUsbAutoOpen()
     this.loadDataDirs()
-    this.loadDbEncryption()
+    this.loadSecurityLevel()
     // 性能面板：先取一次启动耗时，轮询由 _startPerfPolling 负责
     this.loadStartup()
     this._startPerfPolling()
@@ -981,11 +1055,15 @@ export default {
   // 必须在这里停掉轮询，否则离开设置页后仍会每 1.8s 采样一次（常驻开销）。
   activated() {
     this._startPerfPolling()
+    // KeepAlive 恢复时若恢复词仍在展示，重新开启屏幕捕获保护
+    this.syncPrivacyPhraseGuard(!!this.privacyPhrase)
     // 首次进入（或被缓存的页被重新激活）时若 URL 带 focus，定位到目标设置
     this._applyRouteFocus()
   },
   deactivated() {
     this._stopPerfPolling()
+    // 离开设置页时关闭屏幕捕获保护（恢复词区块已不可见）
+    this.syncPrivacyPhraseGuard(false)
     // 离开设置页时收起搜索弹窗并解除滚动监听，避免弹窗残留在 body 上
     this._removeSearchPopupListeners()
     this.settingsSearchOpen = false
@@ -993,6 +1071,7 @@ export default {
     cancelAnimationFrame(this._flashRaf)
   },
   beforeUnmount() {
+    this.syncPrivacyPhraseGuard(false)
     this.clearDeleteTimer()
     this._stopPerfPolling()
     this._removeSearchPopupListeners()

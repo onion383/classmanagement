@@ -5,6 +5,7 @@
 // =========================================================================
 
 const { db } = require('../../db')
+const dbManager = require('../../dbManager/dbManager')
 const { moveToTrash, restoreToOriginal, deleteThumb } = require('../../albumOps')
 const {
   readGridArray, writeGridArray, cellText,
@@ -228,12 +229,12 @@ const executors = {
     },
     async undo({ photo }) {
       await restoreToOriginal(photo)
-      db.prepare('INSERT INTO album_photos (id, album_id, file_path, file_name, file_size, mtime, photo_date, thumb_path) VALUES (?, ?, ?, ?, ?, ?, ?, ?)')
-        .run(photo.id, photo.album_id || 0, photo.file_path, photo.file_name || '', photo.file_size || 0, photo.mtime || '', photo.photo_date || '', '')
+      db.prepare('INSERT INTO album_photos (id, album_id, file_path, file_name, file_size, mtime, photo_date, exif_date, date_src, thumb_path) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)')
+        .run(photo.id, photo.album_id || 0, photo.file_path, photo.file_name || '', photo.file_size || 0, photo.mtime || '', photo.photo_date || '', photo.exif_date || '', photo.date_src || '', '')
     },
     async redo({ photo }) {
       await moveToTrash(photo)
-      await deleteThumb(photo).catch(() => {})
+      await deleteThumb(photo, dbManager.currentSlug()).catch(() => {})
       db.prepare('DELETE FROM album_photos WHERE id = ?').run(photo.id)
     },
     describe(p, mode) {
@@ -253,13 +254,14 @@ const executors = {
     async undo({ album, photos }) {
       db.prepare('INSERT INTO albums (id, name, folder_path, sort_order, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)')
         .run(album.id, album.name || '', album.folder_path || '', album.sort_order || 0, album.created_at || '', album.updated_at || '')
-      const ins = db.prepare('INSERT INTO album_photos (id, album_id, file_path, file_name, file_size, mtime, photo_date, thumb_path) VALUES (?, ?, ?, ?, ?, ?, ?, ?)')
+      const ins = db.prepare('INSERT INTO album_photos (id, album_id, file_path, file_name, file_size, mtime, photo_date, exif_date, date_src, thumb_path) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)')
       for (const ph of photos || []) {
-        ins.run(ph.id, album.id, ph.file_path || '', ph.file_name || '', ph.file_size || 0, ph.mtime || '', ph.photo_date || '', '')
+        ins.run(ph.id, album.id, ph.file_path || '', ph.file_name || '', ph.file_size || 0, ph.mtime || '', ph.photo_date || '', ph.exif_date || '', ph.date_src || '', '')
       }
     },
     async redo({ album, photos }) {
-      for (const ph of photos || []) await deleteThumb(ph).catch(() => {})
+      const slug = dbManager.currentSlug();
+      for (const ph of photos || []) await deleteThumb(ph, slug).catch(() => {})
       db.prepare('DELETE FROM album_photos WHERE album_id = ?').run(album.id)
       db.prepare('DELETE FROM albums WHERE id = ?').run(album.id)
     },
@@ -280,15 +282,19 @@ const executors = {
     },
     async undo({ album }) {
       const photos = db.prepare('SELECT id, file_name FROM album_photos WHERE album_id = ?').all(album.id)
-      for (const ph of photos) await deleteThumb(ph).catch(() => {})
+      const slug = dbManager.currentSlug();
+      for (const ph of photos) await deleteThumb(ph, slug).catch(() => {})
       db.prepare('DELETE FROM album_photos WHERE album_id = ?').run(album.id)
       db.prepare('DELETE FROM albums WHERE id = ?').run(album.id)
       const albumRouter = require('../album')
       if (albumRouter && albumRouter.cancelScan) albumRouter.cancelScan(album.id)
     },
     redo({ album }) {
-      db.prepare('INSERT INTO albums (id, name, folder_path, sort_order, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)')
-        .run(album.id, album.name || '', album.folder_path || '', album.sort_order || 0, album.created_at || '', album.updated_at || '')
+      // kind 必须一起还原：虚拟相册没有文件夹，重做时不能去扫路径（会白跑一轮扫描）
+      const kind = album.kind === 'virtual' ? 'virtual' : 'folder'
+      db.prepare('INSERT INTO albums (id, name, folder_path, kind, sort_order, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)')
+        .run(album.id, album.name || '', album.folder_path || '', kind, album.sort_order || 0, album.created_at || '', album.updated_at || '')
+      if (kind === 'virtual') return
       // 重做=重新加入文件夹，触发该相册的增量扫描（由前端轮询逐步显示）
       const albumRouter = require('../album')
       if (albumRouter && albumRouter.startScan) albumRouter.startScan(album.id)
@@ -296,6 +302,47 @@ const executors = {
     describe(p, mode) {
       const name = p.album ? (p.album.name || `#${p.album.id}`) : ''
       return mode === 'undo' ? `撤销添加相册：${name}` : `重新添加相册：${name}`
+    },
+    change() { return { type: 'full_reload' } }
+  },
+
+  // 移动照片索引到另一个相册：payload { target_album_id, target_album_name, records }。
+  // records 每项记录来源行与本次动作（inserted=目标侧新增；source_removed=来源是虚拟相册、索引已被搬走）。
+  // undo=删掉目标侧新增的索引 + 还原被搬走的来源索引；redo=再做一遍。全程只动 album_photos，不碰文件。
+  album_photo_move: {
+    validate({ target_album_id, records }) {
+      if (!Number.isInteger(target_album_id) || !Array.isArray(records)) return '参数不完整'
+      return null
+    },
+    async undo({ target_album_id, records }) {
+      const delTarget = db.prepare('DELETE FROM album_photos WHERE album_id = ? AND file_path = ?')
+      const ins = db.prepare('INSERT OR IGNORE INTO album_photos (id, album_id, file_path, file_name, file_size, mtime, photo_date, exif_date, date_src, thumb_path) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)')
+      for (const r of records || []) {
+        if (!r || !r.file_path) continue
+        // 只删本次真正插入的行；移动前目标相册里就有的同一文件不能删
+        if (r.inserted) delTarget.run(target_album_id, r.file_path)
+        // 来源行被搬走的，按原 id 还原（缩略图交给 /thumb 按需重建）
+        if (r.source_removed && Number.isInteger(r.source_photo_id)) {
+          ins.run(r.source_photo_id, r.source_album_id, r.file_path, r.file_name || '', r.file_size || 0, r.mtime || '', r.photo_date || '', r.exif_date || '', r.date_src || '', '')
+        }
+      }
+    },
+    async redo({ target_album_id, records }) {
+      // thumb_path 置空：redo 插回目标侧的是新行（无 id / 无缩略图缓存），
+      // 缩略图由 /thumb 按需生成。末尾那个 '' 就是 thumb_path 的实参 ——
+      // 少传一个会直接抛「Too few parameter values were provided」。
+      const ins = db.prepare('INSERT OR IGNORE INTO album_photos (album_id, file_path, file_name, file_size, mtime, photo_date, exif_date, date_src, thumb_path) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)')
+      const del = db.prepare('DELETE FROM album_photos WHERE id = ?')
+      for (const r of records || []) {
+        if (!r || !r.file_path) continue
+        if (r.inserted) ins.run(target_album_id, r.file_path, r.file_name || '', r.file_size || 0, r.mtime || '', r.photo_date || '', r.exif_date || '', r.date_src || '', '')
+        if (r.source_removed && Number.isInteger(r.source_photo_id)) del.run(r.source_photo_id)
+      }
+    },
+    describe(p, mode) {
+      const name = p.target_album_name ? `「${p.target_album_name}」` : ''
+      const count = (p.records || []).length
+      return mode === 'undo' ? `撤销移动照片索引${name}（${count} 张）` : `移动照片索引${name}（${count} 张）`
     },
     change() { return { type: 'full_reload' } }
   }

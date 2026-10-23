@@ -4,14 +4,6 @@
     <form v-if="mode === 'login'" @submit.prevent="login" class="bg-surface p-8 rounded-3xl shadow-card w-80 login-glow">
       <h2 class="text-xl font-bold mb-4">班集登录</h2>
       <p v-if="loginError" class="text-danger text-[15px] font-medium mb-2">{{ loginError }}</p>
-      <!-- 角色选择：仅班主任可用，暂不可选 -->
-      <AppSelect
-        :model-value="role"
-        placeholder="请选择角色"
-        class="w-full mb-2 role-select"
-        :options="roleOptions"
-        :disabled="true"
-      />
       <input v-model="username" placeholder="账号" autocomplete="off" class="border border-border p-2 w-full mb-2 rounded-xl" />
       <input v-model="password" type="password" placeholder="密码（留空则无密码登录）" autocomplete="new-password" class="border border-border p-2 w-full mb-4 rounded-xl" />
       <div class="flex gap-2">
@@ -45,25 +37,20 @@
       </button>
     </form>
 
-    <!-- 注册：单页（角色下拉 + 账号 + 密码 + 确认密码） -->
+    <!-- 注册：单页（安全等级 + 账号 + 密码） -->
     <form v-else-if="mode === 'register'" @submit.prevent="register" class="bg-surface p-8 rounded-3xl shadow-card w-80 login-glow">
       <h2 class="text-xl font-bold mb-1">注册账号</h2>
       <p class="text-xs text-text-muted mb-4">
         <a class="cursor-pointer underline" @click="switchMode('login')">已有账号，去登录</a>
       </p>
-      <!-- 角色选择：仅班主任可用，暂不可选 -->
-      <AppSelect
-        :model-value="role"
-        placeholder="请选择角色"
-        class="w-full mb-2 role-select"
-        :options="roleOptions"
-        :disabled="true"
-      />
+      <AppSelect v-model="securityLevel" :options="securityLevelOptions" class="w-full mb-2" />
       <input v-model="username" placeholder="账号" class="border border-border p-2 w-full mb-2 rounded-xl" autocomplete="off" />
-      <input v-model="password" type="password" placeholder="密码（留空则无密码登录）" autocomplete="new-password" class="border p-2 w-full mb-2 rounded-xl" />
-      <input v-model="confirm" type="password" placeholder="确认密码" autocomplete="new-password" class="border p-2 w-full mb-4 rounded-xl" />
+      <template v-if="registerNeedsPassword">
+        <input v-model="password" type="password" placeholder="密码（至少 6 位）" autocomplete="new-password" class="border p-2 w-full mb-2 rounded-xl" />
+        <input v-model="confirm" type="password" placeholder="确认密码" autocomplete="new-password" class="border p-2 w-full mb-4 rounded-xl" />
+      </template>
       <button type="submit" :disabled="busy" class="bg-info text-text-inverse px-4 py-2 rounded-xl w-full disabled:opacity-50">
-        {{ busy ? '创建中…' : '注册并生成恢复密钥' }}
+        {{ busy ? '创建中…' : '注册' }}
       </button>
     </form>
 
@@ -73,7 +60,7 @@
       <p class="text-xs text-text-muted mb-4">
         <a class="cursor-pointer underline" @click="switchMode('register')">返回</a>
       </p>
-      <p class="text-xs text-text-muted mb-2">请点击「下载文本」，将恢复密钥保存到安全的地方，然后抄写前 3 个词完成注册。</p>
+      <p class="text-xs text-text-muted mb-2">这是超级隐私模式的恢复词，也是忘记密码时的唯一凭证。请点击「下载文本」保存到安全的地方，然后抄写前 3 个词完成注册。</p>
       <div v-if="recoveryPhrase" class="p-3 rounded-xl mb-3 font-mono text-sm leading-6" style="background: rgba(255,255,255,var(--glass-opacity,0.4)); backdrop-filter: blur(10px) saturate(1.1);">{{ recoveryPhrase }}</div>
       <div class="flex gap-2 mb-3">
         <button type="button" @click="downloadTxt" class="bg-info text-text-inverse px-3 py-2 rounded-xl text-sm flex-1">下载文本</button>
@@ -84,18 +71,71 @@
       <button type="button" v-preload="loadConfirmDialog" class="bg-info text-text-inverse px-4 py-2 rounded-xl w-full" @click="finishRecovery">确认并完成注册</button>
     </form>
 
-    <!-- 忘记密码 -->
-    <form v-else-if="mode === 'recover'" @submit.prevent="recoverPassword" class="bg-surface p-8 rounded-3xl shadow-card w-80 login-glow">
+    <!-- 忘记密码：统一入口（恢复词恢复 / 本机信息恢复） -->
+    <form v-else-if="mode === 'recover'" @submit.prevent="onRecoverSubmit" class="bg-surface p-8 rounded-3xl shadow-card w-80 login-glow">
       <h2 class="text-xl font-bold mb-1">找回密码</h2>
-      <p class="text-xs text-text-muted mb-4">
-        <a class="cursor-pointer underline" @click="switchMode('login')">返回登录</a>
+      <p v-if="recoverStep !== 'setpass'" class="text-xs text-text-muted mb-4">
+        <a class="cursor-pointer underline" @click="recoverBack">{{ recoverStep === 'menu' ? '返回登录' : '上一步' }}</a>
       </p>
-      <input v-model="username" placeholder="账号" autocomplete="off" class="border p-2 w-full mb-2 rounded-xl" />
-      <input v-model="recoverPhrase" placeholder="12 个恢复词" class="border p-2 w-full mb-2 rounded-xl" autocomplete="off" />
-      <input v-model="password" type="password" placeholder="新密码（至少 6 位）" autocomplete="new-password" class="border p-2 w-full mb-4 rounded-xl" />
-      <button type="submit" :disabled="busy" class="bg-info text-text-inverse px-4 py-2 rounded-xl w-full disabled:opacity-50">
-        {{ busy ? '重置中…' : '重置密码' }}
-      </button>
+      <p v-else class="mb-4"></p>
+
+      <!-- 步骤 1：选择验证方式 -->
+      <template v-if="recoverStep === 'menu'">
+        <p class="text-xs text-text-muted mb-3">验明身份后即可设置新密码。</p>
+        <button type="button" :disabled="busy" class="bg-surface-hover px-4 py-2 rounded-xl w-full mb-2 disabled:opacity-50" @click="recoverStep = 'phrase'">
+          使用恢复词恢复
+        </button>
+        <button type="button" :disabled="busy" class="bg-surface-hover px-4 py-2 rounded-xl w-full disabled:opacity-50" @click="openLocalRecover">
+          使用本机信息恢复
+        </button>
+      </template>
+
+      <!-- 步骤 2a：恢复词恢复 -->
+      <template v-else-if="recoverStep === 'phrase'">
+        <p class="text-xs text-text-muted mb-2">不用记账号，系统会按恢复词在本机定位对应的账号。</p>
+        <input v-model="recoverPhrase" placeholder="12 个恢复词" autocomplete="off" class="border p-2 w-full mb-2 rounded-xl" />
+        <input v-model="password" type="password" placeholder="新密码（至少 6 位）" autocomplete="new-password" class="border p-2 w-full mb-2 rounded-xl" />
+        <input v-model="confirm" type="password" placeholder="确认新密码" autocomplete="new-password" class="border p-2 w-full mb-4 rounded-xl" />
+        <button type="submit" :disabled="busy" class="bg-info text-text-inverse px-4 py-2 rounded-xl w-full disabled:opacity-50">
+          {{ busy ? '重置中…' : '重置密码' }}
+        </button>
+      </template>
+
+      <!-- 步骤 2b：本机信息恢复（点选本机已登记账号） -->
+      <template v-else-if="recoverStep === 'local'">
+        <p class="text-xs text-text-muted mb-2">选择一个本机账号。超级隐私模式的账号没有主密钥包裹，只能用恢复词恢复。</p>
+        <p class="text-[11px] text-text-muted mb-2">提醒：同一 Windows 账号下，本机恢复等同于共用钥匙；重要账号请使用超级隐私模式。</p>
+        <div v-if="recoverAccounts.length" class="mb-2 max-h-44 overflow-auto rounded-xl border border-border">
+          <button
+            v-for="a in recoverAccounts"
+            :key="a.slug"
+            type="button"
+            class="w-full text-left px-3 py-2 text-sm border-b border-border"
+            :class="recoverSlug === a.slug ? 'bg-surface-hover' : ''"
+            @click="recoverSlug = a.slug"
+          >
+            <span class="font-medium">{{ a.username }}</span>
+            <span class="block text-[11px] text-text-muted">{{ a.slug }}.db</span>
+          </button>
+        </div>
+        <p v-else class="text-xs text-text-muted mb-2">
+          {{ recoverLoading ? '正在读取本机账号…' : '本机没有可恢复的账号，请改用恢复词或从备份恢复。' }}
+        </p>
+        <button type="submit" :disabled="busy || !recoverSlug" class="bg-info text-text-inverse px-4 py-2 rounded-xl w-full disabled:opacity-50">
+          {{ busy ? '恢复中…' : '恢复' }}
+        </button>
+      </template>
+
+      <!-- 步骤 3：本机恢复成功后强制设置新密码 -->
+      <template v-else-if="recoverStep === 'setpass'">
+        <p class="text-xs text-text-muted mb-2">已通过本机数据库验证身份，请设置新密码后进入系统。</p>
+        <input :value="recoveredAccount" readonly placeholder="账号" class="border p-2 w-full mb-2 rounded-xl" />
+        <input v-model="password" type="password" placeholder="新密码（至少 6 位）" autocomplete="new-password" class="border p-2 w-full mb-2 rounded-xl" />
+        <input v-model="confirm" type="password" placeholder="确认新密码" autocomplete="new-password" class="border p-2 w-full mb-4 rounded-xl" />
+        <button type="submit" :disabled="busy" class="bg-info text-text-inverse px-4 py-2 rounded-xl w-full disabled:opacity-50">
+          {{ busy ? '保存中…' : '设置新密码' }}
+        </button>
+      </template>
     </form>
 
     <!-- 确认弹窗（覆盖恢复 / 注册完成确认） -->
@@ -110,6 +150,19 @@
       @confirm="onConfirmAction"
       @cancel="cancelConfirm"
     />
+
+    <!-- 安全等级风险说明：普通密码只有「确定」，超级隐私「确认 / 取消」（取消回退默认档） -->
+    <ConfirmDialog
+      v-if="levelTipVisible"
+      :visible="levelTipVisible"
+      title="安全等级说明"
+      :message="levelTipMessage"
+      :show-cancel="levelTipType === 'privacy'"
+      :confirm-text="levelTipType === 'privacy' ? '确认' : '确定'"
+      cancel-text="取消"
+      @confirm="levelTipVisible = false"
+      @cancel="onLevelTipCancel"
+    />
   </div>
 </template>
 
@@ -120,31 +173,62 @@ import { useNotification } from '../composables/useNotification.js';
 import AppSelect from '../components/base/AppSelect.vue';
 import '../styles/dialog-transition.css';
 import { INVOKE } from '../electronChannels.js';
+import { storeMediaToken } from '../utils/apiUrl';
 
 // 弹窗类组件懒加载：打开时才加载对应 chunk
 const loadConfirmDialog = () => import('../components/base/ConfirmDialog.vue');
 const ConfirmDialog = defineAsyncComponent(loadConfirmDialog);
 
+// 注册可选的四种安全等级（与引导页 / 系统设置共用同一套文案）
+const SECURITY_LEVELS = [
+  { value: 'plain', label: '明文模式（不加密）' },
+  { value: 'nopass', label: '无密码模式（加密，免密码登录）' },
+  { value: 'password', label: '普通密码模式（加密 + 登录密码）' },
+  { value: 'privacy', label: '超级隐私模式（密码 + 恢复词才能解锁）' },
+];
+
 export default {
   components: { ConfirmDialog, AppSelect },
   // 懒加载弹窗保活：首次打开后保持挂载，关闭只降 visible，保留退出动画
   watch: {
-    confirmVisible(n) { if (n) this.confirmMounted = true }
+    confirmVisible(n) { if (n) this.confirmMounted = true },
+    securityLevel(v) {
+      // 取消隐私模式后回退到普通密码是程序化赋值，不再弹一次普通密码说明
+      if (this.levelTipSuppress) return;
+      this.tipSecurityLevel(v);
+    },
+  },
+  computed: {
+    registerNeedsPassword() {
+      return this.securityLevel === 'password' || this.securityLevel === 'privacy';
+    },
+    securityLevelOptions() { return SECURITY_LEVELS },
+    // 安全等级说明弹窗文案（超级隐私模式的「取消」会回退到普通密码）
+    levelTipMessage() {
+      return this.levelTipType === 'privacy'
+        ? '请您妥善保管好您的密钥，如果丢失，任何人将无法打开您的数据（包括开发者），若担心密码丢失，请使用其他模式'
+        : '普通密码模式只能保证其他 Windows 用户无法访问，并且能保证自己复制数据库到其他电脑无法打开。同一个 Windows 用户仍然可以通过数据恢复打开，如果需要严格的保护隐私，请使用超级隐私模式';
+    },
   },
   data() {
     return {
       mode: 'login',           // login | register | recovery | recover
-      role: 'teacher',         // 角色默认班主任（后端当前仅开放班主任）
-      roleOptions: [
-        { value: 'teacher', label: '班主任', hint: '可完整使用班级管理功能' },
-        { value: 'subject', label: '科任老师', hint: '正在开发中' },
-        { value: 'student', label: '学生', hint: '正在开发中' },
-      ],
+      securityLevel: 'password', // 注册安全等级：plain | nopass | password | privacy
+      levelTipVisible: false,    // 安全等级风险说明弹窗
+      levelTipType: 'password',  // password | privacy
+      levelTipSuppress: false,   // 回退赋值时抑制再次弹窗
       username: '',
       password: '',
       confirm: '',
       loginError: '',            // 登录失败时内联显示在表单上方
-      recoverPhrase: '',        // 忘记密码接口用的恢复词
+      // 忘记密码：menu=选择方式 | phrase=恢复词恢复 | local=本机信息恢复 | setpass=强制设新密码
+      recoverStep: 'menu',
+      recoverPhrase: '',
+      recoverAccounts: [],       // 本机已登记且可恢复（非隐私）的账号列表
+      recoverLoading: false,
+      recoverSlug: '',           // 本机恢复选中的库 slug
+      recoveredAccount: '',      // 本机恢复成功后的账号（只读展示）
+      recoveredUser: null,       // 本机恢复签发的登录用户信息
       // 注册成功后的恢复密钥展示
       recoveryPhrase: '',
       recoveryHash: '',
@@ -174,6 +258,27 @@ export default {
     switchMode(m) {
       this.mode = m; this.copyError = ''; this.loginError = ''; this.busy = false;
       if (m === 'restore') { this.password = ''; this.recoverPhrase = ''; this.restoreBundle = null; this.restoreFile = ''; }
+      // 注册默认是普通密码模式：进来先把该等级的边界说清楚
+      if (m === 'register') this.tipSecurityLevel(this.securityLevel);
+      if (m === 'recover') {
+        this.recoverStep = 'menu';
+        this.recoverPhrase = ''; this.recoverAccounts = []; this.recoverSlug = '';
+        this.recoveredAccount = '';
+        this.recoveredUser = null; this.password = ''; this.confirm = '';
+      }
+    },
+    // 选择安全等级时的风险说明弹窗：普通密码只有「确定」，超级隐私「确认 / 取消」
+    tipSecurityLevel(v) {
+      if (v !== 'password' && v !== 'privacy') return;
+      this.levelTipType = v;
+      this.levelTipVisible = true;
+    },
+    // 超级隐私模式的「取消」：回退到默认的普通密码模式，且不再连锁弹出普通密码说明
+    onLevelTipCancel() {
+      this.levelTipVisible = false;
+      this.levelTipSuppress = true;
+      this.securityLevel = 'password';
+      this.$nextTick(() => { this.levelTipSuppress = false; });
     },
     openDbPicker() {
       this.$refs.dbFileInput && this.$refs.dbFileInput.click();
@@ -204,7 +309,6 @@ export default {
       this.busy = true;
       axios.post('/api/db-login', { file: file.name }).then(res => {
         this.username = res.data.username;
-        this.role = 'teacher';
         useNotification().success('已选择数据库，账号 ' + res.data.username + '，请输入密码登录');
       }).catch(err => {
         useNotification().error(err.response?.data?.error || '无法打开该数据库');
@@ -215,6 +319,7 @@ export default {
       this.busy = true;
       axios.post('/api/login', { username: this.username, password: this.password }).then(res => {
         localStorage.setItem('token', res.data.token);
+        storeMediaToken(res.data.mediaToken);
         localStorage.setItem('currentUser', JSON.stringify(res.data.user));
         this.$router.push('/');
       }).catch(err => {
@@ -224,21 +329,27 @@ export default {
     },
     register() {
       if (!this.username) return useNotification().warning('请填写账号');
-      if (this.password && this.password.length < 6) return useNotification().warning('密码长度至少 6 位');
-      if (this.password !== this.confirm) return useNotification().warning('两次输入的密码不一致');
+      if (this.registerNeedsPassword) {
+        if (!this.password || this.password.length < 6) return useNotification().warning('密码长度至少 6 位');
+        if (this.password !== this.confirm) return useNotification().warning('两次输入的密码不一致');
+      }
       this.busy = true;
-      axios.post('/api/register', { username: this.username, password: this.password, role: this.role }).then(res => {
+      const payload = { username: this.username, role: 'teacher', level: this.securityLevel };
+      if (this.registerNeedsPassword) payload.password = this.password;
+      axios.post('/api/register', payload).then(res => {
         this.restoredUsername = res.data.user.username;
         if (res.data.draftId) {
-          // 有密码：先生成恢复密钥，账号尚未创建；抄写通过后再确认建库
+          // 仅超级隐私模式：先展示恢复词，抄写通过后再确认建库
           this.draftId = res.data.draftId;
           this.recoveryPhrase = res.data.recovery.phrase;
           this.recoveryHash = res.data.recovery.hash;
           this.mode = 'recovery';
         } else {
-          // 无密码：无需恢复密钥，直接完成注册
-          useNotification().success('注册成功！请登录账号 ' + this.restoredUsername + ' 使用系统。');
-          this.switchMode('login');
+          // 其余等级：建库即签发登录态，直接进入系统
+          localStorage.setItem('token', res.data.token);
+          storeMediaToken(res.data.mediaToken);
+          localStorage.setItem('currentUser', JSON.stringify(res.data.user));
+          this.$router.push('/');
         }
       }).catch(err => {
         useNotification().error(err.response?.data?.error || '注册失败');
@@ -314,10 +425,15 @@ export default {
     async confirmRecovery() {
       this.confirmVisible = false;
       this.busy = true;
-      axios.post('/api/register/confirm', { draftId: this.draftId })
+      axios.post('/api/register/confirm', {
+        draftId: this.draftId,
+        password: this.password,
+        phrase: this.recoveryPhrase,
+      })
         .then(res => {
           // 注册成功即自动登录并进入首页
           localStorage.setItem('token', res.data.token);
+          storeMediaToken(res.data.mediaToken);
           localStorage.setItem('currentUser', JSON.stringify(res.data.user));
           this.$router.push('/');
         })
@@ -347,6 +463,7 @@ export default {
         // 覆盖恢复成功：后端已签发登录态，直接存 token 并跳首页
         if (res.data.token) {
           localStorage.setItem('token', res.data.token);
+          storeMediaToken(res.data.mediaToken);
           localStorage.setItem('currentUser', JSON.stringify(res.data.user));
           this.$router.push('/');
           return;
@@ -383,6 +500,7 @@ export default {
         // 覆盖恢复成功：后端已签发登录态，直接存 token 并跳首页
         if (res.data.token) {
           localStorage.setItem('token', res.data.token);
+          storeMediaToken(res.data.mediaToken);
           localStorage.setItem('currentUser', JSON.stringify(res.data.user));
           this.$router.push('/');
           return;
@@ -411,33 +529,91 @@ export default {
       this.restoreFile = '';
       this.switchMode('login');
     },
-    recoverPassword() {
+    // 忘记密码：返回上一步（setpass 阶段已签发恢复 token，不提供返回，避免留下未改密的登录态）
+    recoverBack() {
+      if (this.recoverStep === 'menu') return this.switchMode('login');
+      this.recoverStep = 'menu';
+      this.recoverPhrase = '';
+      this.recoverAccounts = [];
+      this.recoverSlug = '';
+      this.password = '';
+      this.confirm = '';
+    },
+    // 本机恢复：列出本机已登记账号（隐私库除外），由用户按账号名点选
+    openLocalRecover() {
+      this.recoverStep = 'local';
+      this.recoverSlug = '';
+      this.recoverAccounts = [];
+      this.recoverLoading = true;
+      axios.get('/api/accounts').then(res => {
+        const list = (res.data && res.data.accounts) || [];
+        this.recoverAccounts = list.filter(a => !a.protect);
+      }).catch(err => {
+        useNotification().error(err.response?.data?.error || '读取本机账号失败');
+      }).finally(() => { this.recoverLoading = false; });
+    },
+    onRecoverSubmit() {
+      if (this.recoverStep === 'phrase') return this.resetByPhrase();
+      if (this.recoverStep === 'local') return this.recoverByLocalAccount();
+      if (this.recoverStep === 'setpass') return this.saveRecoveredPassword();
+    },
+    // 恢复词恢复：只凭恢复词定位账号 + 新密码重置（隐私库与非隐私库都由后端按恢复词校验）
+    resetByPhrase() {
+      if (!this.recoverPhrase) return useNotification().warning('请填写恢复词');
+      if (!this.password || this.password.length < 6) return useNotification().warning('新密码至少 6 位');
+      if (this.password !== this.confirm) return useNotification().warning('两次输入的新密码不一致');
       this.busy = true;
       axios.post('/api/recover-password', {
-        username: this.username,
         phrase: this.recoverPhrase,
         newPassword: this.password,
-      }).then(() => {
-        useNotification().success('密码已重置，请使用新密码登录');
-        this.username = '';
+      }).then(res => {
+        // 后端按恢复词定位到账号后回传用户名，顺带填好登录框
+        const name = res.data && res.data.username;
+        if (name) this.username = name;
+        useNotification().success(name ? '账号 ' + name + ' 的密码已重置，请用新密码登录' : '密码已重置，请使用新密码登录');
         this.recoverPhrase = '';
         this.password = '';
+        this.confirm = '';
         this.switchMode('login');
       }).catch(err => {
         useNotification().error(err.response?.data?.error || '重置失败');
       }).finally(() => { this.busy = false; });
     },
+    // 本机信息恢复：选中的本机库即凭证，签发带 recover 标记的临时登录态，随后强制设新密码
+    recoverByLocalAccount() {
+      if (!this.recoverSlug) return useNotification().warning('请先选择要恢复的账号');
+      this.busy = true;
+      axios.post('/api/db-recover', { file: this.recoverSlug + '.db' }).then(res => {
+        localStorage.setItem('token', res.data.token);
+        storeMediaToken(res.data.mediaToken);
+        this.recoveredUser = res.data.user;
+        this.recoveredAccount = res.data.user.username;
+        this.username = res.data.user.username;
+        this.password = '';
+        this.confirm = '';
+        this.recoverStep = 'setpass';
+        useNotification().info('已验证本机数据库，请设置新密码');
+      }).catch(err => {
+        useNotification().error(err.response?.data?.error || '无法用该数据库文件恢复');
+      }).finally(() => { this.busy = false; });
+    },
+    saveRecoveredPassword() {
+      if (!this.password || this.password.length < 6) return useNotification().warning('新密码至少 6 位');
+      if (this.password !== this.confirm) return useNotification().warning('两次输入的新密码不一致');
+      this.busy = true;
+      axios.put('/api/account/password', { newPassword: this.password }).then(res => {
+        // 后端换发了不含 recover 标记的常规 token，落盘后进入系统
+        if (res.data && res.data.token) {
+          localStorage.setItem('token', res.data.token);
+          storeMediaToken(res.data.mediaToken);
+        }
+        localStorage.setItem('currentUser', JSON.stringify(this.recoveredUser || {}));
+        useNotification().success('新密码已设置');
+        this.$router.push('/');
+      }).catch(err => {
+        useNotification().error(err.response?.data?.error || '设置新密码失败');
+      }).finally(() => { this.busy = false; });
+    },
   },
 };
 </script>
-
-<style>
-/* 登录/注册页的角色选择框：禁用态也不变淡，边框与账号/密码输入框统一 */
-.role-select.av-select--disabled .av-select__trigger {
-  opacity: 1 !important;
-  border-radius: 12px !important;                 /* 与输入框 rounded-xl 一致 */
-  border-color: var(--color-border, #e5e7eb) !important;
-  background-color: var(--color-surface-hover, #f3f4f6) !important;
-  box-shadow: none !important;
-}
-</style>

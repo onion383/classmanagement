@@ -102,6 +102,18 @@
   text-overflow: ellipsis;
 }
 
+/* ---------- 夜间（毛玻璃系）：深色半透明磨砂，替换日间固定白色覆盖 ---------- */
+:root[data-mode="night"]:is([data-theme="glass"], [data-theme="glass2"]) .av-select__trigger {
+  background-color: rgba(24, 34, 56, 0.55) !important;
+  border-color: rgba(255, 255, 255, 0.10) !important;
+}
+:root[data-mode="night"]:is([data-theme="glass"], [data-theme="glass2"]) .av-select__trigger:hover {
+  background-color: rgba(34, 48, 78, 0.70) !important;
+}
+:root[data-mode="night"]:is([data-theme="glass"], [data-theme="glass2"]) .av-select--open .av-select__trigger {
+  background-color: rgba(30, 43, 70, 0.75) !important;
+}
+
 /* ---------- 毛玻璃主题（glass）轻薄磨砂覆盖 ---------- */
 :root:is([data-theme="glass"], [data-theme="win11"]) .av-select__trigger {
   background-color: rgba(255, 255, 255, 0.82) !important;

@@ -12,6 +12,7 @@ const fs = require('fs');
 const path = require('path');
 const dbManager = require('../dbManager/dbManager');
 const sessions = require('../services/sessions');
+const secureChannel = require('../services/secureChannel');
 
 // 杜绝硬编码兜底：优先使用环境变量 JWT_SECRET。
 // 若未配置，则从 .jwt-secret 文件读取（无则自动生成并持久化），保证重启后已签发 Token 仍有效。
@@ -40,19 +41,32 @@ function resolveSecret() {
 
 const SECRET = resolveSecret();
 
-// 登录 Token 签发策略：不设过期时间（不带 exp 声明），只要用户不主动退出就一直有效；
-// 主动退出时由 services/sessions 把该 token 的 sid 移出会话名单，原 token 立即失效。
-// 属本地单机应用，这是「长期保持登录」与「可吊销」之间的平衡做法。
-const TOKEN_SIGN_OPTS = {};
-// 配套 Cookie 同样按 100 年设置。Chromium 会把 Cookie 有效期上限截到 400 天，
-// 但不影响登录保持：前端登录态走 localStorage + Authorization 头，
-// Cookie 仅用于图片/CSS 等静态资源请求（且这些请求也可用 ?token= 兜底）。
+// 登录 Token 签发策略：30 天有效期 + 会话名单双保险。
+// 主动退出时由 services/sessions 把 sid 移出名单，原 token 立即失效；
+// 即使 token 被从 localStorage/备份/内存中捞走，也最多只能用 30 天。
+const TOKEN_SIGN_OPTS = { expiresIn: '30d' };
+// 滑动续期：剩余有效期少于该阈值时，任意一次正常业务请求都会顺带续签一份新的 30 天 token。
+// 效果是「活跃用户永不过期，长期不用的账号最多 30 天后失效」；sid 不变，
+// 因此会话名单、媒体凭据（同 sid）都不受影响。
+const SLIDE_RENEW_WINDOW_MS = 7 * 24 * 60 * 60 * 1000;
+// 配套 Cookie 仍按 100 年设置（JWT 自身有 exp，Cookie 活多久都不会延长鉴权）。
+// 前端登录态走 localStorage + 加密信道凭据；Cookie 仅作为静态资源的兼容兜底。
 const TOKEN_COOKIE_MAX_AGE = 100 * 365 * 24 * 60 * 60 * 1000;
 
-// 解析请求中的 Token：优先 Authorization 头，其次 Cookie，最后 URL 查询参数。
-// 查询参数供 <img> / CSS url() 等无法携带请求头的资源请求使用（渲染层受 file:// 跨源限制，
-// Lax Cookie 不会自动带过去），后端仍校验 Token 有效性，不降低鉴权。
-function resolveToken(req) {
+// 媒体凭据：只用于 <img> / CSS url() 这类无法携带自定义头的静态资源。
+// 登录 JWT 不再出现在 URL 里（URL 会进 Referer/日志/浏览器历史），换成一个
+// scope=media 的受限凭据：能取图，不能调业务 API；登出吊销 sid 后同时失效。
+const MEDIA_TOKEN_TTL = '30d';
+const MEDIA_URL_RE = /^\/api\/album\/photo\/\d+\/(?:thumb|file)$/;
+
+function isMediaRequest(req) {
+  if (req.method !== 'GET' && req.method !== 'HEAD') return false;
+  const url = String(req.originalUrl || req.url || '').split('?')[0].replace(/\/+$/, '');
+  return MEDIA_URL_RE.test(url);
+}
+
+// 明文模式下的凭据来源（Authorization / Cookie / 查询参数）。
+function plainToken(req) {
   const headerToken = (req.headers.authorization || '').split(' ')[1];
   if (headerToken) return headerToken;
   const cookie = req.headers.cookie || '';
@@ -62,41 +76,130 @@ function resolveToken(req) {
   return null;
 }
 
-function verifyToken(token) {
+// 统一解析凭据来源，返回 { token, source }：
+//   channel：本请求携带了加密凭据（X-Auth-Proof）
+//   bound： 会话已绑定登录 token，本请求只带了不含 token 的信道凭据
+//   media： 媒体路径上的受限媒体凭据（查询参数）
+//   plain： 未启用安全通道时的明文凭据
+function resolveAuth(req) {
+  if (req.channelToken) return { token: req.channelToken, source: 'channel' };
+  if (req.sessionId) {
+    const bound = secureChannel.getBoundAuth(req.sessionId);
+    if (bound) return { token: bound, source: 'bound' };
+  }
+  if (secureChannel.hasMaster()) {
+    if (isMediaRequest(req)) {
+      const q = req.query && req.query.token ? String(req.query.token) : null;
+      if (q) return { token: q, source: 'media' };
+    }
+    return { token: null, source: 'none' };
+  }
+  return { token: plainToken(req), source: 'plain' };
+}
+
+// 兼容旧调用：只返回 token 字符串
+function resolveToken(req) {
+  return resolveAuth(req).token;
+}
+
+function verifyToken(token, { allowMedia = false } = {}) {
   const payload = jwtLib().verify(token, SECRET);
   // 会话名单校验：主动退出会把 sid 移出名单，此后原 token 立即失效（用户须重新登录）。
   // 不带 sid 的旧 token（本次改动之前签发的）同样视为失效，全部需要重新登录一次。
   if (!payload || !sessions.has(payload.sid)) throw new Error('会话已失效');
+  // 媒体凭据只能用于媒体路径，不能拿来调业务 API
+  if (payload.scope === 'media' && !allowMedia) throw new Error('媒体凭据不可用于此接口');
   return payload;
+}
+
+// 签发媒体凭据：sid 与登录 token 相同，登出时随会话一起吊销
+function signMediaToken(user) {
+  return jwtLib().sign(
+    {
+      userId: user.userId, username: user.username, role: user.role,
+      dbSlug: user.dbSlug, sid: user.sid, scope: 'media',
+    },
+    SECRET,
+    { expiresIn: MEDIA_TOKEN_TTL }
+  );
+}
+
+// 滑动续期：token 剩余有效期进入 7 天窗口后，随本次正常请求续签一份新的 30 天 token。
+// 新 token 沿用原 sid（会话名单 / 媒体凭据继续有效），通过响应头交前端落盘；
+// 绑定到信道的 token 也同步更新，否则旧 token 到点后该信道会失效。
+// 媒体路径（<img> 取图）不续签：图片请求读不到响应头，且不应因取图凭空签发凭据。
+function slideSession(req, res, user, source) {
+  if (!user || source === 'media') return;
+  const exp = Number(user.exp) || 0;
+  if (!exp || exp * 1000 - Date.now() > SLIDE_RENEW_WINDOW_MS) return;
+  const payload = {
+    userId: user.userId, username: user.username, role: user.role,
+    dbSlug: user.dbSlug, sid: user.sid,
+  };
+  const token = jwtLib().sign(payload, SECRET, TOKEN_SIGN_OPTS);
+  res.set('X-Renewed-Token', token);
+  res.set('X-Renewed-Media', signMediaToken(payload));
+  // 明文模式下 Cookie 还参与鉴权，一并续上；安全模式下 Cookie 不参与鉴权，刷新无副作用
+  res.cookie('token', token, {
+    httpOnly: true, sameSite: 'lax', path: '/', maxAge: TOKEN_COOKIE_MAX_AGE,
+  });
+  if (req.sessionId) secureChannel.bindAuth(req.sessionId, token);
 }
 
 function auth(requiredRoles = []) {
   return (req, res, next) => {
-    const token = resolveToken(req);
-    if (!token) return res.status(401).json({ error: '未登录' });
+    const { token, source } = resolveAuth(req);
+    if (!token) {
+      // 安全模式下没有可用凭据：让前端补发一份带 token 的信道凭据后重试，
+      // 而不是直接判定「登录失效」把用户踢回登录页。
+      if (secureChannel.hasMaster() && req.sessionId) {
+        res.set('X-Auth-Required', '1');
+        return res.status(401).json({ d: 'auth-required' });
+      }
+      return res.status(401).json({ error: '未登录' });
+    }
     try {
-      const user = verifyToken(token);
+      const user = verifyToken(token, { allowMedia: isMediaRequest(req) });
+      // 查询串里的凭据必须是受限媒体凭据：登录 JWT 不允许再通过 URL 使用
+      if (source === 'media' && user.scope !== 'media') throw new Error('媒体凭据无效');
       if (requiredRoles.length > 0 && !requiredRoles.includes(user.role)) {
         return res.status(403).json({ error: '权限不足' });
       }
       req.user = user;
+      slideSession(req, res, user, source);
       const slug = user.dbSlug || 'default';
       // 绑定当前请求对应的班主任库：使 db.js 导出的 db 代理命中正确库
       return dbManager.withDb(slug, () => next());
-    } catch {
+    } catch (err) {
+      // 超级隐私模式：进程内的库钥匙已不在（如登出后旧 token 仍在），要求重新登录解锁
+      if (err && err.code === 'DB_LOCKED') {
+        return res.status(401).json({ error: '数据库已锁定，请重新登录', code: 'DB_LOCKED' });
+      }
+      // 绑定态 token 失效（换账号/其它窗口登出）：解绑并让前端带新 token 重试一次；
+      // 若重试仍失败，才会按正常「Token失效」流程回登录页。
+      if (source === 'bound') {
+        secureChannel.unbindAuth(req.sessionId);
+        res.set('X-Auth-Required', '1');
+        return res.status(401).json({ d: 'auth-required' });
+      }
       res.status(401).json({ error: 'Token无效' });
     }
   };
 }
 
-// 静态资源鉴权：仅校验 Token 有效性（不区分角色），配合 Cookie/查询参数使用，
-// 避免 <img> / CSS url() 等无 Authorization 头的请求被拦截。
+// 静态资源鉴权：<img> / CSS url() 没有自定义头，只能用查询参数里的媒体凭据。
+// 安全模式下不再接受登录 JWT（哪怕放在 Cookie/查询串里）。
 function authStatic() {
   return (req, res, next) => {
-    const token = resolveToken(req);
+    const secureOn = secureChannel.hasMaster();
+    const token = secureOn
+      ? (req.query && req.query.token ? String(req.query.token) : null)
+      : plainToken(req);
     if (!token) return res.status(401).json({ error: '未登录' });
     try {
-      req.user = verifyToken(token);
+      const user = verifyToken(token, { allowMedia: true });
+      if (secureOn && user.scope !== 'media') throw new Error('媒体凭据无效');
+      req.user = user;
       next();
     } catch {
       res.status(401).json({ error: 'Token无效' });
@@ -104,4 +207,7 @@ function authStatic() {
   };
 }
 
-module.exports = { auth, authStatic, SECRET, resolveToken, verifyToken, TOKEN_SIGN_OPTS, TOKEN_COOKIE_MAX_AGE };
+module.exports = {
+  auth, authStatic, SECRET, resolveToken, resolveAuth, verifyToken,
+  signMediaToken, TOKEN_SIGN_OPTS, TOKEN_COOKIE_MAX_AGE,
+};

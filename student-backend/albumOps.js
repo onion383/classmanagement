@@ -6,15 +6,17 @@
 // 命名（{photoId}_{原名}）移入；撤销时再按同一规则从回收站移回原路径。
 // 供 routes/album.js 与 routes/undo.js 共用，避免文件操作逻辑重复。
 //
-// 缩略图恢复说明：缩略图路径固定为 {THUMB_DIR}/{photoId}.jpg，删除后可删文件。
-// 恢复照片索引后 thumb_path 置空，routes/album.js 的 /thumb 接口会自动按需重建，
-// 因此这里不复制缩略图生成逻辑。
+// 缩略图恢复说明：缩略图路径按库隔离，固定为 {THUMB_DIR}/{slug}/{photoId}.jpg
+// （各库的 album_photos.id 都从 1 开始自增，若不按库隔离会互相覆盖导致串图），
+// 删除后可删文件。恢复照片索引后 thumb_path 置空，routes/album.js 的 /thumb
+// 接口会自动按需重建，因此这里不复制缩略图生成逻辑。
 // =========================================================================
 
 const fs = require('fs');
 const fsp = fs.promises;
 const path = require('path');
 const dbManager = require('./dbManager/dbManager');
+const albumThumbs = require('./albumThumbs');
 
 const THUMB_DIR = dbManager.thumbsDir;
 const TRASH_DIR = dbManager.trashDir;
@@ -61,11 +63,16 @@ async function restoreToOriginal(photo) {
   return true;
 }
 
-// 删除某照片的缩略图缓存（路径由 {photoId}.jpg 确定）。文件不存在则忽略。
-async function deleteThumb(photo) {
+// 删除某照片的缩略图缓存（路径由 {slug}/{photoId}.jpg 确定）。文件不存在则忽略。
+// 传入 slug 时（当前请求上下文可取）按库定位；不传则退化为清内存缓存，
+// 磁盘文件由调用方在拿到 slug 后处理。
+async function deleteThumb(photo, slug) {
   const id = photo && photo.id;
   if (id == null) return;
-  const tp = path.join(THUMB_DIR, `${id}.jpg`);
+  const s = slug || dbManager.currentSlug();
+  if (!s) { albumThumbs.forgetPhoto(s, id); return; }
+  const tp = albumThumbs.thumbPathFor(s, id);
+  albumThumbs.forgetPhoto(s, id);
   await fsp.unlink(tp).catch(() => {});
 }
 

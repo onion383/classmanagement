@@ -1,6 +1,6 @@
 import { defineStore } from 'pinia'
 import { ref, computed, watch } from 'vue'
-import { resourceUrl } from '../utils/apiUrl'
+import { resourceUrl, ensureMediaToken } from '../utils/apiUrl'
 import { loadThemeStyles, warmNightMode, isNightWarmEnabled } from '../styles/themeLoader'
 import { performThemeSwap, isThemeSwapInFlight } from '../styles/themeTransition'
 import { SEND } from '../electronChannels.js'
@@ -149,6 +149,13 @@ export const useThemeStore = defineStore('theme', () => {
       const bgUrl = isCustomBg ? resourceUrl(bg) : bg
       document.documentElement.style.setProperty('--bg-image', `url('${bgUrl}')`)
       document.documentElement.classList.add('has-bg-image')
+      // 旧版本升级上来的账号可能还没有媒体凭据：补一份后把背景图重设一次，
+      // 否则这张带鉴权的自定义背景会一直 401（图不会自行重试）。
+      if (isCustomBg && !localStorage.getItem('mediaToken')) {
+        ensureMediaToken().then((t) => {
+          if (t) document.documentElement.style.setProperty('--bg-image', `url('${resourceUrl(bg)}')`)
+        })
+      }
     } else {
       document.documentElement.style.removeProperty('--bg-image')
       document.documentElement.classList.remove('has-bg-image')

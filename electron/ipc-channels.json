@@ -84,7 +84,9 @@
     "perf-gc",
     "perf-startup",
     "get-app-version",
-    "update-check"
+    "update-check",
+    "set-content-protection",
+    "copy-sensitive-text"
   ],
   "receive": [
     "from-main",

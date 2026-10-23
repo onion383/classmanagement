@@ -197,9 +197,10 @@ app.on('second-instance', () => {
   }
 })
 
-// 测试/调试用：INP_DEBUG=1 时开启 Chromium 远程调试端口，供 scripts/inp-probe.mjs 通过 CDP
-// 注入 INP 观测器并派发真实输入事件进行交互性能测量。仅本地测试使用，默认不开启。
-if (process.env.INP_DEBUG) {
+// 测试/调试用：仅开发模式且 INP_DEBUG=1 时开启 Chromium 远程调试端口，
+// 供 scripts/inp-probe.mjs 通过 CDP 注入 INP 观测器并派发真实输入事件进行交互性能测量。
+// 正式包一律不开启：避免他人用环境变量拉起带 CDP 的正式应用。
+if (isDev && process.env.INP_DEBUG) {
   app.commandLine.appendSwitch('remote-debugging-port', '9222')
 }
 
@@ -524,6 +525,27 @@ webviewGuard.registerWebviewGuard({ getMainWindow: () => mainWindow, isDev })
 
 // 安全通道主密钥：提供给渲染进程（含工具箱/桌面组件）参与前后端 HKDF 派生态。
 ipcMain.handle('get-master-key', () => getMasterKey())
+
+// 恢复词等敏感内容：展示期间令窗口排除在屏幕捕获之外（Windows 走 SetWindowDisplayAffinity，
+// 截图/录屏得到黑块），关闭或离开设置页时立即恢复。
+ipcMain.handle('set-content-protection', (event, enabled) => {
+  const win = BrowserWindow.fromWebContents(event.sender)
+  if (!win) return false
+  try { win.setContentProtection(!!enabled) } catch (_) { return false }
+  return true
+})
+
+// 复制敏感文本：写剪贴板，并在 TTL 后「仅当剪贴板仍是这段文本」时清空，
+// 不覆盖用户后来复制的内容。默认 60 秒。
+ipcMain.handle('copy-sensitive-text', (event, { text, ttlMs } = {}) => {
+  if (typeof text !== 'string' || !text) return false
+  clipboard.writeText(text)
+  const ttl = Math.min(Math.max(Number(ttlMs) || 60000, 1000), 10 * 60 * 1000)
+  setTimeout(() => {
+    try { if (clipboard.readText() === text) clipboard.clear() } catch (_) { /* 读剪贴板失败忽略 */ }
+  }, ttl)
+  return true
+})
 
 // 见 tray.js：registerTrayIpc（shutdown-action / win-minimize / win-maximize-toggle / win-close）/
 // handleMainClose / resetShutdownState / createTray / destroyTray / isTrayAlive / beginCloseWithoutMenu

@@ -6,6 +6,7 @@ import './styles/index.css'
 import { loadThemeStyles } from './styles/themeLoader'
 import { useThemeStore } from './stores/theme'
 import { setupApiClient, backendBaseUrl } from './utils/httpClient'
+import { ensureMediaToken } from './utils/apiUrl'
 import { useNotification } from './composables/useNotification'
 import { ensureDashboardData } from './composables/useDashboardData'
 import { installInpProbe } from './utils/inpProbe'
@@ -55,6 +56,10 @@ setupApiClient({
     return m === 'get' || m === 'head'
   },
 })
+
+// 媒体凭据（<img>/CSS 用）：已有登录态时补一份/续期，避免首屏图片缺少受限凭据而 401。
+// 与启动流程并行执行，不阻塞首屏渲染。
+if (localStorage.getItem('token')) ensureMediaToken()
 
 // ===== 关键路径优化：在 Vue 初始化之前就设置主题和预加载资源 =====
 

@@ -10,6 +10,7 @@ const path = require('path');
 const {
   getDatabase, dataDir, wrapKey, unwrapKey, sqlKey,
   registryFindBySlug, registryUpsert, registrySetEncrypted,
+  getUnlockedKey,
 } = require('./dbManager.base');
 const { evictConn } = require('./dbManager.conn');
 
@@ -30,7 +31,10 @@ function exportBundle(slug) {
     filePath: dbFilePath(slug),
     encrypted,
     // 明文库没有库钥匙（数据本身不加密），key 为 null
-    key: encrypted ? unwrapKey(rec.wrapped_key) : null,
+    // 超级隐私模式：wrapped_key 为空，只能取本次登录解锁后留在内存里的库钥匙
+    key: encrypted
+      ? (rec.protect === 1 ? (getUnlockedKey(slug) || (() => { throw new Error('数据库已锁定，请重新登录'); })()) : unwrapKey(rec.wrapped_key))
+      : null,
   };
 }
 

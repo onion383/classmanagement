@@ -35,7 +35,7 @@ export const PAGE_GROUPS = [
   {
     title: '活动中心',
     items: [
-      { to: '/album',         label: '学生相册', emoji: '📷', color: '#f472b6', lucide: Images, py: 'xsxc' },
+      { to: '/album',         label: '班级相册', emoji: '📷', color: '#f472b6', lucide: Images, py: 'bjxc' },
       { to: '/activities',    label: '班级活动', emoji: '🎉', color: '#fb7185', lucide: PartyPopper, py: 'bjhd' },
     ],
   },

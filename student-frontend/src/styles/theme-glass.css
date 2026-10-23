@@ -641,16 +641,15 @@
     inset 0 1px 0 var(--alpha-white-15);
 }
 /* 顶部玻璃受光渐变高光：与侧边栏 / 标题栏统一（自上而下 0.22→0.06→0，占高度 40%），
-   取代原来的「四周 1px 渐变荧光描边」；底边与四周的 1px 亮边仍由 border + box-shadow 提供 */
+   取代原来的「四周 1px 渐变荧光描边」；底边与四周的 1px 亮边仍由 border + box-shadow 提供。
+   这里铺满整卡、由渐变自己淡出（40% 处已为全透明），不能用 height: 40% 的独立块：
+   那样圆角块的底边会压在毛玻璃上，形成一条带圆角的可见接缝。 */
 :root:is([data-theme="glass"], [data-theme="win11"]) .bg-surface::before {
   content: '';
   position: absolute;
-  top: 0;
-  left: 0;
-  right: 0;
-  height: 40%;
+  inset: 0;
   border-radius: inherit;
-  background: linear-gradient(180deg, var(--alpha-white-22) 0%, var(--alpha-white-06) 55%, var(--alpha-white-00) 100%);
+  background: linear-gradient(180deg, var(--alpha-white-22) 0%, var(--alpha-white-06) 22%, var(--alpha-white-00) 40%, var(--alpha-white-00) 100%);
   pointer-events: none;
   z-index: -1;
 }

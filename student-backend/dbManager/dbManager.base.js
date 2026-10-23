@@ -69,20 +69,102 @@ function snapshotsDir(slug) {
 
 // ---------- 库密钥 包裹/解包 ----------
 // wrapped = base64(iv).base64(tag).base64(ciphertext)
-function wrapKey(plainKey) {
+function wrapWithKey(wKey, plainKey) {
   const iv = crypto.randomBytes(12);
-  const cipher = crypto.createCipheriv('aes-256-gcm', WRAP_KEY, iv);
+  const cipher = crypto.createCipheriv('aes-256-gcm', wKey, iv);
   const enc = Buffer.concat([cipher.update(plainKey, 'utf8'), cipher.final()]);
   const tag = cipher.getAuthTag();
   return [iv, tag, enc].map(b => b.toString('base64')).join('.');
 }
 
-function unwrapKey(wrapped) {
-  const [ivB, tagB, encB] = wrapped.split('.');
-  const decipher = crypto.createDecipheriv('aes-256-gcm', WRAP_KEY, Buffer.from(ivB, 'base64'));
+function unwrapWithKey(wKey, wrapped) {
+  const [ivB, tagB, encB] = String(wrapped || '').split('.');
+  if (!ivB || !tagB || !encB) throw new Error('invalid wrapped key');
+  const decipher = crypto.createDecipheriv('aes-256-gcm', wKey, Buffer.from(ivB, 'base64'));
   decipher.setAuthTag(Buffer.from(tagB, 'base64'));
   return Buffer.concat([decipher.update(Buffer.from(encB, 'base64')), decipher.final()]).toString('utf8');
 }
+
+function wrapKey(plainKey) {
+  return wrapWithKey(WRAP_KEY, plainKey);
+}
+
+function unwrapKey(wrapped) {
+  return unwrapWithKey(WRAP_KEY, wrapped);
+}
+
+// ---------- 超级隐私模式：库钥匙改由「登录密码 / 恢复词」包裹 ----------
+// 开启后 registry.wrapped_key 置空，主密钥再也解不出库钥匙：拷走 db-master.key + 库文件，
+// 没有登录密码或恢复词就打不开。口令不落盘，解锁结果只存内存 unlockedKeys，登出即丢。
+// 派生用 scrypt 而非单次 SHA256：离线拿到 wrapped 密文时爆破成本足够高。
+// 密码与恢复词各用独立 salt，改密码不会让已抄写的恢复词失效。
+// 成本参数：N=2^17（约 128MB 内存、本机实测 ~0.2s）。默认 maxmem 只有 32MB，
+// 必须按 N/r 显式放宽，否则 scryptSync 会直接抛错。
+// 每个账号把实际使用的参数记在 registry 里（密码/恢复词各一列），
+// 旧版本用 N=16384 包裹的库仍按旧参数解锁；改密码时顺势升级到新参数。
+const LEGACY_SCRYPT_PARAMS = { N: 16384, r: 8, p: 1 };
+const SCRYPT_PARAMS = { N: 131072, r: 8, p: 1 };
+const SCRYPT_LEN = 32;
+
+function newPrivacySalt() {
+  return crypto.randomBytes(16).toString('base64');
+}
+
+// 把登记行里的参数（JSON 字符串 / 对象 / 空值）还原成 scrypt 选项。
+// 空值或损坏一律回退旧参数（兼容升级前开启的隐私库）；maxmem 不信任存下来的值，按 N/r 现算。
+function normalizeScryptParams(raw) {
+  let parsed = raw;
+  if (typeof raw === 'string') {
+    if (!raw) return { ...LEGACY_SCRYPT_PARAMS, maxmem: 128 * LEGACY_SCRYPT_PARAMS.N * LEGACY_SCRYPT_PARAMS.r * 2 };
+    try { parsed = JSON.parse(raw); } catch (_) { return normalizeScryptParams(''); }
+  }
+  if (!parsed || typeof parsed !== 'object') return normalizeScryptParams('');
+  const N = Number(parsed.N);
+  const r = Number(parsed.r);
+  const p = Number(parsed.p);
+  // 上限防止被改坏的登记行把内存拉爆（宁可解锁失败，也不要 OOM）
+  if (!Number.isInteger(N) || !Number.isInteger(r) || !Number.isInteger(p)
+    || N < 1024 || N > (1 << 19) || r < 1 || r > 32 || p < 1 || p > 16) {
+    return normalizeScryptParams('');
+  }
+  return { N, r, p, maxmem: Math.max(32 * 1024 * 1024, 128 * N * r * 2) };
+}
+
+function serializeScryptParams(params) {
+  const { N, r, p } = normalizeScryptParams(params || SCRYPT_PARAMS);
+  return JSON.stringify({ N, r, p });
+}
+
+function derivePrivacyKey(secret, saltB64, params) {
+  return crypto.scryptSync(
+    String(secret),
+    Buffer.from(String(saltB64), 'base64'),
+    SCRYPT_LEN,
+    normalizeScryptParams(params)
+  );
+}
+
+function wrapKeyByPrivacySecret(plainKey, secret, saltB64, params) {
+  return wrapWithKey(derivePrivacyKey(secret, saltB64, params || SCRYPT_PARAMS), plainKey);
+}
+
+function unwrapKeyByPrivacySecret(wrapped, secret, saltB64, params) {
+  return unwrapWithKey(derivePrivacyKey(secret, saltB64, params), wrapped);
+}
+
+// 内存解锁表：slug -> 库钥匙明文。只在进程内存在，不写盘；登出/退出应用即释放。
+const unlockedKeys = new Map();
+// 解锁来源（password / mnemonic）：用于「恢复词登录后重设密码」时免输已忘记的旧密码
+const unlockSources = new Map();
+function setUnlockedKey(slug, key, source) {
+  if (!slug || !key) return;
+  unlockedKeys.set(slug, key);
+  if (source) unlockSources.set(slug, source);
+}
+function getUnlockedKey(slug) { return unlockedKeys.get(slug) || null; }
+function getUnlockSource(slug) { return unlockSources.get(slug) || null; }
+function clearUnlockedKey(slug) { unlockedKeys.delete(slug); unlockSources.delete(slug); }
+function clearAllUnlockedKeys() { unlockedKeys.clear(); unlockSources.clear(); }
 
 // ---------- 用户绑定钥匙（v2 便携备份） ----------
 // 以「用户的密码/助记词」派生一把 AES 包裹钥匙，把库钥匙加密成密文装进备份包。
@@ -192,21 +274,36 @@ function ensureIndex() {
       username TEXT NOT NULL,
       wrapped_key TEXT NOT NULL,
       encrypted INTEGER NOT NULL DEFAULT 1,
+      protect INTEGER NOT NULL DEFAULT 0,
+      wrapped_by_password TEXT NOT NULL DEFAULT '',
+      wrapped_by_mnemonic TEXT NOT NULL DEFAULT '',
+      kdf_salt TEXT NOT NULL DEFAULT '',
+      mnemonic_salt TEXT NOT NULL DEFAULT '',
+      kdf_params_password TEXT NOT NULL DEFAULT '',
+      kdf_params_mnemonic TEXT NOT NULL DEFAULT '',
       created_at TEXT DEFAULT CURRENT_TIMESTAMP
     );
   `);
-  // 兼容存量 index.db：老库没有 encrypted 列，补上并默认 1（加密），保证既有库行为不变
+  // 兼容存量 index.db：老库缺的列逐个补上，默认值保证既有库行为不变
   const cols = indexDb.prepare('PRAGMA table_info(registry)').all();
-  if (!cols.some((c) => c.name === 'encrypted')) {
-    indexDb.exec('ALTER TABLE registry ADD COLUMN encrypted INTEGER NOT NULL DEFAULT 1');
-  }
+  const ensureCol = (name, ddl) => {
+    if (!cols.some((c) => c.name === name)) indexDb.exec(`ALTER TABLE registry ADD COLUMN ${ddl}`);
+  };
+  ensureCol('encrypted', 'encrypted INTEGER NOT NULL DEFAULT 1');
+  ensureCol('protect', 'protect INTEGER NOT NULL DEFAULT 0');
+  ensureCol('wrapped_by_password', "wrapped_by_password TEXT NOT NULL DEFAULT ''");
+  ensureCol('wrapped_by_mnemonic', "wrapped_by_mnemonic TEXT NOT NULL DEFAULT ''");
+  ensureCol('kdf_salt', "kdf_salt TEXT NOT NULL DEFAULT ''");
+  ensureCol('mnemonic_salt', "mnemonic_salt TEXT NOT NULL DEFAULT ''");
+  ensureCol('kdf_params_password', "kdf_params_password TEXT NOT NULL DEFAULT ''");
+  ensureCol('kdf_params_mnemonic', "kdf_params_mnemonic TEXT NOT NULL DEFAULT ''");
   return indexDb;
 }
 
 // ---------- index.db 操作 ----------
 function registryFindByUsername(username) {
   ensureIndex();
-  return indexDb.prepare('SELECT slug, wrapped_key, encrypted FROM registry WHERE username = ?').get(username);
+  return indexDb.prepare('SELECT * FROM registry WHERE username = ?').get(username);
 }
 
 function registryFindBySlug(slug) {
@@ -237,7 +334,46 @@ function registryDelete(slug) {
 // 列出所有已登记的班主任账号（供登录页「从数据库注册」加载账号）
 function registryList() {
   ensureIndex();
-  return indexDb.prepare('SELECT slug, username FROM registry ORDER BY created_at').all();
+  return indexDb.prepare('SELECT slug, username, protect FROM registry ORDER BY created_at').all();
+}
+
+// 开启超级隐私模式：写入两份口令包裹的库钥匙，并抹掉主密钥包裹的 wrapped_key。
+// 此后没有登录密码/恢复词，任何路径（包括持有 db-master.key）都解不出库钥匙。
+// kdfParamsPassword / kdfParamsMnemonic 分别记录两份包裹实际使用的 scrypt 参数。
+function registrySetPrivacy(slug, {
+  passwordSalt, mnemonicSalt, wrappedByPassword, wrappedByMnemonic,
+  kdfParamsPassword = '', kdfParamsMnemonic = '',
+}) {
+  ensureIndex();
+  indexDb.prepare(`
+    UPDATE registry SET protect = 1, kdf_salt = ?, mnemonic_salt = ?,
+      kdf_params_password = ?, kdf_params_mnemonic = ?,
+      wrapped_by_password = ?, wrapped_by_mnemonic = ?, wrapped_key = ''
+    WHERE slug = ?
+  `).run(
+    passwordSalt, mnemonicSalt, kdfParamsPassword, kdfParamsMnemonic,
+    wrappedByPassword, wrappedByMnemonic, slug
+  );
+}
+
+// 关闭超级隐私模式：用主密钥重新包裹库钥匙，清空口令相关字段
+function registryClearPrivacy(slug, wrappedKey) {
+  ensureIndex();
+  indexDb.prepare(`
+    UPDATE registry SET protect = 0, kdf_salt = '', mnemonic_salt = '',
+      kdf_params_password = '', kdf_params_mnemonic = '',
+      wrapped_by_password = '', wrapped_by_mnemonic = '', wrapped_key = ?
+    WHERE slug = ?
+  `).run(wrappedKey, slug);
+}
+
+// 改登录密码：只换密码这一份包裹（新 salt + 新密文 + 新 KDF 参数），恢复词包裹保持原样
+function registrySetPasswordWrap(slug, passwordSalt, wrappedByPassword, kdfParamsPassword = '') {
+  ensureIndex();
+  indexDb.prepare(`
+    UPDATE registry SET kdf_salt = ?, kdf_params_password = ?, wrapped_by_password = ?
+    WHERE slug = ?
+  `).run(passwordSalt, kdfParamsPassword, wrappedByPassword, slug);
 }
 
 module.exports = {
@@ -254,8 +390,22 @@ module.exports = {
   snapshotsDir,
   wrapKey,
   unwrapKey,
+  wrapWithKey,
+  unwrapWithKey,
   wrapKeyBySecret,
   decryptBundleKey,
+  // 超级隐私模式
+  newPrivacySalt,
+  normalizeScryptParams,
+  serializeScryptParams,
+  SCRYPT_PARAMS,
+  wrapKeyByPrivacySecret,
+  unwrapKeyByPrivacySecret,
+  setUnlockedKey,
+  getUnlockedKey,
+  getUnlockSource,
+  clearUnlockedKey,
+  clearAllUnlockedKeys,
   sqlKey,
   als,
   connCache,
@@ -271,4 +421,7 @@ module.exports = {
   registrySetEncrypted,
   registryDelete,
   registryList,
+  registrySetPrivacy,
+  registryClearPrivacy,
+  registrySetPasswordWrap,
 };

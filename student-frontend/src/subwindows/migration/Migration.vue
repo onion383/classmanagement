@@ -70,6 +70,8 @@
 
 <script>
 import { SEND, INVOKE, RECEIVE } from '../../electronChannels.js'
+import { apiUrl } from '../../utils/apiUrl'
+import { applyAuthHeader } from '../../composables/secureChannel'
 export default {
   name: 'Migration',
   data() {
@@ -138,9 +140,12 @@ export default {
     // 调用后端加密转换接口（NDJSON 流）：逐步读取进度并刷新界面；结束后回报主进程
     async startCrypt(token) {
       try {
-        const resp = await fetch('http://localhost:3000/api/account/db-encryption', {
+        // 凭据统一走信道：安全模式下明文 Authorization 会被后端拒绝（NDJSON 流式响应不受响应加密影响）
+        const headers = { 'Content-Type': 'application/json' }
+        await applyAuthHeader(headers, token)
+        const resp = await fetch(apiUrl('/api/account/db-encryption'), {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+          headers,
           body: JSON.stringify({ encrypt: this.encrypt }),
         })
         if (!resp.ok || !resp.body) throw new Error(`请求后端失败（${resp.status}）`)

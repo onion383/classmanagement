@@ -1,190 +1,282 @@
 <template>
-  <div class="h-full flex flex-col">
-    <!-- 顶部标题栏 -->
+  <div class="h-full flex flex-col relative">
+    <!-- 顶部标题栏：左侧标题，右侧统计（照片 | 相册 | 总占用），样式对齐首页标题栏 -->
     <div class="w-full bg-surface shadow-md rounded-xl mb-6 px-5 py-3 border border-border min-h-[4.5rem] flex items-center">
-      <div class="flex-1 flex items-center justify-between">
-        <h1 class="text-2xl font-bold text-text flex items-center gap-2"><IconGlyph name="album" /> 学生相册</h1>
-        <div class="flex gap-3">
-          <button @click="openAdd" class="bg-primary hover:bg-primary-hover text-text-inverse px-4 py-2 rounded transition-theme">添加文件夹</button>
-          <button @click="openManage" class="bg-surface-hover hover:bg-surface-hover text-text px-4 py-2 rounded transition-theme">管理</button>
-          <button @click="refreshAll" :disabled="busyScan || manageScanning" class="bg-info hover:bg-info-hover text-text-inverse px-4 py-2 rounded transition-theme disabled:opacity-50">
-            {{ busyScan || manageScanning ? (scanMode === 'full' ? '完全更新中…' : '刷新中…') : '刷新' }}
-          </button>
+      <div class="flex-1 flex items-center justify-between gap-3">
+        <h1 class="text-2xl font-bold text-text flex items-center gap-2"><IconGlyph name="album" /> 班级相册</h1>
+        <div class="flex items-center gap-4 shrink-0">
+          <div class="flex items-baseline gap-1.5" title="已索引的照片总数（按文件去重）">
+            <span class="text-lg font-bold text-success leading-none tabular-nums">{{ albumStats.photo_count }}</span>
+            <span class="text-xs text-text-muted">照片</span>
+          </div>
+          <div class="w-px h-6 bg-border"></div>
+          <div class="flex items-baseline gap-1.5" title="相册数量">
+            <span class="text-lg font-bold text-warning leading-none tabular-nums">{{ albumStats.album_count }}</span>
+            <span class="text-xs text-text-muted">相册</span>
+          </div>
+          <div class="w-px h-6 bg-border"></div>
+          <div class="flex items-baseline gap-1.5" title="照片与视频的总占用体积">
+            <span class="text-lg font-bold text-primary leading-none tabular-nums">{{ sizeParts.value }}</span>
+            <span class="text-xs text-text-muted">{{ sizeParts.unit }}</span>
+          </div>
         </div>
       </div>
-      <p v-if="busyScan" class="text-xs mt-3 px-4 py-2 bg-bg rounded text-text-secondary">正在更新照片索引…（可在设置页任务管理中停止）</p>
+      <p v-if="busyScan" class="text-xs mt-3 px-4 py-2 bg-bg rounded text-text-secondary">正在更新照片索引…（可在「任务管理」中查看进度或停止）</p>
     </div>
 
-    <!-- 相册切换条 -->
-    <div v-if="albums.length > 1" class="flex gap-2 mb-4 flex-wrap">
-      <button
-        v-for="a in albums" :key="a.id"
-        :data-row-id="a.id"
-        @click="selectAlbum(a.id)"
-        class="px-4 py-2 rounded transition-theme text-sm"
-        :class="activeAlbumId === a.id ? 'bg-primary text-text-inverse' : 'bg-surface text-text border border-border hover:bg-surface-hover'"
-      >
-        {{ a.name }}（{{ a.photo_count }}）
+    <!-- 工具栏：相册级操作 + 右侧视图切换（时间轴 / 相册），两个视图下都保留 -->
+    <!-- flex-wrap：窗口贴到最小宽度（900）时按钮多，宁可换行也不要横向溢出把 ViewSwitch 挤出去 -->
+    <div class="flex items-center gap-3 mb-4 flex-shrink-0 flex-wrap">
+      <button v-preload="loadNewAlbumDialog" @click="openNewAlbum" class="bg-primary hover:bg-primary-hover text-text-inverse px-4 py-2 rounded transition-theme flex items-center gap-1.5">
+        <IconGlyph name="folder" :size="14" tint="current" /> 新建相册
       </button>
+      <button v-preload="loadAlbumManageDialog" @click="openManage" class="bg-text-muted hover:bg-text-secondary text-text-inverse px-4 py-2 rounded flex items-center gap-1.5 btn-refresh">
+        <IconGlyph name="settings" :size="14" tint="current" /> 管理相册
+      </button>
+      <button v-preload="loadAlbumTaskDialog" @click="openTask" class="bg-warning hover:bg-warning-hover text-text-inverse px-4 py-2 rounded transition-theme flex items-center gap-1.5">
+        <IconGlyph name="clock" :size="14" tint="current" /> 任务管理
+      </button>
+      <!-- 多选：时间轴选照片（移动/全选），相册视图选虚拟相册（合并）；再点一次退出 -->
+      <button
+        @click="toggleSelectMode"
+        :disabled="activeTab === 'gallery' ? albums.length === 0 : !activeAlbum"
+        class="bg-text-muted hover:bg-text-secondary text-text-inverse px-4 py-2 rounded flex items-center gap-1.5 btn-refresh disabled:opacity-50"
+        title="进入 / 退出多选（时间轴选照片，相册视图选虚拟相册合并）"
+      >
+        <IconGlyph name="check" :size="14" tint="current" /> 多选
+      </button>
+      <button v-preload="loadExportAlbumIndex" @click="openExport" class="bg-warning hover:bg-warning-hover text-text-inverse px-4 py-2 rounded transition-theme flex items-center gap-1.5">
+        <IconGlyph name="download" :size="14" tint="current" /> 导出相册索引
+      </button>
+      <!-- 刷新：从标题栏移到菜单栏，增量更新当前相册的照片索引 -->
+      <button @click="refreshAll" :disabled="busyScan || !activeAlbumId" class="bg-text-muted hover:bg-text-secondary text-text-inverse px-4 py-2 rounded flex items-center gap-1.5 btn-refresh disabled:opacity-50" :title="activeAlbumIsVirtual ? '按已有索引更新拍摄时间与缩略图（不遍历文件夹）' : '增量更新当前相册的照片索引'">
+        <IconGlyph name="refresh" :size="14" tint="current" /> {{ busyScan ? '刷新中…' : '刷新' }}
+      </button>
+      <!-- 视图切换：紧跟「刷新」右侧并右对齐 -->
+      <ViewSwitch v-model="activeTab" :options="VIEW_OPTIONS" class="ml-auto" />
     </div>
 
-    <!-- 空状态 -->
-    <div v-if="!activeAlbum" class="bg-surface rounded-xl border border-border p-12 text-center text-text-muted">
-      <p class="text-lg mb-2">还没有相册</p>
-      <p class="text-sm">点击「添加文件夹」选择照片所在文件夹，系统会自动扫描并建立索引。</p>
+    <!-- ==================== 时间轴：照片按日期分组的网格 ==================== -->
+    <div v-if="activeTab === 'timeline'" class="flex-1 min-h-0 flex flex-col">
+      <!-- 相册切换条 -->
+      <div v-if="albums.length > 1" class="flex gap-2 mb-4 flex-wrap">
+        <button
+          v-for="a in albums" :key="a.id"
+          :data-row-id="a.id"
+          @click="selectAlbum(a.id)"
+          class="px-4 py-2 rounded transition-theme text-sm"
+          :class="activeAlbumId === a.id ? 'bg-primary text-text-inverse' : 'bg-surface text-text border border-border hover:bg-surface-hover'"
+        >
+          {{ a.name }}（{{ a.photo_count }}）
+        </button>
+      </div>
+
+      <!-- 空状态 -->
+      <div v-if="!activeAlbum" class="bg-surface rounded-xl border border-border p-12 text-center text-text-muted">
+        <p class="text-lg mb-2">还没有相册</p>
+        <p class="text-sm">点击「新建相册」选择照片所在文件夹，系统会自动扫描并建立索引。</p>
+      </div>
+
+      <!-- 照片按日期分组（网格窗口化虚拟滚动） -->
+      <div v-else class="flex-1 min-h-0 flex flex-col">
+        <p v-if="groups.length === 0" class="bg-surface rounded-xl border border-border p-12 text-center text-text-muted">
+          当前相册暂无照片，点击「刷新」或到设置页「更新文件夹照片」重新扫描。
+        </p>
+
+        <!-- 照片区 + 右侧年份刻度尺：行布局，滚动只发生在左侧网格里 -->
+        <div v-else class="flex-1 min-h-0 flex gap-1">
+          <!-- 虚拟滚动容器：只挂载视口附近的分组，外部用总高度撑起滚动条 -->
+          <div ref="containerRef" class="flex-1 overflow-auto min-h-0 album-scroll" @scroll="onScroll">
+          <div class="relative" :style="{ height: totalH + 'px' }">
+            <div
+              v-for="v in visibleGroups"
+              :key="v.g.date"
+              class="absolute left-0 right-0 mb-8 album-group"
+              :style="{ top: v.offset + 'px' }"
+            >
+              <h2 class="text-lg font-semibold text-text mb-3 flex items-center gap-2">
+                <span class="px-2 py-0.5 bg-info/10 text-info rounded text-sm">{{ v.g.date }}</span>
+                <span class="text-xs text-text-muted">{{ v.g.photos.length }} 张</span>
+                <!-- 日期来源提示：日期组里混有读不到拍摄时间的照片时给出个数（读不到的那些单独归「未知时间」） -->
+                <span
+                  v-if="groupDateHint(v.g)"
+                  class="text-xs text-text-muted border border-border rounded px-1.5 py-0.5"
+                  :title="`${groupDateHint(v.g)}：图片里没有可读的拍摄时间，已单独归到时间轴最底部的「未知时间」`"
+                >{{ groupDateHint(v.g) }}</span>
+              </h2>
+              <div class="flex flex-wrap gap-3">
+                <div
+                  v-for="p in v.g.photos"
+                  :key="p.id"
+                  @click="onCellClick(p)"
+                  @pointerdown="onCellPointerDown(p, $event)"
+                  @pointermove="onCellPointerMove"
+                  @pointerup="onCellPointerUp"
+                  @pointercancel="onCellPointerUp"
+                  @pointerleave="onCellPointerUp"
+                  class="rounded-lg overflow-hidden bg-bg border cursor-pointer group relative photo-cell select-none"
+                  :class="selectMode && isSelected(p.id) ? 'border-info ring-2 ring-info' : 'border-border'"
+                  :style="cellStyle"
+                >
+                  <VideoThumb v-if="isVideo(p)" :src="thumbSrc(p)" />
+                  <img v-else :src="thumbSrc(p)" :alt="p.file_name" class="w-full h-full object-cover" loading="lazy" decoding="async" draggable="false" @error="onThumbError" />
+                  <!-- 多选态：左上角勾选标记 -->
+                  <span
+                    v-if="selectMode"
+                    class="absolute top-1.5 left-1.5 z-10 w-5 h-5 rounded-md border-2 flex items-center justify-center text-[11px] leading-none"
+                    :class="isSelected(p.id) ? 'bg-info border-info text-text-inverse' : 'bg-black/25 border-white/85 text-transparent'"
+                  >✓</span>
+                  <div class="photo-mask" :class="{ 'photo-mask--sel': selectMode && isSelected(p.id) }"></div>
+                </div>
+              </div>
+            </div>
+          </div>
+          </div>
+
+          <!-- 右侧年份刻度尺：拖动手柄直接定位到对应日期 -->
+          <AlbumYearRuler
+            :items="rulerItems"
+            :total="totalH"
+            :scroll-top="scrollTop"
+            :client-h="clientH"
+            @seek="seekTimeline"
+          />
+        </div>
+      </div>
     </div>
 
-    <!-- 照片按日期分组（网格窗口化虚拟滚动） -->
+    <!-- ==================== 相册：封面卡片 ==================== -->
     <div v-else class="flex-1 min-h-0 flex flex-col">
-      <p v-if="groups.length === 0" class="bg-surface rounded-xl border border-border p-12 text-center text-text-muted">
-        当前相册暂无照片，点击「刷新」或到设置页「更新文件夹照片」重新扫描。
+
+      <p v-if="albums.length === 0" class="bg-surface rounded-xl border border-border p-12 text-center text-text-muted">
+        还没有相册，点击「新建相册」选择照片所在文件夹，系统会自动扫描并建立索引。
       </p>
 
-      <!-- 虚拟滚动容器：只挂载视口附近的分组，外部用总高度撑起滚动条 -->
-      <div v-else ref="containerRef" class="flex-1 overflow-auto min-h-0 album-scroll" @scroll="onScroll">
-        <div class="relative" :style="{ height: totalH + 'px' }">
+      <div v-else class="flex-1 min-h-0 overflow-auto pr-1">
+        <div class="grid grid-cols-[repeat(auto-fill,minmax(200px,1fr))] gap-5">
           <div
-            v-for="v in visibleGroups"
-            :key="v.g.date"
-            class="absolute left-0 right-0 mb-8 album-group"
-            :style="{ top: v.offset + 'px' }"
+            v-for="a in albums" :key="a.id"
+            :data-row-id="a.id"
+            @click="onAlbumCardClick(a)"
+            class="bg-surface rounded-2xl border border-border p-2.5 transition-theme hover:shadow-card hover:border-primary/40 group relative"
+            :class="[
+              selectMode && a.kind !== 'virtual' ? 'opacity-60 cursor-not-allowed' : 'cursor-pointer',
+              selectMode && isAlbumSelected(a.id) ? 'border-info ring-2 ring-info' : ''
+            ]"
+            :title="selectMode
+              ? (a.kind === 'virtual' ? '点击选择 / 取消选择（虚拟相册可合并）' : '文件夹相册不能参与合并')
+              : `查看「${a.name}」的照片`"
           >
-            <h2 class="text-lg font-semibold text-text mb-3 flex items-center gap-2">
-              <span class="px-2 py-0.5 bg-info/10 text-info rounded text-sm">{{ v.g.date }}</span>
-              <span class="text-xs text-text-muted">{{ v.g.photos.length }} 张</span>
-            </h2>
-            <div class="flex flex-wrap gap-3">
-              <div
-                v-for="p in v.g.photos"
-                :key="p.id"
-                @click="viewPhoto(p)"
-                class="rounded-lg overflow-hidden bg-surface border border-border cursor-pointer group relative photo-cell"
-                :style="cellStyle"
-              >
-                <VideoThumb v-if="isVideo(p)" :src="thumbSrc(p)" />
-                <img v-else :src="thumbSrc(p)" :alt="p.file_name" class="w-full h-full object-cover" loading="lazy" decoding="async" @error="onThumbError" />
-                <div class="absolute inset-0 bg-black/0 group-hover:bg-black/20 transition-theme"></div>
+            <!-- 相册多选态：左上角勾选标记；文件夹相册只显示禁用态 -->
+            <span
+              v-if="selectMode"
+              class="absolute top-3.5 left-3.5 z-10 w-5 h-5 rounded-md border-2 flex items-center justify-center text-[11px] leading-none"
+              :class="isAlbumSelected(a.id) ? 'bg-info border-info text-text-inverse' : 'bg-black/25 border-white/85 text-transparent'"
+            >✓</span>
+            <!-- 封面：最新一张图片的缩略图，四角圆角 -->
+            <div class="aspect-[4/3] rounded-xl overflow-hidden bg-bg relative">
+              <span v-if="a.kind === 'virtual'" class="absolute top-1.5 right-1.5 z-10 px-1.5 py-0.5 rounded text-[10px] bg-black/45 text-white">虚拟</span>
+              <img
+                v-if="a.cover_photo_id"
+                :src="coverSrc(a)"
+                alt=""
+                class="w-full h-full object-cover transition-transform duration-300 group-hover:scale-[1.04]"
+                loading="lazy"
+                decoding="async"
+                @error="onThumbError"
+              />
+              <div v-else class="w-full h-full flex flex-col items-center justify-center gap-1 text-text-muted text-xs">
+                <IconGlyph name="folder" :size="22" />
+                <span>暂无图片</span>
               </div>
             </div>
+            <div class="px-1 pt-2.5 pb-1">
+              <p class="font-medium text-text truncate">{{ a.name }}</p>
+              <p class="text-xs text-text-muted mt-1">共 {{ a.photo_count || 0 }} 个媒体</p>
+            </div>
           </div>
         </div>
       </div>
     </div>
 
-    <!-- 添加相册弹窗 -->
-    <Teleport to="body">
-    <Transition name="dialog">
-    <div v-if="showAdd" class="fixed inset-0 bg-black/50 flex items-center justify-center z-[10003]" @click.self="showAdd = false">
-      <div class="bg-surface p-6 rounded-xl w-96 shadow-card dialog-card">
-        <h3 class="text-lg font-bold text-text mb-4">添加文件夹</h3>
-        <label class="block text-sm text-text-secondary mb-1">相册名称</label>
-        <input v-model="newName" placeholder="如：文艺晚会" class="border border-border bg-surface text-text px-3 py-2 rounded w-full mb-4" />
-        <label class="block text-sm text-text-secondary mb-1">文件夹路径</label>
-        <div class="flex gap-2 mb-4">
-          <input v-model="newPath" placeholder="点击右侧按钮选择文件夹" class="border border-border bg-surface text-text px-3 py-2 rounded flex-1 min-w-0" readonly @click="pickFolder" />
-          <button @click="pickFolder" class="bg-surface-hover hover:bg-surface-hover text-text px-4 py-2 rounded transition-theme whitespace-nowrap">选择文件夹</button>
-        </div>
-        <p class="text-xs text-text-muted mb-4">系统会递归读取该文件夹及所有子目录下的照片并建立索引。</p>
-        <div class="flex gap-2 justify-end">
-          <button @click="showAdd = false" class="bg-surface-hover px-4 py-2 rounded">取消</button>
-          <button @click="addAlbum" :disabled="busyAdd" class="bg-primary text-text-inverse px-4 py-2 rounded disabled:opacity-50">
-            {{ busyAdd ? '添加中…' : '添加并扫描' }}
-          </button>
+    <!-- 多选浮窗：固定在页面底部，与时间轴 / 相册视图重叠（不占列表高度） -->
+    <!-- 外层只负责水平居中，内层只做竖直弹入，避免动画过程中水平位移 -->
+    <Transition name="select-float">
+      <div v-if="selectMode" class="absolute bottom-1 left-1/2 -translate-x-1/2 z-30">
+        <div class="select-float-panel flex items-center gap-2 px-4 py-2.5 rounded-full bg-surface border border-border shadow-lg">
+          <!-- 相册视图：选中的是虚拟相册，动作为合并 -->
+          <template v-if="activeTab === 'gallery'">
+            <span class="text-sm text-text whitespace-nowrap">已选 <span class="font-semibold tabular-nums">{{ selectedAlbumCount }}</span> 个相册</span>
+            <button @click="clearSelection" class="px-3 py-1 rounded-full bg-surface-hover text-text border border-border text-sm transition-theme whitespace-nowrap">取消选择</button>
+            <button
+              @click="mergeSelectedAlbums"
+              :disabled="selectedAlbumCount < 2 || merging"
+              class="px-3 py-1 rounded-full bg-info hover:bg-info-hover text-text-inverse text-sm transition-theme whitespace-nowrap disabled:opacity-50"
+              title="把选中的虚拟相册合并成一个新虚拟相册（不移动磁盘文件）"
+            >{{ merging ? '合并中…' : `合并相册（${selectedAlbumCount}）` }}</button>
+            <button @click="exitSelectMode" class="px-3 py-1 rounded-full bg-surface-hover text-text border border-border text-sm transition-theme whitespace-nowrap">退出多选</button>
+          </template>
+          <!-- 时间轴视图：选中的是照片，动作为移动到其他相册 -->
+          <template v-else>
+            <span class="text-sm text-text whitespace-nowrap">已选 <span class="font-semibold tabular-nums">{{ selectedCount }}</span> 张</span>
+            <button @click="selectAllPhotos" class="px-3 py-1 rounded-full bg-surface-hover text-text border border-border text-sm transition-theme whitespace-nowrap">全选</button>
+            <button @click="clearSelection" class="px-3 py-1 rounded-full bg-surface-hover text-text border border-border text-sm transition-theme whitespace-nowrap">取消选择</button>
+            <button
+              v-preload="loadMoveAlbumDialog"
+              @click="openMove"
+              :disabled="!selectedCount"
+              class="px-3 py-1 rounded-full bg-info hover:bg-info-hover text-text-inverse text-sm transition-theme whitespace-nowrap disabled:opacity-50"
+              title="把选中的照片索引移动到其他相册（不移动磁盘文件）"
+            >移动到相册（{{ selectedCount }}）</button>
+            <button @click="exitSelectMode" class="px-3 py-1 rounded-full bg-surface-hover text-text border border-border text-sm transition-theme whitespace-nowrap">退出多选</button>
+          </template>
         </div>
       </div>
-    </div>
     </Transition>
-    </Teleport>
 
-    <!-- 管理弹窗（相册管理 + 任务管理） -->
-    <Teleport to="body">
-    <Transition name="dialog">
-    <div v-if="showManage" class="fixed inset-0 bg-black/50 flex items-center justify-center z-[10003]" @click.self="showManage = false">
-      <div class="bg-surface rounded-xl p-6 w-[820px] max-w-[94vw] flex flex-col border border-border shadow-card dialog-card">
-        <div class="flex items-center justify-between mb-4 flex-shrink-0">
-          <h3 class="text-lg font-bold text-text">相册管理</h3>
-          <button @click="showManage = false" class="dlg-close">✕</button>
-        </div>
+    <!-- 新建相册弹窗（文件夹 / 其他相册两种来源），懒加载 -->
+    <NewAlbumDialog
+      v-if="newAlbumMounted"
+      :visible="newAlbumVisible"
+      :albums="albums"
+      @close="newAlbumVisible = false"
+      @created="onAlbumCreated"
+    />
 
-        <!-- 添加文件夹 -->
-        <div class="flex items-end gap-2 mb-4 flex-shrink-0">
-          <input v-model="newName" placeholder="相册名称，如：文艺晚会" class="border border-border bg-surface text-text px-3 py-2 rounded w-36 flex-shrink-0" />
-          <div class="flex gap-1 flex-1 min-w-0">
-            <input v-model="newPath" placeholder="点击右侧选择文件夹" readonly @click="pickFolder" class="border border-border bg-surface text-text px-3 py-2 rounded flex-1 min-w-0" />
-            <button @click="pickFolder" class="bg-surface-hover hover:bg-surface-hover text-text px-3 py-2 rounded whitespace-nowrap transition-theme">选择文件夹</button>
-          </div>
-          <button @click="addAlbum" :disabled="busyAdd" class="bg-primary hover:bg-primary-hover text-text-inverse px-4 py-2 rounded transition-theme whitespace-nowrap disabled:opacity-50">
-            {{ busyAdd ? '添加中…' : '添加' }}
-          </button>
-        </div>
+    <!-- 管理相册弹窗（相册增删排序），懒加载 -->
+    <AlbumManageDialog
+      v-if="manageMounted"
+      :visible="showManage"
+      @close="showManage = false"
+      @changed="onAlbumsChanged"
+    />
 
-        <!-- 文件夹列表（可滚动区域，可拖拽排序） -->
-        <div class="flex-1 min-h-0 overflow-y-auto">
-          <p v-if="albums.length === 0" class="text-sm text-text-muted py-3">暂无相册文件夹，请在上面添加。</p>
-          <div v-else ref="albumListRef" class="space-y-2 mb-4">
-            <div v-for="a in albums" :key="a.id" class="flex items-center gap-1 border border-border rounded-lg p-2.5 album-sort-item">
-              <span class="drag-handle cursor-grab active:cursor-grabbing text-text-muted hover:text-text flex-shrink-0 select-none" title="拖拽排序">⠿</span>
-              <div class="flex-1 min-w-0">
-                <p class="font-medium text-text">{{ a.name }}</p>
-                <p class="text-xs text-text-muted truncate">{{ a.folder_path }} · {{ a.photo_count || 0 }} 项</p>
-              </div>
-              <button @click="openFolder(a)" class="text-text-muted hover:text-text px-2 py-1 text-sm flex-shrink-0" title="在文件管理器中打开">📂 打开文件夹</button>
-              <button @click="confirmRemove(a)" class="bg-danger hover:bg-danger/80 text-text-inverse text-sm px-3 py-1.5 rounded flex-shrink-0 ml-4">删除</button>
-            </div>
-          </div>
-        </div>
+    <!-- 任务管理弹窗（后台扫描任务列表 + 更新文件夹照片），懒加载 -->
+    <AlbumTaskDialog
+      v-if="taskMounted"
+      :visible="showTask"
+      @close="showTask = false"
+      @changed="onAlbumsChanged"
+    />
 
-        <!-- 任务管理 -->
-        <div class="border-t border-border pt-4 flex-shrink-0">
-          <div class="flex items-center justify-between gap-3">
-            <div>
-              <p class="font-medium text-text">更新文件夹照片</p>
-              <p class="text-xs text-text-muted mt-0.5">重新扫描所有相册文件夹及其子目录，同步最新的照片与视频索引</p>
-            </div>
-            <div class="flex gap-2 flex-shrink-0">
-              <button @click="rescanAll('incremental')" :disabled="manageScanning" class="bg-info hover:bg-info-hover text-text-inverse px-4 py-2 rounded whitespace-nowrap transition-theme disabled:opacity-50">
-                {{ manageScanning ? '更新中…' : '增量更新' }}
-              </button>
-              <button @click="rescanAll('full')" :disabled="manageScanning" class="bg-warning hover:bg-warning/80 text-text-inverse px-4 py-2 rounded whitespace-nowrap transition-theme disabled:opacity-50">
-                {{ manageScanning ? '更新中…' : '完全更新' }}
-              </button>
-              <button @click="stopScan" class="bg-danger hover:bg-danger/80 text-text-inverse px-4 py-2 rounded whitespace-nowrap transition-theme">停止</button>
-            </div>
-          </div>
-          <!-- 进度条 -->
-          <div v-if="manageScanning" class="mt-3">
-            <div class="flex items-center gap-2 text-xs text-text-muted mb-1.5">
-              <span class="tabular-nums">{{ scanProgress.scanned }}</span>
-              <span class="text-text-muted">/</span>
-              <span class="tabular-nums">{{ scanProgress.total || '?' }}</span>
-            </div>
-            <div class="w-full h-2 bg-bg rounded-full overflow-hidden">
-              <div
-                class="h-full bg-info rounded-full transition-[width] duration-300"
-                :style="{ width: scanProgress.total > 0 ? Math.min(100, scanProgress.scanned / scanProgress.total * 100) + '%' : '2%' }"
-              ></div>
-            </div>
-          </div>
-        </div>
-      </div>
-    </div>
-    </Transition>
-    </Teleport>
+    <!-- 移动到其他相册弹窗（时间轴长按多选后使用），懒加载 -->
+    <MoveAlbumDialog
+      v-if="moveMounted"
+      :visible="moveVisible"
+      :albums="albums"
+      :current-album-id="activeAlbumId"
+      :photo-ids="selectedPhotoIds"
+      @close="moveVisible = false"
+      @moved="onPhotosMoved"
+    />
 
-    <!-- 删除确认弹窗 -->
-    <Teleport to="body">
-    <Transition name="dialog">
-    <div v-if="confirmDelete" class="fixed inset-0 bg-black/50 flex items-center justify-center z-[10004]" @click.self="confirmDelete = null">
-      <div class="bg-surface p-5 rounded-lg min-w-[300px] text-center shadow-card dialog-card">
-        <p class="mb-3">确定删除相册「<strong>{{ confirmDelete.name }}</strong>」吗？<br><span class="text-xs text-text-muted">仅删除索引，不删除磁盘照片</span></p>
-        <div class="flex gap-2 justify-center">
-          <button @click="doRemove" class="bg-danger text-text-inverse px-4 py-1.5 rounded">确定删除</button>
-          <button @click="confirmDelete = null" class="bg-surface-hover px-4 py-1.5 rounded">取消</button>
-        </div>
-      </div>
-    </div>
-    </Transition>
-    </Teleport>
+    <!-- 导出相册索引弹窗（复用 ExportExcel），懒加载 -->
+    <ExportAlbumIndex
+      v-if="exportMounted"
+      :is-visible="exportVisible"
+      :albums="albums"
+      @update:is-visible="exportVisible = $event"
+    />
 
     <!-- 媒体查看器（图片 / 视频） -->
     <Teleport to="body">
@@ -209,13 +301,13 @@
           @ended="playing = false"
         ></video>
       </div>
-      <!-- 图片查看区 -->
+      <!-- 图片查看区：滚轮缩放只挂在外层容器上（原来 img 上还挂了一份重复监听，
+           多出来的非 passive wheel 监听既浪费又会在 devtools 里刷 Violation 提示） -->
       <div v-else class="flex-1 flex items-center justify-center p-6 overflow-hidden preview-media" @wheel.prevent="onZoomWheel">
         <img
           :src="photoSrc(viewer)"
           class="max-w-full max-h-full select-none transition-transform duration-100"
           :style="viewerStyle"
-          @wheel.prevent="onZoomWheel"
           draggable="false"
         />
       </div>
@@ -265,38 +357,62 @@
 </template>
 
 <script setup>
-import { ref, computed, nextTick, onMounted, onActivated, onBeforeUnmount, getCurrentInstance, watch } from 'vue'
+import { ref, computed, nextTick, onMounted, onActivated, onDeactivated, onBeforeUnmount, getCurrentInstance, watch, defineAsyncComponent } from 'vue'
 import axios from 'axios'
 import { pushUndo } from '../api/undo'
 import { useNotification } from '../composables/useNotification.js'
 import { applyRouteRowFocus } from '../composables/useRowFocus.js'
 import { useUndoShortcut } from '../composables/useUndo.js'
+import { useAlbumScan } from '../composables/useAlbumScan.js'
+import { usePhotoTimeline } from '../composables/usePhotoTimeline.js'
+import { useThumbBatch } from '../composables/useThumbBatch.js'
 import VideoThumb from '../components/import-export/VideoThumb.vue'
 import AppSelect from '../components/base/AppSelect.vue'
-import { resourceUrl } from '../utils/apiUrl'
+import ViewSwitch from '../components/base/ViewSwitch.vue'
+import AlbumYearRuler from '../components/album/AlbumYearRuler.vue'
+import IconGlyph from '../components/base/IconGlyph.vue'
+import { albumThumbUrl, albumFileUrl } from '../utils/albumMedia'
 import { pad2 } from '../utils/dateTime.js'
 import '../styles/dialog-transition.css'
 import { INVOKE } from '../electronChannels.js'
 
+// 新建相册 / 相册管理 / 任务管理 / 相册索引导出四个弹窗按需加载（与分组管理等页面同一套约定）
+const loadNewAlbumDialog = () => import('../components/dialogs/NewAlbumDialog.vue')
+const NewAlbumDialog = defineAsyncComponent(loadNewAlbumDialog)
+const loadAlbumManageDialog = () => import('../components/dialogs/AlbumManageDialog.vue')
+const AlbumManageDialog = defineAsyncComponent(loadAlbumManageDialog)
+const loadAlbumTaskDialog = () => import('../components/dialogs/AlbumTaskDialog.vue')
+const AlbumTaskDialog = defineAsyncComponent(loadAlbumTaskDialog)
+const loadMoveAlbumDialog = () => import('../components/dialogs/MoveAlbumDialog.vue')
+const MoveAlbumDialog = defineAsyncComponent(loadMoveAlbumDialog)
+const loadExportAlbumIndex = () => import('../components/import-export/ExportAlbumIndex.vue')
+const ExportAlbumIndex = defineAsyncComponent(loadExportAlbumIndex)
+
+// 视图切换（菜单栏右对齐的 ViewSwitch）：时间轴 = 原照片按日期分组页；相册 = 封面卡片
+const VIEW_OPTIONS = [
+  { value: 'timeline', label: '时间轴' },
+  { value: 'gallery', label: '相册' }
+]
+const activeTab = ref('timeline')
+
 const albums = ref([])
+// 标题栏统计：照片总数 / 相册数 / 总占用（由后端按文件路径去重后返回）
+const albumStats = ref({ photo_count: 0, album_count: 0, total_size: 0 })
 const activeAlbumId = ref(null)
 const groups = ref([])
 const busyScan = ref(false)
-const busyAdd = ref(false)
 
-// 管理弹窗
+// 弹窗
+const newAlbumVisible = ref(false)
+const newAlbumMounted = ref(false)
 const showManage = ref(false)
-const manageScanning = ref(false)
-const scanProgress = ref({ scanned: 0, total: 0 })
-const scanMode = ref('incremental')
-const albumListRef = ref(null)
-const confirmDelete = ref(null)
-let sortableInstance = null
-
-// 添加弹窗
-const showAdd = ref(false)
-const newName = ref('')
-const newPath = ref('')
+const manageMounted = ref(false)
+const showTask = ref(false)
+const taskMounted = ref(false)
+const moveVisible = ref(false)
+const moveMounted = ref(false)
+const exportVisible = ref(false)
+const exportMounted = ref(false)
 
 // 查看器
 const viewer = ref(null)
@@ -311,6 +427,8 @@ const duration = ref(0)
 const playbackRate = ref(1)
 const dragging = ref(false)
 
+const { waitScan, stopAll } = useAlbumScan()
+
 const token = () => localStorage.getItem('token') || ''
 const authHeaders = () => ({ Authorization: 'Bearer ' + token() })
 
@@ -322,15 +440,22 @@ function isVideo(p) {
 // 用 id 动态拉取源文件（图片/视频），避免直接暴露绝对路径，也保持鉴权。
 // 用稳定 URL（不带时间戳），让浏览器能正常缓存，避免每次渲染整批重载。
 // 生产模式 file:// 协议下需补完整后端地址（apiUrl），否则 /api 会被解析到磁盘根目录。
-// <img> 无法携带 Authorization 头，故用 resourceUrl 追加 ?token= 查询参数通过鉴权。
+// <img> 无法携带 Authorization 头，故由 utils/albumMedia 统一追加 ?token= 查询参数通过鉴权。
 function photoSrc(p) {
-  return resourceUrl(`/api/album/photo/${p.id}/file`)
+  return albumFileUrl(p.id)
 }
 
-// 视频缩略图用稳定 URL（不带时间戳），便于 VideoThumb 按 URL 缓存封面
-// 指向服务端 /thumb 小图接口（首帧封面 / 图片缩略图），稳定 URL 便于浏览器缓存
+// 缩略图 URL 由 utils/albumMedia 统一拼（顺带带上缩略图缓存版本 v=，
+// 尺寸/质量升级时靠它让浏览器旧缓存失效；否则 max-age 会把旧图留一天）
+// 优先用批量预取拿到的 objectURL（少几百次 HTTP 往返），
+// 没批量到的回落到单张 /thumb 接口（服务端现场生成，功能不变）。
 function thumbSrc(p) {
-  return resourceUrl(`/api/album/photo/${p.id}/thumb`)
+  return batchThumbUrl(p.id) || albumThumbUrl(p.id)
+}
+
+// 相册卡片封面：后端已按「mtime 最新的一张图片」给出 cover_photo_id，直接用它的缩略图
+function coverSrc(a) {
+  return albumThumbUrl(a.cover_photo_id)
 }
 
 // 缩略图生成失败/源文件缺失等导致的 404：换为中性占位图，避免网格出现破图图标
@@ -349,86 +474,66 @@ function fmtTime(t) {
 }
 
 const activeAlbum = computed(() => albums.value.find(a => a.id === activeAlbumId.value))
+// 虚拟相册没有绑定文件夹，索引来自别的相册，刷新/重扫对它没有意义
+const activeAlbumIsVirtual = computed(() => activeAlbum.value?.kind === 'virtual')
 const viewerStyle = computed(() => {
   const base = (viewer.value && viewer.value._rot) || 0
   return { transform: `rotate(${base}deg) scale(${zoom.value})` }
 })
 
 /* ===== 网格窗口化虚拟滚动 =====
- * 以“日期分组”为窗口单元：外部用总高度撑起滚动条，
- * 内部只挂载视口附近（含缓冲）的分组，其余用绝对定位占位。
- * 分组内部 grid 用固定尺寸的方形格子（flex-wrap），
- * 列数/格子尺寸由容器宽度实时计算，保证各分组高度可精确预算，无需测量。 */
-const containerRef = ref(null)
-const scrollTop = ref(0)
-const clientH = ref(0)
-const viewW = ref(0)
-const cols = ref(5)
-const cell = ref(150)
-let rafId = 0
+ * 逻辑已抽到 composables/usePhotoTimeline.js（与「选择照片」弹窗共用）：
+ * 以“日期分组”为窗口单元，外部用总高度撑起滚动条，内部只挂载视口附近（含缓冲）的分组。 */
+const {
+  containerRef, scrollTop, clientH, cellStyle, totalH, visibleGroups, layout,
+  measure, onScroll, onResize, reset: resetTimeline,
+} = usePhotoTimeline(groups)
 
-const GAP = 12        // 格子间距（与模板 gap-3 一致）
-const HEADER = 40     // 分组日期标题高度约值
-const GROUP_GAP = 32  // 组间距（与模板 mb-8 一致）
-const BUFFER = 900    // 上下预留缓冲，提前渲染避免闪过空白
+/* ===== 右侧年份刻度尺 =====
+ * 刻度尺的定位基准就是 layout 里的分组偏移（每个分组带 date + offset），
+ * 拖动手柄时按目标偏移写回容器 scrollTop，容器滚动再驱动刻度尺同步。 */
+const rulerItems = computed(() => layout.value.items.map(v => ({ date: v.g.date, offset: v.offset })))
 
-function measure() {
+function seekTimeline(offset) {
   const el = containerRef.value
   if (!el) return
-  viewW.value = el.clientWidth
-  clientH.value = el.clientHeight
-  // 固定一行 6 张，把剩余宽度分给每格，让格子尽量铺满容器（仍是正方形）
-  cols.value = 6
-  cell.value = cols.value > 1 ? Math.floor((viewW.value - (cols.value - 1) * GAP) / cols.value) : viewW.value
+  el.scrollTop = Math.max(0, Math.min(offset, el.scrollHeight - el.clientHeight))
 }
 
-const cellStyle = computed(() => ({ width: cell.value + 'px', height: cell.value + 'px' }))
-
-function groupHeight(g) {
-  const n = g.photos ? g.photos.length : 0
-  const rows = n ? Math.ceil(n / cols.value) : 0
-  return HEADER + (rows ? rows * cell.value + (rows - 1) * GAP : 0)
+// 分组标题旁的来源标记：整组都有 EXIF 时不显示（「未知时间」组由后端统一命名，
+// 那里必然全是回退项，再标一次是冗余）；只有正常日期组里混进了无 EXIF 的照片才提示。
+function groupDateHint(g) {
+  if (g.date === '未知时间') return ''
+  const ps = g.photos || []
+  if (!ps.length) return ''
+  const exifCount = ps.filter(p => p.date_src === 'exif').length
+  if (exifCount === ps.length) return ''
+  const rest = ps.length - exifCount
+  return `${rest} 张未知时间`
 }
 
-const layout = computed(() => {
-  let offset = 0
-  const items = []
-  for (const g of groups.value) {
-    const h = groupHeight(g)
-    items.push({ g, offset, h })
-    offset += h + GROUP_GAP
+/* ===== 缩略图批量预取 =====
+ * 可视区的照片 id 变化时，一次批量取回缩略图（转 objectURL 给 <img> 用），
+ * 免得几十上百个 <img> 各自发一次请求（受浏览器同源并发连接数限制）。
+ * 批量没取到的（服务端还没缓存缩略图）自动回落到单张 /thumb 接口，功能不变。
+ * 实测：批量 0.19 ms/张 vs 逐个并发 2.43 ms/张。 */
+const visiblePhotoIds = computed(() => {
+  const out = []
+  for (const v of visibleGroups.value) {
+    for (const p of (v.g.photos || [])) out.push(p.id)
   }
-  return { total: offset, items }
+  return out
 })
-
-const totalH = computed(() => layout.value.total)
-
-const visibleGroups = computed(() => {
-  const top = scrollTop.value - BUFFER
-  const bottom = scrollTop.value + clientH.value + BUFFER
-  return layout.value.items
-    .filter(v => v.offset + v.h >= top && v.offset <= bottom)
-    .map(v => ({ g: v.g, offset: v.offset }))
-})
-
-function onScroll() {
-  const el = containerRef.value
-  if (!el) return
-  if (rafId) return
-  rafId = requestAnimationFrame(() => {
-    rafId = 0
-    scrollTop.value = el.scrollTop
-    clientH.value = el.clientHeight
-  })
-}
-
-function onResize() {
-  measure()
-}
+const {
+  thumbUrlFor: batchThumbUrl,
+  refresh: refreshThumbBatch,
+  clear: clearThumbBatch,
+} = useThumbBatch(() => visiblePhotoIds.value)
 
 async function loadAlbums(first = true) {
   const res = await axios.get('/api/album', { headers: authHeaders() })
   albums.value = res.data.data || []
+  albumStats.value = res.data.stats || { photo_count: 0, album_count: albums.value.length, total_size: 0 }
   // 保持选中；相册被删则切到第一个
   if (!albums.value.find(a => a.id === activeAlbumId.value)) {
     activeAlbumId.value = albums.value.length ? albums.value[0].id : null
@@ -436,24 +541,65 @@ async function loadAlbums(first = true) {
   if (activeAlbumId.value) await loadPhotos(first)
 }
 
+// 标题栏体积显示：不足 1MB 用 KB，其余按 MB / GB（保留一位小数）
+function formatSize(bytes) {
+  const n = Number(bytes) || 0
+  if (n >= 1024 ** 3) return `${(n / 1024 ** 3).toFixed(1)} GB`
+  if (n >= 1024 ** 2) return `${(n / 1024 ** 2).toFixed(1)} MB`
+  return `${Math.round(n / 1024)} KB`
+}
+
+// 拆成「数字 + 单位」两部分，单位与照片 / 相册的标签同字号
+const sizeParts = computed(() => {
+  const [value, unit = 'KB'] = formatSize(albumStats.value.total_size).split(' ')
+  return { value, unit }
+})
+
 async function loadPhotos(first = true) {
   if (!activeAlbumId.value) { groups.value = []; return }
   const res = await axios.get(`/api/album/${activeAlbumId.value}/photos`, { headers: authHeaders() })
   groups.value = res.data.data || []
   if (first) {
     // 切换相册/刷新后回到顶部并重新计量
-    scrollTop.value = 0
     await nextTick()
-    const el = containerRef.value
-    if (el) el.scrollTop = 0
-    measure()
+    resetTimeline()
   }
+  // 照片列表换新了 → 立即触发一次批量预取（不等滚动）
+  refreshThumbBatch()
 }
 
 function selectAlbum(id) {
+  // 切相册时清空多选：不同相册的照片 id 不能混在一起移动
+  if (activeAlbumId.value !== id) exitSelectMode()
+  if (activeAlbumId.value !== id) {
+    // 换了相册 → 旧的 objectURL 全作废（照片 id 不同，留着会显示错图）
+    clearThumbBatch()
+  }
   activeAlbumId.value = id
   loadPhotos()
 }
+
+// 相册 tab 点卡片：切到时间轴，只看这个相册的照片（按日期分组排列）
+function openAlbum(a) {
+  activeTab.value = 'timeline'
+  if (activeAlbumId.value === a.id) {
+    // 已经是当前相册：只需回到顶部
+    nextTick(() => resetTimeline())
+  } else {
+    selectAlbum(a.id)
+  }
+}
+
+// 切换 Tab 后时间轴容器重新挂载，需要重新计量并恢复滚动位置
+// （两个视图的多选对象不同，切换时统一退出多选）
+watch(activeTab, async (v) => {
+  exitSelectMode()
+  if (v !== 'timeline') return
+  await nextTick()
+  measure()
+  const el = containerRef.value
+  if (el) el.scrollTop = scrollTop.value
+})
 
 // 跨页定位：/album?focus=<相册id>
 const inst = getCurrentInstance()
@@ -462,121 +608,52 @@ function applyFocus() {
     parse: (key) => {
       const id = Number(key)
       if (!albums.value.some((a) => a.id === id)) return null
+      // 定位到某个相册时直接落在时间轴上，避免停在卡片列表看不出效果
+      activeTab.value = 'timeline'
       if (activeAlbumId.value !== id) selectAlbum(id)
       return key
     },
   })
 }
 
-function openAdd() {
-  newName.value = ''
-  newPath.value = ''
-  showAdd.value = true
+function openNewAlbum() {
+  newAlbumMounted.value = true
+  newAlbumVisible.value = true
 }
 
-async function pickFolder() {
-  if (!window.electron || typeof window.electron.invoke !== 'function') {
-    useNotification().warning('请使用桌面客户端选择文件夹')
-    return
+// 新建成功：刷新列表并选中新相册（文件夹相册由 scanWatch 边扫边出图）
+async function onAlbumCreated(id) {
+  exitSelectMode()
+  await loadAlbums(false)
+  if (id) {
+    activeAlbumId.value = id
+    await loadPhotos(true)
   }
-  try {
-    const result = await window.electron.invoke(INVOKE.SELECT_FOLDER)
-    if (result && result.filePaths && result.filePaths.length > 0) {
-      newPath.value = result.filePaths[0]
-      // 相册名缺省取文件夹名
-      if (!newName.value) newName.value = result.filePaths[0].split(/[\\/]/).filter(Boolean).pop() || ''
-    }
-  } catch (_) {
-    useNotification().error('选择文件夹失败')
-  }
-}
-
-async function addAlbum() {
-  if (!newName.value) { useNotification().warning('请输入相册名称'); return }
-  if (!newPath.value) { useNotification().warning('请输入文件夹路径'); return }
-  busyAdd.value = true
-  try {
-    const res = await axios.post('/api/album', { name: newName.value, folder_path: newPath.value }, { headers: authHeaders() })
-    showAdd.value = false
-    useNotification().success('相册已添加，正在后台扫描照片…')
-    // 记录「添加相册」撤销：undo 撤销添加（删索引+缩略图），redo 重新添加
-    pushUndo({
-      key: 'album',
-      type: 'album_add',
-      label: `添加相册：${newName.value}`,
-      payload: {
-        album: { id: res.data.id, name: newName.value, folder_path: newPath.value, sort_order: res.data.id, created_at: '', updated_at: '' }
-      }
-    }).catch(() => {})
-    await loadAlbums()
-    activeAlbumId.value = res.data.id
-    // 扫描是后台任务，稍后拉取
-    setTimeout(refreshAll, 1500)
-  } catch (err) {
-    useNotification().error(err.response?.data?.error || '添加失败')
-  } finally { busyAdd.value = false }
+  // 踢一脚观察器立即探测：新相册的首次全量扫描马上进入快刷，不用等空闲周期
+  scheduleScanWatch(0)
 }
 
 function openManage() {
+  manageMounted.value = true
   showManage.value = true
-  loadAlbums()
-  nextTick(() => initSortable())
 }
 
-async function initSortable() {
-  destroySortable()
-  const el = albumListRef.value
-  if (!el) return
-  // 渲染后给每个子元素设置 data-id
-  const children = el.children
-  for (let i = 0; i < children.length; i++) {
-    children[i].dataset.id = String(albums.value[i]?.id || '')
-  }
-  const Sortable = await import('sortablejs').then(m => m.default || m)
-  sortableInstance = new Sortable(el, {
-    handle: '.drag-handle',
-    animation: 200,
-    easing: 'cubic-bezier(0.22, 0.61, 0.36, 1)',
-    onEnd: () => {
-      const childIds = []
-      for (const child of el.children) {
-        const aid = Number(child.dataset?.id || '')
-        if (aid) childIds.push(aid)
-      }
-      if (childIds.length === albums.value.length) {
-        reorderAlbums(childIds)
-      }
-    }
-  })
+// 任务管理：后台扫描任务（含软件自动发起的）都在这里看进度/停止，「更新文件夹照片」也在这个弹窗里
+function openTask() {
+  taskMounted.value = true
+  showTask.value = true
 }
 
-function destroySortable() {
-  if (sortableInstance) {
-    sortableInstance.destroy()
-    sortableInstance = null
-  }
+function openExport() {
+  exportMounted.value = true
+  exportVisible.value = true
 }
 
-async function reorderAlbums(ids) {
-  const oldOrder = albums.value.map(a => a.id)
-  try {
-    await axios.put('/api/album/reorder', { ids }, { headers: authHeaders() })
-    // 记录相册排序撤销（顺序确有变化才记录）
-    if (oldOrder.length && JSON.stringify(oldOrder) !== JSON.stringify(ids)) {
-      pushUndo({
-        key: 'album',
-        type: 'album_order',
-        label: '相册排序更新',
-        payload: { oldOrder, newOrder: ids }
-      }).catch(() => {})
-    }
-    // 按新顺序重新排列本地数据
-    const map = new Map(albums.value.map(a => [a.id, a]))
-    albums.value = ids.map(id => map.get(id)).filter(Boolean)
-  } catch (err) {
-    useNotification().error(err.response?.data?.error || '排序更新失败')
-    loadAlbums()
-  }
+// 管理弹窗里增删/排序/扫描完成：重新拉列表与照片（不清滚动位置）
+async function onAlbumsChanged() {
+  await loadAlbums(false)
+  await nextTick()
+  measure()
 }
 
 // Ctrl+Z 撤销 / Ctrl+Shift+Z、Ctrl+Y 重做相册排序、相册增删与删除照片
@@ -588,8 +665,8 @@ useUndoShortcut('album', {
   },
   onAfterRedo: async (label) => {
     await loadAlbums(false)
-    // 重做（如重新加入文件夹）已在后端触发增量扫描，轮询让照片渐进显示
-    pollScan(true)
+    // 重做（如重新加入文件夹）已在后端触发增量扫描，scanWatch 会让照片渐进显示
+    pollScan()
     useNotification().success(label ? `已重做：${label}` : '已重做')
   }
 })
@@ -597,95 +674,75 @@ useUndoShortcut('album', {
 async function refreshAll() {
   if (!activeAlbumId.value) return
   busyScan.value = true
-  // 顶部刷新用增量模式，瞬间完成，不渐进显示
+  const isVirtual = activeAlbumIsVirtual.value
   try {
+    // 虚拟相册没有文件夹，不能走增量扫描；后端按相册类型自行分流
+    // （kind='virtual' → 只按已有索引更新拍摄时间与缩略图，不遍历磁盘、不增删行）。
+    // 这里仍传 mode，后端优先看 kind。
     await axios.post(`/api/album/${activeAlbumId.value}/rescan`, { mode: 'incremental' }, { headers: authHeaders() })
-    useNotification().info('已开始增量更新照片索引…')
-    await pollScan(true)
+    useNotification().info(isVirtual ? '已开始更新虚拟相册的照片信息…' : '已开始增量更新照片索引…')
+    // 踢一脚观察器立即探测，扫描马上进入快刷
+    scheduleScanWatch(0)
+    await pollScan()
     await loadAlbums()
-    useNotification().success('照片索引已更新')
+    useNotification().success(isVirtual ? '虚拟相册已更新' : '照片索引已更新')
   } catch (err) {
     useNotification().error(err.response?.data?.error || '刷新失败')
   } finally { busyScan.value = false }
 }
 
-const pollTimers = ref([])
-
-function pollScan(progressive = false) {
-  const id = activeAlbumId.value
-  return new Promise(resolve => {
-    const timer = setInterval(async () => {
-      try {
-        const res = await axios.get(`/api/album/${id}/status`, { headers: authHeaders() })
-        if (res.data.scanning) {
-          if (progressive && activeAlbumId.value === id) {
-            await loadAlbums(false)
-          }
-        } else {
-          clearInterval(timer)
-          const idx = pollTimers.value.indexOf(timer)
-          if (idx !== -1) pollTimers.value.splice(idx, 1)
-          resolve()
-        }
-      } catch (_) {
-        clearInterval(timer)
-        const idx = pollTimers.value.indexOf(timer)
-        if (idx !== -1) pollTimers.value.splice(idx, 1)
-        resolve()
-      }
-    }, 800)
-    pollTimers.value.push(timer)
-  })
+// 渐进刷新统一由下面的 scanWatch 常驻观察器负责（任何入口发起的扫描都能兜住），
+// 这里只负责「等到当前相册扫描结束」，供刷新按钮做完成提示。
+function pollScan() {
+  return waitScan(activeAlbumId.value)
 }
 
-// ---- 相册管理 / 任务管理 ----
-function confirmRemove(a) {
-  confirmDelete.value = a
-}
+/* ===== 扫描渐进刷新常驻观察器（扫描一点、显示一点）=====
+ * 后台扫描是异步任务；以前只有「顶部刷新」等个别入口挂了轮询，新建相册、
+ * 任务管理弹窗发起的扫描在页面上毫无动静，只能切走再切回才看到新照片。
+ * 改成常驻观察器统一兜住所有入口：
+ *   - 有扫描在跑 → 按 800ms（与 useAlbumScan 同节奏）重拉相册与当前照片；
+ *   - 空闲 → 3s 低频探一次 /api/album/tasks，发现新扫描立即进入快节奏。
+ * 页面被 KeepAlive 缓存时停表（onDeactivated），切回（onActivated）再开。 */
+const SCAN_BUSY_MS = 800
+const SCAN_IDLE_MS = 3000
+let scanWatchTimer = 0
+// 上一轮「当前相册是否有扫描在跑」：用于扫完瞬间补拉最后一次，
+// 否则任务从 /tasks 消失的那轮不刷新，尾巴上的照片就丢了。
+let scanWatchActiveRunning = false
 
-async function doRemove() {
-  const a = confirmDelete.value
-  if (!a) return
-  confirmDelete.value = null
+async function scanWatchTick() {
+  let running = []
   try {
-    // 删除前抓取相册照片索引，供撤销时还原
-    let albumPhotos = []
-    try {
-      const pr = await axios.get(`/api/album/${a.id}/photos`, { headers: authHeaders() })
-      for (const g of (pr.data.data || [])) {
-        for (const x of (g.photos || [])) {
-          albumPhotos.push({ id: x.id, album_id: a.id, file_path: x.file_path, file_name: x.file_name, file_size: x.file_size, mtime: x.mtime, photo_date: x.photo_date })
-        }
-      }
-    } catch (_) { /* 抓取失败不阻塞删除 */ }
-    await axios.delete(`/api/album/${a.id}`, { headers: authHeaders() })
-    // 记录「删除相册」撤销：undo 还原相册+照片索引，redo 再次删除
-    pushUndo({
-      key: 'album',
-      type: 'album_delete',
-      label: `删除相册：${a.name}`,
-      payload: {
-        album: { id: a.id, name: a.name, folder_path: a.folder_path, sort_order: a.sort_order, created_at: a.created_at, updated_at: a.updated_at },
-        photos: albumPhotos
-      }
-    }).catch(() => {})
-    useNotification().success('相册已删除')
-    await loadAlbums()
-  } catch (err) {
-    useNotification().error(err.response?.data?.error || '删除失败')
-  }
-}
-
-async function openFolder(a) {
-  if (!window.electron || typeof window.electron.invoke !== 'function') {
-    useNotification().warning('请使用桌面客户端打开文件夹')
-    return
-  }
-  try {
-    await window.electron.invoke(INVOKE.OPEN_FOLDER, a.folder_path)
+    const res = await axios.get('/api/album/tasks', { headers: authHeaders() })
+    running = (res.data.data || []).filter(t => t.scanning && !t.cancelled)
   } catch (_) {
-    useNotification().error('打开文件夹失败')
+    running = []
   }
+  const activeRunning = running.some(t => t.albumId === activeAlbumId.value)
+  // 本册在扫 → 本轮刷新；本册刚从「在扫」转「扫完」→ 补拉收尾
+  if (activeRunning || (scanWatchActiveRunning && !activeRunning)) {
+    await loadAlbums(false).catch(() => {})
+  }
+  scanWatchActiveRunning = activeRunning
+  scheduleScanWatch(running.length ? SCAN_BUSY_MS : SCAN_IDLE_MS)
+}
+
+function scheduleScanWatch(ms) {
+  clearTimeout(scanWatchTimer)
+  scanWatchTimer = setTimeout(scanWatchTick, ms)
+}
+
+function startScanWatch() {
+  if (scanWatchTimer) return
+  // 立即探一次：进页面/切回来就能接上正在跑的扫描
+  scheduleScanWatch(0)
+}
+
+function stopScanWatch() {
+  clearTimeout(scanWatchTimer)
+  scanWatchTimer = 0
+  scanWatchActiveRunning = false
 }
 
 function openFolderViewer() {
@@ -702,66 +759,162 @@ function openFolderViewer() {
   window.electron.invoke(INVOKE.OPEN_FOLDER, dir).catch(() => useNotification().error('打开文件夹失败'))
 }
 
-async function rescanAll(mode = 'incremental') {
-  if (albums.value.length === 0) { useNotification().warning('请先添加相册文件夹'); return }
-  manageScanning.value = true
-  scanProgress.value = { scanned: 0, total: 0 }
-  scanMode.value = mode
-  // 全量更新：先清空前端网格，扫描中逐步显示新索引的照片
-  if (mode === 'full') groups.value = []
-  try {
-    for (const a of albums.value) {
-      await axios.post(`/api/album/${a.id}/rescan`, { mode }, { headers: authHeaders() })
-    }
-    useNotification().info('已开始' + (mode === 'full' ? '完全' : '增量') + '更新照片索引…')
-    await Promise.all(albums.value.map(a => pollScanFor(a.id, mode === 'full')))
-    await loadAlbums()
-    useNotification().success('照片索引已更新')
-  } catch (err) {
-    useNotification().error(err.response?.data?.error || '更新失败')
-  } finally { manageScanning.value = false }
-}
-
-function pollScanFor(id, progressive = false) {
-  return new Promise(resolve => {
-    const timer = setInterval(async () => {
-      try {
-        const res = await axios.get(`/api/album/${id}/status`, { headers: authHeaders() })
-        if (res.data.scanning) {
-          scanProgress.value = { scanned: res.data.scanned || 0, total: res.data.total || 0 }
-          if (progressive && activeAlbumId.value === id) {
-            await loadAlbums(false)
-          }
-        } else {
-          clearInterval(timer)
-          const idx = pollTimers.value.indexOf(timer)
-          if (idx !== -1) pollTimers.value.splice(idx, 1)
-          resolve()
-        }
-      } catch (_) {
-        clearInterval(timer)
-        const idx = pollTimers.value.indexOf(timer)
-        if (idx !== -1) pollTimers.value.splice(idx, 1)
-        resolve()
-      }
-    }, 800)
-    pollTimers.value.push(timer)
-  })
-}
-
-async function stopScan() {
-  for (const a of albums.value) {
-    await axios.post(`/api/album/${a.id}/stop`, {}, { headers: authHeaders() }).catch(() => {})
-  }
-  useNotification().info('已请求停止扫描')
-}
-
 // 当前相册的扁平照片列表（按日期分组展开），用于上下张切换
 const allPhotos = computed(() => {
   const arr = []
   for (const g of groups.value) arr.push(...(g.photos || []))
   return arr
 })
+
+/* ===== 时间轴多选（长按或工具栏「多选」按钮进入）与「移动到相册」 =====
+ * 长按照片 400ms 进入多选（与 GridView 的长按阈值一致）：按住的那张自动勾选，
+ * 也可以点工具栏「多选」直接进入、再点照片切换勾选；多选态下单击照片不再打开查看器。
+ * 多选只持有照片索引 id；移动时后端只改 album_photos 索引，绝不移动/修改磁盘文件。 */
+const LONG_PRESS_MS = 400
+const LONG_PRESS_TOLERANCE = 10
+const selectMode = ref(false)
+const selectedIds = ref(new Set())
+let pressTimer = 0
+let pressOrigin = null
+// 长按触发后紧跟的那次 click 只用于收尾，不再当作「查看照片」
+let suppressClick = false
+
+const selectedCount = computed(() => selectedIds.value.size)
+const selectedPhotoIds = computed(() => [...selectedIds.value])
+
+/* ===== 相册视图多选（仅虚拟相册可参与合并） =====
+ * 文件夹相册代表磁盘目录，合并会破坏它与目录的对应关系，因此不可勾选/合并。 */
+const selectedAlbumIds = ref(new Set())
+const selectedAlbumCount = computed(() => selectedAlbumIds.value.size)
+const merging = ref(false)
+
+function isAlbumSelected(id) { return selectedAlbumIds.value.has(id) }
+function toggleAlbumSelect(id) {
+  const next = new Set(selectedAlbumIds.value)
+  if (next.has(id)) next.delete(id)
+  else next.add(id)
+  selectedAlbumIds.value = next
+}
+// 相册卡片点击：多选态下切换勾选（文件夹相册提示不可合并），否则正常打开时间轴
+function onAlbumCardClick(a) {
+  if (!selectMode.value) { openAlbum(a); return }
+  if (a.kind !== 'virtual') { useNotification().info('文件夹相册不能参与合并，请选择虚拟相册'); return }
+  toggleAlbumSelect(a.id)
+}
+
+// 合并选中的虚拟相册：后端合成一个新虚拟相册并删除源相册（只动索引，不碰磁盘文件）
+async function mergeSelectedAlbums() {
+  const ids = [...selectedAlbumIds.value]
+  if (ids.length < 2) { useNotification().info('请至少选择两个虚拟相册'); return }
+  merging.value = true
+  try {
+    const res = await axios.post('/api/album/merge', { album_ids: ids }, { headers: authHeaders() })
+    exitSelectMode()
+    await loadAlbums()
+    useNotification().success(res.data?.message || '相册已合并')
+  } catch (err) {
+    useNotification().error(err.response?.data?.error || '合并相册失败')
+  } finally {
+    merging.value = false
+  }
+}
+
+function isSelected(id) { return selectedIds.value.has(id) }
+
+function enterSelectMode(id) {
+  selectMode.value = true
+  if (id != null) {
+    const next = new Set(selectedIds.value)
+    next.add(id)
+    selectedIds.value = next
+  }
+}
+
+// 退出多选并清空勾选（切相册、切视图、移动/合并完成时调用）
+function exitSelectMode() {
+  if (!selectMode.value && selectedIds.value.size === 0 && selectedAlbumIds.value.size === 0) return
+  selectMode.value = false
+  selectedIds.value = new Set()
+  selectedAlbumIds.value = new Set()
+}
+
+// 工具栏「多选」按钮：未进入时进入，已在多选时再点一下退出
+function toggleSelectMode() {
+  if (selectMode.value) exitSelectMode()
+  else enterSelectMode()
+}
+
+function clearSelection() {
+  selectedIds.value = new Set()
+  selectedAlbumIds.value = new Set()
+}
+
+function selectAllPhotos() {
+  const next = new Set()
+  for (const p of allPhotos.value) next.add(p.id)
+  selectedIds.value = next
+  if (next.size) selectMode.value = true
+}
+
+function toggleSelect(id) {
+  const next = new Set(selectedIds.value)
+  if (next.has(id)) next.delete(id)
+  else next.add(id)
+  selectedIds.value = next
+}
+
+function clearPressTimer() {
+  if (pressTimer) { clearTimeout(pressTimer); pressTimer = 0 }
+}
+
+// 按下开始计时：未移动且持续 LONG_PRESS_MS → 进入多选（鼠标/触屏统一走 pointer 事件）
+function onCellPointerDown(p, e) {
+  if (e.pointerType === 'mouse' && e.button !== 0) return
+  suppressClick = false
+  pressOrigin = { x: e.clientX, y: e.clientY }
+  clearPressTimer()
+  pressTimer = setTimeout(() => {
+    pressTimer = 0
+    if (selectMode.value) return
+    suppressClick = true
+    enterSelectMode(p.id)
+  }, LONG_PRESS_MS)
+}
+
+// 按住后移动超过阈值视为滚动/拖拽，取消长按
+function onCellPointerMove(e) {
+  if (!pressTimer || !pressOrigin) return
+  if (Math.abs(e.clientX - pressOrigin.x) > LONG_PRESS_TOLERANCE || Math.abs(e.clientY - pressOrigin.y) > LONG_PRESS_TOLERANCE) clearPressTimer()
+}
+
+function onCellPointerUp() {
+  clearPressTimer()
+  pressOrigin = null
+}
+
+function onCellClick(p) {
+  if (suppressClick) { suppressClick = false; return }
+  if (selectMode.value) { toggleSelect(p.id); return }
+  viewPhoto(p)
+}
+
+function openMove() {
+  if (!selectedCount.value) {
+    useNotification().warning('请先选择要移动的照片')
+    return
+  }
+  moveMounted.value = true
+  moveVisible.value = true
+}
+
+// 移动完成：清空多选 → 重拉相册列表（数量变化）与当前相册照片（来源是虚拟相册时会变少）
+async function onPhotosMoved() {
+  moveVisible.value = false
+  exitSelectMode()
+  await loadAlbums(false)
+  await nextTick()
+  measure()
+}
 
 // ---- 查看器操作 ----
 function viewPhoto(p) {
@@ -866,7 +1019,7 @@ async function deletePhoto(p) {
       type: 'photo_trash',
       label: `删除照片：${p.file_name}`,
       payload: {
-        photo: { id: p.id, album_id: activeAlbum.value?.id, file_path: p.file_path, file_name: p.file_name, file_size: p.file_size, mtime: p.mtime, photo_date: p.photo_date }
+        photo: { id: p.id, album_id: activeAlbum.value?.id, file_path: p.file_path, file_name: p.file_name, file_size: p.file_size, mtime: p.mtime, photo_date: p.photo_date, exif_date: p.exif_date, date_src: p.date_src }
       }
     }).catch(() => {})
     viewer.value = null
@@ -883,28 +1036,57 @@ onMounted(async () => {
   await nextTick()
   measure()
   applyFocus()
+  // 扫描渐进刷新观察器：任何入口发起的扫描都边扫边刷
+  startScanWatch()
 })
 
-onActivated(applyFocus)
+onActivated(() => {
+  applyFocus()
+  // KeepAlive 首次挂载也会触发 activated；startScanWatch 幂等，重复调用无害
+  startScanWatch()
+})
 watch(() => inst.proxy.$route.query.focus, applyFocus)
+
+// 被 KeepAlive 缓存时定时器要停（见 scanWatch 注释），否则切走后仍在发请求
+onDeactivated(stopScanWatch)
 
 onBeforeUnmount(() => {
   window.removeEventListener('resize', onResize)
-  if (rafId) { cancelAnimationFrame(rafId); rafId = 0 }
   // 清理所有轮询定时器，避免页面切走后仍在发请求
-  for (const t of pollTimers.value) clearInterval(t)
-  pollTimers.value = []
+  stopAll()
+  stopScanWatch()
 })
 </script>
 
 <style scoped>
 /* ===== 网格窗口化虚拟滚动 =====
- * 外层以“日期分组”为窗口单元做 JS 虚拟滚动（只挂载视口附近分组）。
- * 分组内部：超大单日分组仍可能出现大量格子，这里再用 content-visibility
- * 跳过离屏格子布局/绘制，作为兜底，进一步降低大分组滚动卡顿。 */
-.photo-cell {
-  content-visibility: auto;
-  contain-intrinsic-size: auto 1px 150px;
+ * 外层以“日期分组”为窗口单元做 JS 虚拟滚动（只挂载视口附近分组），
+ * 可视区内的格子数量本来就有限，故格子本身不再加 content-visibility：
+ * 它会把格子拆成独立光栅层，和毛玻璃主题的 backdrop-filter 叠加时
+ * 容易出现「图片清晰但显示发虚」（层按 1x 光栅化再按 DPR 放大）。 */
+
+/* 悬停压暗遮罩：故意不用 inset-0 / bg-black/* 这组工具类——
+   全局 utilities.css 里有一条「弹窗遮罩模糊」规则用 [class*="inset-0"][class*="bg-black/"]
+   做匹配，会把这种内容层遮罩也当成弹窗遮罩，加上 backdrop-filter: blur(18px)，
+   导致遮罩下面的照片整张被虚化（这才是「缩略图怎么调都糊」的真凶）。 */
+.photo-mask {
+  position: absolute;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  left: 0;
+  background-color: transparent;
+  transition: background-color 0.2s ease;
+  pointer-events: none;
+}
+.group:hover .photo-mask {
+  background-color: rgba(0, 0, 0, 0.18);
+}
+
+/* 多选态：选中格子的高亮遮罩（与「选择照片」弹窗同一套观感）。
+   选择器叠到与 hover 规则同等特异度并写在后面，保证选中色不被 hover 压掉。 */
+.group .photo-mask.photo-mask--sel {
+  background-color: color-mix(in srgb, var(--color-info, #38bdf8) 18%, transparent);
 }
 
 /* 隐藏相册主列表滚动条（滚动能力保留） */
@@ -915,6 +1097,30 @@ onBeforeUnmount(() => {
 .album-scroll::-webkit-scrollbar {
   display: none;
   width: 0;
+}
+
+/* ===== 多选浮窗：只在竖直方向弹入（过冲回弹，与表格新增行同一曲线、方向相反） =====
+   水平居中由外层 -translate-x-1/2 负责，动画只动内层 transform，避免水平位移 */
+.select-float-enter-active {
+  transition: opacity 0.24s cubic-bezier(0.22, 1, 0.36, 1);
+}
+.select-float-enter-active .select-float-panel {
+  transition: transform 0.24s cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+/* 退出：沿进入方向对称返回，向下加速淡出（时长略短于进入） */
+.select-float-leave-active {
+  transition: opacity 0.12s cubic-bezier(0.5, 0, 0.85, 0.3);
+}
+.select-float-leave-active .select-float-panel {
+  transition: transform 0.12s cubic-bezier(0.5, 0, 0.85, 0.3);
+}
+.select-float-enter-from,
+.select-float-leave-to {
+  opacity: 0;
+}
+.select-float-enter-from .select-float-panel,
+.select-float-leave-to .select-float-panel {
+  transform: translateY(18px);
 }
 
 /* ===== 媒体预览动画：淡入 + 缩放（从较明显放大到原始） ===== */

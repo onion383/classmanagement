@@ -87,11 +87,11 @@
                 </div>
                 <div class="notice-item">
                   <div class="notice-title">本地优先，数据安全</div>
-                  <p class="notice-desc">所有数据均保存在您的本地设备中，遵循「本地优先」原则；本软件不会采集、上传或分析您的任何数据，仅在检查与下载更新时才会使用网络。</p>
+                  <p class="notice-desc">所有数据均保存在您的本地设备中，遵循「本地优先」原则；本软件不会采集、上传或分析您的任何数据，仅在您使用 AI 助手、以及检查与下载更新时才会使用网络。</p>
                 </div>
                 <div class="notice-item">
                   <div class="notice-title">密码提醒</div>
-                  <p class="notice-desc">如果您设置了账户的密码，请牢牢记住账户的密码和恢复密钥，一旦丢失将无法恢复（开发者也没有办法哦）。如果您担心忘记密码，可以设置无密码账户。</p>
+                  <p class="notice-desc">如果您设置了账户的密码并开启了超级隐私模式，请牢牢记住账户密码和 12 词恢复词，一旦两者都丢失将无法恢复（开发者也没有办法哦）。如果您担心忘记密码，可以设置无密码账户。</p>
                 </div>
               </div>
             </div>
@@ -107,33 +107,19 @@
                 <div class="f-static">{{ account.username }}</div>
               </div>
               <div class="f-row">
-                <label class="f-label">保存方式</label>
-                <div class="f-static">{{ account.saveMode === 'encrypted' ? '密文保存（已加密）' : '明文保存' }}</div>
+                <label class="f-label">安全等级</label>
+                <div class="f-static">{{ securityLevelLabel }}</div>
               </div>
               <p class="f-hint">点击「下一步」继续设置班级信息。</p>
             </div>
 
             <template v-else>
-              <!-- 保存方式 -->
-              <div v-if="subKey === 'mode'" class="pane">
-                <label class="opt-card" :class="{ 'is-active': account.saveMode === 'encrypted' }">
-                  <input type="radio" value="encrypted" v-model="account.saveMode" class="hidden-radio" />
-                  <span class="opt-body">
-                    <span class="opt-name">密文保存（推荐）</span>
-                    <span class="opt-desc">数据库以随机密钥加密落盘，可设置登录密码，安全性最高。</span>
-                  </span>
-                </label>
-                <label class="opt-card" :class="{ 'is-active': account.saveMode === 'plain' }">
-                  <input type="radio" value="plain" v-model="account.saveMode" class="hidden-radio" />
-                  <span class="opt-body">
-                    <span class="opt-name">明文保存</span>
-                    <span class="opt-desc">数据库以明文保存，任何程序都可直接读取；明文模式下无法设置密码。</span>
-                  </span>
-                </label>
-              </div>
-
               <!-- 账户信息 -->
-              <div v-else-if="subKey === 'info'" class="pane">
+              <div v-if="subKey === 'info'" class="pane">
+                <div class="f-row">
+                  <label class="f-label">安全等级</label>
+                  <AppSelect v-model="account.securityLevel" :options="securityLevels" class="flex-1 min-w-0" />
+                </div>
                 <div class="f-row">
                   <label class="f-label">用户名</label>
                   <input
@@ -143,34 +129,37 @@
                     autocomplete="off"
                   />
                 </div>
-                <div class="f-row">
-                  <label class="f-label">密码</label>
-                  <input
-                    v-model="account.password"
-                    type="password"
-                    class="f-input"
-                    :disabled="!canSetPassword"
-                    :placeholder="canSetPassword ? '至少 6 位（留空则无密码登录）' : '明文保存模式下不可设置密码'"
-                    autocomplete="new-password"
-                  />
-                </div>
-                <div class="f-row">
-                  <label class="f-label">确认密码</label>
-                  <input
-                    v-model="account.confirm"
-                    type="password"
-                    class="f-input"
-                    :disabled="!canSetPassword || !account.password"
-                    placeholder="再次输入密码"
-                    autocomplete="new-password"
-                  />
-                </div>
+                <template v-if="canSetPassword">
+                  <div class="f-row">
+                    <label class="f-label">密码</label>
+                    <input
+                      v-model="account.password"
+                      type="password"
+                      class="f-input"
+                      placeholder="至少 6 位"
+                      autocomplete="new-password"
+                    />
+                  </div>
+                  <div class="f-row">
+                    <label class="f-label">确认密码</label>
+                    <input
+                      v-model="account.confirm"
+                      type="password"
+                      class="f-input"
+                      placeholder="再次输入密码"
+                      autocomplete="new-password"
+                    />
+                  </div>
+                </template>
+                <p v-if="account.securityLevel === 'plain'" class="f-hint ind">明文模式下数据库不加密，任何程序都可直接读取；之后可在系统设置中升级为加密等级。</p>
+                <p v-else-if="account.securityLevel === 'nopass'" class="f-hint ind">数据仍加密，但登录无需密码；之后可在系统设置中切换为密码或隐私模式。</p>
+                <p v-else-if="account.securityLevel === 'privacy'" class="f-hint ind">需凭密码或 12 词恢复词解锁数据库，两者都丢失将无法恢复。</p>
                 <p v-if="errorMsg" class="f-error">{{ errorMsg }}</p>
               </div>
 
-              <!-- 恢复密钥（仅设置了密码时出现） -->
+              <!-- 恢复密钥（仅超级隐私模式出现） -->
               <div v-else class="pane">
-                <p class="f-hint">请将下方恢复密钥保存到安全的地方，忘记密码时可凭它找回；随后抄写前 3 个词完成注册。</p>
+                <p class="f-hint">这是超级隐私模式的恢复词，也是忘记密码时的唯一凭证；请抄写保存，随后输入前 3 个词完成注册。</p>
                 <div class="phrase-box">{{ recovery.phrase }}</div>
                 <div class="btn-row">
                   <button type="button" class="btn-ghost" @click="downloadPhrase">下载文本</button>
@@ -229,6 +218,14 @@
                   </span>
                   <span class="theme-name">{{ t.name }}</span>
                 </button>
+              </div>
+              <!-- 日夜模式：与设置页同一控件；不支持夜间配色的主题固定日间并置灰 -->
+              <div class="mode-row">
+                <span class="f-label">日夜模式</span>
+                <div class="mode-switch" :class="{ 'is-disabled': !nightSupported }">
+                  <ViewSwitch :modelValue="pendingMode" :options="modeSwitchOptions" @update:modelValue="onSelectMode" />
+                </div>
+                <span class="mode-hint">{{ nightSupported ? '当前主题支持夜间配色' : '当前主题不支持夜间配色，固定为日间' }}</span>
               </div>
               <label class="anim-toggle">
                 <input type="checkbox" :checked="themeStore.animationsEnabled" @change="onAnimationsChange" />
@@ -308,6 +305,18 @@
     </div>
     </Transition>
   </div>
+  <!-- 安全等级风险说明：普通密码只有「确定」，超级隐私「确认 / 取消」（取消回退默认档） -->
+  <ConfirmDialog
+    v-if="levelTipVisible"
+    :visible="levelTipVisible"
+    title="安全等级说明"
+    :message="levelTipMessage"
+    :show-cancel="levelTipType === 'privacy'"
+    :confirm-text="levelTipType === 'privacy' ? '确认' : '确定'"
+    cancel-text="取消"
+    @confirm="levelTipVisible = false"
+    @cancel="onLevelTipCancel"
+  />
 </template>
 
 <script>
@@ -315,6 +324,11 @@ import axios from 'axios'
 import { useThemeStore } from '../../stores/theme'
 import { waitForBackendReady } from '../../utils/backendReady'
 import { SEND, INVOKE, RECEIVE } from '../../electronChannels.js'
+import { storeMediaToken } from '../../utils/apiUrl'
+import AppSelect from '../../components/base/AppSelect.vue'
+import ViewSwitch from '../../components/base/ViewSwitch.vue'
+import ConfirmDialog from '../../components/base/ConfirmDialog.vue'
+import { Sun, Moon } from '@lucide/vue'
 
 // 主题预览色：仅用于「主题选择」的缩略示意（真实配色由各主题 CSS 变量驱动）
 const PREVIEW = {
@@ -334,8 +348,16 @@ const STEPS = [
   { key: 'perf', label: '性能优化' },
 ]
 
+const SECURITY_LEVELS = [
+  { value: 'plain', label: '明文模式（不加密）' },
+  { value: 'nopass', label: '无密码模式（加密，免密码登录）' },
+  { value: 'password', label: '普通密码模式（加密 + 登录密码）' },
+  { value: 'privacy', label: '超级隐私模式（密码 + 恢复词才能解锁）' },
+]
+
 export default {
   name: 'Setup',
+  components: { AppSelect, ViewSwitch, ConfirmDialog },
   props: {
     // 首屏画面，由 src/setup/main.js 依据主进程 launch-plan / URL 参数解析后传入
     initialScreen: { type: String, default: 'welcome' },
@@ -358,8 +380,12 @@ export default {
         username: '',
         password: '',
         confirm: '',
-        saveMode: 'encrypted', // 默认密文保存
+        securityLevel: 'password', // plain=明文 | nopass=加密免密 | password=加密+密码 | privacy=超级隐私
       },
+      // 安全等级风险说明弹窗（超级隐私模式的「取消」回退到普通密码）
+      levelTipVisible: false,
+      levelTipType: 'password',
+      levelTipSuppress: false,
       recovery: {
         phrase: '',
         draftId: '',
@@ -367,6 +393,11 @@ export default {
         saved: false,
       },
       classInfo: { name: '', mottoStyle: '', xuefeng: '' },
+      // 日夜模式切换：与设置页同一套控件（仅 glass / glass2 支持夜间配色）
+      modeSwitchOptions: [
+        { value: 'day', label: '日间', icon: Sun },
+        { value: 'night', label: '夜间', icon: Moon },
+      ],
       dirs: { dataDir: '', thumbsDir: '' },
       busyDataDir: false,
       busyThumbsDir: false,
@@ -378,23 +409,39 @@ export default {
     themeStore() { return useThemeStore() },
     totalSteps() { return STEPS.length },
     current() { return STEPS[this.step].key },
+    // 安全等级说明弹窗文案（与登录页注册保持一致）
+    levelTipMessage() {
+      return this.levelTipType === 'privacy'
+        ? '请您妥善保管好您的密钥，如果丢失，任何人将无法打开您的数据（包括开发者），若担心密码丢失，请使用其他模式'
+        : '普通密码模式只能保证其他 Windows 用户无法访问，并且能保证自己复制数据库到其他电脑无法打开。同一个 Windows 用户仍然可以通过数据恢复打开，如果需要严格的保护隐私，请使用超级隐私模式'
+    },
     activeNo() { return this.step + 1 },
     // 总能「上一步」：即使在第一步，也会回到最前面的欢迎页
     canPrev() { return true },
     // 切换动画的 key：步骤或子步骤变化都会重新触发过渡
     paneKey() { return `${this.current}-${this.subKey}` },
     transitionName() { return this.dir < 0 ? 'slide-prev' : 'slide-next' },
-    // 有密码时账户设置分 3 个子步骤，否则 2 个（无需抄写恢复密钥）
+    // 有密码时账户设置分 2 个子步骤，否则 1 个（无需抄写恢复密钥）
     subSteps() {
       const arr = [
-        { key: 'mode', label: '保存方式' },
         { key: 'info', label: '账户信息' },
       ]
       if (this.recovery.phrase) arr.push({ key: 'recovery', label: '恢复密钥' })
       return arr
     },
     subKey() { return this.subSteps[Math.min(this.sub, this.subSteps.length - 1)].key },
-    canSetPassword() { return this.account.saveMode === 'encrypted' },
+    canSetPassword() { return this.account.securityLevel === 'password' || this.account.securityLevel === 'privacy' },
+    securityLevels() { return SECURITY_LEVELS },
+    nightSupported() { return this.themeStore.nightSupported },
+    pendingMode() { return this.themeStore.pendingMode },
+    securityLevelLabel() {
+      return {
+        plain: '明文模式',
+        nopass: '无密码模式',
+        password: '普通密码模式',
+        privacy: '超级隐私模式',
+      }[this.account.securityLevel] || '—'
+    },
     nextLabel() {
       if (this.current === 'perf') return this.busy ? '处理中…' : '完成'
       return this.busy ? '处理中…' : '下一步'
@@ -410,9 +457,22 @@ export default {
     },
   },
   watch: {
-    // 明文模式下强制清空密码（明文库不允许密码）
-    'account.saveMode'(v) {
-      if (v === 'plain') { this.account.password = ''; this.account.confirm = '' }
+    // 安全等级变化：清理不适用的密码与旧草稿，避免用上一等级的草稿完成注册
+    'account.securityLevel'(v) {
+      if (v === 'plain' || v === 'nopass') {
+        this.account.password = ''
+        this.account.confirm = ''
+      }
+      this.recovery.phrase = ''
+      this.recovery.draftId = ''
+      this.recovery.copyWords = ''
+      this.recovery.saved = false
+      // 取消隐私模式后回退到普通密码是程序化赋值，不再弹一次普通密码说明
+      if (!this.levelTipSuppress) this.tipSecurityLevel(v)
+    },
+    // 首次进入账户设置步骤时，先对默认等级（普通密码模式）做一次说明
+    current(v) {
+      if (v === 'account') this.tipSecurityLevel(this.account.securityLevel)
     },
     // 子步骤数量变化（密码清空 → 恢复密钥子步骤消失）时收敛下标
     subSteps() {
@@ -437,6 +497,19 @@ export default {
     if (api && this._onMain) api.off(RECEIVE.FROM_MAIN, this._onMain)
   },
   methods: {
+    // 选择安全等级时的风险说明弹窗（与登录页注册一致）：普通密码只有「确定」，超级隐私「确认 / 取消」
+    tipSecurityLevel(v) {
+      if (v !== 'password' && v !== 'privacy') return
+      this.levelTipType = v
+      this.levelTipVisible = true
+    },
+    // 超级隐私模式的「取消」：回退到默认的普通密码模式，且不再连锁弹出普通密码说明
+    onLevelTipCancel() {
+      this.levelTipVisible = false
+      this.levelTipSuppress = true
+      this.account.securityLevel = 'password'
+      this.$nextTick(() => { this.levelTipSuppress = false })
+    },
     // ---------- 主题 ----------
     previewStyle(id) {
       const p = PREVIEW[id] || PREVIEW.glass
@@ -444,6 +517,15 @@ export default {
     },
     pickTheme(id) {
       this.themeStore.setTheme(id)
+      // 切到不支持夜间配色的主题时，立即回落到日间
+      if (!this.themeStore.nightSupported && this.themeStore.pendingMode === 'night') {
+        this.themeStore.setMode('day')
+      }
+    },
+    // 日夜模式：仅支持夜间配色的主题可切换
+    onSelectMode(value) {
+      if (!this.nightSupported) return
+      this.themeStore.setMode(value)
     },
     // 动画效果总开关：立即生效
     onAnimationsChange(e) {
@@ -546,14 +628,14 @@ export default {
     async nextAccount() {
       if (this.registered) { this.step += 1; this.sub = 0; return }
       const key = this.subKey
-      if (key === 'mode') { this.sub = 1; return }
       if (key === 'info') return this.submitAccountInfo()
       return this.confirmRegister()
     },
     validateAccountInfo() {
       const { username, password, confirm } = this.account
       if (!username || username.length < 2 || username.length > 30) return '用户名需在 2-30 个字符之间'
-      if (password) {
+      if (this.canSetPassword) {
+        if (!password) return '请设置登录密码'
         if (password.length < 6) return '密码长度至少 6 位'
         if (password !== confirm) return '两次输入的密码不一致'
       }
@@ -564,12 +646,14 @@ export default {
       if (bad) { this.errorMsg = bad; return }
       this.busy = true
       try {
+        const level = this.account.securityLevel
         const payload = {
           username: this.account.username,
           role: 'teacher',
-          encrypted: this.account.saveMode === 'encrypted',
+          encrypted: level !== 'plain',
         }
-        if (this.account.password) payload.password = this.account.password
+        if (level === 'privacy') payload.privacy = true
+        if (this.canSetPassword) payload.password = this.account.password
         const { data } = await axios.post('/api/register', payload)
         if (data.draftId) {
           // 有密码：后端先返回草稿与恢复密钥，进入抄写确认子步骤
@@ -577,7 +661,7 @@ export default {
           this.recovery.phrase = data.recovery?.phrase || ''
           this.recovery.copyWords = ''
           this.recovery.saved = false
-          this.sub = 2
+          this.sub = 1
         } else {
           this.onRegistered(data)
         }
@@ -592,7 +676,13 @@ export default {
       if (!this.checkCopyWords()) { this.errorMsg = '抄写的前 3 个词不正确，请核对'; return }
       this.busy = true
       try {
-        const { data } = await axios.post('/api/register/confirm', { draftId: this.recovery.draftId })
+        // 超级隐私模式：复用这份恢复词作为隐私恢复词，确认时一并提交密码与恢复词
+        const body = { draftId: this.recovery.draftId }
+        if (this.account.securityLevel === 'privacy') {
+          body.password = this.account.password
+          body.phrase = this.recovery.phrase
+        }
+        const { data } = await axios.post('/api/register/confirm', body)
         this.onRegistered(data)
       } catch (err) {
         this.errorMsg = err?.response?.data?.error || err?.message || '注册失败，请重试'
@@ -602,6 +692,7 @@ export default {
     },
     onRegistered(data) {
       if (data && data.token) localStorage.setItem('token', data.token)
+      storeMediaToken(data && data.mediaToken)
       if (data && data.user) localStorage.setItem('currentUser', JSON.stringify(data.user))
       this.registered = true
       this.sub = 0
@@ -1030,34 +1121,32 @@ export default {
   color: var(--color-success);
 }
 
-/* 保存方式选项 */
-.opt-card {
-  display: flex;
-  align-items: flex-start;
-  gap: 10px;
-  padding: 11px 13px;
-  margin-bottom: 10px;
-  border: 1px solid var(--color-border);
-  border-radius: 10px;
-  background: var(--color-bg);
-  cursor: pointer;
-  transition: border-color 0.15s ease, background-color 0.15s ease;
+/* ===== 夜间配色微调（仅引导窗口，不影响主界面） ===== */
+/* 文字整体提亮：在本窗口内重映射文本色变量，层级保留但不发灰 */
+:root[data-mode="night"]:is([data-theme="glass"], [data-theme="glass2"]) .setup-card {
+  --color-text: #f2f6fd;
+  --color-text-secondary: #cfdaeb;
+  --color-text-muted: #aab8cd;
 }
-.opt-card.is-active {
-  border-color: var(--color-primary);
-  background: var(--color-primary-light);
+/* 第二层毛玻璃：夜间改为更淡的深蓝磨砂，去掉白色叠加造成的发灰感 */
+:root[data-mode="night"]:is([data-theme="glass"], [data-theme="glass2"]) .glass-panel {
+  background: rgba(34, 49, 80, 0.28);
+  border-color: rgba(255, 255, 255, 0.07);
+  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.18);
+  backdrop-filter: blur(8px) saturate(1.05);
+  -webkit-backdrop-filter: blur(8px) saturate(1.05);
 }
-.hidden-radio { display: none; }
-.opt-body { display: flex; flex-direction: column; gap: 3px; }
-.opt-name {
-  font-size: 15px;
-  font-weight: 600;
-  color: var(--color-text);
+/* 低版本系统提示：红字与白底按钮跟随深色 */
+:root[data-mode="night"]:is([data-theme="glass"], [data-theme="glass2"]) .ow-msg {
+  color: #fca5a5;
 }
-.opt-desc {
-  font-size: 13px;
-  line-height: 1.5;
-  color: var(--color-text-muted);
+:root[data-mode="night"]:is([data-theme="glass"], [data-theme="glass2"]) .ow-ghost {
+  border-color: rgba(147, 197, 253, 0.35);
+  background: rgba(59, 130, 246, 0.12);
+  color: #bfdbfe;
+}
+:root[data-mode="night"]:is([data-theme="glass"], [data-theme="glass2"]) .ow-ghost:hover {
+  background: rgba(59, 130, 246, 0.22);
 }
 
 /* 用户须知 */
@@ -1173,6 +1262,20 @@ export default {
 .theme-card.is-active .theme-name {
   color: var(--color-primary);
   font-weight: 600;
+}
+
+/* 日夜模式（与设置页同一控件；不支持夜间配色的主题置灰） */
+.mode-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin: 0 0 14px;
+}
+.mode-switch { display: inline-flex; }
+.mode-switch.is-disabled { opacity: 0.5; pointer-events: none; }
+.mode-hint {
+  font-size: 13px;
+  color: var(--color-text-muted);
 }
 
 /* 动画效果开关 */
