@@ -43,6 +43,15 @@ Thumbs.db
 # SQLite WAL/SHM 运行时边车文件（避免误提交）
 *-shm
 *-wal
+# 数据库衍生文件：rekey 转换期间的临时备份（dbManager.backup.js 生成，形如 <db>.rekey-backup）、
+# 明文导出副本与整体备份目录。这些可能是不加密的明文库，绝不入库。
+# 注意：仅写 *.db 不足以覆盖 *.db.rekey-backup 这类带后缀的文件名。
+*.rekey-backup
+*.db.bak
+*.db-*
+*.plain.bak
+.db-backup-*/
+db-backup-*/
 
 
 
