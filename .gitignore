@@ -67,6 +67,8 @@ student-frontend/sticky-test.html
 
 # 问题/优化管理文档（仅本地，不入库）
 doc/problem.md
+# GitHub 孤立对象清除工单（含泄漏 blob SHA 清单，仅本地，不入库）
+doc/GitHub孤立对象清除工单.md
 
 # 设计和支付原图（需要入库，勿忽略）
 !student-frontend/origin/
