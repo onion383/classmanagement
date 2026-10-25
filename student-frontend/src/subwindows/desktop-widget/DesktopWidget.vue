@@ -1,7 +1,9 @@
 <template>
   <div class="desktop-widget">
-    <!-- 时钟区域（拖动手柄：桌面层子窗口用不了 app-region，改为自实现拖动，见 onDragStart） -->
-    <div class="clock-area glass-panel drag-handle" @pointerdown="onWindowDragStart">
+    <!-- 时钟区域（拖动手柄：顶层窗口用原生 app-region；桌面层子窗口改由自实现拖动） -->
+    <div class="clock-area glass-panel drag-handle"
+         :class="{ 'drag-handle-layer': isDesktopLayer }"
+         @pointerdown="onWindowDragStart">
       <AnimatedClock date-format="{Y}-{M}-{D}  星期{W}" />
     </div>
 
@@ -108,6 +110,20 @@ import { ref, computed, onMounted, onUnmounted } from 'vue'
 import axios from 'axios'
 import AnimatedClock from '../../components/AnimatedClock.vue'
 import { INVOKE } from '../../electronChannels.js'
+import { useThemeStore } from '../../stores/theme'
+
+// ========== 主题 ==========
+// 组件需要知道当前主题/日夜间，才能套用对应配色（文字颜色、卡片底色等）。
+// 背景磨砂由主进程的系统亚克力材质提供（真实透出桌面被模糊），**不由渲染层绘制**。
+const themeStore = useThemeStore()
+
+// ========== 窗口形态（决定拖动方式）============
+// 两种形态（Windows 层面互斥，见 electron/desktop-widget-host.js 的说明）：
+//   · 顶层窗口（默认）：系统亚克力生效，拖动用 Electron 原生 -webkit-app-region: drag。
+//   · 桌面层子窗口（用户开启「常驻最底层」）：亚克力失效，app-region 也失效（系统把
+//     SC_MOVE 转发给父窗 Progman），需由渲染层上报坐标、主进程 SetWindowPos 自实现拖动。
+// 这里向主进程询问当前形态；问不到就按顶层窗口处理（原生拖动）。
+const isDesktopLayer = ref(false)
 
 // ========== 时钟：逐字符动画已抽取为 AnimatedClock 组件 ==========
 const now = ref(new Date())
@@ -419,13 +435,15 @@ async function loadAll() {
   }
 }
 
-// ========== 窗口拖动（自实现） ==========
-// 桌面组件挂到 Windows 桌面层（Progman 子窗口）后，-webkit-app-region: drag 立即失效
-// （系统把 SC_MOVE 转发给父窗 Progman），只能由渲染层上报鼠标屏幕坐标、主进程 SetWindowPos 搬窗口。
+// ========== 窗口拖动（仅桌面层模式需要）============
+// 顶层窗口走原生 -webkit-app-region: drag（见 .drag-handle 样式），无需 JS。
+// 桌面层子窗口里 app-region 失效（SC_MOVE 被转发给父窗 Progman，表现为完全拖不动），
+// 只能由渲染层上报鼠标屏幕坐标、主进程 SetWindowPos 搬窗口。
 // screenX/screenY 是屏幕绝对坐标，不随窗口自身移动变化，故拖动不会自我叠加。
 let windowDragging = false
 
 function onWindowDragStart(e) {
+  if (!isDesktopLayer.value) return
   if (e.button !== 0 || !window.electron || !window.electron.send) return
   windowDragging = true
   e.preventDefault()
@@ -451,7 +469,11 @@ let refreshClock = null
 onMounted(() => {
   loadAll()
   loadApps()
-  // 窗口拖动：pointermove/up 挂在 window 上，拖动中窗口自身在移动也不会丢事件
+  // 询问主进程当前窗口形态（决定用原生 app-region 还是自实现拖动）
+  Promise.resolve(window.electron?.invoke?.(INVOKE.GET_DESKTOP_LAYER_STATE))
+    .then((st) => { if (st) isDesktopLayer.value = !!st.desktopLayerEnabled })
+    .catch(() => {})
+  // 桌面层模式下需要监听 pointermove/up（顶层模式不需要）
   window.addEventListener('pointermove', onWindowDragMove)
   window.addEventListener('pointerup', onWindowDragEnd)
   window.addEventListener('pointercancel', onWindowDragEnd)
@@ -471,15 +493,16 @@ onUnmounted(() => {
 
 <style scoped>
 .desktop-widget {
-  /* 宽度与主进程窗口 setContentSize(320,...) 完全一致，避免四周漏出透明亚克力边缘 */
+  /* 宽度与主进程窗口 setContentSize(320,...) 完全一致，避免四周漏出窗口底色边缘 */
   width: 320px;
   padding: 16px;
   box-sizing: border-box;
   /* 内容超高时（值日项目多/课程全满）纵向滚动，避免底部卡片被窗口裁掉 */
   max-height: 100vh;
   overflow-y: auto;
-  /* 页面背景全透明：由主进程 Win32 亚克力效果着色并模糊桌面背景，
-     此处不再画底色，否则会盖住亚克力的模糊/着色效果 */
+  /* 整窗底色透明：由主进程的系统亚克力材质（backgroundMaterial:'acrylic'）绘制在窗口背景上，
+     渲染层保持透明让真实的桌面内容透出被模糊 —— 与 Win11 主题的观感一致。
+     若这里画底色，会把亚克力的模糊/着色整个盖住。 */
   background: transparent;
   border-radius: 20px;
   border: 1px solid rgba(255, 255, 255, 0.25);
@@ -490,10 +513,17 @@ onUnmounted(() => {
   color: #1f2937;
 }
 
-/* 拖动手柄：桌面组件已挂到 Windows 桌面层（Progman 子窗口），app-region: drag 在子窗口上失效
-   （系统把 SC_MOVE 转发给父窗 Progman，表现为完全拖不动），改由 pointerdown + IPC 自实现。 */
+/* 拖动手柄：默认交给 Electron 原生窗口拖动（app-region） */
 .drag-handle {
+  -webkit-app-region: drag;
   cursor: move;
+}
+
+/* 桌面层子窗口模式：app-region 在子窗口里失效（SC_MOVE 被转发给父窗 Progman，
+   表现为完全拖不动），改由渲染层上报坐标 + 主进程 SetWindowPos 自实现拖动，
+   故必须去掉 app-region，否则系统会把拖动交给父窗、组件纹丝不动。 */
+.drag-handle-layer {
+  -webkit-app-region: no-drag;
 }
 
 /* 各区块共用毛玻璃面板：半透明白底 + 背景模糊 + 柔和边框/高光。

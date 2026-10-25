@@ -130,3 +130,18 @@
   background: rgba(255, 255, 255, 0.35);
   border-bottom: 1px solid rgba(0, 0, 0, 0.08);
 }
+
+/* ===== 「系统亚克力」窗口 ===== 
+   桌面小组件用。该窗口的磨砂背景来自**主进程的系统背景材质**（backgroundMaterial:'acrylic'，
+   真实透出桌面被模糊，与 Win11 窗口的观感一致），页面自身必须完全透明 ——
+   否则各主题给 body 的底色（glass 的 #f0f4f8、glass2 的 #e9edf8、night 的 #182238…）
+   会把亚克力盖住，背景退化成一块纯色板。
+   主题的背景图机制（--bg-image / has-bg-image）也不参与，见 stores/theme.js 的
+   suppressBackgroundImage —— 否则会再叠一张静态背景图，把亚克力遮掉。
+   放在 theme-base.css（基础层，所有主题都会加载）以一处覆盖全部主题。 */
+:root.system-acrylic body,
+:root.system-acrylic body::before,
+:root.system-acrylic body::after {
+  background: transparent !important;
+  background-image: none !important;
+}

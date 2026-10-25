@@ -443,15 +443,17 @@
         </div>
         <p class="text-xs text-text-muted mt-2 ml-40">关闭后启动不创建桌面小组件窗口（更省资源），并可立即关闭当前窗口；开启立即显示</p>
         <div class="flex items-center gap-4 mt-5 pt-5 border-t border-border">
-          <label class="text-sm font-medium text-text w-40 flex-shrink-0">桌面组件关闭最底层<span class="text-text-muted font-normal">（提升稳定性）</span></label>
+          <label class="text-sm font-medium text-text w-40 flex-shrink-0">桌面组件常驻最底层</label>
           <label class="inline-flex items-center cursor-pointer">
-            <input type="checkbox" :checked="noDesktopLayer" @change="onNoDesktopLayerChange" :disabled="!desktopWidgetEnabled" class="w-4 h-4 rounded border-border text-primary focus:ring-primary cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed" />
-            <span class="ml-2 text-sm text-text-secondary">{{ noDesktopLayer ? '已关闭（稳定模式）' : '已开启' }}</span>
+            <input type="checkbox" :checked="desktopLayerEnabled" @change="onDesktopLayerChange" :disabled="!desktopWidgetEnabled" class="w-4 h-4 rounded border-border text-primary focus:ring-primary cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed" />
+            <span class="ml-2 text-sm text-text-secondary">{{ desktopLayerEnabled ? '已开启' : '已关闭' }}</span>
           </label>
         </div>
         <p class="text-xs text-text-muted mt-2 ml-40">
-          勾选后组件不再常驻所有窗口之下：不挂到桌面层，稳定性更高，但会盖在其他窗口上面、点击可能被抬到最前面。切换后组件会自动重启一次。
-          <span v-if="desktopLayerAutoDisabled" class="block text-danger mt-1">上次启动时组件连续崩溃，已自动切换到稳定模式；确认无误后可在上面取消勾选重新开启。</span>
+          开启后组件常驻所有窗口之下：不会被其它应用窗口盖住，点击也不会把窗口抬到最前面。代价是
+          <span class="text-text-secondary">Windows 的系统磨砂背景会失效</span>（该效果只对顶层窗口有效），组件背景会变成纯色。
+          关闭时组件是普通顶层窗口，背景有与 Win11 窗口一致的透出模糊。切换后组件会自动重启一次。
+          <span v-if="desktopLayerAutoDisabled" class="block text-danger mt-1">上次启动时组件连续崩溃，已自动关闭「常驻最底层」；确认无误后可在上面勾选重新开启。</span>
         </p>
       </div>
     </div>
@@ -780,7 +782,7 @@ export default {
         { label: '本次启用工具箱',           section: 'toolbox',  py: 'bcqygjx' },
         { label: '新U盘插入自动打开',        section: 'toolbox',  py: 'xupcrzddk' },
         { label: '启用桌面小组件',           section: 'widget',   py: 'qyzmxjjs' },
-        { label: '桌面组件关闭最底层',       section: 'widget',   py: 'zmzjgbzdc' },
+        { label: '桌面组件常驻最底层',       section: 'widget',   py: 'zmzjgbzdc' },
         { label: '注释截屏保存位置',         section: 'savepath', py: 'zsjpbcwz' },
         { label: '一键截屏保存位置',         section: 'savepath', py: 'yjjpbcwz' },
         { label: '数据库目录',               section: 'datadir',  py: 'sjkml' },
@@ -844,9 +846,9 @@ export default {
       usbAutoOpen: false,
       // 桌面小组件启用状态：localStorage 持久化，默认启用（主进程据此按需创建桌面小组件窗口）
       desktopWidgetEnabled: (localStorage.getItem('desktopWidgetEnabled') ?? '1') !== '0',
-      // 「桌面组件关闭最底层」：真实状态存在主进程（连续崩溃时会被自动关闭），这里只是界面镜像，
-      // mounted 时用 IPC 同步初值
-      noDesktopLayer: false,
+      // 「桌面组件常驻最底层」：真实状态存在主进程（连续崩溃时会被自动关闭），这里只是界面镜像，
+      // mounted 时用 IPC 同步初值。默认关闭 = 顶层窗口 + 系统亚克力（背景有真磨砂）
+      desktopLayerEnabled: false,
       // 是否由「连续启动崩溃」自动降级而来（用于在设置页给出原因说明）
       desktopLayerAutoDisabled: false,
       loaded: false,

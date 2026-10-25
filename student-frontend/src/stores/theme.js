@@ -84,6 +84,11 @@ export const useThemeStore = defineStore('theme', () => {
   const iconStyle = ref(persisted.iconStyle)
   const topbarColor = ref(persisted.topbarColor)
   const animationsEnabled = ref(persisted.animationsEnabled)
+  // 「不画主题背景图」开关（**不持久化**，每次启动由调用方设置）。
+  // 桌面小组件用：它的磨砂背景来自主进程的系统亚克力（真实透出桌面被模糊），
+  // 若再叠一层主题背景图就会盖住亚克力、退化成一张静态图片。
+  // 组件启动时置 true → 只借主题的配色，背景图与遮罩一律不画。
+  const suppressBackgroundImage = ref(false)
 
   const allThemes = computed(() => [
     ...PRESETS,
@@ -144,7 +149,14 @@ export const useThemeStore = defineStore('theme', () => {
     const isCustomBg = Boolean(backgroundImage.value)
     // glass 内置默认底图：日/夜各一张（夜间图本身是深色风景图，遮罩随之变轻）
     const defaultGlassBg = mode.value === 'night' ? DEFAULT_GLASS_BG_NIGHT : DEFAULT_GLASS_BG
-    const bg = (!isWin11 && backgroundImage.value) || (currentTheme.value === 'glass' ? defaultGlassBg : '')
+    // 「不画主题背景图」：桌面小组件用。组件的磨砂背景来自**主进程的系统亚克力**
+    // （真实透出桌面被模糊），若这里再画一层主题背景图就会盖住它、变成一张静态图片。
+    // 故组件只借用主题的配色（文字、卡片、圆角等），背景图与遮罩一律不画。
+    const suppressBg = suppressBackgroundImage.value
+    // Win11 主题：主进程开窗外亚克力，页面自身保持透明让模糊透出，故不设背景图。
+    const bg = suppressBg
+      ? ''
+      : (!isWin11 && backgroundImage.value) || (currentTheme.value === 'glass' ? defaultGlassBg : '')
     if (bg) {
       const bgUrl = isCustomBg ? resourceUrl(bg) : bg
       document.documentElement.style.setProperty('--bg-image', `url('${bgUrl}')`)
@@ -391,6 +403,7 @@ export const useThemeStore = defineStore('theme', () => {
     iconStyle,
     topbarColor,
     animationsEnabled,
+    suppressBackgroundImage,
     allThemes,
     currentThemeMeta,
     isPreset,

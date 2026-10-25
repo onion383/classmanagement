@@ -137,23 +137,25 @@ export function useSettingsAppearance() {
       try { localStorage.setItem('desktopWidgetEnabled', this.desktopWidgetEnabled ? '1' : '0') } catch (_) {}
       window.electron?.send(SEND.DESKTOP_WIDGET_ENABLED, this.desktopWidgetEnabled)
     },
-    // 读取「桌面组件关闭最底层」的真实状态：该状态由主进程持有（连续启动崩溃时会被自动关闭），
+    // 读取「桌面组件常驻最底层」的真实状态：该状态由主进程持有（连续启动崩溃时会被自动关闭），
     // 设置页的开关只是镜像，加载时必须同步，否则界面显示和实际层级会不一致。
     async loadDesktopLayerState() {
       try {
         const st = await window.electron?.invoke(INVOKE.GET_DESKTOP_LAYER_STATE)
         if (st) {
-          this.noDesktopLayer = !!st.desktopLayerDisabled
+          this.desktopLayerEnabled = !!st.desktopLayerEnabled
           this.desktopLayerAutoDisabled = !!st.autoDisabled
         }
       } catch (_) {}
     },
-    // 切换「桌面组件关闭最底层」：主进程改状态并重启组件子进程
+    // 切换「桌面组件常驻最底层」：主进程改状态并重启组件子进程
     // （窗口层级在创建时决定，只能重启才生效；用户手动改过后清掉「自动降级」提示）
-    onNoDesktopLayerChange(e) {
-      this.noDesktopLayer = e.target.checked
-      if (!this.noDesktopLayer) this.desktopLayerAutoDisabled = false
-      window.electron?.send(SEND.DESKTOP_WIDGET_DESKTOP_LAYER, !this.noDesktopLayer)
+    // 注意：开启后组件挂成桌面层子窗口，**系统亚克力会失效**（DWM 材质只对顶层窗口生效），
+    // 背景会退化成纯色 —— 这是 Windows 层面的取舍，两者不可兼得。
+    onDesktopLayerChange(e) {
+      this.desktopLayerEnabled = e.target.checked
+      if (this.desktopLayerEnabled) this.desktopLayerAutoDisabled = false
+      window.electron?.send(SEND.DESKTOP_WIDGET_DESKTOP_LAYER, this.desktopLayerEnabled)
     },
     async onUsbAutoOpenChange(e) {
       this.usbAutoOpen = e.target.checked

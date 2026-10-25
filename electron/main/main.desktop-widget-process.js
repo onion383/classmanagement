@@ -22,8 +22,11 @@ const { app, BrowserWindow } = require('electron')
 
 // 与 main.js 入口分流里检测的参数保持一致
 const HOST_ARG = '--desktop-widget-host'
-// 关掉桌面层用的参数（host 收到后不 SetParent，按普通顶层窗口创建）
-const NO_LAYER_ARG = '--no-desktop-layer'
+// 开启桌面层用的参数（host 收到后才 SetParent 挂到 Progman 之下）。
+// 默认**不挂**：组件是普通顶层窗口 —— 只有顶层窗口才能用系统亚克力材质
+// （挂成子窗口后 DWM 材质完全失效，背景会退化成一块死白板）。
+// 用户在设置里显式开启「常驻最底层」时才带上这个参数。
+const LAYER_ARG = '--desktop-layer'
 // 一分钟内最多自动重建次数：防止「启动即崩」时把 CPU 打满
 const MAX_RESTARTS_PER_MIN = 6
 // 意外退出后的延迟：Explorer 重启时 Progman 要几百毫秒才重建好，太早启动会挂不上桌面层
@@ -46,8 +49,8 @@ let restartTimes = []
 // 子进程启动时刻：用于区分「启动即崩」和「正常运行后崩溃」
 let startedAt = 0
 
-// 持久化状态：desktopLayerDisabled=是否已关闭桌面层；autoDisabled=是否由自动降级关闭
-const state = { desktopLayerDisabled: false, autoDisabled: false, faultStreak: 0 }
+// 持久化状态：desktopLayerEnabled=用户是否开启「常驻最底层」；autoDisabled=是否由自动降级关闭
+const state = { desktopLayerEnabled: false, autoDisabled: false, faultStreak: 0 }
 
 function stateFile() {
   return path.join(app.getPath('userData'), 'desktop-widget-state.json')
@@ -57,11 +60,11 @@ function loadState() {
   try {
     const raw = fs.readFileSync(stateFile(), 'utf8')
     const o = JSON.parse(raw) || {}
-    state.desktopLayerDisabled = !!o.desktopLayerDisabled
+    state.desktopLayerEnabled = !!o.desktopLayerEnabled
     state.autoDisabled = !!o.autoDisabled
     state.faultStreak = Number(o.faultStreak) || 0
   } catch (_) {
-    // 文件不存在 / 损坏：按默认（启用桌面层）来
+    // 文件不存在 / 损坏：按默认（不挂桌面层，即普通顶层窗口 + 系统亚克力）来
   }
 }
 
@@ -93,8 +96,8 @@ function buildCommand() {
   const passthrough = process.argv.filter(
     (a) => a.startsWith('--no-sandbox') || a.startsWith('--disable-gpu')
   )
-  // 已自动降级 / 用户关闭桌面层时带上这个参数，host 就不去 SetParent，按普通窗口创建
-  const layerArgs = state.desktopLayerDisabled ? [NO_LAYER_ARG] : []
+  // 用户开启「常驻最底层」时带上这个参数，host 才会 SetParent 挂到桌面层
+  const layerArgs = state.desktopLayerEnabled ? [LAYER_ARG] : []
   // 打包后 exe 自带入口，只需传参数；开发模式要显式指定入口脚本。
   const args = app.isPackaged
     ? [HOST_ARG, ...layerArgs, ...passthrough]
@@ -130,15 +133,16 @@ function onExit(proc, code, signal) {
 
   // ===== 启动即崩 → 自动降级 =====
   // 只统计「起来不到 FAULT_WINDOW 就退出」的情况：Explorer 重启属于跑了很久才崩，
-  // 不计入，否则正常使用会被误降级。降级后本次的 start() 会带上 --no-desktop-layer。
+  // 不计入，否则正常使用会被误降级。降级后本次的 start() 不再带 --desktop-layer
+  // （改回普通顶层窗口 + 系统亚克力）。
   if (Date.now() - startedAt < FAULT_WINDOW) {
     state.faultStreak += 1
-    if (state.faultStreak >= FAULT_LIMIT && !state.desktopLayerDisabled) {
-      state.desktopLayerDisabled = true
+    if (state.faultStreak >= FAULT_LIMIT && state.desktopLayerEnabled) {
+      state.desktopLayerEnabled = false
       state.autoDisabled = true
       saveState()
       console.warn(
-        '[desktop-widget] 连续 ' + FAULT_LIMIT + ' 次启动即崩，已自动关闭桌面层（改用普通窗口）；' +
+        '[desktop-widget] 连续 ' + FAULT_LIMIT + ' 次启动即崩，已自动关闭「常驻最底层」（改用普通窗口 + 亚克力）；' +
           '组件仍会显示，可在「桌面小组件设置」里重新开启'
       )
       notifyAutoDisabled()
@@ -226,11 +230,13 @@ function restartHost() {
   }, 400)
 }
 
-// 手动开启/关闭桌面层（layerEnabled=true 表示启用「常驻最底层」）
+// 手动开启/关闭「常驻最底层」（layerEnabled=true 表示挂到桌面层）
+// 注意：开启后窗口会变成 Progman 子窗口，**系统亚克力材质随之失效**（DWM 材质只对顶层窗口生效），
+// 背景会退化成纯色。这是 Windows 层面的取舍，见 electron/desktop-widget-host.js 的说明。
 function setDesktopLayerEnabled(layerEnabled) {
-  const nextDisabled = !layerEnabled
-  if (state.desktopLayerDisabled === nextDisabled) return false
-  state.desktopLayerDisabled = nextDisabled
+  const next = !!layerEnabled
+  if (state.desktopLayerEnabled === next) return false
+  state.desktopLayerEnabled = next
   // 用户手动改过：清掉「自动降级」标记与故障计数，避免界面一直显示自动降级提示
   state.autoDisabled = false
   state.faultStreak = 0
@@ -241,7 +247,7 @@ function setDesktopLayerEnabled(layerEnabled) {
 
 function getDesktopLayerState() {
   return {
-    desktopLayerDisabled: state.desktopLayerDisabled,
+    desktopLayerEnabled: state.desktopLayerEnabled,
     autoDisabled: state.autoDisabled,
     faultStreak: state.faultStreak,
   }
@@ -281,5 +287,5 @@ module.exports = {
   setDesktopLayerEnabled,
   getDesktopLayerState,
   HOST_ARG,
-  NO_LAYER_ARG,
+  LAYER_ARG,
 }
