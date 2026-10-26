@@ -1,7 +1,18 @@
 # testjs
 
-开发期辅助脚本集合。**都不参与打包**，也不被应用代码引用；除 `seed-test-data.js` 需要后端在运行外，
-其余脚本在任意工作目录下执行都可以（内部自行解析仓库根目录）。
+开发期辅助脚本集合。**都不参与打包**，也不被应用代码引用。
+
+## 目录约定
+
+| 目录 | 定位 | 是否入库 |
+| --- | --- | --- |
+| `units/` | 单元测试（`node:test`），可接 CI | ✅ 入库 |
+| `smoke/` | 冒烟脚本：一次跑完能给出「有没有坏」的结论 | ✅ 入库 |
+| `probe/` | 过程探针：测量/诊断用，需要手动传参、耗时较长 | ✅ 入库 |
+| `tools/` | 工具脚本：种子数据、审计、统计等长期复用的辅助 | ✅ 入库 |
+| `tmp/` | 一次性验证脚本与中间产物，**默认不入库** | ❌ 忽略 |
+
+> 新脚本的归类判断：**能重复执行 + 结论可判定的** → `smoke/`；**输出是数据/报告、不判对错** → `probe/` 或 `tools/`；**只服务某一次排查** → `tmp/`。
 
 ## 1. 单元测试 `units/`
 
@@ -18,68 +29,69 @@ npm run test:units        # node --test "testjs/units/*.test.js"
 | `recoveryKey.test.js` | 恢复密钥的归一化、格式化、哈希稳定性与常数时间比较 |
 | `heatColor.test.js` | 前端热力配色端点、钳制与前景色选择 |
 | `backendLogic.test.js` | 请假时间窗校验、SQL 时间戳格式（会注入临时 `DATA_DIR` 与测试主密钥） |
+| `pdfText.test.js` | 前端 `collectPdfText` 的循环引用、超深递归、null/函数输入等边界 |
 
 新增测试：在 `units/` 下建 `*.test.js`，用 `node:test` 的 `test()` 写即可，无需改配置。
-注意：需要 `student-backend` 依赖（如 `better-sqlite3`）时，用
+需要 `student-backend` 依赖（如 `better-sqlite3`）时，用
 `createRequire(path.join(ROOT, 'student-backend/package.json'))` 解析，见 `schema.test.js`。
+前端是 ESM 的模块，用 `pathToFileURL` + 动态 `import()` 加载，见 `heatColor.test.js`。
 
-## 2. 测试数据 `seed-test-data.js`
-
-```bash
-npm run seed                 # 等价于 node testjs/seed-test-data.js
-SEED_BASE=http://127.0.0.1:3000 node testjs/seed-test-data.js   # 指向别的后端
-SEED_USER=演示账号 SEED_PASSWORD=demo1234 node testjs/seed-test-data.js   # 换个账号灌
-```
-
-- **前提**：后端已在运行（`npm run electron:dev` 或打包版），否则会连接失败。
-- **可重复执行**：学生/班费/请假/加分/活动/倒计时/班干部按业务键去重；宿舍组每次重建；
-  「学习小组」维度先删同名再建。重复运行不会堆重复数据。
-- **产出**：账号 `测试班主任` / 密码 `test1234`，以及学生 30 名、座位、课表、值日、分组、班干部、
-  班费、请假、加分、活动、倒计时、学期范围、权重、历史快照、首页班级信息。
-- 注册走「带密码注册 → `/api/register/confirm` 确认」的完整流程；已存在则自动改为登录。
-- 运行结束会回读 `/api/dashboard` 打印各域数量，便于确认。
-
-## 3. 性能测量
-
-### `measure-startup.mjs` —— 启动耗时
+## 2. 冒烟测试 `smoke/` —— 统一入口
 
 ```bash
-node testjs/measure-startup.mjs                 # 正式版整体启动，默认 3 次
-node testjs/measure-startup.mjs --backend-only  # 只测后端冷启动
-node testjs/measure-startup.mjs --dev           # 未打包 Electron + Vite
-node testjs/measure-startup.mjs --json          # 机器可读
+npm run smoke                        # 一次跑完 smoke/ 下所有脚本
+node testjs/run-smoke.cjs --list     # 只看会跑哪些
+node testjs/run-smoke.cjs --only=pdf # 只跑文件名含 pdf 的（可重复传）
+node testjs/run-smoke.cjs --skip=pdf # 跳过文件名含 pdf 的（可重复传）
+node testjs/run-smoke.cjs --bail     # 第一个失败就停
 ```
 
-数据隔离在 `%LOCALAPPDATA%\BanjiiStartupMeasure`，不会碰真实用户数据。
-完整参数见文件头部注释（`--runs` / `--exe` / `--cold` / `--duration` / `--grace` / `--real`）。
+**每个脚本也可以单独跑**：`node testjs/smoke/<文件名>`。
 
-### `inp-probe.mjs` —— 交互延迟（INP）
+约定：
+- 退出码 `0` = 通过，非 0 = 失败；**退出码 `3` = 脚本自己判定「环境不具备，跳过」**（如缺 `fontTools`），不计失败。
+- 需要后端在跑的脚本（`auth-e2e-probe.js`、`auth-privacy-probe.js`）在后端未监听 3000 端口时判为跳过。
+- `.py` 脚本找不到 python 时跳过。
 
-```bash
-node testjs/inp-probe.mjs
-```
+| 脚本 | 覆盖范围 |
+| --- | --- |
+| `api-smoke.cjs` | 后端基础接口连通 |
+| `auth-e2e-probe.js` | 注册 → 确认 → 登录 → 隐私模式全链路（**需后端**） |
+| `auth-privacy-probe.js` | 隐私模式下的接口鉴权（**需后端**） |
+| `collator-equiv-probe.js` | `Intl.Collator` 与前端等价排序一致性 |
+| `unzip-safe-test.cjs` | 自研安全解压：符号链接/路径穿越/绝对路径/反斜杠全部拦截 |
+| `pptx-guard-test.cjs` | PPTX 导入的守卫生效 |
+| `thumbs-cache-test.cjs` | 缩略图缓存目录与命中逻辑 |
+| `theme-setting-probe.mjs` | 主题设置项读写 |
+| `pdf-subset-verify.mjs` | PDF 字体动态子集产出核对 |
+| `font-subset-verify.py` | 子集 cmap 是否覆盖实际绘制的全部字符（需 `fontTools`） |
 
-会先关掉单实例锁冲突、自动起 Vite 与带调试口的 Electron，用 CDP 派发真实输入事件，
-输出「场景 → 输入延迟 / 处理 / 呈现」表。`INP_ONESHOT=1` 可在出报告后直接退出。
+## 3. 过程探针 `probe/`
 
-## 4. 其他探针
+需要手动传参、耗时较长或会拉起完整应用的诊断脚本。**不是回归测试**，别放进冒烟。
 
-### `ocr-probe.mjs` —— OCR 可用性
+| 脚本 | 用途 |
+| --- | --- |
+| `measure-startup.mjs` | 启动耗时。`--backend-only` / `--dev` / `--json` / `--runs` / `--exe` 等参数见文件头注释 |
+| `inp-probe.mjs` | 交互延迟（INP）。自动起 Vite 与带调试口的 Electron，用 CDP 派发真实输入事件 |
+| `mode-probe.mjs` | 日/夜模式切换开销测量 |
+| `ocr-probe.mjs` | OCR 可用性（Windows 有效） |
+| `pdf-leak-probe.mjs` | PDF 导出内存泄漏核查（看 V8 external，不看 rss） |
 
-```bash
-node testjs/ocr-probe.mjs                 # 默认示例文字
-node testjs/ocr-probe.mjs "班费支出 500 元"
-OCR_TEXT="第一行|第二行" node testjs/ocr-probe.mjs
-```
+`measure-startup.mjs` 的数据隔离在 `%LOCALAPPDATA%\BanjiiStartupMeasure`，不碰真实用户数据。
 
-用 `sharp` 现场生成带中文的 PNG，再调系统 OCR 识别。仅 Windows 有效。
+## 4. 工具 `tools/`
 
-### `comment-audit.js` —— 注释保真审计
+| 脚本 | 用途 |
+| --- | --- |
+| `seed-test-data.js` | 灌测试数据。`npm run seed`；`SEED_BASE` / `SEED_USER` / `SEED_PASSWORD` 可覆盖。**需后端在跑** |
+| `comment-audit.js` | 注释保真审计：比对拆分前后的注释，只读不改。`AUDIT_BASE=<git ref>` 指定基准 |
+| `album-sql-args.js` | 相册 SQL 参数构造的辅助核对 |
+| `code_stats.ps1` | 代码量统计（PowerShell） |
 
-```bash
-node testjs/comment-audit.js
-AUDIT_BASE=<git ref> node testjs/comment-audit.js
-```
+`seed-test-data.js` 是幂等的：按业务键去重，重复运行不会堆重复数据。产出账号 `测试班主任` / `test1234`。
 
-把 `units` 清单里「拆分前文件（git 某版本）」与「拆分后目录」的注释逐条比对，
-区分「改写/换行」与「真丢失」。只读，不改代码；新的拆分完成后往数组里追加一条即可复用。
+## 5. `tmp/`
+
+只服务某一次排查的脚本与中间产物（如字体子集对比、缩略图基准、Excel 阻塞测量）。**默认不入库**，
+确认不再复用就留在这里，需要时可整个目录删除。

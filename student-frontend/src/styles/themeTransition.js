@@ -1,5 +1,11 @@
 // 日/夜切换的过渡编排：把「可见的过渡」交给浏览器快照，把「逐元素过渡」瞬时化。
 //
+// ⚠️ 当前状态：**预备方案，尚未上线**。全项目没有任何 import（主题切换走的是
+// themeLoader.js 的动态 import + CSS 过渡）；不是因为效果不行被否决，而是留着等
+// 「表格页切主题卡顿」真正要治时再接。下面这套性能分析结论依然成立，启用方式：
+//   用 performThemeSwap(swap) 包住「改 data-mode」的那一下（swap 里同步改状态与 DOM），
+//   它会自动瞬时化元素过渡并做快照淡入。启用前务必在表格页实测对比。
+//
 // 背景（见 styles/theme-night.css / styles/themeLoader.js）：
 //   theme-night.css 里近 200 条规则全部以 :root[data-mode="night"] 限定作用域，而
 //   data-mode 挂在 <html> 上，是整棵 DOM 的祖先属性。属性一变，浏览器要对每个元素

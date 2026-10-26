@@ -31,7 +31,7 @@ import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 const require = createRequire(import.meta.url)
-const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
+const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..')
 const FRONTEND = path.join(ROOT, 'student-frontend')
 // 端口与 electron/main/main.js 的 INP_DEBUG 分支一致（那里 appendSwitch 写死 9222）
 const PORT = 9222

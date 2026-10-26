@@ -15,7 +15,6 @@ const fs = require('fs')
 
 const marks = []
 const startTime = Date.now()
-const startHR = process.hrtime.bigint()
 
 // 起点校正：上面的零点只是「本计时器被 require」的时刻，而主进程 JS 此前已经跑了一段——
 // 更早还隔着「Electron 进程创建 → Chromium/Node 引导 → main.js 顶层 require」。

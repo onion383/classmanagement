@@ -119,7 +119,6 @@ export function useSeatGrid(apiBase, options = {}) {
       const row = newRows[r]
       if (row._isPodium) continue
       const seatRow = []
-      let realCol = 0
       for (let d = 0; d < row.cells.length; d++) {
         if (isAisleCol(d, cols.value, mode.value, showAisle.value)) continue
         const cell = row.cells[d]
@@ -132,7 +131,6 @@ export function useSeatGrid(apiBase, options = {}) {
         } else {
           seatRow.push(name)
         }
-        realCol++
       }
       newSeats.push(seatRow)
     }

@@ -29,6 +29,10 @@ router.post('/chat', async (req, res) => {
     let proposal = null;
     let exportFile = null;
     let exportImage = null;
+    // 工具返回的「反问用户」选项。**必须在这里声明**：漏了声明时，下面 `ask = out.ask`
+    // 会写成隐式全局变量（CJS 非严格模式不报错），并发请求之间会互相覆盖，
+    // 表现为 A 用户收到 B 用户的提问、或某请求误判为「有待确认提问」提前返回。
+    let ask = null;
     const blocks = [];
     const ctx = { blocks, slug: req.user && req.user.dbSlug, images: tools().latestUserImages(messages), attachments, cfg: s };
     // 联网搜索开关：仅当请求未显式关闭（webSearch === false）时下发 web_search 工具

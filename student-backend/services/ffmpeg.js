@@ -17,10 +17,8 @@
 const fs = require('fs');
 const fsp = fs.promises;
 const path = require('path');
-const os = require('os');
 const https = require('https');
 const crypto = require('crypto');
-const { execFile } = require('child_process');
 const { promisify } = require('util');
 const { pipeline } = promisify(require('stream').pipeline);
 const dbManager = require('../dbManager/dbManager');
@@ -160,8 +158,12 @@ async function ensureFfmpeg() {
       }
     }
 
-    const extract = require('extract-zip'); // 轻量纯 JS，按需加载
-    await extract(zipPath, { dir: CACHE_DIR });
+    // 解压：用自研的 unzipSafe（yauzl 流式），不再依赖 extract-zip
+    // —— 后者有「zip 内符号链接写任意路径」的漏洞且无修复版本。
+    // unzipSafe 在**解压前**逐条目拦掉符号链接/穿越路径；下面的 hasSymlink 是双保险
+    // （自研代码宁可多一道），一旦命中同样 fail-closed。
+    const { unzipSafe } = require('./unzipSafe'); // 轻量纯 JS，按需加载
+    await unzipSafe(zipPath, CACHE_DIR);
 
     // 解压后安全校验：正常 LGPL 包内不应存在符号链接（符号链接可被用于穿越写入缓存目录外）。
     // 一旦发现即视为被篡改，清空缓存并放弃使用该二进制（fail-closed）。

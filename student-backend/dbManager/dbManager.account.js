@@ -13,7 +13,7 @@ const {
   dataDir, openFile, wrapKey, unwrapKey, newPrivacySalt,
   SCRYPT_PARAMS, serializeScryptParams,
   wrapKeyByPrivacySecret, unwrapKeyByPrivacySecret,
-  setUnlockedKey, getUnlockedKey, getUnlockSource,
+  setUnlockedKey, getUnlockedKey,
   registryFindByUsername, registryFindBySlug, registryUpsert, registryDelete, registryList,
   registrySetPrivacy, registryClearPrivacy, registrySetPasswordWrap,
 } = require('./dbManager.base');

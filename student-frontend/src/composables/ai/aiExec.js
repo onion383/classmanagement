@@ -5,6 +5,12 @@ import { refreshUndoStatus } from '../useUndo.js'
 import { useThemeStore } from '../../stores/theme.js'
 import { EXEC, DOC_UNDO_KEY } from './aiConstants.js'
 
+// 数值型设置的安全读取：0 是合法值（不透明度滑到底），不能用 `parseFloat(x) || 默认值`
+const readFrontNum = (key, fallback) => {
+  const v = parseFloat(localStorage.getItem(key))
+  return Number.isFinite(v) ? v : fallback
+}
+
 // 提案执行 + undo 登记 + 前端设置读写 相关的方法组（Options API mixin）。
 // 方法体保留 this.xxx 写法。
 export default {
@@ -275,8 +281,10 @@ export default {
         case 'iconStyle': return localStorage.getItem('app-icon-style') || 'color'
         case 'topbarColor': return localStorage.getItem('app-topbar-color') || 'light'
         case 'animations': return (localStorage.getItem('app-animations') ?? '1') !== '0'
-        case 'bgMaskOpacity': return parseFloat(localStorage.getItem('app-bg-mask-opacity')) || 0.6
-        case 'glassOpacity': return parseFloat(localStorage.getItem('app-glass-opacity')) || 0.4
+        // 不透明度两项不能用 `parseFloat(x) || 默认值`：0 是合法取值（滑到底 = 完全透明），
+        // 会被 `||` 判成"没设置"。AI 回读设置值时必须与 store 的读数口径一致。
+        case 'bgMaskOpacity': return readFrontNum('app-bg-mask-opacity', 0.6)
+        case 'glassOpacity': return readFrontNum('app-glass-opacity', 0.4)
         case 'mergeNotifications': return (localStorage.getItem('mergeNotifications') ?? '1') !== '0'
         default: return null
       }

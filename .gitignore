@@ -26,7 +26,6 @@ cert.pem
 
 # 打包产物
 release*/
-dist/
 dist-verify*/
 *.exe
 # 例外：随包分发的 FFmpeg LGPL 自编译版本（exe + 构建脚本 + 许可证 + 构建信息）需入库，
@@ -65,10 +64,10 @@ testjs/tmp/
 student-frontend/*-bench.html
 student-frontend/sticky-test.html
 
-# 问题/优化管理文档（仅本地，不入库）
-doc/problem.md
-# GitHub 孤立对象清除工单（含泄漏 blob SHA 清单，仅本地，不入库）
-doc/GitHub孤立对象清除工单.md
+# 开发文档目录（仅本地，不入库）。原先零散的 problem.md / GitHub孤立对象清除工单.md
+# 以及 Structure.md、优化计划.md、优化文档.md、MCP接入方案.md 已统一收进此目录。
+# 该目录含泄漏 blob SHA 清单等敏感内容，绝不入库。
+doc/开发文档/
 
 # 设计和支付原图（需要入库，勿忽略）
 !student-frontend/origin/
@@ -89,6 +88,4 @@ lerna-debug.log*
 # AI 助手本地记忆（不入库）
 .workbuddy/
 .tmp-crops/
-.perf-data/
 .issverify/
-.trae/

@@ -10,7 +10,6 @@ const { validateRow } = require('../services/businessRules');
 // ======================== 模式（日常值日 / 大扫除） ========================
 // cells/settings/items 字段既可存旧版「整块即日常」，也可存「按模式分键」的新结构，
 // 这样两种模式数据彼此独立，且旧数据自动归入「日常」模式。
-const MODES = ['daily', 'big'];
 function fieldToModeMap(field) {
   let obj = {};
   try { obj = (typeof field === 'object' && field !== null) ? field : JSON.parse(field || '{}'); }

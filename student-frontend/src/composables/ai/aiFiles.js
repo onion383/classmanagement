@@ -10,7 +10,7 @@ export function readAsDataURL(file) {
   })
 }
 
-export function readAsText(file) {
+function readAsText(file) {
   return new Promise((resolve) => {
     const reader = new FileReader()
     reader.onload = (e) => resolve(e.target.result)
@@ -18,7 +18,7 @@ export function readAsText(file) {
   })
 }
 
-export async function uploadAndParse(file) {
+async function uploadAndParse(file) {
   const form = new FormData()
   form.append('file', file)
   try {
@@ -63,7 +63,7 @@ export async function readFile(file) {
 
 // ===== AI 导出文件：由 export_file 工具下发规格，前端生成字节并弹系统保存对话框 =====
 // 保存走 Electron 的 save-file 通道（浏览器环境退回直接下载）
-export async function saveExportWithDialog(defaultName, blob) {
+async function saveExportWithDialog(defaultName, blob) {
   if (window.electron && typeof window.electron.invoke === 'function') {
     const arrayBuffer = await blob.arrayBuffer()
     const result = await window.electron.invoke(INVOKE.SAVE_FILE, { defaultName, data: arrayBuffer })
@@ -83,7 +83,7 @@ export async function saveExportWithDialog(defaultName, blob) {
 }
 
 // 按规格生成文件并保存：xlsx 用 ExcelJS，其余为纯文本序列化
-export async function saveAiExport(spec) {
+async function saveAiExport(spec) {
   const { success: notify, error: notifyError } = useNotification()
   if (!spec || !Array.isArray(spec.columns) || !spec.columns.length) return
   const { format, filename, columns, title } = spec
@@ -145,7 +145,7 @@ export async function saveAiExport(spec) {
 
 // ===== AI 导出图片：由 export_image 工具下发规格，前端用 html2canvas 渲染成 PNG =====
 // 规格 items 内每项含 title + columns + rows（行是字符串数组），可多项纵向堆叠为一张图
-export async function saveAiImage(spec) {
+async function saveAiImage(spec) {
   const { success: notify, error: notifyError } = useNotification()
   if (!spec || !Array.isArray(spec.items) || !spec.items.length) return
   const esc = (str) => {

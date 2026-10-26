@@ -97,7 +97,8 @@
 import { ref, computed, onUnmounted } from 'vue'
 import { pad2 } from '../../utils/dateTime.js'
 
-const emit = defineEmits(['close'])
+// 声明本组件会往上抛的事件（关闭按钮）；宏的返回值无需接收
+defineEmits(['close'])
 
 const mode = ref('countup') // 'countup' | 'countdown'
 const running = ref(false)

@@ -19,7 +19,6 @@
 
 const { app, BrowserWindow, ipcMain, Menu, screen } = require('electron')
 const startupTimer = require('./main.startup-timer')
-const { applyBackgroundMaterial } = require('./main.window-material')
 const { buildWebPreferences } = require('./main.web-prefs')
 // 桌面小组件跑在独立进程里（见 main.desktop-widget-process.js 顶部注释）：
 // 本模块只保留工具箱浮窗的窗口逻辑，桌面组件的建/关/拖动都交给该进程。
@@ -271,7 +270,7 @@ function registerWidgetIpc(opts = {}) {
   ipcMain.on('widget-move-to', (event, position) => {
     if (widgetWindow && !widgetWindow.isDestroyed()) {
       const { height: screenH } = screen.getPrimaryDisplay().workAreaSize
-      const [winWidth, winHeight] = widgetWindow.getSize()
+      const [, winHeight] = widgetWindow.getSize()
       if (position === 'left-middle') {
         const x = 0
         const y = Math.round((screenH - winHeight) / 2)

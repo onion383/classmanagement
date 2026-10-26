@@ -2,7 +2,7 @@ const express = require('express');
 const fs = require('fs');
 const fsp = fs.promises;
 const path = require('path');
-const { db, _current: currentDb } = require('../db');
+const { db } = require('../db');
 const dbManager = require('../dbManager/dbManager');
 const { moveToTrash, deleteThumb } = require('../albumOps');
 const albumThumbs = require('../albumThumbs');
@@ -453,7 +453,6 @@ router.post('/tasks/resume', (req, res) => {
     const want = Array.isArray(req.body && req.body.albumIds)
       ? new Set(req.body.albumIds.map(Number).filter(v => Number.isInteger(v) && v > 0))
       : null;
-    const slug = dbManager.currentSlug();
     let resumed = 0;
     for (const r of rows) {
       const albumId = r.album_id;

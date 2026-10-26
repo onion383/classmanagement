@@ -553,7 +553,6 @@ function fitCanvas() {
 
 function placeToolbar() {
   if (toolbarPlaced || !toolbarRef.value) return
-  const w = toolbarRef.value.offsetWidth
   const h = toolbarRef.value.offsetHeight
   toolbarPos.x = 20
   toolbarPos.y = Math.max(0, window.innerHeight - h - 20)

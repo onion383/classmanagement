@@ -39,8 +39,6 @@ const RESTART_LIMIT_PER_MIN = 6;
 let child = null;             // 当前 worker 进程
 let idleTimer = null;         // 空闲退出定时器
 let restartTimer = null;      // 崩溃重建定时器
-let isReady = false;          // worker 是否已回 'ready'
-let restartCount = 0;         // 限流计数
 // 「这个 worker 是我们主动叫它退的」标志。
 // 为什么需要：主动 shutdown 走 child.kill() 时，Windows 上 exit 回调拿到的是
 // code=null + signal=SIGTERM，与崩溃长得一模一样 → 被当成崩溃去 scheduleRestart。
@@ -67,7 +65,6 @@ function spawnWorker() {
   if (child) return child;
   clearTimeout(restartTimer);
   restartTimer = null;
-  isReady = false;
   expectExit = false;
 
   // fork 时继承主进程 env：DATA_DIR / DB_MASTER_KEY / ALBUM_THUMBS_DIR 等主进程已注入，
@@ -92,7 +89,6 @@ function spawnWorker() {
     active.clear();
     const wanted = expectExit;
     child = null;
-    isReady = false;
     expectExit = false;
     // 主动叫退（空闲退出 / shutdown / 进程退出）不算崩溃，不重建。
     // 注意光看 code===0 不够：Windows 上 child.kill() 得到的是 code=null + signal='SIGTERM'。
@@ -124,7 +120,6 @@ function onWorkerMessage(msg) {
   if (!msg || !msg.type) return;
   switch (msg.type) {
     case 'ready':
-      isReady = true;
       break;
     case 'progress': {
       // 进度真源本来就是库表 album_scan_tasks（/status 读表），这里只更新一个内存计数

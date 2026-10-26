@@ -8,12 +8,8 @@ let _jwt = null;
 const useJwt = () => (_jwt || (_jwt = require('jsonwebtoken')));
 // bcryptjs 只在登录/注册/重置密码等「用户操作」里用到，不需要在后端就绪前加载：
 // 改为首次调用时才 require，避免把它的冷加载成本压在启动关键路径上（行为完全不变）。
-let _bcrypt = null;
-const useBcrypt = () => (_bcrypt || (_bcrypt = require('bcryptjs')));
-const bcrypt = {
-  compareSync: (...a) => useBcrypt().compareSync(...a),
-  hashSync: (...a) => useBcrypt().hashSync(...a),
-};
+// 惰性加载逻辑已下沉到 services/bcryptAsync.js，本文件只引用它的异步接口。
+const { hash: bcryptHash, compare: bcryptCompare } = require('../services/bcryptAsync');
 const { SECRET, auth, TOKEN_SIGN_OPTS, TOKEN_COOKIE_MAX_AGE, signMediaToken } = require('../middleware/auth');
 const secureChannel = require('../services/secureChannel');
 const sessions = require('../services/sessions');
@@ -139,7 +135,7 @@ router.post('/db-recover', (req, res) => {
 // ---------------------------------------------------------------------------
 // POST /login
 // ---------------------------------------------------------------------------
-router.post('/login', (req, res) => {
+router.post('/login', async (req, res) => {
   const { username, password, mnemonic } = req.body;
   if (!username) return res.status(400).json({ error: '请输入账号' });
 
@@ -168,9 +164,13 @@ router.post('/login', (req, res) => {
   // 恢复词解锁本身就是所有者证明：不再校验登录密码（可用于忘记密码时登录后重设）
   const unlockedByMnemonic = resolved.unlockedBy === 'mnemonic';
   // 无密码用户：直接放行；有密码用户：校验密码哈希
-  if (!unlockedByMnemonic && user.password && !bcrypt.compareSync(password, user.password)) {
-    console.warn('[login] 密码校验失败:', username);
-    return res.status(401).json({ error: '账号或密码错误' });
+  // 保持原短路语义：前两个条件不成立时完全不做密码比对（省一次 bcrypt 计算）。
+  if (!unlockedByMnemonic && user.password) {
+    const pwOk = await bcryptCompare(password, user.password);
+    if (!pwOk) {
+      console.warn('[login] 密码校验失败:', username);
+      return res.status(401).json({ error: '账号或密码错误' });
+    }
   }
 
   const dbSlug = user.db_slug || resolved.slug;
@@ -192,7 +192,7 @@ router.post('/login', (req, res) => {
 // 仅班主任可用；科任老师 / 学生 返回「正在开发中」。
 // 注册即新建一个独立的班主任库；仅超级隐私模式会先生成 12 词恢复词并要求抄写确认。
 // ---------------------------------------------------------------------------
-router.post('/register', (req, res) => {
+router.post('/register', async (req, res) => {
   const { username, password, role, encrypted, privacy, level } = req.body || {};
 
   // 仅班主任开放
@@ -229,12 +229,16 @@ router.post('/register', (req, res) => {
   }
 
   // 密码为空视为无密码登录，不加密；有密码则校验长度并加密存储
-  const passwordHash = !password ? '' : (
-    String(password).length < 6
-      ? res.status(400).json({ error: '密码长度至少 6 位' })
-      : bcrypt.hashSync(String(password), 10)
-  );
-  if (res.headersSent) return; // 校验失败已返回错误
+  // （原实现用三元表达式把 res.json(...) 塞进变量、再靠 res.headersSent 判断，
+  //   改异步后 await 会打断连续执行，故改为显式提前返回，行为一致。）
+  let passwordHash = '';
+  if (password) {
+    if (String(password).length < 6) {
+      res.status(400).json({ error: '密码长度至少 6 位' });
+      return;
+    }
+    passwordHash = await bcryptHash(String(password), 10);
+  }
 
   // 检查账号唯一（跨所有库）
   if (dbManager.registryFindByUsername(uname)) {
@@ -281,7 +285,7 @@ router.post('/register', (req, res) => {
 // ---------------------------------------------------------------------------
 // 完成确认注册：前端在「抄写前 3 词」校验通过后调用，此时才真正创建账号库。
 // ---------------------------------------------------------------------------
-router.post('/register/confirm', (req, res) => {
+router.post('/register/confirm', async (req, res) => {
   const { draftId, password, phrase } = req.body || {};
   const draft = draftId && pendingRegs.get(draftId);
   if (!draft) {
@@ -291,7 +295,12 @@ router.post('/register/confirm', (req, res) => {
   // 超级隐私模式：复用注册时展示的恢复词作为隐私恢复词。
   // 确认时必须提交同一密码与恢复词，否则账号建出来却解不开。
   if (draft.privacy) {
-    if (!password || !bcrypt.compareSync(String(password), draft.passwordHash)) {
+    // 保持原短路语义：密码为空时不做比对，直接判失败
+    let pwOk = false;
+    if (password) {
+      pwOk = await bcryptCompare(String(password), draft.passwordHash);
+    }
+    if (!pwOk) {
       return res.status(400).json({ error: '密码不正确' });
     }
     if (!phrase || !safeEqualHash(deriveRestoreHash(normalizePhrase(phrase)), draft.restoreHash)) {
@@ -369,7 +378,7 @@ function findAccountsByPhrase(phrase) {
   return hits;
 }
 
-router.post('/recover-password', (req, res) => {
+router.post('/recover-password', async (req, res) => {
   const { username, phrase, newPassword } = req.body || {};
   if (!phrase || !newPassword) {
     return res.status(400).json({ error: '请提供恢复密钥和新密码' });
@@ -396,8 +405,10 @@ router.post('/recover-password', (req, res) => {
     try {
       // 先换密码包裹，再改 users 里的密码；顺序反了会出现新旧密码都解不开库
       dbManager.rewrapPassword(name, { newPassword: String(newPassword), useMemoryKey: true });
+      // 哈希是异步的：先算完再写库，避免把 Promise 对象写进 password 列
+      const newHash = await bcryptHash(String(newPassword), 10);
       resolved.conn.prepare('UPDATE users SET password = ? WHERE username = ?')
-        .run(bcrypt.hashSync(String(newPassword), 10), name);
+        .run(newHash, name);
     } catch (err) {
       return res.status(500).json({ error: err.message });
     }
@@ -421,7 +432,7 @@ router.post('/recover-password', (req, res) => {
     return res.status(403).json({ error: '恢复密钥错误' });
   }
 
-  const passwordHash = bcrypt.hashSync(String(newPassword), 10);
+  const passwordHash = await bcryptHash(String(newPassword), 10);
   resolved.conn.prepare('UPDATE users SET password = ? WHERE username = ?').run(passwordHash, user.username);
   res.json({ message: '密码已重置，请重新登录', username: user.username });
 });

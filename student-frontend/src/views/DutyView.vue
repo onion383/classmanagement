@@ -643,14 +643,6 @@ function swapDays(oldIndex, newIndex) {
   persistSettings({ active: true, master: true })
 }
 
-function deleteItem(itemName) {
-  if (!confirm(`确定删除劳动项目「${itemName}」及其值日安排吗？`)) return
-  settingsItems.value = settingsItems.value.filter(it => it.name !== itemName)
-  delete activeCells.value[itemName]
-  delete masterCells.value[itemName]
-  persistSettings({ active: true, master: true }).then(() => notifySuccess('已删除'))
-}
-
 // ==================== 保存设置 ====================
 async function saveSettings({ days, items }) {
   settingsDays.value = days
@@ -1057,13 +1049,6 @@ async function loadHistorySnapshot(options = {}) {
 function onWeekChange(week) {
   if (week) historyCurrentWeek.value = week
   loadHistorySnapshot({ silent: true })
-}
-
-function getMonday(date) {
-  const d = new Date(date)
-  const day = d.getDay()
-  const diff = d.getDate() - day + (day === 0 ? -6 : 1)
-  return new Date(d.setDate(diff))
 }
 
 // 补存已过日期：仅补齐「今天之前」缺失的历史快照（今天由启动时的静默补存负责）

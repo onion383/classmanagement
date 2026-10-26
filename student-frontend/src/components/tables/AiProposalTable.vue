@@ -122,13 +122,10 @@ import DynamicTable from './DynamicTable/DynamicTable.vue'
 import AiRecordTable from './AiRecordTable.vue'
 import AiGridPreview, { GRID_TABLES } from './AiGridPreview.vue'
 import { lineDiff } from '../../composables/ai/aiMessages.js'
+// 设置项的展示名与后端/AI 侧共用同一份（原先是本文件手抄了一份，加设置项时两边容易漏一处）
+import { FRONT_LABELS } from '../../composables/ai/aiConstants.js'
 
-// 前端设置项：key → 展示名 + 枚举值的中文说明（供设置提案预览可读）
-const FRONT_LABELS = {
-  theme: '主题', mode: '日夜模式', iconStyle: '图标样式', topbarColor: '标题栏配色',
-  animations: '动画效果', bgMaskOpacity: '背景遮罩不透明度', glassOpacity: '毛玻璃不透明度',
-  mergeNotifications: '提示合并',
-}
+// 枚举值的中文说明（仅本表格用，供设置提案预览可读）
 const FRONT_VALUE_LABELS = {
   base: '彩色色块', glass: '毛玻璃', glass2: '新毛玻璃', win11: 'Win11', minimal: '极简',
   day: '日间', night: '夜间',

@@ -284,6 +284,7 @@ import { TransitionGroup, defineAsyncComponent } from 'vue'
 import { Search, Filter } from '@lucide/vue'
 import { useDynamicTableDrag } from './DynamicTable.drag.js'
 import { vPreload } from '../../../utils/dialogPrefetch.js'
+import { zhCollator } from '../../../utils/collator.js'
 
 // 表头筛选面板：独立组件 + 懒加载。
 // 用 defineAsyncComponent 把面板拆成单独 chunk，只有第一次点开表头放大镜/漏斗时才下载；
@@ -939,7 +940,7 @@ export default {
       const bNum = b.trim() !== '' && !Number.isNaN(nb);
       if (aNum && bNum) return na - nb;
       if (aNum !== bNum) return aNum ? -1 : 1;   // 数字排在文字前
-      return a.localeCompare(b, 'zh');
+      return zhCollator.compare(a, b);
     },
     // 渲染下标 → rows 原始下标（未筛选且未窗口化时恒等）
     srcIndex(i) {

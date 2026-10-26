@@ -1,28 +1,37 @@
 {
   "name": "campus-assistant",
   "version": "0.8.0",
+  "engines": {
+    "node": ">=22.12.0"
+  },
   "description": "班集桌面应用",
   "main": "electron/main/main.js",
   "scripts": {
-    "dev": "cd student-frontend && npm run dev",
+    "dev": "node student-frontend/dev-vite.js",
     "electron": "electron .",
-    "electron:dev": "concurrently --names \"Vite,Electron\" --prefix-colors \"blue,green\" --kill-others \"npm run dev\" \"electron .\"",
-    "inp": "node testjs/inp-probe.mjs",
-    "seed": "node testjs/seed-test-data.js",
+    "electron:dev": "concurrently --names \"Vite,Electron\" --prefix-colors \"blue,green\" --kill-others \"node student-frontend/dev-vite.js\" \"electron .\"",
+    "inp": "node testjs/probe/inp-probe.mjs",
+    "seed": "node testjs/tools/seed-test-data.js",
+    "smoke": "node testjs/run-smoke.cjs",
     "test:units": "node --test \"testjs/units/*.test.js\"",
     "build": "cd student-frontend && npm run build",
     "build:win:inno": "node electron/inno/compile.mjs",
     "electron:build": "npm run build && electron-builder --dir && npm run build:win:inno",
-    "postinstall": "cd student-backend && npm install"
+    "postinstall": "cd student-backend && npm install",
+    "lint": "eslint student-frontend/src student-frontend/*.js student-backend electron"
   },
   "dependencies": {
     "koffi": "^3.3.3"
   },
   "devDependencies": {
     "@electron/rebuild": "^4.2.1",
+    "@eslint/js": "^10.0.1",
     "concurrently": "^10.0.6",
     "electron": "^44.9.3",
     "electron-builder": "^26.15.3",
+    "eslint": "^10.13.0",
+    "eslint-plugin-vue": "^10.11.1",
+    "globals": "^17.13.0",
     "wait-on": "^9.5.1"
   }
 }

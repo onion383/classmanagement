@@ -3,9 +3,10 @@ import axios from 'axios'
 import { pushUndo } from '../api/undo'
 import { useNotification } from './useNotification'
 import { createRowReuseCache } from '../utils/rowReuse.js'
+import { zhCollator } from '../utils/collator.js'
 
 export function useTableCRUD(apiBase, defaultFields, options = {}) {
-  const { error: notifyError } = useNotification()
+  const { error: notifyError, success: notifySuccess } = useNotification()
   const {
     requiredField = null,
     protectedColumns = [],
@@ -83,7 +84,7 @@ export function useTableCRUD(apiBase, defaultFields, options = {}) {
         if (!isNaN(va) && !isNaN(vb) && String(va) !== '' && String(vb) !== '') {
           return (Number(va) - Number(vb)) * (sortOrder.value === 'asc' ? 1 : -1)
         }
-        return String(va).localeCompare(String(vb), 'zh') * (sortOrder.value === 'asc' ? 1 : -1)
+        return zhCollator.compare(String(va), String(vb)) * (sortOrder.value === 'asc' ? 1 : -1)
       })
     }
     // 序号列沿用旧口径：按「插入新增行之前」的顺序赋 1..n（新增行本身显示 '-'，占位 0）

@@ -255,6 +255,7 @@ import ViewSwitch from '../components/base/ViewSwitch.vue'
 import AppSelect from '../components/base/AppSelect.vue'
 import DynamicTable from '../components/tables/DynamicTable/DynamicTable.vue'
 import LeaveTimeline from '../components/base/LeaveTimeline.vue'
+import { zhCollator } from '../utils/collator.js'
 import StatBarList from '../components/base/StatBarList.vue'
 import { useNotification } from '../composables/useNotification.js'
 import { recordCellUndo, useUndoShortcut } from '../composables/useUndo.js'
@@ -355,7 +356,6 @@ export default {
         { name: '备注', type: '文字' }
       ],
       // 今日到班两张表的列定义（顺序可拖动并保存到后端；slot 指向模板里的自定义单元格）
-      leaveTypeOptions: ['病假', '事假', '其他'],
       activeLeaveFields: [
         { name: 'position', label: '#' },
         { name: '姓名' },
@@ -453,7 +453,7 @@ export default {
         else row.其他++
         row.合计++
       })
-      return [...map.values()].sort((a, b) => b.合计 - a.合计 || a.姓名.localeCompare(b.姓名, 'zh'))
+      return [...map.values()].sort((a, b) => b.合计 - a.合计 || zhCollator.compare(a.姓名, b.姓名))
     },
     // 统计条长度基准：出现次数最多的学生
     maxLeaveStat() {

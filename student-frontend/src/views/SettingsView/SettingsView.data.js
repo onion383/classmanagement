@@ -3,6 +3,7 @@
 import axios from 'axios'
 import { listUndo, undoById, redoById, clearUndo } from '../../api/undo'
 import { pad2 } from '../../utils/dateTime.js'
+import { clearMediaToken } from '../../utils/apiUrl'
 
 export function useSettingsData() {
   return {
@@ -235,6 +236,7 @@ export function useSettingsData() {
         try { await axios.post('/api/auth/logout') } catch (_) {}
         localStorage.removeItem('token')
         localStorage.removeItem('currentUser')
+        clearMediaToken()
         this.$router.push('/login')
       }, '确认')
     },
@@ -269,6 +271,7 @@ export function useSettingsData() {
         await axios.delete('/api/account')
         localStorage.removeItem('token')
         localStorage.removeItem('currentUser')
+        clearMediaToken()
         this.$router.push('/login')
       } catch (err) {
         this.showAlert(err.response?.data?.error || '删除失败')

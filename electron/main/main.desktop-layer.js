@@ -79,7 +79,12 @@ function init() {
     const kernel32 = koffi.load('kernel32.dll')
 
     // 结构体必须在同一 koffi 实例里只注册一次，故放在 init 内（init 有 api 缓存）
+    // 这两个赋值「看似未使用」，实际是**按名字注册 koffi 类型**：下面
+    // user32.func('int GetWindowRect(void *hWnd, _Out_ RECT *lpRect)') 用字符串引用它们，
+    // 删掉会让 func() 抛 unknown type。勿当死代码清理。
+    /* eslint-disable-next-line no-unused-vars */
     const POINT = koffi.struct('POINT', { x: 'int', y: 'int' })
+    /* eslint-disable-next-line no-unused-vars */
     const RECT = koffi.struct('RECT', {
       left: 'int',
       top: 'int',

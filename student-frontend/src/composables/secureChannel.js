@@ -49,7 +49,7 @@ function randomNonce() {
   return b64(b)
 }
 
-export async function encryptAuthProof(token) {
+async function encryptAuthProof(token) {
   const { sessionId: sid, sessionKey: key } = await ensureSession()
   const payload = { ts: Date.now(), n: randomNonce() }
   if (token) payload.token = token
@@ -61,7 +61,7 @@ export async function encryptAuthProof(token) {
 }
 
 // 会话身份绑定状态：首次带 token 的请求成功后置位；后端回 auth-required 时清除。
-export function isAuthBound() { return authBound }
+// （原先还导出了 isAuthBound()，全项目无人调用，已移除；状态本身仍由下面两个函数维护）
 export function markAuthBound() { authBound = true }
 export function resetAuthBinding() { authBound = false }
 

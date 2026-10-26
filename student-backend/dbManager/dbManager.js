@@ -46,6 +46,8 @@ module.exports = {
   lockDb: conn.lockDb,
   registryFindByUsername: base.registryFindByUsername,
   registryFindBySlug: base.registryFindBySlug,
+  // 改账号名用：只改 registry.username，不碰库钥匙包裹
+  registryRename: base.registryRename,
   wrapKey: base.wrapKey,
   unwrapKey: base.unwrapKey,
   wrapKeyBySecret: base.wrapKeyBySecret,

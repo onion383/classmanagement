@@ -61,8 +61,6 @@ const SCAN_YIELD_EVERY = 16;
 // 攒批后提交次数降到 1/10。注意不能跨 await 显式 BEGIN/COMMIT（同步库在 await 期间
 // 会被其他请求插进来打断，反而拉长锁持有），所以用「攒够就立刻提交」而非开长事务。
 const THUMB_WRITE_BATCH = 10;
-// 扫描任务顺带消化「需求队列」的批大小：补图是顺带的，不是主线，别抢遍历本身的进度。
-const DRAIN_MAX = 8;
 // 扫描断点的写库间隔：每 20 个文件写一次（1 万张不必写 1 万次库，崩溃时最多重扫一批）。
 const PERSIST_EVERY = 20;
 

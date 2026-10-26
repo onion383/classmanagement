@@ -197,16 +197,14 @@
 
 
 <script>
-import axios from 'axios';
 import { getCurrentInstance, defineAsyncComponent } from 'vue';
 import EmptySnapshot from '../../components/base/EmptySnapshot.vue';
 import GridView from '../../components/tables/GridView/GridView.vue';
 import Tabs from '../../components/base/Tabs.vue';
 import WeekSwitcher from '../../components/base/WeekSwitcher.vue';
 import { useNotification } from '../../composables/useNotification.js';
-import { useUndoShortcut, recordGridCellUndo, recordGridSnapshotUndo } from '../../composables/useUndo.js';
+import { useUndoShortcut } from '../../composables/useUndo.js';
 import { createRowReuseCache } from '../../utils/rowReuse.js';
-import { applyRouteRowFocus } from '../../composables/useRowFocus.js';
 import { useScheduleCommon } from './ScheduleView.common.js';
 import { useScheduleMaster } from './ScheduleView.master.js';
 import { useScheduleActive } from './ScheduleView.active.js';

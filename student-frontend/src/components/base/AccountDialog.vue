@@ -45,6 +45,7 @@ import { useRouter } from 'vue-router'
 import { User } from '@lucide/vue'
 import axios from 'axios'
 import ConfirmDialog from './ConfirmDialog.vue'
+import { clearMediaToken } from '../../utils/apiUrl'
 
 const props = defineProps({ visible: { type: Boolean, default: false } })
 const emit = defineEmits(['close'])
@@ -65,6 +66,7 @@ function doLogout() {
   axios.post('/api/auth/logout').catch(() => {})
   localStorage.removeItem('token')
   localStorage.removeItem('currentUser')
+  clearMediaToken() // 媒体凭据与登录同 sid，登出即失效；本地也清掉，避免死 token 继续拼进图片 URL
   confirmOpen.value = false
   emit('close')
   router.push('/login')

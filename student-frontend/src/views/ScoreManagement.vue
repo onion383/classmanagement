@@ -170,6 +170,7 @@ import Tabs from '../components/base/Tabs.vue'
 import LeaveTimeline from '../components/base/LeaveTimeline.vue'
 import StatBarList from '../components/base/StatBarList.vue'
 import DynamicTable from '../components/tables/DynamicTable/DynamicTable.vue'
+import { zhCollator } from '../utils/collator.js'
 import { useNotification } from '../composables/useNotification.js'
 import { recordCellUndo, recordRowInsert, recordRowDelete, recordRowUpdate, useUndoShortcut } from '../composables/useUndo.js'
 import { formatDate } from '../utils/dateTime.js'
@@ -304,7 +305,7 @@ export default {
     addPeopleLabel() { return this.isGroup ? '加分小组' : '加分人数' },
     subPeopleLabel() { return this.isGroup ? '扣分小组' : '扣分人数' },
     allRecords() {
-      return this.activeData.slice().sort((a, b) => String(b.加分时间).localeCompare(String(a.加分时间)))
+      return this.activeData.slice().sort((a, b) => zhCollator.compare(String(b.加分时间), String(a.加分时间)))
     },
     statRows() {
       // 小组模式：按小组名聚合

@@ -227,7 +227,6 @@ function createMainWindow() {
   tray.destroyTray()
   // （新窗口）关闭菜单状态复位（allowMainClose / shutdownMenuOpen / mainRendererShutdownReady）
   tray.resetShutdownState()
-  const isFrameless = true
   mainWindowChrome = 'frameless'
   // webPreferences 提出对象字面量单独计时（仅 dev 打点用；打包版行为与内联写法完全一致）
   const _profWpT0 = Date.now()
@@ -764,7 +763,6 @@ function shouldWarnOsVersion() {
 // 复用 preload.js 与「无边框 + 系统亚克力」窗口方案，固定尺寸、不可缩放。
 let setupWindow = null
 let setupRunning = false
-let setupUiReady = false
 // 本次启动窗口要展示的画面计划：warn=先显示低版本提示，setup=提示后继续走首次引导。
 // 窗口创建前由 proceedStartup 写入，渲染层通过 launch-plan invoke 取用决定首屏画面。
 let launchPlan = { warn: false, setup: false }
@@ -807,6 +805,12 @@ function looksLikeFirstRun() {
 }
 
 // 首启判定：FORCE_SETUP=1 强制为真；否则先看文件系统，再等后端就绪看有效账号是否为空
+//
+// 注意：**当前启动流程没有调用它**。实际判定用的是上面同步版 looksLikeFirstRun()，
+// 经由 firstRunAtStartup 参与 needSetup 计算（见 proceedStartup）。
+// 两者差别只有一种场景：index.db 存在、但里面一个有效账号都没有 —— 同步版会判成「非首启」。
+// 这个函数是当时为覆盖该场景写的，保留在此以免丢失意图；接线前需确认登录页是否有兜底入口。
+/* eslint-disable-next-line no-unused-vars */
 async function detectFirstRun() {
   if (process.env.FORCE_SETUP === '1') return true
   if (looksLikeFirstRun()) return true
@@ -868,7 +872,6 @@ function createSetupWindow(plan = launchPlan) {
     return setupWindow
   }
   launchPlan = { warn: !!plan.warn, setup: !!plan.setup }
-  setupUiReady = false
   const win = new BrowserWindow({
     width: 800,
     height: 540,
@@ -934,7 +937,6 @@ function createSetupWindow(plan = launchPlan) {
 ipcMain.on('setup-ready', (event) => {
   if (!setupWindow || setupWindow.isDestroyed()) return
   if (event.sender !== setupWindow.webContents) return
-  setupUiReady = true
   // 引导界面已挂载：dev 下此刻显示窗口（毛玻璃与引导界面同时出现）；prod 下窗口本就已显示
   clearTimeout(setupWindow.__revealTimer)
   startupTimer.mark('引导界面挂载完成')

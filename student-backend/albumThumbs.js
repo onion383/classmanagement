@@ -78,6 +78,35 @@ function thumbPathFor(slug, photoId) {
 // 按库分区存储，避免不同库的相同 photoId 互相覆盖（与磁盘目录同理）
 const indexBySlug = new Map();
 
+// 索引同样按估算字节封顶。它比 buffer 缓存小得多（每条约 100 字节），
+// 但条目数会随相册照片数单调增长，且进程生命周期内不会自然回落，所以也需要一道闸门：
+//   30MB ≈ 30 万条，单个班级的相册远到不了这个量级。
+// **淘汰是安全的**：索引只用于「判断缩略图是否已生成」，miss 会退回磁盘检查后重建，
+// 不丢数据、不出错，只是那一次走慢路径。
+const INDEX_MAX_BYTES = 30 * 1024 * 1024;
+let indexBytes = 0;
+
+// 单条估算：path 是 UTF-16 字符串（2 字节/字符）+ 对象与 Map 项开销约 96 字节。
+// 不追求精确 —— 这是防失控的闸门，不是内存分析器。
+function indexEntryCost(rec) {
+  return (rec && rec.path ? rec.path.length * 2 : 0) + 96;
+}
+
+// 超限即从最老条目开始淘汰（Map 迭代序 = 插入序，库之间按首次创建顺序）。
+// 一次降到 80%，避免每次 set 都触发全量扫描。
+function evictIndexIfNeeded() {
+  if (indexBytes <= INDEX_MAX_BYTES) return;
+  const target = Math.floor(INDEX_MAX_BYTES * 0.8);
+  for (const m of indexBySlug.values()) {
+    for (const [photoId, rec] of m) {
+      if (indexBytes <= target) return;
+      m.delete(photoId);
+      indexBytes -= indexEntryCost(rec);
+      dropBuf(rec.path); // 索引淘汰时顺带放掉对应 buffer，避免两边口径不一致
+    }
+  }
+}
+
 function indexFor(slug) {
   const key = safeSlug(slug);
   let m = indexBySlug.get(key);
@@ -88,8 +117,14 @@ function indexFor(slug) {
 // 记录一条缩略图（生成成功后调用）：同时更新索引与 buffer 缓存
 function rememberThumb(slug, photoId, filePath, version, buf) {
   if (photoId == null) return;
-  indexFor(slug).set(photoId, { path: filePath, v: version || 0 });
+  const m = indexFor(slug);
+  const old = m.get(photoId);
+  if (old) indexBytes -= indexEntryCost(old); // 覆盖旧条目：先扣回，避免重复计数
+  const rec = { path: filePath, v: version || 0 };
+  m.set(photoId, rec);
+  indexBytes += indexEntryCost(rec);
   if (buf && buf.length) putBuf(filePath, buf);
+  evictIndexIfNeeded();
 }
 
 // 查索引：命中且版本足够新则返回路径，否则返回 ''（需重建）
@@ -105,7 +140,11 @@ function forgetPhoto(slug, photoId) {
   const m = indexBySlug.get(safeSlug(slug));
   if (!m) return;
   const rec = m.get(photoId);
-  if (rec) { dropBuf(rec.path); m.delete(photoId); }
+  if (rec) {
+    dropBuf(rec.path);
+    m.delete(photoId);
+    indexBytes -= indexEntryCost(rec);
+  }
 }
 
 // 失效整库（删账号 / 删相册时）
@@ -113,7 +152,10 @@ function forgetAlbum(slug) {
   const key = safeSlug(slug);
   const m = indexBySlug.get(key);
   if (!m) return;
-  for (const rec of m.values()) dropBuf(rec.path);
+  for (const rec of m.values()) {
+    dropBuf(rec.path);
+    indexBytes -= indexEntryCost(rec);
+  }
   m.clear();
 }
 
@@ -165,6 +207,8 @@ function dropBuf(filePath) {
 function cacheStats() {
   return {
     index_count: [...indexBySlug.values()].reduce((n, m) => n + m.size, 0),
+    index_bytes: indexBytes,
+    index_max_bytes: INDEX_MAX_BYTES,
     buf_count: bufCache.size,
     buf_bytes: bufBytes,
     buf_max_bytes: BUF_MAX_BYTES,

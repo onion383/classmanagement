@@ -11,11 +11,6 @@ function allCadres() {
   return db.prepare('SELECT * FROM cadres ORDER BY sort_order, id').all();
 }
 
-// 读取某职务的担任学生
-function membersOf(cadreId) {
-  return db.prepare('SELECT id, cadre_id, student_id, student_name FROM cadre_members WHERE cadre_id = ? ORDER BY sort_order, id').all(cadreId);
-}
-
 // 组装成树并附上担任学生
 function buildTree() {
   const all = allCadres();

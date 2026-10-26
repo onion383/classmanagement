@@ -32,7 +32,7 @@ import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 const require = createRequire(import.meta.url)
-const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
+const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..')
 const FRONTEND = path.join(ROOT, 'student-frontend')
 const PORT = Number(process.env.INP_PORT || 9222)
 const BASE = `http://127.0.0.1:5173`

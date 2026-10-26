@@ -8,7 +8,7 @@ import { createRequire } from 'node:module'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 
-const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
+const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..')
 // 以 student-backend 的 package.json 为基准解析依赖（sharp 装在该子工程下）
 const require = createRequire(path.join(ROOT, 'student-backend', 'package.json'))
 const sharp = require('sharp')

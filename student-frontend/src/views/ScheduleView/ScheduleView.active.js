@@ -1,7 +1,7 @@
 // ===== 课程表：实行课表加载/保存、行列与单元格交互、设置 =====
 // 纯代码搬运自 ScheduleView.vue 的 methods，未改写逻辑；通过展开注册到组件 methods。
 import axios from 'axios'
-import { recordGridCellUndo, recordGridSnapshotUndo } from '../../composables/useUndo.js'
+import { recordGridSnapshotUndo } from '../../composables/useUndo.js'
 
 export function useScheduleActive({ API_BASE, DEFAULT_SECTIONS }) {
   return {

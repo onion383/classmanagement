@@ -5,6 +5,8 @@
 //   与 ExportExcel.vue（面向课表/座位等带特殊行语义的表格）相互独立、互不影响。
 // =========================================================================
 import { INVOKE } from '../electronChannels.js'
+import { loadPdfFontBase64, collectPdfText } from '../utils/pdfFont.js'
+import { toRaw } from 'vue'
 
 // 保存文件：Electron 下弹系统保存对话框，用户确认后才写入；浏览器则直接下载
 export async function saveFileWithDialog(defaultName, blob) {
@@ -166,22 +168,10 @@ async function exportPDF(cols, body, name, title) {
   const doc = new jsPDF({ orientation: 'landscape', unit: 'mm', format: 'a4' })
   let fontLoaded = false
   try {
-    // 中文全量字体以 gzip 随包分发（与 ExportExcel 同一套加载方式）：
-    // app:// 协议返回 gzip 原始字节需自行解压；Vite dev 已透明解压（拿到原始 TTF）。
-    // 先按 gzip 魔数 1F 8B 判断，两种情形都能用。
-    const response = await fetch('/NotoSansSC-6.ttf.gz')
-    if (!response.ok) throw new Error('字体文件加载失败')
-    let bytes = new Uint8Array(await response.arrayBuffer())
-    if (bytes[0] === 0x1f && bytes[1] === 0x8b) {
-      const stream = new Blob([bytes]).stream().pipeThrough(new DecompressionStream('gzip'))
-      bytes = new Uint8Array(await new Response(stream).arrayBuffer())
-    }
-    const fontBase64 = await new Promise((resolve, reject) => {
-      const reader = new FileReader()
-      reader.onloadend = () => resolve(reader.result.split(',')[1])
-      reader.onerror = reject
-      reader.readAsDataURL(new Blob([bytes]))
-    })
+    // 字体按「本次实际要画的字符」现做子集（十几 KB）再嵌入，不再整份塞 13MB 全量字体。
+    // 加载链路（gzip 魔数判断）与「子集失败退回全量」的兜底见 utils/pdfFont.js。
+    // toRaw：入参可能来自响应式状态，逐属性读代理比读原始对象慢得多（见 pdfFont.js 的说明）。
+    const fontBase64 = await loadPdfFontBase64(collectPdfText(title, name, toRaw(cols), toRaw(body)))
     doc.addFileToVFS('NotoSansSC.ttf', fontBase64)
     doc.addFont('NotoSansSC.ttf', 'NotoSansSC', 'normal')
     doc.addFont('NotoSansSC.ttf', 'NotoSansSC', 'bold')

@@ -41,6 +41,27 @@ const PRESETS = [
   { id: 'minimal', name: '极简主题', editable: true },
 ]
 
+// 数值型设置的读取：**不能用 `parseFloat(x) || 默认值`**。
+// 不透明度滑块的 min 是 0，「完全透明」是合法取值，而 0 会被 `||` 当成"没读到"→ 重载后变回默认值。
+const readNum = (key, fallback) => {
+  const v = parseFloat(localStorage.getItem(key))
+  return Number.isFinite(v) ? v : fallback
+}
+
+// JSON 型设置的读取：localStorage 可能被写坏（旧版本格式、外部工具、写入中断），
+// 而这里在 store 初始化时同步执行 —— 一旦抛错就是整个应用白屏、且用户无法自救。
+// 坏数据按「回到默认值」处理，并在控制台留痕。
+const readJson = (key, fallback) => {
+  const raw = localStorage.getItem(key)
+  if (!raw) return fallback
+  try {
+    return JSON.parse(raw)
+  } catch (_) {
+    console.warn(`[theme] 本地设置 ${key} 不是合法 JSON，已回退默认值`)
+    return fallback
+  }
+}
+
 export const useThemeStore = defineStore('theme', () => {
   // 持久化设置的读取集中在这里：既用于初始状态，也用于「别的窗口改了设置」时重新同步
   // （工具箱浮窗跟随主窗口的主题/日夜间切换，见 src/subwindows/widget/main.js）。
@@ -50,13 +71,13 @@ export const useThemeStore = defineStore('theme', () => {
     mode: localStorage.getItem(MODE_KEY) === 'night' ? 'night' : 'day',
     // 是否跟随系统配色（true 时 mode 由系统偏好决定，手动切换会自动关闭它）
     followSystem: localStorage.getItem(FOLLOW_KEY) === '1',
-    customColors: JSON.parse(localStorage.getItem(CUSTOM_KEY) || '{}'),
-    customThemes: JSON.parse(localStorage.getItem(CUSTOM_THEMES_KEY) || '[]'),
+    customColors: readJson(CUSTOM_KEY, {}),
+    customThemes: readJson(CUSTOM_THEMES_KEY, []),
     backgroundImage: localStorage.getItem(BG_IMAGE_KEY) || '',
     // 背景遮罩层不透明度（0~1，有自定义背景图时生效）
-    bgMaskOpacity: parseFloat(localStorage.getItem(BG_MASK_KEY)) || 0.6,
+    bgMaskOpacity: readNum(BG_MASK_KEY, 0.6),
     // 组件透明玻璃层不透明度（0~1，卡片基准值）
-    glassOpacity: parseFloat(localStorage.getItem(GLASS_KEY)) || 0.4,
+    glassOpacity: readNum(GLASS_KEY, 0.4),
     // 图标样式：'color'（彩色图标）| 'emoji'（Emoji）
     iconStyle: localStorage.getItem(ICON_STYLE_KEY) || 'color',
     // 标题栏/侧边栏毛玻璃配色：'blue'（深蓝，旧款）| 'light'（白色调，新款默认）

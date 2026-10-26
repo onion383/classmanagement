@@ -11,6 +11,8 @@
 // 合并整行，CSV 会自动跳过，Markdown/文本/JSON 里落在第一格，不需要改导出组件的渲染逻辑。
 // =========================================================================
 
+import { naturalCollator } from '../../utils/collator.js'
+
 // 索引表的固定三列（ExportExcel 的 fields 格式）
 export const INDEX_FIELDS = [{ name: '序号' }, { name: '文件名' }, { name: '目录' }];
 
@@ -51,10 +53,12 @@ export function formatGroupTitle(key, mode) {
   return `${m[1]}年${Number(m[2])}月${Number(m[3])}日`;
 }
 
-// 文件名自然排序（1.jpg < 2.jpg < 10.jpg）：localeCompare 带 numeric 才按数字比较大小，
+// 文件名自然排序（1.jpg < 2.jpg < 10.jpg）：用带 numeric 的比较器，
 // 否则会排成 1、10、2。
+// 比较器复用（不在比较器里每次调 localeCompare）—— 排序会调用 O(n log n) 次，
+// 每次重建 Collator 纯属浪费。参数与原先的 localeCompare 调用保持一致。
 function nameCompare(a, b) {
-  return String(a || '').localeCompare(String(b || ''), 'zh-Hans-CN', { numeric: true, sensitivity: 'base' });
+  return naturalCollator.compare(String(a || ''), String(b || ''));
 }
 
 /**

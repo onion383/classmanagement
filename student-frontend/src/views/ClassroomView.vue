@@ -223,20 +223,19 @@ watch(() => inst.proxy.$route.query.focus, applyFocus)
 // 为了兼容原有模板，创建别名
 const students = table.rows
 const {
-  fields, newRow, editingCell, contextMenu, dialog, columnForm,
+  newRow, editingCell, contextMenu, dialog, columnForm,
   sortField, sortOrder, searchField, searchKeyword,
   selectedCount, selectedRowKeys,
   importDialogVisible, dedupeDialogVisible,
   displayRows, displayIndexes, visibleFields, allBusinessFields,
   fetchRows, applyUndoChange, showAlert, showConfirm, onDialogConfirm, onDialogCancel, onDialogExtra,
-  startEditCell, saveCell, validateValue,
-  addNewRowAtBottom, insertRowAbove, insertRowBelow, createNewRow, cancelNewRow, saveNewRow,
-  moveRow, deleteColumn, startAddColumn, confirmAddColumn,
+  startEditCell, saveCell,
+  addNewRowAtBottom, cancelNewRow, saveNewRow,
+  moveRow,
   toggleSort, openSearch, closeSearch, openContextMenu,
-  onUpdateNewRow, cutRows, cutSelectedRows, deleteRows, onBatchDelete,
-  pasteRows, onMoveSelectedRows, onSwapRows, onSwapColumns,
-  onSelectionChange, onImportData, onDeleteDuplicates,
-  saveCurrentOrder, deleteRowById
+  onUpdateNewRow, onBatchDelete,
+  onMoveSelectedRows, onSwapRows, onSwapColumns,
+  onSelectionChange, onImportData, onDeleteDuplicates
 } = table
 
 // 弹窗首次打开时置 mounted=true（保活），此后保持挂载，关闭仅降 visible 以播放退出动画

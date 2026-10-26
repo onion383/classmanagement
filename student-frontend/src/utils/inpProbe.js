@@ -38,7 +38,6 @@ const DIALOG_SEL = '[role="dialog"], [class*="dialog"], [class*="Dialog"], [clas
 const byCategory = new Map() // 类别 -> stats
 const byTarget = new Map()   // '事件 → 元素' -> stats
 let observer = null
-let autoTimer = null
 let pendingSinceDump = 0
 
 // 目标元素做成人能看懂的短标签：tag#id.class「按钮文案」
@@ -139,7 +138,9 @@ export function installInpProbe() {
       for (const entry of list.getEntries()) record(entry)
     })
     observer.observe({ type: 'event', buffered: true, durationThreshold: MIN_DURATION })
-    autoTimer = setInterval(() => {
+    // 只在 dev 启用、且 installInpProbe 有 observer 短路保护，进程内只会有一个定时器；
+    // 页面级探针不提供停止入口，故不保存句柄（原先存了 autoTimer 却从未 clear）
+    setInterval(() => {
       if (!pendingSinceDump) return
       pendingSinceDump = 0
       dump('自动')

@@ -23,8 +23,6 @@ const CONTROL_RE = /[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/g;
 const PATH_RE = /^(?:[A-Za-z]:[\\/])?[^<>:"|?*\u0000-\u001f]{0,255}$/;
 // 宽松日期（仅归一，不拒绝）：YYYY-M-D，可选带时间
 const LOOSE_DATE_RE = /^(\d{4})[-/.年](\d{1,2})[-/.月](\d{1,2})日?(?:[ T](\d{1,2}):(\d{2})(?::(\d{2}))?)?$/;
-// 严格日期（用于显式声明的日期列）
-const STRICT_DATE_RE = LOOSE_DATE_RE;
 // 年份合理区间：显式声明的日期列超出该区间视为不合理日期（拒 1900 / 2099 这类离谱年份）
 const MIN_YEAR = 2000;
 const MAX_YEAR = 2100;

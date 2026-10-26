@@ -124,7 +124,6 @@ import NewComerConfirm from '../NewComerConfirm.vue';
 import ConfirmDialog from '../../base/ConfirmDialog.vue';
 import AppSelect from '../../base/AppSelect.vue';
 import { useSeatDraft } from '../../../composables/useSeatDraft.js'
-import { useNotification } from '../../../composables/useNotification.js'
 import { useSmartArrangementPipeline } from './SmartArrangementDialog.pipeline.js'
 import { useSmartArrangementBlocks } from './SmartArrangementDialog.blocks.js'
 import { useSmartArrangementOptions } from './SmartArrangementDialog.options.js'

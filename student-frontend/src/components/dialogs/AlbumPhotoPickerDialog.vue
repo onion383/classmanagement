@@ -94,7 +94,7 @@ const groups = ref([])
 const selected = ref(new Set())
 const photoMap = new Map()
 
-const { containerRef, cellStyle, totalH, visibleGroups, onScroll, measure, reset } = usePhotoTimeline(groups)
+const { containerRef, cellStyle, totalH, visibleGroups, onScroll, reset } = usePhotoTimeline(groups)
 
 /* 缩略图批量预取：可视区照片 id 变化时一次批量取回（少几百次 HTTP 往返），
  * 批量没取到的自动回落到单张 /thumb 接口，功能不变。 */

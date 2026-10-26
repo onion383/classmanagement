@@ -115,7 +115,8 @@ import { useThemeStore } from '../../stores/theme'
 // ========== 主题 ==========
 // 组件需要知道当前主题/日夜间，才能套用对应配色（文字颜色、卡片底色等）。
 // 背景磨砂由主进程的系统亚克力材质提供（真实透出桌面被模糊），**不由渲染层绘制**。
-const themeStore = useThemeStore()
+// 触达 store 以确保主题状态已初始化（配色由 CSS 变量驱动，本组件不直接读 store 字段）
+useThemeStore()
 
 // ========== 窗口形态（决定拖动方式）============
 // 两种形态（Windows 层面互斥，见 electron/desktop-widget-host.js 的说明）：

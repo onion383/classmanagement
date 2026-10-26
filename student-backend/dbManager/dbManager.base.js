@@ -325,6 +325,20 @@ function registrySetEncrypted(slug, encrypted) {
   indexDb.prepare('UPDATE registry SET encrypted = ? WHERE slug = ?').run(encrypted ? 1 : 0, slug);
 }
 
+// 改账号名：只更新 registry.username 一列。
+//
+// 为什么不能复用 registryUpsert：它的 ON CONFLICT 子句会连带覆盖
+// wrapped_key / encrypted —— 而 wrapped_key 是**库钥匙的主密钥包裹**，
+// 一旦被写坏，该库将永远解不开（等于数据报废）。改用户名与钥匙无关，
+// 因此这里单独提供一个「只动 username」的窄接口。
+//
+// 定位用 slug（主键，不随用户名变），返回受影响行数供调用方判断是否真的改到。
+function registryRename(slug, newUsername) {
+  ensureIndex();
+  const info = indexDb.prepare('UPDATE registry SET username = ? WHERE slug = ?').run(newUsername, slug);
+  return info.changes;
+}
+
 // 从 index 登记表移除账号（删除账号用）
 function registryDelete(slug) {
   ensureIndex();
@@ -419,6 +433,7 @@ module.exports = {
   registryFindBySlug,
   registryUpsert,
   registrySetEncrypted,
+  registryRename,
   registryDelete,
   registryList,
   registrySetPrivacy,

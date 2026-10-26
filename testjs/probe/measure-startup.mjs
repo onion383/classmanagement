@@ -39,7 +39,7 @@ import path from 'node:path'
 import http from 'node:http'
 import { fileURLToPath } from 'node:url'
 
-const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
+const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..')
 const BACKEND_DIR = path.join(ROOT, 'student-backend')
 const BACKEND_APP = path.join(BACKEND_DIR, 'app.js')
 // 隔离目录默认放 LOCALAPPDATA（不放项目目录）：项目目录易被杀软实时扫描锁住文件，

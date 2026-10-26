@@ -698,8 +698,6 @@
 </template>
 
 <script>
-import axios from 'axios'
-import { listUndo, undoById, redoById, clearUndo } from '../../api/undo'
 import { defineAsyncComponent } from 'vue'
 import AppSelect from '../../components/base/AppSelect.vue'
 import { Sun, Moon } from '@lucide/vue'
@@ -707,9 +705,7 @@ import ViewSwitch from '../../components/base/ViewSwitch.vue'
 import { useThemeStore } from '../../stores/theme'
 import { storeToRefs } from 'pinia'
 import { resourceUrl } from '../../utils/apiUrl'
-import { pad2 } from '../../utils/dateTime.js'
 import '../../styles/dialog-transition.css'
-import { useNotification } from '../../composables/useNotification'
 import { useSettingsSearch } from './SettingsView.search.js'
 import { useSettingsData } from './SettingsView.data.js'
 import { useSettingsAppearance } from './SettingsView.appearance.js'

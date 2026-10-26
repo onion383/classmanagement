@@ -9,12 +9,8 @@ const { db } = require('../db');
 const dbManager = require('../dbManager/dbManager');
 // bcryptjs 只在改用户名/改密码/删除账号等「用户操作」里用到，不需要在后端就绪前加载：
 // 改为首次调用时才 require，避免把它的冷加载成本压在启动关键路径上（行为完全不变）。
-let _bcrypt = null;
-const useBcrypt = () => (_bcrypt || (_bcrypt = require('bcryptjs')));
-const bcrypt = {
-  compareSync: (...a) => useBcrypt().compareSync(...a),
-  hashSync: (...a) => useBcrypt().hashSync(...a),
-};
+// 惰性加载逻辑已下沉到 services/bcryptAsync.js，本文件只引用它的异步接口。
+const { hash: bcryptHash, compare: bcryptCompare } = require('../services/bcryptAsync');
 const { SECRET, auth, TOKEN_SIGN_OPTS, TOKEN_COOKIE_MAX_AGE, signMediaToken } = require('../middleware/auth');
 const secureChannel = require('../services/secureChannel');
 const { pickPhrase, deriveRestoreHash, formatPhrase } = require('../services/recoveryKey');
@@ -36,7 +32,7 @@ router.get('/recovery-key', auth(), (req, res) => {
 // 备份导出：一次导出当前班主任库（业务数据 + 应用设置 + 账号 全带走）。
 // v2 便携包：仅在「输入正确登录密码」时放行导出，防止他人偷导。
 // 库钥匙用该登录密码派生钥匙包裹进包，换机后仍可用同一登录密码解包恢复。
-router.post('/export', auth(), (req, res) => {
+router.post('/export', auth(), async (req, res) => {
   try {
     const slug = req.user && req.user.dbSlug ? req.user.dbSlug : 'default';
     // 密码走请求体而非 URL query：配合加密通道，避免 GET 明文 URL 泄露密码
@@ -49,7 +45,7 @@ router.post('/export', auth(), (req, res) => {
     // 有密码账号：必须提供并校验正确的登录密码
     if (hasPassword) {
       if (!password) return res.status(400).json({ error: '请输入登录密码以导出数据库' });
-      if (!bcrypt.compareSync(password, user.password)) {
+      if (!await bcryptCompare(password, user.password)) {
         return res.status(401).json({ error: '密码错误，只有本人能导出数据库' });
       }
     }
@@ -223,33 +219,63 @@ router.post('/restore-offline', (req, res) => {
 });
 
 // 修改用户名
-router.put('/username', auth(), (req, res) => {
+//
+// 账号名存在**两处**：业务库（<班主任>.db）的 users 表、以及 index.db 的 registry 登记表。
+// registry.username 才是登录的唯一定位依据（见 dbManager.resolveByUsername），
+// 两处必须同步改，否则会出现「改完名字登不进去 / 旧名字仍能登」的错乱。
+router.put('/username', auth(), async (req, res) => {
   try {
     const { newUsername, password } = req.body;
     if (!newUsername || !password) {
       return res.status(400).json({ error: '请输入新用户名和当前密码' });
     }
+    const newName = String(newUsername).trim();
 
     const user = db.prepare('SELECT * FROM users WHERE id = ?').get(req.user.userId);
-    if (!bcrypt.compareSync(password, user.password)) {
+    if (!await bcryptCompare(password, user.password)) {
       return res.status(400).json({ error: '密码错误' });
     }
 
-    // 检查新用户名是否已被占用
-    const existing = db.prepare('SELECT id FROM users WHERE username = ?').get(newUsername);
+    // 重名检查要跨全部账号：registry 是跨库的账号登记表，只查本库 users 会漏掉别的库。
+    const occupied = dbManager.registryFindByUsername(newName);
+    if (occupied && occupied.slug !== req.user.dbSlug) {
+      return res.status(400).json({ error: '该用户名已被占用' });
+    }
+    // 同库内另有同名用户（registry 与业务库不同步的兜底）
+    const existing = db.prepare('SELECT id FROM users WHERE username = ?').get(newName);
     if (existing && existing.id !== req.user.userId) {
       return res.status(400).json({ error: '该用户名已被占用' });
     }
 
-    db.prepare('UPDATE users SET username = ? WHERE id = ?').run(newUsername, req.user.userId);
-    res.json({ message: '用户名修改成功', username: newUsername });
+    // 先更新 registry（登录定位的真源），再更新业务库 users。
+    // 顺序理由：registry 决定「能不能用这个名字登录」，是权威侧；
+    // 万一业务库更新失败，registry 已改而 users 未改的状态下一致性由下次改名修正，
+    // 反过来（先改 users）则会出现「库里是新名、登记表是旧名」→ 新名永远登不进去。
+    const changed = dbManager.registryRename(req.user.dbSlug, newName);
+    if (!changed) {
+      return res.status(500).json({ error: '账号登记表更新失败，请重试' });
+    }
+    db.prepare('UPDATE users SET username = ? WHERE id = ?').run(newName, req.user.userId);
+
+    // 登录态里带的是旧用户名：重新签发一份含新用户名的 token，并同步换发媒体凭据。
+    // （sid 沿用原会话，登出/会话名单机制不受影响）
+    const payload = {
+      userId: req.user.userId, username: newName, role: req.user.role,
+      dbSlug: req.user.dbSlug, sid: req.user.sid,
+    };
+    const token = useJwt().sign(payload, SECRET, TOKEN_SIGN_OPTS);
+    if (req.sessionId) secureChannel.bindAuth(req.sessionId, token);
+    res.cookie('token', token, {
+      httpOnly: true, sameSite: 'lax', path: '/', maxAge: TOKEN_COOKIE_MAX_AGE,
+    });
+    res.json({ message: '用户名修改成功', username: newName, token, mediaToken: signMediaToken(payload) });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
 });
 
 // 修改密码
-router.put('/password', auth(), (req, res) => {
+router.put('/password', auth(), async (req, res) => {
   try {
     const { oldPassword, newPassword } = req.body || {};
     if (!newPassword) {
@@ -264,8 +290,17 @@ router.put('/password', auth(), (req, res) => {
     const byMnemonic = isPrivacy && dbManager.getUnlockSource(req.user.dbSlug) === 'mnemonic';
     // 「本机信息恢复」签发的 token 带 recover 标记：本机文件即凭证，允许免旧密码直接设置新密码
     const byLocalRecover = req.user.recover === true && !isPrivacy;
-    if (!byMnemonic && !byLocalRecover && (!oldPassword || !bcrypt.compareSync(oldPassword, user.password))) {
-      return res.status(400).json({ error: '原密码错误' });
+    // 只有「既不是恢复词解锁、也不是本机恢复」时才需要校验旧密码。
+    // 保持原短路语义：这两种情况下完全不比对密码（既省一次 bcrypt 计算，行为也与原来一致）。
+    if (!byMnemonic && !byLocalRecover) {
+      // 旧密码为空时不必比对；非空才做一次异步比对
+      let oldOk = false;
+      if (oldPassword) {
+        oldOk = await bcryptCompare(oldPassword, user.password);
+      }
+      if (!oldOk) {
+        return res.status(400).json({ error: '原密码错误' });
+      }
     }
 
     // 先换密码包裹：包裹更新失败就不改 users 里的密码，避免新旧密码都解不开库
@@ -277,7 +312,7 @@ router.put('/password', auth(), (req, res) => {
       });
     }
 
-    const hashed = bcrypt.hashSync(newPassword, 10);
+    const hashed = await bcryptHash(newPassword, 10);
     db.prepare('UPDATE users SET password = ? WHERE id = ?').run(hashed, req.user.userId);
     // 「本机信息恢复」的 token 只授权这一次改密码：改完立即换发不含 recover 的常规 token，
     // 否则它在 30 天内都能免旧密码再次改密码。
@@ -353,7 +388,7 @@ router.post('/security-level', auth(), async (req, res) => {
     const needsCurrent = from === 'password' || from === 'privacy';
     if (needsCurrent) {
       if (!password) return res.status(400).json({ error: '请输入当前登录密码' });
-      if (!bcrypt.compareSync(password, user.password)) return res.status(400).json({ error: '密码错误' });
+      if (!await bcryptCompare(password, user.password)) return res.status(400).json({ error: '密码错误' });
     }
 
     // 目标需要登录密码但当前没有：先写入新密码（必须在库连接还可用时改）
@@ -361,7 +396,9 @@ router.post('/security-level', auth(), async (req, res) => {
     if (!needsCurrent && (target === 'password' || target === 'privacy')) {
       if (String(newPassword).length < 6) return res.status(400).json({ error: '新密码长度至少 6 位' });
       effectivePwd = String(newPassword);
-      db.prepare('UPDATE users SET password = ? WHERE id = ?').run(bcrypt.hashSync(effectivePwd, 10), user.id);
+      // 先算出哈希再写库：哈希是异步的，必须 await 拿到结果才能入库
+      const newHash = await bcryptHash(effectivePwd, 10);
+      db.prepare('UPDATE users SET password = ? WHERE id = ?').run(newHash, user.id);
     } else if (target === 'plain' || target === 'nopass') {
       // 明文库与免密登录都不能保留密码
       db.prepare('UPDATE users SET password = ? WHERE id = ?').run('', user.id);
@@ -410,13 +447,13 @@ router.get('/privacy', auth(), (req, res) => {
 
 // 开启超级隐私模式：用当前登录密码确认身份，并生成一份 12 词恢复词（仅此次返回）。
 // 开启后库钥匙只由「登录密码 / 恢复词」包裹，主密钥再也解不开；忘记两者即不可恢复。
-router.post('/privacy/enable', auth(), (req, res) => {
+router.post('/privacy/enable', auth(), async (req, res) => {
   try {
     const { password } = req.body || {};
     const user = db.prepare('SELECT * FROM users WHERE id = ?').get(req.user.userId);
     if (!user) return res.status(401).json({ error: '账号不存在' });
     if (!user.password) return res.status(400).json({ error: '当前账号未设置登录密码，请先设置密码' });
-    if (!password || !bcrypt.compareSync(password, user.password)) {
+    if (!password || !await bcryptCompare(password, user.password)) {
       return res.status(400).json({ error: '密码错误' });
     }
 

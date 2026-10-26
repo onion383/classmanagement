@@ -10,10 +10,16 @@ Git 代码统计（原始行 / 有效代码行 / 字符数）
 
 说明：不依赖 ThreadJob 等第三方模块，兼容 Windows PowerShell 5.1 与 PowerShell 7+。
 #>
+param(
+    # 非交互调用（CI、管道、Agent）时传 -NoPause，避免末尾 Read-Host 挂住
+    [switch]$NoPause
+)
+
 [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
 $ErrorActionPreference = 'Stop'
 
-$root = Split-Path -Parent $MyInvocation.MyCommand.Path
+# 脚本位于 testjs/tools/，仓库根在上三级（原先放在仓库根，只需一级）
+$root = Split-Path -Parent (Split-Path -Parent (Split-Path -Parent $MyInvocation.MyCommand.Path))
 Set-Location -LiteralPath $root
 
 Write-Host "======================================" -ForegroundColor Cyan
@@ -119,9 +125,16 @@ function Measure-OneFile {
     }
 
     # 模块：取路径第一段（顶层目录）；根目录下的文件归为“(根目录)”
+    # testjs 下再细分一级（testjs/smoke、testjs/probe…），其余目录保持一级
     $norm = $RelPath -replace '\\', '/'
     $slash = $norm.IndexOf('/')
     $module = if ($slash -lt 0) { '(根目录)' } else { $norm.Substring(0, $slash) }
+    if ($module -eq 'testjs') {
+        $rest = $norm.Substring($slash + 1)
+        $sub = $rest.IndexOf('/')
+        if ($sub -ge 0) { $module = "testjs/" + $rest.Substring(0, $sub) }
+        else { $module = 'testjs/(根目录)' }
+    }
 
     [PSCustomObject]@{
         FilePath = $RelPath
@@ -254,4 +267,6 @@ $reportPath = 'doc\仓库代码数量统计.md'
 Write-Host "`n✅ 报告已保存到：$reportPath"
 
 # 仅在交互式终端等待回车；被管道/自动化调用时直接结束（避免 NonInteractive 报错）
-try { Read-Host "`n统计完成，按回车退出" } catch { }
+if (-not $NoPause) {
+    try { Read-Host "`n统计完成，按回车退出" } catch { }
+}

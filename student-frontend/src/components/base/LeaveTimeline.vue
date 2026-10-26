@@ -62,6 +62,7 @@
 
 <script>
 import AppSelect from './AppSelect.vue'
+import { zhCollator } from '../../utils/collator.js'
 
 export default {
   name: 'LeaveTimeline',
@@ -118,7 +119,7 @@ export default {
           return true;
         })
         .slice()
-        .sort((a, b) => String(b.time).localeCompare(String(a.time)));
+        .sort((a, b) => zhCollator.compare(String(b.time), String(a.time)));
     }
   },
   methods: {

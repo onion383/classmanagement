@@ -6,7 +6,7 @@ import './styles/index.css'
 import { loadThemeStyles } from './styles/themeLoader'
 import { useThemeStore } from './stores/theme'
 import { setupApiClient, backendBaseUrl } from './utils/httpClient'
-import { ensureMediaToken } from './utils/apiUrl'
+import { ensureMediaToken, clearMediaToken } from './utils/apiUrl'
 import { useNotification } from './composables/useNotification'
 import { ensureDashboardData } from './composables/useDashboardData'
 import { installInpProbe } from './utils/inpProbe'
@@ -39,6 +39,7 @@ setupApiClient({
     if (!config?.__skipAuth && !isAuthReq && Date.now() - lastAuthPrompt > 2000) {
       lastAuthPrompt = Date.now()
       localStorage.removeItem('token')
+      clearMediaToken()
       useNotification().error('登录已过期，请重新登录', 5000)
       if (router.currentRoute.value.path !== '/login') {
         router.push('/login')
@@ -86,8 +87,14 @@ try {
   })
 } catch (_) {}
 // 应用透明度
-const glassOpacity = parseFloat(localStorage.getItem(GLASS_KEY)) || 0.4
-const bgMaskOpacity = parseFloat(localStorage.getItem(BG_MASK_KEY)) || 0.6
+// 注意：这里不能用 `parseFloat(x) || 默认值` —— 滑块 min=0，0（完全透明）是合法值，
+// 却会被 `||` 当成"没设置"而回退成默认值。必须用 Number.isFinite 判断。
+const readNumSetting = (key, fallback) => {
+  const v = parseFloat(localStorage.getItem(key))
+  return Number.isFinite(v) ? v : fallback
+}
+const glassOpacity = readNumSetting(GLASS_KEY, 0.4)
+const bgMaskOpacity = readNumSetting(BG_MASK_KEY, 0.6)
 document.documentElement.style.setProperty('--glass-opacity', glassOpacity)
 document.documentElement.style.setProperty('--bg-mask-opacity', bgMaskOpacity)
 // 应用背景图：glass 用「自选图 ?? 内置默认图」，glass2（新毛玻璃）只用自选图

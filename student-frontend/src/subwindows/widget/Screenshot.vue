@@ -47,12 +47,6 @@ const filePath = computed(() => {
   return '保存至：图片/screenshots/'
 })
 
-function truncatePath(fullPath) {
-  const parts = fullPath.split(/[\\/]/)
-  if (parts.length <= 3) return fullPath
-  return '...' + parts.slice(-2).join('/')
-}
-
 async function capture() {
   try {
     // 获取自定义保存路径
