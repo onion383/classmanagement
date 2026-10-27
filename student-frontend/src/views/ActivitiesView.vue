@@ -12,9 +12,9 @@
     <div v-if="activeTab === 'daily'">
       <!-- 工具栏 -->
       <div class="mb-4 flex items-center gap-3 opbar">
-        <button v-preload="loadAddActivityDialog" @click="openAddActivity" class="bg-primary hover:bg-primary-hover text-text-inverse px-5 py-2 rounded">＋ 新增活动</button>
-        <button @click="refreshActivities" class="bg-text-muted hover:bg-text-secondary text-text-inverse px-4 py-2 rounded flex items-center gap-1 btn-refresh"><IconGlyph name="refresh" :size="14" tint="current" /> 刷新</button>
-        <button v-preload="loadExportExcel" @click="openActivityExport" class="bg-warning hover:bg-warning-hover text-text-inverse px-4 py-2 rounded flex items-center gap-1">📥 导出活动</button>
+        <button v-preload="loadAddActivityDialog" @click="openAddActivity" class="bg-primary hover:bg-primary-hover text-text-inverse px-5 py-2 rounded transition-theme">＋ 新增活动</button>
+        <button @click="refreshActivities" class="bg-text-muted hover:bg-text-secondary text-text-inverse px-4 py-2 rounded flex items-center gap-1 btn-refresh transition-theme"><IconGlyph name="refresh" :size="14" tint="current" /> 刷新</button>
+        <button v-preload="loadExportExcel" @click="openActivityExport" class="bg-warning hover:bg-warning-hover text-text-inverse px-4 py-2 rounded flex items-center gap-1 transition-theme">📥 导出活动</button>
       </div>
 
       <!-- 活动时间轴（带状态标签） -->
@@ -34,9 +34,9 @@
         </template>
         <template #ops="{ node }">
           <div class="flex items-center gap-1.5">
-            <button @click="openEditActivity(activityByKey(node.key))" class="bg-info hover:bg-blue-700 text-text-inverse px-2.5 py-0.5 rounded text-xs">编辑</button>
-            <button @click="goAlbum" class="bg-surface-hover hover:bg-border text-text-secondary px-2.5 py-0.5 rounded text-xs border border-border">查看相册</button>
-            <button @click="askDeleteActivity(activityByKey(node.key))" class="bg-danger hover:bg-red-700 text-text-inverse px-2.5 py-0.5 rounded text-xs">删除</button>
+            <button @click="openEditActivity(activityByKey(node.key))" class="bg-info hover:bg-blue-700 text-text-inverse px-2.5 py-0.5 rounded text-xs transition-theme">编辑</button>
+            <button @click="goAlbum" class="bg-surface-hover hover:bg-border text-text-secondary px-2.5 py-0.5 rounded text-xs border border-border transition-theme">查看相册</button>
+            <button @click="askDeleteActivity(activityByKey(node.key))" class="bg-danger hover:bg-red-700 text-text-inverse px-2.5 py-0.5 rounded text-xs transition-theme">删除</button>
           </div>
         </template>
       </LeaveTimeline>
@@ -57,9 +57,9 @@
 
       <!-- 工具栏 -->
       <div class="mb-4 flex items-center gap-3 opbar">
-        <button v-preload="loadAddCountdownDialog" @click="openAddCountdown" class="bg-primary hover:bg-primary-hover text-text-inverse px-5 py-2 rounded">＋ 添加倒计时</button>
-        <button @click="refreshCountdowns" class="bg-text-muted hover:bg-text-secondary text-text-inverse px-4 py-2 rounded flex items-center gap-1 btn-refresh">🔄 刷新</button>
-        <button v-preload="loadExportExcel" @click="openCountdownExport" class="bg-warning hover:bg-warning-hover text-text-inverse px-4 py-2 rounded flex items-center gap-1"><IconGlyph name="download" :size="14" tint="current" /> 导出 EXCEL 表格</button>
+        <button v-preload="loadAddCountdownDialog" @click="openAddCountdown" class="bg-primary hover:bg-primary-hover text-text-inverse px-5 py-2 rounded transition-theme">＋ 添加倒计时</button>
+        <button @click="refreshCountdowns" class="bg-text-muted hover:bg-text-secondary text-text-inverse px-4 py-2 rounded flex items-center gap-1 btn-refresh transition-theme">🔄 刷新</button>
+        <button v-preload="loadExportExcel" @click="openCountdownExport" class="bg-warning hover:bg-warning-hover text-text-inverse px-4 py-2 rounded flex items-center gap-1 transition-theme"><IconGlyph name="download" :size="14" tint="current" /> 导出 EXCEL 表格</button>
       </div>
 
       <!-- 倒计时时间轴 -->
@@ -81,8 +81,8 @@
         </template>
         <template #ops="{ node }">
           <div class="flex items-center gap-1.5">
-            <button @click="openEditCountdown(countdownByKey(node.key))" class="bg-info hover:bg-blue-700 text-text-inverse px-2.5 py-0.5 rounded text-xs">编辑</button>
-            <button @click="askDeleteCountdown(countdownByKey(node.key))" class="bg-danger hover:bg-red-700 text-text-inverse px-2.5 py-0.5 rounded text-xs">删除</button>
+            <button @click="openEditCountdown(countdownByKey(node.key))" class="bg-info hover:bg-blue-700 text-text-inverse px-2.5 py-0.5 rounded text-xs transition-theme">编辑</button>
+            <button @click="askDeleteCountdown(countdownByKey(node.key))" class="bg-danger hover:bg-red-700 text-text-inverse px-2.5 py-0.5 rounded text-xs transition-theme">删除</button>
           </div>
         </template>
       </LeaveTimeline>
@@ -339,14 +339,30 @@ export default {
     cntExportVisible(n) { if (n) this.cntExportMounted = true },
     'confirm.visible'(n) { if (n) this.confirmMounted = true },
     // 跨页定位：标题栏全局搜索点「班级活动 / 倒计时」结果跳转 /activities?focus=<id>
-    '$route.query.focus'() { this._applyRowFocus() }
+    '$route.query.focus'() { this._applyRowFocus() },
+    // 桌面小组件点倒计时：/activities?tab=countdown 直达倒计时页签
+    '$route.query.tab'() { this._applyTabQuery() },
+    // 页签反向同步到 URL：用户手动切回「日常活动」后，组件再点倒计时仍能重新跳转
+    // （否则 URL 一直停在 ?tab=countdown，主窗口收到同路径导航时就无法区分当前页签）
+    activeTab(val) {
+      if (this.$route.path !== '/activities') return
+      const next = { ...this.$route.query }
+      if (val === 'countdown') next.tab = 'countdown'
+      else delete next.tab
+      if ((next.tab || '') === (this.$route.query.tab || '')) return
+      this.$router.replace({ path: this.$route.path, query: next }).catch(() => {})
+    }
   },
   async created() {
     await this.loadAll()
   },
-  mounted() { this._applyRowFocus() },
-  activated() { this._applyRowFocus() },
+  mounted() { this._applyRowFocus(); this._applyTabQuery() },
+  activated() { this._applyRowFocus(); this._applyTabQuery() },
   methods: {
+    _applyTabQuery() {
+      const tab = this.$route.query.tab
+      if (tab === 'daily' || tab === 'countdown') this.activeTab = tab
+    },
     // 跨页定位：活动/倒计时共用本页。倒计时结果带 countdown: 前缀，先切到倒计时页签再定位。
     _applyRowFocus() {
       applyRouteRowFocus(this, {

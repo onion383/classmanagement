@@ -17,7 +17,7 @@
         <h3 class="text-lg font-bold mb-3 text-text">{{ title }}</h3>
         <div class="text-sm text-text leading-relaxed whitespace-pre-wrap break-words max-h-[50vh] overflow-y-auto">{{ text }}</div>
         <div class="flex justify-end gap-2 mt-4">
-          <button @click="close" class="px-4 py-2 rounded-lg bg-primary text-text-inverse hover:bg-primary-hover">关闭</button>
+          <button @click="close" class="px-4 py-2 rounded-lg bg-primary text-text-inverse hover:bg-primary-hover transition-theme">关闭</button>
         </div>
       </div>
     </div>

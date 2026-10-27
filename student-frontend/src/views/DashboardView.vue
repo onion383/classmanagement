@@ -117,7 +117,7 @@
             <IconGlyph name="schedule" :size="20" /> 今日课程
           </h2>
           <div v-if="todayCourseList.length" class="space-y-1.5">
-            <div v-for="c in todayCourseList" :key="c.no" class="flex items-center gap-3 px-3 py-2 rounded-lg hover:bg-bg-secondary/60">
+            <div v-for="c in todayCourseList" :key="c.no" class="flex items-center gap-3 px-3 py-2 rounded-lg hover:bg-bg-secondary/60 transition-theme">
               <span class="w-6 text-center text-text-muted text-xs font-medium shrink-0">{{ c.no }}</span>
               <span class="text-text text-sm flex-1 truncate">{{ c.course }}</span>
               <span class="text-text-muted text-xs shrink-0">{{ c.time }}</span>
@@ -523,7 +523,7 @@ onBeforeUnmount(() => {
   gap: 24px;
   margin-bottom: 20px;
   padding: 22px 28px;
-  border-radius: 16px;
+  border-radius: var(--radius-surface);
   background: rgba(255, 255, 255, 0.42);
   backdrop-filter: blur(20px) saturate(1.3);
   border: 1px solid rgba(255, 255, 255, 0.55);
@@ -663,7 +663,7 @@ onBeforeUnmount(() => {
   cursor: pointer;
   padding: 2px 8px;
   margin: -2px -8px;
-  border-radius: 8px;
+  border-radius: var(--radius-control);
   transition: background-color .15s ease;
 }
 .stat-link:hover {
@@ -679,7 +679,7 @@ onBeforeUnmount(() => {
   margin-right: 2px;
   padding: 4px 9px 4px 7px;
   border: none;
-  border-radius: 8px;
+  border-radius: var(--radius-control);
   background: transparent;
   color: #94a3b8;
   cursor: pointer;
@@ -702,15 +702,15 @@ onBeforeUnmount(() => {
 .sk-welcome {
   height: 92px;
   margin-bottom: 24px;
-  border-radius: 12px;
+  border-radius: var(--radius-card);
 }
 .sk-info {
   height: 122px;
   margin-bottom: 20px;
-  border-radius: 16px;
+  border-radius: var(--radius-surface);
 }
 .sk-card {
   height: 180px;
-  border-radius: 12px;
+  border-radius: var(--radius-card);
 }
 </style>

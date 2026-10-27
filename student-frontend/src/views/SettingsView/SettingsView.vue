@@ -144,17 +144,43 @@
             class="bg-danger text-text-inverse px-4 py-2 rounded transition-theme disabled:opacity-40 disabled:cursor-not-allowed"
           >删除学期</button>
         </div>
-        <div class="flex items-center gap-4 mb-6">
+        <div class="flex items-center gap-4 mb-2">
           <label class="text-sm font-medium text-text w-40 flex-shrink-0">学期开始时间</label>
-          <input type="date" v-model="semesterStart" @change="saveSemesterSettings" class="border border-border bg-bg text-text px-3 py-2 rounded-lg" />
+          <input
+            type="date"
+            v-model="semesterStart"
+            @input="semesterDateErrorText = ''"
+            :class="{ 'border-danger': semesterDateError || semesterDateErrorText }"
+            class="border border-border bg-bg text-text px-3 py-2 rounded-lg"
+          />
         </div>
-        <div class="flex items-center gap-4 mb-6">
+        <div class="flex items-center gap-4 mb-2">
           <label class="text-sm font-medium text-text w-40 flex-shrink-0">学期结束时间</label>
-          <input type="date" v-model="semesterEnd" @change="saveSemesterSettings" class="border border-border bg-bg text-text px-3 py-2 rounded-lg" />
+          <input
+            type="date"
+            v-model="semesterEnd"
+            @input="semesterDateErrorText = ''"
+            :class="{ 'border-danger': semesterDateError || semesterDateErrorText }"
+            class="border border-border bg-bg text-text px-3 py-2 rounded-lg"
+          />
         </div>
-        <div class="flex items-center gap-4">
+        <!-- 校验错误：结束早于开始。存反了会让值日/座位的快照补存整段跳过（范围上界 < 下界），
+             而结束日期正是那两处的补存范围上界 —— 必须在写库前拦住。 -->
+        <p v-if="semesterDateError || semesterDateErrorText" class="text-sm text-danger mb-2 ml-44">
+          {{ semesterDateErrorText || semesterDateError }}
+        </p>
+        <div class="flex items-center gap-4 mb-2">
           <label class="text-sm font-medium text-text w-40 flex-shrink-0">本学期时长</label>
           <span class="text-sm text-text-secondary">{{ semesterWeeks ? `共 ${semesterWeeks} 周` : '—' }}</span>
+        </div>
+        <div class="flex items-center gap-4 mb-4">
+          <div class="w-40 flex-shrink-0"></div>
+          <button
+            @click="saveSemesterSettings"
+            :disabled="!semesterId || !semesterDatesDirty || busySemesterDate || !!semesterDateError"
+            class="bg-primary hover:bg-primary-hover text-text-inverse px-4 py-2 rounded transition-theme disabled:opacity-40 disabled:cursor-not-allowed"
+          >{{ busySemesterDate ? '保存中…' : '保存日期' }}</button>
+          <span v-if="!semesterDatesDirty && !busySemesterDate" class="text-xs text-text-muted">日期未改动</span>
         </div>
         <p class="text-xs text-text-muted mt-4">座位快照按天补存与座位指数结算均以当前学期范围为准</p>
       </div>
@@ -240,7 +266,7 @@
             </div>
             <ul class="divide-y divide-border max-h-72 overflow-auto">
               <li v-for="rec in group.records" :key="rec.id"
-                  class="flex items-center justify-between gap-3 px-4 py-2 hover:bg-surface-hover">
+                  class="flex items-center justify-between gap-3 px-4 py-2 hover:bg-surface-hover transition-theme">
                 <div class="flex items-center gap-2 min-w-0">
                   <span class="text-xs text-text-muted flex-shrink-0">{{ fmtTs(rec.ts) }}</span>
                   <span class="text-sm text-text truncate">{{ rec.label }}</span>
@@ -293,7 +319,7 @@
               :options="iconStyleOptions"
               class="w-56"
             />
-            <span class="text-xs text-text-muted">影响侧边栏导航图标显示风格</span>
+            <AppHelp text="影响侧边栏导航图标显示风格" aria-label="图标样式说明" />
           </div>
 
           <!-- 标题栏/侧边栏毛玻璃配色切换 -->
@@ -305,7 +331,7 @@
               :options="topbarColorOptions"
               class="w-56"
             />
-            <span class="text-xs text-text-muted">标题栏与侧边栏的毛玻璃底色（深蓝 / 白色调）</span>
+            <AppHelp text="标题栏与侧边栏的毛玻璃底色（深蓝 / 白色调）" aria-label="顶栏配色说明" />
           </div>
 
           <!-- 日夜模式 + 跟随系统（同一组：组内紧凑，上下留白更大，与相邻设置分开；仅支持夜间配色的主题显示） -->
@@ -313,41 +339,32 @@
             <div class="flex items-center gap-4">
               <label class="text-sm font-medium text-text w-16 flex-shrink-0">日夜模式</label>
               <ViewSwitch :modelValue="pendingMode" :options="modeSwitchOptions" @update:modelValue="onSelectMode" />
-              <span class="text-xs text-text-muted">当前主题支持夜间配色</span>
+              <AppHelp text="当前主题支持夜间配色" aria-label="日夜模式说明" />
             </div>
             <div class="flex items-center gap-4">
               <label class="text-sm font-medium text-text w-16 flex-shrink-0">跟随系统</label>
-              <label class="inline-flex items-center cursor-pointer">
-                <input type="checkbox" :checked="followSystem" @change="onFollowSystemChange" class="w-4 h-4 rounded border-border text-primary focus:ring-primary cursor-pointer" />
-                <span class="ml-2 text-sm text-text-secondary">{{ followSystem ? '随系统深色/浅色自动切换' : '手动指定' }}</span>
-              </label>
-              <span class="text-xs text-text-muted">开启后按操作系统的深色/浅色偏好自动切换</span>
+              <AppSwitch :model-value="followSystem" aria-label="跟随系统" @change="onFollowSystemChange" />
+              <AppHelp text="开启后按操作系统的深色/浅色偏好自动切换" aria-label="跟随系统说明" />
             </div>
           </div>
 
           <!-- 提示合并 -->
           <div class="flex items-center gap-4 mb-6">
             <label class="text-sm font-medium text-text w-16 flex-shrink-0">提示合并</label>
-            <label class="inline-flex items-center cursor-pointer">
-              <input type="checkbox" :checked="mergeNotifications" @change="onMergeNotificationsChange" class="w-4 h-4 rounded border-border text-primary focus:ring-primary cursor-pointer" />
-              <span class="ml-2 text-sm text-text-secondary">{{ mergeNotifications ? '合并相同内容的提示' : '相同内容每次单独展示' }}</span>
-            </label>
-            <span class="text-xs text-text-muted">相同类型的重复提示合并为一条并计数，避免遮挡页面</span>
+            <AppSwitch :model-value="mergeNotifications" aria-label="提示合并" @change="onMergeNotificationsChange" />
+            <AppHelp text="相同类型的重复提示合并为一条并计数，避免遮挡页面" aria-label="提示合并说明" />
           </div>
 
           <!-- 动画效果总开关 -->
           <div class="flex items-center gap-4 mb-6">
             <label class="text-sm font-medium text-text w-16 flex-shrink-0">动画效果</label>
-            <label class="inline-flex items-center cursor-pointer">
-              <input type="checkbox" :checked="animationsEnabled" @change="onAnimationsChange" class="w-4 h-4 rounded border-border text-primary focus:ring-primary cursor-pointer" />
-              <span class="ml-2 text-sm text-text-secondary">{{ animationsEnabled ? '已启用' : '已关闭' }}</span>
-            </label>
-            <span class="text-xs text-text-muted">关闭后禁用全部过渡与动画（含窗口淡入淡出、弹窗与列表动效）</span>
+            <AppSwitch :model-value="animationsEnabled" aria-label="动画效果" @change="onAnimationsChange" />
+            <AppHelp text="关闭后禁用全部过渡与动画（含窗口淡入淡出、弹窗与列表动效）" aria-label="动画效果说明" />
           </div>
 
           <!-- 背景图片（毛玻璃系主题：glass / glass2） -->
           <div v-if="isGlassTheme" class="border-t border-border pt-6 mt-6">
-            <h3 class="text-lg font-semibold text-text mb-4 flex items-center gap-2"><IconGlyph name="image" :size="18" /> 背景图片</h3>
+            <h3 class="text-lg font-semibold text-text mb-4 flex items-center gap-2"><IconGlyph name="image" :size="18" /> 背景图片 <AppHelp text="支持 JPG / PNG / GIF / WebP，留空使用默认弥散光斑" aria-label="背景图片说明" /></h3>
             <div class="flex items-center gap-3 mb-2">
               <input
                 ref="bgImageInput"
@@ -360,7 +377,6 @@
               <span v-if="bgImageFileName" class="text-sm text-text-secondary">已选: {{ bgImageFileName }}</span>
               <button v-if="bgImageUrl" @click="clearBgImage" class="text-sm text-danger hover:underline">清除</button>
             </div>
-            <p class="text-xs text-text-muted">支持 JPG / PNG / GIF / WebP，留空使用默认弥散光斑</p>
             <div v-if="bgImageUrl" class="mt-3">
               <img :src="bgImagePreviewUrl" class="max-h-40 rounded border border-border object-cover shadow-sm" />
             </div>
@@ -372,7 +388,10 @@
             <div class="space-y-5">
               <div>
                 <div class="flex items-center justify-between mb-1">
-                  <label class="text-sm font-medium text-text">背景遮罩层（有自定义背景图时）</label>
+                  <div class="flex items-center gap-1.5 min-w-0">
+                    <label class="text-sm font-medium text-text">背景遮罩层（有自定义背景图时）</label>
+                    <AppHelp text="数值越高，背景图越不明显；越低，背景图越清晰" aria-label="背景遮罩层说明" />
+                  </div>
                   <span class="text-xs text-text-muted">{{ Math.round(bgMaskOpacity * 100) }}%</span>
                 </div>
                 <input
@@ -384,11 +403,13 @@
                   @input="onBgMaskOpacityChange"
                   class="w-full"
                 />
-                <p class="text-xs text-text-muted mt-1">数值越高，背景图越不明显；越低，背景图越清晰</p>
               </div>
               <div>
                 <div class="flex items-center justify-between mb-1">
-                  <label class="text-sm font-medium text-text">组件透明玻璃层</label>
+                  <div class="flex items-center gap-1.5 min-w-0">
+                    <label class="text-sm font-medium text-text">组件透明玻璃层</label>
+                    <AppHelp text="控制卡片、表格、通知弹窗等玻璃层的透明度" aria-label="组件透明玻璃层说明" />
+                  </div>
                   <span class="text-xs text-text-muted">{{ Math.round(glassOpacity * 100) }}%</span>
                 </div>
                 <input
@@ -400,7 +421,6 @@
                   @input="onGlassOpacityChange"
                   class="w-full"
                 />
-                <p class="text-xs text-text-muted mt-1">控制卡片、表格、通知弹窗等玻璃层的透明度</p>
               </div>
             </div>
           </div>
@@ -412,21 +432,19 @@
       <h2 id="settings-section-toolbox" class="text-xl font-semibold text-text mb-4 flex items-center gap-2"><IconGlyph name="toolbox" :size="20" /> 工具箱设置</h2>
       <div class="bg-surface rounded-lg border border-border p-6">
         <div class="flex items-center gap-4">
-          <label class="text-sm font-medium text-text w-40 flex-shrink-0">是否启用工具箱</label>
-          <label class="inline-flex items-center cursor-pointer">
-            <input type="checkbox" :checked="toolboxEnabled" @change="onToolboxChange" class="w-4 h-4 rounded border-border text-primary focus:ring-primary cursor-pointer" />
-            <span class="ml-2 text-sm text-text-secondary">{{ toolboxEnabled ? '已启用' : '已禁用' }}</span>
-          </label>
+          <div class="w-40 flex-shrink-0 flex items-center gap-1.5">
+            <label class="text-sm font-medium text-text">是否启用工具箱</label>
+            <AppHelp text="关闭后立即隐藏工具箱并释放其窗口，下次启动也不再显示；开启立即显示" aria-label="是否启用工具箱说明" />
+          </div>
+          <AppSwitch :model-value="toolboxEnabled" aria-label="是否启用工具箱" @change="onToolboxChange" />
         </div>
-        <p class="text-xs text-text-muted mt-2 ml-40">关闭后立即隐藏工具箱并释放其窗口，下次启动也不再显示；开启立即显示</p>
         <div class="flex items-center gap-4 mt-6">
-          <label class="text-sm font-medium text-text w-40 flex-shrink-0">新U盘插入自动打开</label>
-          <label class="inline-flex items-center cursor-pointer">
-            <input type="checkbox" :checked="usbAutoOpen" @change="onUsbAutoOpenChange" class="w-4 h-4 rounded border-border text-primary focus:ring-primary cursor-pointer" />
-            <span class="ml-2 text-sm text-text-secondary">{{ usbAutoOpen ? '已开启' : '已关闭' }}</span>
-          </label>
+          <div class="w-40 flex-shrink-0 flex items-center gap-1.5">
+            <label class="text-sm font-medium text-text">新U盘插入自动打开</label>
+            <AppHelp text="插入新U盘时自动用文件资源管理器打开（仅Windows，即时生效）" aria-label="新U盘插入自动打开说明" />
+          </div>
+          <AppSwitch :model-value="usbAutoOpen" aria-label="新U盘插入自动打开" @change="onUsbAutoOpenChange" />
         </div>
-        <p class="text-xs text-text-muted mt-2 ml-40">插入新U盘时自动用文件资源管理器打开（仅Windows，即时生效）</p>
       </div>
     </div>
 
@@ -435,25 +453,15 @@
       <h2 id="settings-section-widget" class="text-xl font-semibold text-text mb-4 flex items-center gap-2"><IconGlyph name="monitor" :size="20" /> 桌面小组件设置</h2>
       <div class="bg-surface rounded-lg border border-border p-6">
         <div class="flex items-center gap-4">
-          <label class="text-sm font-medium text-text w-40 flex-shrink-0">启用桌面小组件</label>
-          <label class="inline-flex items-center cursor-pointer">
-            <input type="checkbox" :checked="desktopWidgetEnabled" @change="onDesktopWidgetChange" class="w-4 h-4 rounded border-border text-primary focus:ring-primary cursor-pointer" />
-            <span class="ml-2 text-sm text-text-secondary">{{ desktopWidgetEnabled ? '已启用' : '已禁用' }}</span>
-          </label>
-        </div>
-        <p class="text-xs text-text-muted mt-2 ml-40">关闭后启动不创建桌面小组件窗口（更省资源），并可立即关闭当前窗口；开启立即显示</p>
-        <div class="flex items-center gap-4 mt-5 pt-5 border-t border-border">
-          <label class="text-sm font-medium text-text w-40 flex-shrink-0">桌面组件常驻最底层</label>
-          <label class="inline-flex items-center cursor-pointer">
-            <input type="checkbox" :checked="desktopLayerEnabled" @change="onDesktopLayerChange" :disabled="!desktopWidgetEnabled" class="w-4 h-4 rounded border-border text-primary focus:ring-primary cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed" />
-            <span class="ml-2 text-sm text-text-secondary">{{ desktopLayerEnabled ? '已开启' : '已关闭' }}</span>
-          </label>
+          <div class="w-40 flex-shrink-0 flex items-center gap-1.5">
+            <label class="text-sm font-medium text-text">启用桌面小组件</label>
+            <AppHelp text="关闭后启动不创建桌面小组件窗口（更省资源），并可立即关闭当前窗口；开启立即显示" aria-label="启用桌面小组件说明" />
+          </div>
+          <AppSwitch :model-value="desktopWidgetEnabled" aria-label="启用桌面小组件" @change="onDesktopWidgetChange" />
         </div>
         <p class="text-xs text-text-muted mt-2 ml-40">
-          开启后组件常驻所有窗口之下：不会被其它应用窗口盖住，点击也不会把窗口抬到最前面。代价是
-          <span class="text-text-secondary">Windows 的系统磨砂背景会失效</span>（该效果只对顶层窗口有效），组件背景会变成纯色。
-          关闭时组件是普通顶层窗口，背景有与 Win11 窗口一致的透出模糊。切换后组件会自动重启一次。
-          <span v-if="desktopLayerAutoDisabled" class="block text-danger mt-1">上次启动时组件连续崩溃，已自动关闭「常驻最底层」；确认无误后可在上面勾选重新开启。</span>
+          组件固定常驻所有窗口之下（桌面图标之上）：不会被其它应用窗口盖住，点击也不会把窗口抬到最前面，
+          仍可点击、可拖动；位置会记住，下次启动回到原处。
         </p>
       </div>
     </div>
@@ -518,7 +526,10 @@
 
         <!-- 上次启动耗时 -->
         <div class="border-t border-border pt-6 mt-6 flex items-center gap-4">
-          <span class="text-sm text-text-muted" title="口径：进程启动到窗口首次显示（ready-to-show），不含数据加载等待">上次启动耗时</span>
+          <div class="flex items-center gap-1.5">
+            <span class="text-sm text-text-muted">上次启动耗时</span>
+            <AppHelp text="口径：进程启动到窗口首次显示（ready-to-show），不含数据加载等待" aria-label="启动耗时口径说明" :size="13" />
+          </div>
           <span class="text-sm font-medium text-text" style="font-variant-numeric: tabular-nums;">{{ (perfStartupTotal / 1000).toFixed(3) }} s</span>
         </div>
       </div>
@@ -530,18 +541,23 @@
       <div class="bg-surface rounded-lg border border-border p-6 space-y-6">
         <div>
           <div class="flex items-center gap-4 mb-2">
-            <label class="text-sm font-medium text-text w-40 flex-shrink-0">注释截屏保存位置</label>
+            <div class="w-40 flex-shrink-0 flex items-center gap-1.5">
+              <label class="text-sm font-medium text-text">注释截屏保存位置</label>
+              <AppHelp text="注释工具保存截图的目录，留空则使用默认位置" aria-label="注释截屏保存位置说明" />
+            </div>
             <div class="flex-1 min-w-0">
               <div class="truncate text-sm text-text-secondary border border-border bg-bg px-3 py-2 rounded-lg" :title="noteSavePath || screenshotDir">{{ noteSavePath || screenshotDir }}</div>
             </div>
             <button @click="selectFolder('note')" class="bg-info hover:bg-info-hover text-text-inverse px-4 py-2 rounded transition-theme whitespace-nowrap">修改</button>
             <button @click="openDir(noteSavePath || screenshotDir)" class="bg-success hover:bg-success-hover text-text-inverse px-4 py-2 rounded transition-theme whitespace-nowrap">打开文件夹</button>
           </div>
-          <p class="text-xs text-text-muted ml-40">注释工具保存截图的目录，留空则使用默认位置</p>
         </div>
         <div>
           <div class="flex items-center gap-4 mb-2">
-            <label class="text-sm font-medium text-text w-40 flex-shrink-0">一键截屏保存位置</label>
+            <div class="w-40 flex-shrink-0 flex items-center gap-1.5">
+              <label class="text-sm font-medium text-text">一键截屏保存位置</label>
+              <AppHelp text="一键截屏工具保存截图的目录，留空则使用默认位置" aria-label="一键截屏保存位置说明" />
+            </div>
             <div class="flex-1 min-w-0">
               <div class="truncate text-sm text-text-secondary border border-border bg-bg px-3 py-2 rounded-lg" :title="screenshotSavePath || screenshotDir">
                 {{ screenshotSavePath || screenshotDir }}
@@ -550,7 +566,6 @@
             <button @click="selectFolder('screenshot')" class="bg-info hover:bg-info-hover text-text-inverse px-4 py-2 rounded transition-theme whitespace-nowrap">修改</button>
             <button @click="openDir(screenshotSavePath || screenshotDir)" class="bg-success hover:bg-success-hover text-text-inverse px-4 py-2 rounded transition-theme whitespace-nowrap">打开文件夹</button>
           </div>
-          <p class="text-xs text-text-muted ml-40">一键截屏工具保存截图的目录，留空则使用默认位置</p>
         </div>
       </div>
     </div>
@@ -626,13 +641,14 @@
     <Transition name="dialog">
       <div v-if="modalType === 'username'" class="fixed inset-0 bg-black/50 flex items-center justify-center z-[10001]" @click.self="closeModal">
         <div class="dialog-card bg-surface rounded-lg p-6 w-96 border border-border shadow-lg">
-          <h3 class="text-lg font-bold text-text mb-4">修改用户名</h3>
-          <input v-model="newUsername" placeholder="新用户名" class="border border-border bg-surface text-text p-2 w-full mb-3 rounded" />
-          <input v-model="usernamePassword" type="password" placeholder="当前密码" autocomplete="current-password" class="border border-border bg-surface text-text p-2 w-full mb-4 rounded" />
-          <div class="flex justify-end gap-2">
-            <button @click="closeModal" class="bg-surface-hover text-text px-4 py-2 rounded border border-border transition-theme">取消</button>
-            <button @click="changeUsername" class="bg-primary hover:bg-primary-hover text-text-inverse px-4 py-2 rounded transition-theme">确认修改</button>
-          </div>
+            <h3 class="text-lg font-bold text-text mb-4">修改用户名</h3>
+            <input v-model="newUsername" placeholder="新用户名" class="border border-border bg-surface text-text p-2 w-full mb-3 rounded" @keydown.enter="changeUsername" />
+            <input v-model="usernamePassword" type="password" placeholder="当前密码" autocomplete="current-password" class="border border-border bg-surface text-text p-2 w-full mb-3 rounded" @keydown.enter="changeUsername" />
+            <p v-if="usernameError" class="text-sm text-danger mb-3">{{ usernameError }}</p>
+            <div class="flex justify-end gap-2">
+              <button @click="closeModal" :disabled="busyUsername" class="bg-surface-hover text-text px-4 py-2 rounded border border-border transition-theme disabled:opacity-50">取消</button>
+              <button @click="changeUsername" :disabled="busyUsername" class="bg-primary hover:bg-primary-hover text-text-inverse px-4 py-2 rounded transition-theme disabled:opacity-50">{{ busyUsername ? '提交中…' : '确认修改' }}</button>
+            </div>
         </div>
       </div>
     </Transition>
@@ -643,13 +659,21 @@
     <Transition name="dialog">
       <div v-if="modalType === 'password'" class="fixed inset-0 bg-black/50 flex items-center justify-center z-[10001]" @click.self="closeModal">
         <div class="dialog-card bg-surface rounded-lg p-6 w-96 border border-border shadow-lg">
-          <h3 class="text-lg font-bold text-text mb-4">修改密码</h3>
-          <input v-model="oldPassword" type="password" placeholder="原密码" autocomplete="current-password" class="border border-border bg-surface text-text p-2 w-full mb-3 rounded" />
-          <input v-model="newPassword" type="password" placeholder="新密码" autocomplete="new-password" class="border border-border bg-surface text-text p-2 w-full mb-4 rounded" />
-          <div class="flex justify-end gap-2">
-            <button @click="closeModal" class="bg-surface-hover text-text px-4 py-2 rounded border border-border transition-theme">取消</button>
-            <button @click="changePassword" class="bg-info hover:bg-info-hover text-text-inverse px-4 py-2 rounded transition-theme">确认修改</button>
-          </div>
+            <h3 class="text-lg font-bold text-text mb-4">修改密码</h3>
+            <input v-model="oldPassword" type="password" placeholder="原密码" autocomplete="current-password" class="border border-border bg-surface text-text p-2 w-full mb-3 rounded" @keydown.enter="changePassword" />
+            <input v-model="newPassword" type="password" placeholder="新密码（至少 6 位）" autocomplete="new-password" class="border border-border bg-surface text-text p-2 w-full mb-3 rounded" @keydown.enter="changePassword" />
+            <!-- 二次确认：密码改错没有退路（恢复词只存在于「超级隐私」等级），必须挡住手误 -->
+            <input v-model="confirmPassword" type="password" placeholder="再次输入新密码" autocomplete="new-password" class="border border-border bg-surface text-text p-2 w-full mb-1 rounded" @keydown.enter="changePassword" />
+            <!-- 一致性提示：边输边给反馈，不用等提交才报错 -->
+            <p v-if="confirmPassword && newPassword !== confirmPassword" class="text-xs text-warning mb-3">两次输入不一致</p>
+            <p v-else-if="confirmPassword && newPassword && confirmPassword === newPassword" class="text-xs text-success mb-3">两次输入一致</p>
+            <p v-else class="text-xs text-text-muted mb-3">改完请记牢，普通密码账户没有恢复途径。</p>
+            <!-- 服务端错误就地显示：用 alert 会把用户弹出的输入内容一起清掉，得从头再填一遍 -->
+            <p v-if="pwdError" class="text-sm text-danger mb-3">{{ pwdError }}</p>
+            <div class="flex justify-end gap-2">
+              <button @click="closeModal" :disabled="busyPwd" class="bg-surface-hover text-text px-4 py-2 rounded border border-border transition-theme disabled:opacity-50">取消</button>
+              <button @click="changePassword" :disabled="busyPwd" class="bg-info hover:bg-info-hover text-text-inverse px-4 py-2 rounded transition-theme disabled:opacity-50">{{ busyPwd ? '提交中…' : '确认修改' }}</button>
+            </div>
         </div>
       </div>
     </Transition>
@@ -699,7 +723,9 @@
 
 <script>
 import { defineAsyncComponent } from 'vue'
+import AppHelp from '../../components/base/AppHelp.vue'
 import AppSelect from '../../components/base/AppSelect.vue'
+import AppSwitch from '../../components/base/AppSwitch.vue'
 import { Sun, Moon } from '@lucide/vue'
 import ViewSwitch from '../../components/base/ViewSwitch.vue'
 import { useThemeStore } from '../../stores/theme'
@@ -715,7 +741,7 @@ import { RECEIVE } from '../../electronChannels.js'
 const ConfirmDialog = defineAsyncComponent(() => import('../../components/base/ConfirmDialog.vue'))
 
 export default {
-  components: { AppSelect, ConfirmDialog, ViewSwitch },
+  components: { AppHelp, AppSelect, AppSwitch, ConfirmDialog, ViewSwitch },
   // 懒加载弹窗保活：首次打开后保持挂载，关闭只降 visible，保留退出动画
   watch: {
     'dialog.visible'(n) { if (n) this.dialogMounted = true },
@@ -778,7 +804,6 @@ export default {
         { label: '本次启用工具箱',           section: 'toolbox',  py: 'bcqygjx' },
         { label: '新U盘插入自动打开',        section: 'toolbox',  py: 'xupcrzddk' },
         { label: '启用桌面小组件',           section: 'widget',   py: 'qyzmxjjs' },
-        { label: '桌面组件常驻最底层',       section: 'widget',   py: 'zmzjgbzdc' },
         { label: '注释截屏保存位置',         section: 'savepath', py: 'zsjpbcwz' },
         { label: '一键截屏保存位置',         section: 'savepath', py: 'yjjpbcwz' },
         { label: '数据库目录',               section: 'datadir',  py: 'sjkml' },
@@ -807,6 +832,14 @@ export default {
       usernamePassword: '',
       oldPassword: '',
       newPassword: '',
+      // 修改密码的三件配套：二次确认输入、弹窗内联错误、提交中锁。
+      // 密码改错没有退路（恢复词只有「超级隐私」等级才有），这三样缺一都会让手误变成锁死。
+      confirmPassword: '',
+      pwdError: '',
+      busyPwd: false,
+      // 修改用户名同样缺提交锁：点了没反应时用户会连点，请求发两次
+      usernameError: '',
+      busyUsername: false,
       // Export database
       exportPassword: '',
       exportEncrypt: true,
@@ -821,8 +854,13 @@ export default {
       showAddSemester: false,
       showDeleteSemester: false,
       busySemester: false,
+      // 保存学期日期的独立 busy 标志：与 busySemester（增删学期）分开，
+      // 否则「保存日期」和「删除学期」会互相把对方的按钮置灰
+      busySemesterDate: false,
       semesterStart: '',
       semesterEnd: '',
+      // 学期日期的内联错误文案（保存失败时显示在输入框下方，不只靠 toast）
+      semesterDateErrorText: '',
       // Dialog
       dialog: {
         visible: false,
@@ -842,12 +880,7 @@ export default {
       usbAutoOpen: false,
       // 桌面小组件启用状态：localStorage 持久化，默认启用（主进程据此按需创建桌面小组件窗口）
       desktopWidgetEnabled: (localStorage.getItem('desktopWidgetEnabled') ?? '1') !== '0',
-      // 「桌面组件常驻最底层」：真实状态存在主进程（连续崩溃时会被自动关闭），这里只是界面镜像，
-      // mounted 时用 IPC 同步初值。默认关闭 = 顶层窗口 + 系统亚克力（背景有真磨砂）
-      desktopLayerEnabled: false,
-      // 是否由「连续启动崩溃」自动降级而来（用于在设置页给出原因说明）
-      desktopLayerAutoDisabled: false,
-      loaded: false,
+     loaded: false,
       _fromMainHandler: null,
       // 数据目录 / 缓存目录
       dataDir: '',
@@ -892,11 +925,14 @@ export default {
       busyRestartWidget: false,
       busyRestartAll: false,
       _perfTimer: null,
+      // 主题下拉的候选项（这份列表是独立硬编码的副本，不走 store 的 allThemes）。
+      // 「Win11 主题」暂时移除：它的背景模糊依赖 DWM 系统亚克力，效果不可控
+      // （本机实测连原生 Win32 都只渲染出均匀中性灰，壁纸完全透不出），
+      // 故先从选择入口去掉。实现代码保留，恢复见 stores/theme.js 的 HIDDEN_THEME_IDS。
       presetThemes: [
         { id: 'base', name: '彩色色块主题' },
         { id: 'glass', name: '毛玻璃主题' },
         { id: 'glass2', name: '新毛玻璃主题' },
-        { id: 'win11', name: 'Win11 主题' },
         { id: 'minimal', name: '极简主题' },
       ],
     }
@@ -991,6 +1027,24 @@ export default {
       const days = Math.round((new Date(this.semesterEnd) - new Date(this.semesterStart)) / 86400000) + 1
       return days > 0 ? Math.round(days / 7) : 0
     },
+    // 学期起止日期的合法性：结束不能早于开始。
+    // 存反了不是显示问题 —— 值日/座位的快照补存拿 semesterRange() 当范围上界，
+    // 上界小于下界时那边会直接判「学期范围外」整段跳过，用户看到的是「历史记录一直是空的」。
+    // 两端都留空是允许的（表示不限），只有一端有值也不校验。
+    semesterDateError() {
+      const s = this.semesterStart
+      const e = this.semesterEnd
+      if (!s || !e) return ''
+      // YYYY-MM-DD 字典序即时间序，直接比字符串
+      if (e < s) return '结束日期不能早于开始日期'
+      return ''
+    },
+    // 有没有改动过日期（决定「保存」按钮是否可点）
+    semesterDatesDirty() {
+      const cur = this.activeSemester
+      if (!cur) return false
+      return (cur.start_date || '') !== this.semesterStart || (cur.end_date || '') !== this.semesterEnd
+    },
     // 预览图走 resourceUrl：补完整后端地址并追加 ?token=，保证打包版 file:// 下能通过鉴权
     bgImagePreviewUrl() {
       return this.bgImageUrl ? resourceUrl(this.bgImageUrl) : ''
@@ -1035,7 +1089,6 @@ export default {
     this.loadUndo()
     this.loadSemesterSettings()
     this.loadWidgetSettings()
-    this.loadDesktopLayerState()
     this.loadUsbAutoOpen()
     this.loadDataDirs()
     this.loadSecurityLevel()
@@ -1045,9 +1098,7 @@ export default {
     this._fromMainHandler = window.electron?.on(RECEIVE.FROM_MAIN, (data) => {
       // 浮窗右键「关闭工具箱」会把持久化开关置 false，这里刷新一下开关状态
       if (data && data.type === 'toolbox-close-request') this.loadWidgetSettings()
-      // 组件连续崩溃被自动降级时刷新开关与提示（用户不必手动去查状态）
-      if (data && data.type === 'desktop-layer-auto-disabled') this.loadDesktopLayerState()
-    })
+   })
   },
   // 设置页被 KeepAlive 缓存：切走页面走 deactivated 而非 beforeUnmount，
   // 必须在这里停掉轮询，否则离开设置页后仍会每 1.8s 采样一次（常驻开销）。

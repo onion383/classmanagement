@@ -37,6 +37,33 @@ function appendBlocks(text, blocks) {
   return text ? `${text}\n\n${blocks.join('\n\n')}` : blocks.join('\n\n');
 }
 
+// 饼图最多保留的扇区数：超过后取前 5 + 「其他」，避免小扇区挤成一团
+const PIE_MAX_SLICES = 6;
+
+// 饼图 Top N：按数值从大到小取前 5 项，其余合并成「其他」；已有「其他」也并入这个桶。
+function aggregatePie(labels, values) {
+  if (labels.length <= PIE_MAX_SLICES) return { labels, values };
+  const named = [];
+  let rest = 0;
+  labels.forEach((label, i) => {
+    const v = Math.max(0, values[i]);
+    if (label === '其他') rest += v;
+    else named.push({ label, value: v });
+  });
+  named.sort((a, b) => b.value - a.value);
+  const head = named.slice(0, PIE_MAX_SLICES - 1);
+  rest += named.slice(PIE_MAX_SLICES - 1).reduce((sum, p) => sum + p.value, 0);
+  const out = {
+    labels: head.map((p) => p.label),
+    values: head.map((p) => p.value),
+  };
+  if (rest > 0) {
+    out.labels.push('其他');
+    out.values.push(rest);
+  }
+  return out;
+}
+
 // show_chart 工具：模型只给「类型 + 标签 + 数值」，后端转成前端可渲染的 chart 代码块
 function runShowChart({ type, title, labels, values, unit }) {
   const t = CHART_TYPES.includes(type) ? type : 'bar';
@@ -44,18 +71,22 @@ function runShowChart({ type, title, labels, values, unit }) {
   const vs = (Array.isArray(values) ? values : []).map((x) => { const n = Number(x); return Number.isFinite(n) ? n : 0; }).slice(0, 12);
   const n = Math.min(ls.length, vs.length);
   if (n < 1) return { error: '缺少图表数据（labels 与 values 至少各需要 1 项）' };
+  // 饼图先收敛到最多 6 项（前 5 + 其他），再交给前端绘制
+  const pie = t === 'pie' ? aggregatePie(ls.slice(0, n), vs.slice(0, n)) : null;
+  const chartLabels = pie ? pie.labels : ls.slice(0, n);
+  const chartValues = pie ? pie.values : vs.slice(0, n);
   const data = {
     type: t,
     title: String(title || '').slice(0, 40),
     unit: String(unit || '').slice(0, 8),
-    labels: ls.slice(0, n),
-    values: vs.slice(0, n),
+    labels: chartLabels,
+    values: chartValues,
   };
   // 饼图按占比绘制，负值无意义
-  if (t === 'pie' && data.values.reduce((a, b) => a + Math.max(0, b), 0) <= 0) {
+  if (t === 'pie' && chartValues.reduce((a, b) => a + Math.max(0, b), 0) <= 0) {
     return { error: '饼图需要至少一个大于 0 的数值（占比数据请用正数）' };
   }
-  return { block: '```chart\n' + JSON.stringify(data) + '\n```', type: t, count: n, title: data.title };
+  return { block: '```chart\n' + JSON.stringify(data) + '\n```', type: t, count: chartValues.length, title: data.title };
 }
 
 // ask_user 工具：模型向用户提问并给候选选项，用户回答后作为新一轮消息继续对话

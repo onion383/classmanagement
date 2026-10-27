@@ -3,31 +3,41 @@
 //
 // 汇总主进程里与「工具箱浮窗 / 桌面小组件」相关的窗口生命周期与 IPC：
 //   - 工具箱浮窗：创建/隐藏/显示、拖动、缩放、全屏、鼠标穿透、右键菜单、会话级显隐
-//   - 桌面小组件：**窗口已搬到独立进程**（electron/desktop-widget-host.js）。本模块只负责
-//     按启用状态拉起/停止那个子进程，崩溃由 main.desktop-widget-process.js 自动重建。
-//     原因：组件窗口要挂在桌面层（Progman 子窗口），Explorer 重启会级联销毁子窗口并让
-//     挂载方 Electron 原生崩溃，独立进程可把影响限制在那个子进程内。
-//   - 相关 IPC：widgets-ready / desktop-widget-enabled / widget-* / to-widget / to-main 等
-//     （desktop-widget-drag-* 已随窗口移到 host 进程内处理）
+//   - 桌面小组件：**窗口跑在主进程里**（与工具箱同一套生命周期），320 × 工作区 95%、
+//     透明（圆角由页面 CSS 绘制）。设置里可开启「常驻最底层」，实现是把窗口的 z 序
+//     插到「Progman 之上、所有可见窗口之下」（见 main.desktop-layer.js），**不是**
+//     SetParent 子窗口 —— 子窗口形态下移动会让 Electron 原生崩溃（0xC000041D）。
+//   - 相关 IPC：widgets-ready / desktop-widget-enabled / desktop-widget-content-ready /
+//     desktop-widget-drag-* / desktop-widget-open-page / get-desktop-layer-state /
+//     widget-* / to-widget / to-main 等
+//
+// 桌面小组件为什么从独立进程合并回来（v0.8.x）：独立进程原本只为隔离「跨进程子窗口
+// 被移动 → 原生崩溃」这一类问题，而置底实现改成顶层窗口 + z 序之后该诱因已消失；
+// 合并省掉一个 Chromium browser/GPU 进程与整套 spawn/重建/会话快照逻辑。
+// 代价：browser 进程级原生崩溃不再隔离（与工具箱同等风险水平）。渲染进程崩溃仍隔离，
+// 且这里用 render-process-gone 自动重载兜底。
 //
 // 依赖注入：窗口引用与「开发服务器就绪后再导航」工具由 main.js 通过 registerWidgetIpc 注入
 // （getter/闭包，调用时取当前值）。本模块自有的可变状态（两个窗口引用、拖动/缩放/全屏临时态、
 // 桌面组件开关、会话级工具箱开关）全部收敛在本模块内。
 //
-// 与本模块 __dirname 相关的路径：本文件位于 electron/，与 preload.js 同级。
+// 与本模块 __dirname 相关的路径：本文件位于 electron/main/，preload 在上一级。
 // =========================================================================
 
+const fs = require('fs')
+const path = require('path')
 const { app, BrowserWindow, ipcMain, Menu, screen } = require('electron')
 const startupTimer = require('./main.startup-timer')
 const { buildWebPreferences } = require('./main.web-prefs')
-// 桌面小组件跑在独立进程里（见 main.desktop-widget-process.js 顶部注释）：
-// 本模块只保留工具箱浮窗的窗口逻辑，桌面组件的建/关/拖动都交给该进程。
-const desktopWidgetProcess = require('./main.desktop-widget-process')
+// Windows 置底：把组件窗口的 z 序插到「Progman 之上、所有可见窗口之下」
+const desktopLayer = require('./main.desktop-layer')
 
 const isDev = !app.isPackaged
 
 // 窗口 / 工具出口：由 registerWidgetIpc 注入（均为调用时取当前值）
 let getMainWindow = () => null
+// 主窗口已关闭到托盘时，点击组件面板需要按原关闭策略重建主窗口（同样由 main.js 注入）
+let createMainWindow = () => {}
 // 开发模式下「等 Vite 就绪再导航」的重试加载器（定义在 main.js，供主/引导/迁移/工具箱共用）
 let loadUrlWithRetry = () => {}
 
@@ -55,6 +65,17 @@ let sessionWidgetEnabled = null
 // ===== 桌面小组件状态 =====
 // 「桌面小组件按需创建」：主窗口渲染层延迟到「首帧真正空闲」才回报，主进程据此错峰创建窗口
 let desktopEnabled = true
+// 置底是**唯一形态**（不再有开关）：窗口是否已成功置底；attach 失败时退回普通顶层窗口
+let desktopLayerOn = false
+// 拖动起点：内容矩形 + 鼠标位置（均为 DIP）
+let desktopDragBounds = null
+let desktopDragMouse = null
+// 上屏兜底与 z 序自愈定时器
+let desktopShowTimer = null
+let desktopLayerWatchdog = null
+let desktopContentReady = false
+// 渲染层迟迟不发就绪信号（页面加载失败等）时的兜底上屏时间
+const DESKTOP_READY_TIMEOUT_MS = 8000
 
 // 小组件窗口四周留出的阴影绘制边距（px）。
 // 渲染层用同值 padding 让「视觉内容」贴回原位置，因此窗口比内容大 2*M，且窗口位置相对视觉位置偏移 -M。
@@ -157,54 +178,261 @@ function exitToolbox() {
   }
 }
 
-// ===== 桌面小组件「常驻桌面最底层」：已落地（第三条路）=====
-// 目标：小组件始终在所有应用窗口之下，点击它也不会被抬到最前面，同时仍可点击、可拖动。
-// 已实测的两条死路，别再重复踩：
-//   1) focusable:false —— Electron 会加 WS_EX_NOACTIVATE，该状态下窗口收不到鼠标输入，
-//      图标/按钮/拖动全部失效；
-//   2) SetWindowPos 到 HWND_BOTTOM —— 窗口被压到桌面 shell 窗口之下（桌面 shell 盖满全屏、
-//      对鼠标输入不透明）：窗口还看得见（shell 客户区透明），但点击全被 shell 吃掉，
-//      图标/按钮/拖动一并失效。
-// 现用方案（Rainmeter 等桌面挂件的做法，实现集中在 main.desktop-layer.js）：把窗口 SetParent
-// 到桌面窗口（Progman）使其成为「桌面层」子窗口——天然位于所有应用窗口之下、点击不被抬到前台
-// 且仍可交互；**必须同时把窗口样式改成 WS_CHILD**（只 SetParent 不改样式时，点击会先走激活流程，
-// 而桌面子窗口永远无法成为前台窗口，这次激活会把点击吞掉，表现为整块点不动、拖不动）；
-// 挂载后需 SetWindowPos(HWND_TOP) 提到桌面层内部 z 序顶端（否则会落在桌面图标层
-// SHELLDLL_DefView/SysListView32 之下、点不动）；挂载失败则自动恢复样式 + SetParent(hwnd, 0)
-// 解挂退回普通窗口（可点击、可拖动，但会盖住别的窗口）。
-// 注意：挂到桌面层后 -webkit-app-region: drag 立即失效（系统把 SC_MOVE 转发给父窗 Progman），
-// 拖动改由渲染层上报 screenX/screenY、主进程 SetWindowPos 自实现（desktop-widget-drag-*）。
-
-// 创建桌面小组件：常驻桌面、不挡应用
+// ===== 桌面小组件：窗口生命周期（主进程内）=====
+// 窗口形态：320 × 工作区 95% 的**顶层窗口** + 透明（四角圆角由页面 CSS border-radius 绘制，
+// 见 DesktopWidget.vue）。置底模式只是把它的 z 序插到「Progman 之上、所有可见窗口之下」，
+// 由 main.desktop-layer.js 负责；**不要**改回 SetParent 子窗口（移动会原生崩溃）。
 //
-// 现在窗口跑在**独立进程**里（electron/desktop-widget-host.js）：Explorer 重启会销毁桌面壳
-// Progman、级联销毁挂在其下的子窗口，导致挂载方 Electron 原生崩溃（实测整个进程瞬间消失）。
-// 与主应用进程隔离后，崩溃只影响那个子进程，由 main.desktop-widget-process.js 自动重建。
-// 这里只负责拉起子进程；窗口参数、桌面层挂载、拖动 IPC 全在 host 进程内。
-function createDesktopWidgetWindow() {
-  desktopWidgetProcess.start()
+// 拖动：渲染层 pointerdown/pointermove 上报 screenX/screenY（CSS 像素 = DIP），这里用
+// getContentBounds 记起点、每帧 setContentBounds **连宽高一起**搬（只改位置会让窗口越拖越大，
+// 工具箱浮窗当年同一个坑），松手 setContentSize 兜底并把落点写进 desktop-widget-pos.json。
+
+function desktopPosFile() {
+  return path.join(app.getPath('userData'), 'desktop-widget-pos.json')
+}
+// 桌面组件的诊断日志：沿用原来的 desktop-layer.log（与 startup.log 放一起），
+// 排查「没显示 / 没置底 / 拖动异常」先看它。主进程侧只记关键节点，不刷流水账。
+// 仅开发模式写入：正式打包版不产出 desktop-layer.log。
+function logWidget(msg) {
+  if (!isDev) return
+  try {
+    fs.appendFileSync(
+      path.join(app.getPath('userData'), 'desktop-layer.log'),
+      '[' + new Date().toISOString() + '] ' + msg + '\n'
+    )
+  } catch (_) {
+    /* 忽略 */
+  }
+}
+function readJsonFile(file) {
+  try {
+    return JSON.parse(fs.readFileSync(file, 'utf8'))
+  } catch (_) {
+    return null
+  }
+}
+function writeJsonFile(file, obj) {
+  try {
+    fs.writeFileSync(file, JSON.stringify(obj))
+  } catch (e) {
+    console.warn('[widget] 写状态文件失败：', file, e && e.message)
+  }
 }
 
-function scheduleCreateDesktop() {
-  if (!desktopEnabled) return
-  if (!desktopWidgetProcess.isRunning()) {
-    createDesktopWidgetWindow()
-    startupTimer.mark('桌面组件创建完成')
+function desktopWidgetUrl() {
+  return isDev
+    ? 'http://127.0.0.1:5173/desktop-widget.html'
+    : 'app://local/desktop-widget.html'
+}
+
+function stopDesktopTimers() {
+  if (desktopShowTimer) {
+    clearTimeout(desktopShowTimer)
+    desktopShowTimer = null
   }
+  if (desktopLayerWatchdog) {
+    clearInterval(desktopLayerWatchdog)
+    desktopLayerWatchdog = null
+  }
+}
+
+// 上屏：**先确认已贴到桌面之上，再显示**（反过来会先以普通顶层窗口浮到最前闪一下）
+function showDesktopWidget() {
+  const win = desktopWidgetWindow
+  if (!win || win.isDestroyed() || win.isVisible()) return
+  desktopLayerOn = desktopLayer.attach(win)
+  if (desktopLayerOn) {
+    win.showInactive()
+    desktopLayer.reassert(win)
+  } else {
+    // attach 失败（非 Windows / koffi 缺失）：退回普通顶层窗口，只影响层级不影响可用性
+    win.show()
+  }
+  logWidget('[widget] shown bottom=' + desktopLayerOn)
+  startupTimer.mark('桌面组件上屏')
+}
+
+// 渲染层没发就绪信号（页面加载失败等）时仍要上屏，避免组件永远不出现
+function scheduleDesktopShowFallback() {
+  if (desktopContentReady || !desktopWidgetWindow) return
+  if (desktopShowTimer) clearTimeout(desktopShowTimer)
+  desktopShowTimer = setTimeout(() => {
+    desktopShowTimer = null
+    showDesktopWidget()
+  }, DESKTOP_READY_TIMEOUT_MS)
+}
+
+// z 序自愈：Explorer 重启会重建 Progman，别的程序也可能插队，定时确认「仍在可见窗口之下」。
+// 只调 z 序、不移动窗口，开销是几个 user32 调用。
+function startDesktopLayerWatchdog() {
+  if (desktopLayerWatchdog) return
+  desktopLayerWatchdog = setInterval(() => {
+    if (!desktopLayerOn) return
+    const win = desktopWidgetWindow
+    if (!win || win.isDestroyed()) return
+    if (!desktopLayer.isJustAboveDesktop(win)) desktopLayer.reassert(win)
+  }, 5000)
+}
+
+// 创建桌面小组件窗口（幂等）。已存在则只把它显示出来。
+function createDesktopWidgetWindow() {
+  if (desktopWidgetWindow && !desktopWidgetWindow.isDestroyed()) {
+    showDesktopWidget()
+    return desktopWidgetWindow
+  }
+
+  const { width: screenW, height: screenH } = screen.getPrimaryDisplay().workAreaSize
+  const widgetHeight = Math.round(screenH * 0.95)
+  const saved = readJsonFile(desktopPosFile())
+  const startX = Number.isFinite(saved && saved.x) ? saved.x : screenW - 340
+  const startY = Number.isFinite(saved && saved.y)
+    ? saved.y
+    : Math.round((screenH - widgetHeight) / 2)
+
+  const win = new BrowserWindow({
+    width: 320,
+    height: widgetHeight,
+    x: Math.round(startX),
+    y: Math.round(startY),
+    frame: false,
+    // 逐像素透明：四角圆角由页面 CSS 绘制，窗口本身不能有不透明底漆
+    transparent: true,
+    backgroundColor: '#00000000',
+    backgroundMaterial: 'none',
+    alwaysOnTop: false,
+    skipTaskbar: true,
+    resizable: false,
+    hasShadow: false,
+    maximizable: false,
+    minimizable: false,
+    fullscreenable: false,
+    // 不能用 focusable:false：Windows 下会加 WS_EX_NOACTIVATE，窗口收不到任何鼠标输入。
+    // show:false + 内容就绪后再 show：先建好并加载完，避免闪出空窗。
+    show: false,
+    webPreferences: buildWebPreferences({ backgroundThrottling: false }),
+  })
+  desktopWidgetWindow = win
+  desktopContentReady = false
+  logWidget('[widget] created pos=' + Math.round(startX) + ',' + Math.round(startY) +
+    ' size=320x' + widgetHeight)
+
+  // 渲染层 console（仅开发模式）与硬故障：主进程没有 stdio，统一落到 desktop-layer.log
+  if (isDev) {
+    let lastMsg = ''
+    let lastAt = 0
+    win.webContents.on('console-message', (e) => {
+      if (!e || !e.message) return
+      const text = String(e.message)
+      if (e.level === 'info' && text.startsWith('[dw-timing]')) { logWidget(text); return }
+      if (e.level !== 'error' && e.level !== 'warning') return
+      if (text === lastMsg && Date.now() - lastAt < 30000) return
+      lastMsg = text
+      lastAt = Date.now()
+      logWidget('[renderer:' + e.level + '] ' + text.slice(0, 600))
+    })
+  }
+  win.webContents.on('did-fail-load', (e, code, desc, url, isMainFrame) => {
+    if (isMainFrame) logWidget('主框架加载失败(' + code + ' ' + desc + '): ' + url)
+  })
+
+  // 渲染进程崩了（页面 OOM / GPU 掉驱动）别让窗口一直白着：自动重载一次。
+  // 注意这只能兜住渲染进程级崩溃，browser 进程级崩仍会带走主应用（与工具箱同等风险）。
+  win.webContents.on('render-process-gone', (e, details) => {
+    console.warn('[widget] 桌面组件渲染进程退出：', JSON.stringify(details || {}))
+    logWidget('[widget] render-process-gone ' + JSON.stringify(details || {}).slice(0, 300))
+    if (desktopWidgetWindow !== win || win.isDestroyed()) return
+    try {
+      win.reload()
+    } catch (_) {
+      /* 忽略 */
+    }
+  })
+  win.webContents.on('did-finish-load', () => scheduleDesktopShowFallback())
+
+  // 用户点击会把窗口激活并抬到最前：失焦/再获焦都重新压回底层
+  win.on('focus', () => {
+    if (desktopLayerOn) desktopLayer.reassert(win)
+  })
+  win.on('blur', () => {
+    if (desktopLayerOn) desktopLayer.reassert(win)
+  })
+  win.on('closed', () => {
+    if (desktopWidgetWindow === win) desktopWidgetWindow = null
+    desktopLayerOn = false
+    desktopDragBounds = null
+    desktopDragMouse = null
+    stopDesktopTimers()
+  })
+
+  if (isDev) loadUrlWithRetry(win, desktopWidgetUrl())
+  else win.loadURL(desktopWidgetUrl())
+
+  // 置底：先插层（隐藏状态也能设 z 序），上屏等 content-ready
+  desktopLayerOn = desktopLayer.attach(win)
+  logWidget('[widget] bottom mode at create = ' + desktopLayerOn)
+  if (desktopLayerOn) startDesktopLayerWatchdog()
+  startupTimer.mark('桌面组件创建完成')
+  return win
+}
+
+function destroyDesktopWidgetWindow() {
+  const win = desktopWidgetWindow
+  desktopWidgetWindow = null
+  desktopLayerOn = false
+  desktopDragBounds = null
+  desktopDragMouse = null
+  stopDesktopTimers()
+  if (win && !win.isDestroyed()) win.destroy()
 }
 
 function setDesktopEnabled(enabled) {
   desktopEnabled = !!enabled
-  if (desktopEnabled) {
-    scheduleCreateDesktop()
-  } else {
-    // 关闭桌面小组件子进程（不影响主窗口与后端，不触发 window-all-closed 退出）
-    desktopWidgetProcess.stop()
+  if (desktopEnabled) createDesktopWidgetWindow()
+  else destroyDesktopWidgetWindow()
+}
+
+// 组件面板点击：窗口就在本进程里，直接唤醒/重建主窗口并推路由。
+// 主窗口可能已关闭到托盘（引用被置空），此时先按原关闭策略重建，再等页面真正加载完成
+// （开发模式还会先经过 data: 占位页）后推路由。
+
+function openMainPage(page) {
+  let mainWindow = getMainWindow()
+  let created = false
+  if (!mainWindow || mainWindow.isDestroyed()) {
+    createMainWindow()
+    mainWindow = getMainWindow()
+    created = true
   }
+  if (!mainWindow || mainWindow.isDestroyed()) return
+  // 新建窗口交给 createMainWindow 自己的出现时机（ready-to-show），避免提前露出空窗
+  if (!created) {
+    if (mainWindow.isMinimized()) mainWindow.restore()
+    mainWindow.show()
+    mainWindow.focus()
+  }
+  navigateMainWhenReady(mainWindow, page)
+}
+
+// 等主窗口加载到真实页面再发 from-main：开发模式的 data: 占位页和加载中的页面都不能接。
+// 主窗口已就绪时立即发；未就绪则挂到 did-finish-load，直到 URL 不再是 data: 为止。
+function navigateMainWhenReady(mainWindow, page) {
+  const wc = mainWindow.webContents
+  let done = false
+  const send = () => {
+    if (done || wc.isDestroyed()) return
+    const url = wc.getURL()
+    if (!url || url.startsWith('data:') || wc.isLoading()) return
+    done = true
+    wc.removeListener('did-finish-load', send)
+    wc.send('from-main', { type: 'navigate', path: page })
+  }
+  wc.on('did-finish-load', send)
+  send()
 }
 
 function registerWidgetIpc(opts = {}) {
   if (typeof opts.getMainWindow === 'function') getMainWindow = opts.getMainWindow
+  if (typeof opts.createMainWindow === 'function') createMainWindow = opts.createMainWindow
   if (typeof opts.loadUrlWithRetry === 'function') loadUrlWithRetry = opts.loadUrlWithRetry
 
   // 主窗口渲染层空闲回报：同时创建工具箱浮窗，并（按启用状态）创建/关闭桌面小组件窗口
@@ -227,17 +455,88 @@ function registerWidgetIpc(opts = {}) {
     setDesktopEnabled(enabled)
   })
 
-  // 「桌面组件关闭最底层（提升稳定性）」开关：改完需要重启组件子进程才生效。
-  // 入参 layerEnabled=true 表示启用常驻最底层；false 时组件按普通顶层窗口创建。
-  ipcMain.on('desktop-widget-desktop-layer', (event, layerEnabled) => {
-    const mainWindow = getMainWindow()
-    if (!mainWindow || mainWindow.isDestroyed()) return
-    if (event.sender !== mainWindow.webContents) return
-    desktopWidgetProcess.setDesktopLayerEnabled(!!layerEnabled)
+  // 读取置底的实际状态（渲染层只用于日志与拖动手柄样式；置底是唯一形态，没有开关）。
+  // autoDisabled/faultStreak 是独立进程时代的字段，保留形状、恒为 false/0。
+  ipcMain.handle('get-desktop-layer-state', () => ({
+    desktopLayerEnabled: desktopLayerOn,
+    autoDisabled: false,
+    faultStreak: 0,
+  }))
+
+  // ===== 桌面小组件窗口 IPC =====
+  // 渲染层内容就绪：Vue 挂载完成且骨架 DOM 已生成。此时才显示窗口（置底模式下先插层再显示）。
+  ipcMain.on('desktop-widget-content-ready', (event) => {
+    const win = desktopWidgetWindow
+    if (!win || win.isDestroyed() || event.sender !== win.webContents) return
+    desktopContentReady = true
+    logWidget('[widget] content ready')
+    if (desktopShowTimer) {
+      clearTimeout(desktopShowTimer)
+      desktopShowTimer = null
+    }
+    showDesktopWidget()
   })
 
-  // 读取桌面层状态：设置页加载时同步开关初值，并显示「是否因连续崩溃被自动关闭」
-  ipcMain.handle('get-desktop-layer-state', () => desktopWidgetProcess.getDesktopLayerState())
+  // 拖动：起点缓存内容矩形，每帧连宽高一起传（只改位置会让窗口越拖越大）
+  ipcMain.on('desktop-widget-drag-start', (event, pos) => {
+    const win = desktopWidgetWindow
+    if (!win || win.isDestroyed() || event.sender !== win.webContents || !pos) return
+    try {
+      desktopDragBounds = win.getContentBounds()
+    } catch (_) {
+      desktopDragBounds = null
+      return
+    }
+    desktopDragMouse = [pos.screenX, pos.screenY]
+  })
+
+  ipcMain.on('desktop-widget-drag-move', (event, pos) => {
+    const win = desktopWidgetWindow
+    if (!win || win.isDestroyed() || event.sender !== win.webContents || !pos) return
+    if (!desktopDragBounds || !desktopDragMouse) return
+    const { width, height } = desktopDragBounds
+    const dx = pos.screenX - desktopDragMouse[0]
+    const dy = pos.screenY - desktopDragMouse[1]
+    const wa = screen.getPrimaryDisplay().workArea
+    const minVisible = 60
+    const nx = Math.max(
+      Math.round(wa.x - width + minVisible),
+      Math.min(Math.round(desktopDragBounds.x + dx), Math.round(wa.x + wa.width - minVisible))
+    )
+    const ny = Math.max(
+      Math.round(wa.y - height + minVisible),
+      Math.min(Math.round(desktopDragBounds.y + dy), Math.round(wa.y + wa.height - minVisible))
+    )
+    win.setContentBounds({ x: nx, y: ny, width, height })
+  })
+
+  ipcMain.on('desktop-widget-drag-end', (event) => {
+    const win = desktopWidgetWindow
+    if (!win || win.isDestroyed() || event.sender !== win.webContents) return
+    if (desktopDragBounds) {
+      try {
+        // 松手兜底尺寸 + 记住落点（重建后回到这里）
+        win.setContentSize(desktopDragBounds.width, desktopDragBounds.height)
+        const b = win.getContentBounds()
+        writeJsonFile(desktopPosFile(), { x: Math.round(b.x), y: Math.round(b.y) })
+        logWidget('[widget] drag end pos=' + Math.round(b.x) + ',' + Math.round(b.y))
+      } catch (_) {
+        /* 忽略 */
+      }
+    }
+    desktopDragBounds = null
+    desktopDragMouse = null
+    // 松手后压回底层（拖动过程中可能被抬到前台）
+    if (desktopLayerOn) desktopLayer.reassert(win)
+  })
+
+  // 点击组件面板（课程 / 值日 / 人数 / 倒计时）：唤醒主窗口并切路由。
+  // 窗口就在本进程里，直接调用 openMainPage，不再需要父子进程消息中转。
+  ipcMain.on('desktop-widget-open-page', (event, page) => {
+    const win = desktopWidgetWindow
+    if (!win || win.isDestroyed() || event.sender !== win.webContents) return
+    if (typeof page === 'string' && page.startsWith('/')) openMainPage(page)
+  })
 
   // 调整小组件窗口大小（带边界保护，防止超出屏幕）
   // 入参 [width, height] 为「视觉内容」尺寸；窗口实际会比它大 2*M，四周多出的部分用于绘制阴影。
@@ -384,17 +683,8 @@ function registerWidgetIpc(opts = {}) {
   // 读取会话级开关；未初始化（尚未注入本次默认值）返回 null
   ipcMain.handle('get-session-widget-visible', () => sessionWidgetEnabled)
 
-  // 桌面组件获取主窗口的 token（跨渲染进程共享，避免 cookie/localStorage 隔离）
-  ipcMain.handle('get-main-token', () => {
-    const mainWindow = getMainWindow()
-    if (mainWindow && !mainWindow.isDestroyed()) {
-      return mainWindow.webContents.executeJavaScript('localStorage.getItem("token")', true)
-    }
-    return null
-  })
-
-  // 桌面小组件的拖动 IPC 已随窗口一起搬到独立进程（electron/desktop-widget-host.js）：
-  // 窗口不在本进程里，SetWindowPos 只能由创建它的进程执行。
+  // 桌面组件与主窗口同 origin，token 直接读自己的 localStorage；
+  // 原来的 get-main-token IPC 已随独立进程一起删除。
 
   // 拖动中：使用 setContentBounds 与 setContentSize 保持一致，避免 setBounds/setSize 边界计算差异
   ipcMain.on('widget-drag-move', (event, { screenX, screenY }) => {
@@ -447,10 +737,12 @@ module.exports = {
   showWidgetWindow,
   createDesktopWidgetWindow,
   getWidgetWindow: () => widgetWindow,
-  // 桌面组件窗口不在本进程里：返回伪窗口对象，让 tray / perf 既有的
-  // `w && !w.isDestroyed()` 判断与 close/destroy 调用继续可用。
-  getDesktopWidgetWindow: () => desktopWidgetWindow || desktopWidgetProcess.getProxy(),
-  setDesktopWidgetWindow: (w) => { desktopWidgetWindow = w },
+  getDesktopWidgetWindow: () => desktopWidgetWindow,
+  // perf 面板关闭组件后会回写 null；同时清掉"已置底"标记，避免看门狗继续操作已销毁窗口
+  setDesktopWidgetWindow: (w) => {
+    desktopWidgetWindow = w
+    if (!w) desktopLayerOn = false
+  },
   isDesktopEnabled: () => desktopEnabled,
-  isDesktopWidgetRunning: () => desktopWidgetProcess.isRunning(),
+  isDesktopWidgetRunning: () => !!(desktopWidgetWindow && !desktopWidgetWindow.isDestroyed()),
 }

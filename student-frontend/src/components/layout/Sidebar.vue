@@ -110,6 +110,8 @@ function toggleCollapsed() {
 }
 .sidebar-scroll::-webkit-scrollbar-thumb {
   background: rgba(255, 255, 255, 0.25);
+  /* 滚动条滑块：宽度 6px，半高圆角 3px 才呈胶囊。
+     写死 3px 是因为它必须等于滑块自身宽度的一半，与卡片圆角体系无关。 */
   border-radius: 3px;
 }
 .sidebar-scroll::-webkit-scrollbar-thumb:hover {
@@ -127,7 +129,7 @@ function toggleCollapsed() {
   align-items: center;
   gap: 10px;
   padding: 8px 12px;
-  border-radius: 8px;
+  border-radius: var(--radius-control);
   text-decoration: none;
   /* padding 也纳入过渡：折叠/展开时图标靠 padding-left 平滑移动，避免瞬跳 */
   transition-property: background-color, border-color, color, box-shadow, border-radius, transform, padding-left, padding-right;

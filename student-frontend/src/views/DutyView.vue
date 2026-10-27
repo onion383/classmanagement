@@ -44,9 +44,13 @@
                 candidate-label-field="姓名"
                 candidate-placeholder="输入姓名"
                 :min-table-height="200"
+                :empty-ready="activeLoaded"
+                :load-error="activeError"
+                error-text="值日表加载失败"
                 @update:cells="onActiveCellsUpdate"
                 @swap-rows="swapItems"
                 @swap-columns="swapDays"
+                @retry="loadActive"
               />
               <ExportExcel v-if="activeExportMounted" :is-visible="activeExportVisible" :rows="activeExportRows" :fields="exportFields" defaultFilename="当前值日表" @update:is-visible="activeExportVisible = $event" />
             </template>
@@ -67,9 +71,13 @@
                 candidate-label-field="姓名"
                 candidate-placeholder="输入姓名"
                 :min-table-height="200"
+                :empty-ready="masterLoaded"
+                :load-error="masterError"
+                error-text="值日模板加载失败"
                 @update:cells="onMasterCellsUpdate"
                 @swap-rows="swapItems"
                 @swap-columns="swapDays"
+                @retry="loadMaster"
               />
               <ExportExcel v-if="masterExportMounted" :is-visible="masterExportVisible" :rows="masterExportRows" :fields="exportFields" defaultFilename="值日模板" @update:is-visible="masterExportVisible = $event" />
             </template>
@@ -96,9 +104,13 @@
               row-header-label="劳动项目"
               :enable-candidate="false"
               :min-table-height="200"
+              :empty-ready="weightLoaded"
+              :load-error="weightError"
+              error-text="权重表加载失败"
               @update:cells="onWeightCellsUpdate"
               @swap-rows="onWeightSwapRows"
               @swap-columns="onWeightSwapColumns"
+              @retry="loadWeight"
             />
             <ExportExcel v-if="weightExportMounted" :is-visible="weightExportVisible" :rows="weightExportRows" :fields="exportFields" defaultFilename="值日项目权重表" @update:is-visible="weightExportVisible = $event" />
           </section>
@@ -107,13 +119,18 @@
         <div v-else-if="activeTab === 'history'" class="relative">
           <!-- 值日指数（公平账本）：每人一根长条，按所做值日项目的权重逐天累加，截至所选周 -->
           <div v-if="historySnapshot" class="mb-8">
-            <div class="flex flex-wrap items-center justify-between gap-3 mb-4">
-              <h2 class="text-xl font-semibold text-text flex items-center gap-2"><IconGlyph name="chart" :size="20" /> 值日指数</h2>
+            <div class="flex flex-wrap items-center justify-between gap-3 mb-3">
+              <h2 class="text-xl font-semibold text-text flex items-center gap-2 min-h-7"><IconGlyph name="chart" :size="20" /> 值日指数</h2>
               <span class="text-xs text-text-muted">按每人所做值日项目的权重逐天累加 · 截至 {{ historySnapDate || '—' }}</span>
+            </div>
+            <div class="mb-4 flex flex-wrap items-center gap-3 opbar">
+              <button @click="refreshDutyIndex()" class="bg-text-muted text-text-inverse px-4 py-2 rounded flex items-center gap-1.5 btn-refresh"><IconGlyph name="refresh" :size="14" tint="current" /> 刷新</button>
+              <button @click="openIndexExport()" class="bg-warning text-text-inverse px-4 py-2 rounded flex items-center gap-1.5"><IconGlyph name="download" :size="14" tint="current" /> 导出 Excel</button>
             </div>
             <div class="bg-surface rounded-lg border border-border p-6">
               <StatBarList :rows="dutyIndexRows" :bar-width="dutyIndexBarWidth" :value-text="(row) => row.value.toFixed(2)" empty-text="暂无值日指数数据" />
             </div>
+            <ExportExcel v-if="indexExportMounted" :is-visible="indexExportVisible" :rows="indexExportRows" :fields="indexExportFields" defaultFilename="值日指数" @update:is-visible="indexExportVisible = $event" />
           </div>
 
           <!-- 值日记录：标题 + 菜单栏（设置 / 刷新 / 导出 Excel / 补录记录） -->
@@ -497,12 +514,19 @@ const activeCells = ref({})
 // loaded 只表示「首次数据已就绪」（供行后填与跨页定位判断），刷新/重载不再回退成假，
 // 避免加载期间行被清空闪一下；模式切换路径会显式置假（见 _applyRowFocus）
 const activeLoaded = ref(false)
+// 加载失败：驱动表格的「加载失败态」（告警 + 重试）。和 activeLoaded 分开 ——
+// 后者在 finally 里一律置 true（成功失败都算「试过了」），没法区分「空数据」和「加载失败」。
+const activeError = ref(false)
 const loadActive = async () => {
   try {
     const res = await axios.get(`${API_BASE}/duty?mode=${dutyMode.value}`)
     activeCells.value = res.data.cells || {}
     syncCellsNames(activeCells.value) // 加载后检测未收录姓名
-  } catch (e) { console.error(e) } finally { activeLoaded.value = true }
+    activeError.value = false
+  } catch (e) {
+    console.error(e)
+    activeError.value = true
+  } finally { activeLoaded.value = true }
 }
 // 行对象复用缓存：编辑一格时只重建真正变化的那一行，避免整表重画
 const reuseActiveRows = createRowReuseCache()
@@ -512,12 +536,17 @@ const dutyActiveRows = computed(() => reuseActiveRows(buildGridRows(activeCells.
 // ==================== 值日模板 ====================
 const masterCells = ref({})
 const masterLoaded = ref(false)
+const masterError = ref(false)
 const loadMaster = async () => {
   try {
     const res = await axios.get(`${API_BASE}/duty/template?mode=${dutyMode.value}`)
     masterCells.value = res.data.cells || {}
     syncCellsNames(masterCells.value) // 加载后检测未收录姓名
-  } catch (e) { console.error(e) } finally { masterLoaded.value = true }
+    masterError.value = false
+  } catch (e) {
+    console.error(e)
+    masterError.value = true
+  } finally { masterLoaded.value = true }
 }
 const dutyMasterRows = computed(() => reuseMasterRows(buildGridRows(masterCells.value)))
 
@@ -769,6 +798,7 @@ const historyRows = computed(() => buildGridRows(historyCells.value, historyItem
 // 结构：{ 项目名: { 星期几: 权重值 } }。与值日表同构，供指数与权重公平算法使用。
 const dutyWeights = ref({})
 const weightLoaded = ref(false)
+const weightError = ref(false)
 const WEIGHT_MIN = 0
 const WEIGHT_MAX = 1
 async function loadWeight() {
@@ -787,7 +817,8 @@ async function loadWeight() {
       })
       dutyWeights.value = init
     }
-  } catch (e) { console.error(e) } finally { weightLoaded.value = true }
+    weightError.value = false
+  } catch (e) { console.error(e); weightError.value = true } finally { weightLoaded.value = true }
 }
 async function refreshWeight() {
   try { await loadWeight(); notifySuccess('已刷新值日项目权重表') } catch (_) { /* 已在 load 内处理 */ }
@@ -971,6 +1002,28 @@ const dutyIndexRows = computed(() => {
 })
 function dutyIndexBarWidth(row) {
   return Math.round((Math.abs(row.value) / row._max) * 100)
+}
+// 刷新值日指数：权重与逐天账本都重取，避免只刷新其中一侧导致数据不一致
+async function refreshDutyIndex() {
+  try {
+    await Promise.all([loadWeight(), loadDutyIndex()])
+    notifySuccess('已刷新值日指数')
+  } catch (e) { notifyError('刷新值日指数失败'); console.error(e) }
+}
+// ---------- 值日指数导出 ----------
+const indexExportVisible = ref(false)
+const indexExportMounted = ref(false)
+watch(() => indexExportVisible.value, v => { if (v) indexExportMounted.value = true })
+const indexExportFields = [
+  { name: '姓名' },
+  { name: '值日指数' }
+]
+const indexExportRows = computed(() =>
+  dutyIndexRows.value.map(r => ({ 姓名: r.name, 值日指数: Number(r.value.toFixed(2)) }))
+)
+function openIndexExport() {
+  if (!dutyIndexRows.value.length) return useNotification().info('暂无值日指数可导出')
+  indexExportVisible.value = true
 }
 
 // 载入「权重公平」所需账本：统计学期范围内、截至昨日每人累计的值日权重

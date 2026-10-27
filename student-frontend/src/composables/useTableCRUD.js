@@ -3,6 +3,7 @@ import axios from 'axios'
 import { pushUndo } from '../api/undo'
 import { useNotification } from './useNotification'
 import { createRowReuseCache } from '../utils/rowReuse.js'
+import { filterRowsByKeyword, isSearchNoResult } from '../utils/tableSearch.js'
 import { zhCollator } from '../utils/collator.js'
 
 export function useTableCRUD(apiBase, defaultFields, options = {}) {
@@ -17,6 +18,9 @@ export function useTableCRUD(apiBase, defaultFields, options = {}) {
 
   // ==================== 状态 ====================
   const rows = ref([])
+  // 加载失败标志：原来只在「表里还没有任何行」时弹一次 alert，关掉之后表格就显示
+  // 「还没有 XX 数据」——用户分不清是自己没数据还是加载挂了。交给表格组件显示告警 + 重试。
+  const loadError = ref(false)
   const fields = ref([...defaultFields])
   // 撤销专用：最近一次加载的全表快照，作为单元格"旧值"来源
   const rowsSnapshot = ref([])
@@ -61,20 +65,21 @@ export function useTableCRUD(apiBase, defaultFields, options = {}) {
     try { performance.measure(name, startMark) } catch (_) { /* 忽略 */ }
   }
 
+  // 关键字过滤后的行（不含排序、不含新增行插入）。
+  // 单独抽出来是因为「搜索无结果」这个判定要基于它：
+  // 表格组件拿到的是已过滤的 rows，光看 rows.length === 0 分不清
+  // 「本来就没数据」和「有数据但被关键字筛光了」——这两者要给用户不同的提示。
+  const searchFilteredRows = computed(() =>
+    filterRowsByKeyword(rows.value, searchField.value, searchKeywordDebounced.value)
+  )
+
   // 展示列表：过滤 + 排序 +（可选）插入新增行。
   // 关键：**复用行对象引用**，不再逐行 {...} 拷贝。原来每次派生都为每行造新对象，
   // 任何数据变化都会让所有行的 vnode 属性全变，触发整表重画（实测 ~29ms）；
   // 复用引用后键控 diff 只更新真正变化的那一行。
   const displayList = computed(() => {
     perfMark('perf:displayRows:start')
-    let filtered = rows.value
-    if (searchField.value && searchKeywordDebounced.value) {
-      const kw = searchKeywordDebounced.value.toLowerCase()
-      filtered = rows.value.filter(s => {
-        const val = s[searchField.value]
-        return val != null && String(val).toLowerCase().includes(kw)
-      })
-    }
+    let filtered = searchFilteredRows.value
     if (sortField.value) {
       const field = sortField.value
       filtered = [...filtered].sort((a, b) => {
@@ -113,6 +118,14 @@ export function useTableCRUD(apiBase, defaultFields, options = {}) {
   const displayRows = computed(() => displayList.value.rows)
   // 与 displayRows 对齐的序号数组：DynamicTable 用它渲染 position 列，避免把序号写回行对象
   const displayIndexes = computed(() => displayList.value.indexes)
+
+  // 搜索无结果：有关键字在搜、但搜出来的行是 0 条。
+  // 用于让表格区分两种「空」：本来就没数据 vs 数据在但没匹配上关键字。
+  // 注意排除「本来就没数据」的情况（rows 为空）：那种情况该说「还没有 XX 数据」，
+  // 提示用户去添加，而不是说「暂无搜索结果」让用户去清搜索（清了也还是空）。
+  const searchNoResult = computed(() =>
+    isSearchNoResult(rows.value, searchFilteredRows.value, searchField.value, searchKeywordDebounced.value)
+  )
 
   const visibleFields = computed(() => {
     return fields.value.filter(f => f.name !== 'id' && f.name !== 'position')
@@ -175,9 +188,11 @@ export function useTableCRUD(apiBase, defaultFields, options = {}) {
       if (!fields.value || fields.value.length === 0) {
         fields.value = [...defaultFields]
       }
+      loadError.value = false
     } catch (err) {
       console.error(err)
-      if (!rows.value.length) showAlert('无法加载数据')
+      // 不再弹 alert：表格内会显示「加载失败 + 重试」，比一次性弹窗更持久、也更明确
+      loadError.value = true
     }
   }
 
@@ -416,6 +431,13 @@ export function useTableCRUD(apiBase, defaultFields, options = {}) {
 
   function closeSearch() {
     searchField.value = null
+    searchKeyword.value = ''
+  }
+
+  // 只清关键字、保留搜索列：表格空态里的「清除搜索」用。
+  // 不像 closeSearch 那样把搜索列也置空 —— 列还留着，用户可以直接换个词再搜，
+  // 不用重新点表头 🔍 选列。
+  function clearSearchKeyword() {
     searchKeyword.value = ''
   }
 
@@ -692,18 +714,19 @@ export function useTableCRUD(apiBase, defaultFields, options = {}) {
   })
 
   return {
-    rows, fields, newRow, editingCell,
+    rows, fields, newRow, editingCell, loadError,
     contextMenu, dialog, columnForm, renameOldName,
     sortField, sortOrder, searchField, searchKeyword, searchKeywordDebounced,
     dialogCallback, selectedCount, clipboard, selectedRowKeys,
     importDialogVisible, dedupeDialogVisible,
     displayRows, displayIndexes, visibleFields, allBusinessFields,
+    searchNoResult,
     fetchRows, applyUndoChange, showAlert, showConfirm, onDialogConfirm, onDialogCancel, onDialogExtra,
     startEditCell, saveCell, validateValue,
     addNewRowAtBottom, insertRowAbove, insertRowBelow, createNewRow, cancelNewRow, saveNewRow,
     moveRow, deleteColumn, startAddColumn, confirmAddColumn,
     startRenameColumn, confirmRenameColumn,
-    toggleSort, openSearch, closeSearch, openContextMenu,
+    toggleSort, openSearch, closeSearch, clearSearchKeyword, openContextMenu,
     onUpdateNewRow, cutRows, cutSelectedRows, deleteRows, onBatchDelete,
     pasteRows, onMoveSelectedRows, onSwapRows, onSwapColumns,
     onSelectionChange, onImportData, onDeleteDuplicates,

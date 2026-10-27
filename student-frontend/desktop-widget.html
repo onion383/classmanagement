@@ -7,6 +7,20 @@
   <style>
     * { user-select: none; -webkit-user-select: none; }
     html, body { margin: 0; padding: 0; overflow: hidden; width: 100%; height: 100%; background: transparent; }
+    /* 组件窗口是**逐像素透明**的：圆角由 DesktopWidget.vue 的 .dw-wallpaper / .dw-veil
+       用 CSS border-radius 绘制，四角外侧必须是透明的。
+       但主题 CSS 会给 body（及 body::before/::after 的背景图层）上底色
+       （glass 的 #f0f4f8、glass2 的 #e9edf8、night 的 #182238…），那样四角又会被填成方的，
+       所以这里对组件窗口统一压成透明。加 !important 是因为主题选择器权重更高
+       （如 :root[data-theme="glass"] body）。 */
+    :root body,
+    :root body::before,
+    :root body::after {
+      background: transparent !important;
+      background-image: none !important;
+    }
+    /* 背景图/光斑由组件自己画（.dw-wallpaper），不用主题那套 */
+    #desktop-widget-app { background: transparent; }
   </style>
 </head>
 <body>

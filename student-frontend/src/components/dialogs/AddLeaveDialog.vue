@@ -28,7 +28,7 @@
             <div
               v-for="s in filteredStudents"
               :key="s.id"
-              class="px-3 py-2 text-sm cursor-pointer hover:bg-primary/10"
+              class="px-3 py-2 text-sm cursor-pointer hover:bg-primary/10 transition-theme"
               @mousedown.prevent="selectStudent(s)"
             >
               <span class="text-text">{{ s.姓名 }}</span>
@@ -79,7 +79,7 @@
             :key="q"
             type="button"
             @click="applyQuick(q)"
-            class="px-3 py-1.5 text-xs rounded-lg bg-surface-hover text-text-secondary hover:bg-border border border-border"
+            class="px-3 py-1.5 text-xs rounded-lg bg-surface-hover text-text-secondary hover:bg-border border border-border transition-theme"
           >{{ q }}</button>
         </div>
         <div class="grid grid-cols-2 gap-3">
@@ -101,9 +101,9 @@
       </div>
 
       <div class="flex justify-end gap-2">
-        <button v-if="isEdit" type="button" @click="$emit('delete', editingRecord)" class="mr-auto px-4 py-2 rounded-lg bg-danger text-text-inverse hover:bg-danger-hover">删除</button>
-        <button type="button" @click="$emit('cancel')" class="px-4 py-2 rounded-lg bg-text-muted text-text-inverse hover:bg-text-secondary">取消</button>
-        <button type="button" @click="submit" class="px-4 py-2 rounded-lg bg-primary text-text-inverse hover:bg-primary-hover">确认请假</button>
+        <button v-if="isEdit" type="button" @click="$emit('delete', editingRecord)" class="mr-auto px-4 py-2 rounded-lg bg-danger text-text-inverse hover:bg-danger-hover transition-theme">删除</button>
+        <button type="button" @click="$emit('cancel')" class="px-4 py-2 rounded-lg bg-text-muted text-text-inverse hover:bg-text-secondary transition-theme">取消</button>
+        <button type="button" @click="submit" class="px-4 py-2 rounded-lg bg-primary text-text-inverse hover:bg-primary-hover transition-theme">确认请假</button>
       </div>
     </div>
   </DialogShell>

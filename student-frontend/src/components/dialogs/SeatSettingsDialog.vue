@@ -21,13 +21,12 @@
           </label>
         </div>
       </div>
-      <div class="mb-4">
-        <label class="flex items-center gap-2 cursor-pointer">
-          <input type="checkbox" v-model="localShowAisle" /> 显示走廊
-        </label>
-        <p class="text-xs text-text-muted mt-1">
-          单桌：每列间有走廊；同桌：每两列为一组，组间有走廊。
-        </p>
+      <div class="mb-4 flex items-center justify-between gap-2">
+        <div class="flex items-center gap-1.5">
+          <span class="text-sm font-medium">显示走廊</span>
+          <AppHelp text="单桌：每列间有走廊；同桌：每两列为一组，组间有走廊。" aria-label="显示走廊说明" />
+        </div>
+        <AppSwitch v-model="localShowAisle" aria-label="显示走廊" />
       </div>
       <div class="flex justify-end gap-2">
         <button @click="$emit('cancel')" class="bg-surface-hover px-4 py-2 rounded text-text">取消</button>
@@ -40,11 +39,13 @@
 <script>
 import { useNotification } from '../../composables/useNotification.js'
 import '../../styles/dialog-transition.css'
+import AppHelp from '../base/AppHelp.vue'
+import AppSwitch from '../base/AppSwitch.vue'
 import DialogShell from '../base/DialogShell.vue'
 
 export default {
   name: 'SeatSettingsDialog',
-  components: { DialogShell },
+  components: { AppHelp, AppSwitch, DialogShell },
   props: {
     visible: Boolean,
     rows: { type: Number, required: true },

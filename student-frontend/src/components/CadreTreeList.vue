@@ -369,7 +369,7 @@ export default {
   padding: 0 6px;
   margin: 0;
   border: 1px solid rgba(255, 255, 255, 0.3);
-  border-radius: 4px;
+  border-radius: var(--radius-xs);
   background: rgba(255, 255, 255, 0.2);
   color: inherit;
   font-size: 12px;
@@ -406,7 +406,7 @@ button.chip:disabled {
   font-size: 12px;
   line-height: 1;
   border: 1px solid var(--color-border, #e5e7eb);
-  border-radius: 4px;
+  border-radius: var(--radius-xs);
   background: var(--color-surface, #fff);
   color: var(--color-text, #1f2937);
   outline: none;
@@ -431,7 +431,7 @@ button.chip:disabled {
   font-size: 12px;
   line-height: 1;
   cursor: pointer;
-  border-radius: 4px;
+  border-radius: var(--radius-xs);
   width: 18px;
   height: 18px;
   display: grid;

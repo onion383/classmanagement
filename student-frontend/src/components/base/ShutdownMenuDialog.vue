@@ -113,7 +113,7 @@ export default {
   backdrop-filter: blur(14px) saturate(1.15);
   -webkit-backdrop-filter: blur(14px) saturate(1.15);
   border: 1px solid var(--color-border);
-  border-radius: 16px;
+  border-radius: var(--radius-surface);
   box-shadow: var(--shadow-lg);
   text-align: left;
   color: var(--color-text);
@@ -172,7 +172,7 @@ export default {
      无需为深浅两套模式各写一份取色。 */
   background: color-mix(in srgb, var(--color-text) 4%, transparent);
   border: 1px solid transparent;
-  border-radius: 12px;
+  border-radius: var(--radius-control);
   text-align: left;
   cursor: pointer;
   transition: background 0.15s, border-color 0.15s, transform 0.1s;
@@ -203,7 +203,7 @@ export default {
   justify-content: center;
   width: 40px;
   height: 40px;
-  border-radius: 10px;
+  border-radius: var(--radius-control);
 }
 .opt-icon-blue   { background: rgba(59, 130, 246, 0.12); color: #2563eb; }
 .opt-icon-cyan   { background: rgba(6, 182, 212, 0.12);  color: #0891b2; }
@@ -245,7 +245,7 @@ export default {
   /* 弱底纹统一用文字色按比例混出：日间≈原来的 #f9fafb，夜间自动变浅色微亮 */
   background: color-mix(in srgb, var(--color-text) 4%, transparent);
   border: 1px solid var(--color-border);
-  border-radius: 10px;
+  border-radius: var(--radius-control);
   font-size: 13px;
   color: var(--color-text-secondary);
   cursor: pointer;
@@ -263,7 +263,7 @@ export default {
   width: 16px;
   height: 16px;
   border: 1.5px solid var(--color-border-strong);
-  border-radius: 4px;
+  border-radius: var(--radius-xs);
   background: var(--color-surface);
   position: relative;
   transition: background 0.15s, border-color 0.15s;

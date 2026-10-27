@@ -125,16 +125,10 @@ function Measure-OneFile {
     }
 
     # 模块：取路径第一段（顶层目录）；根目录下的文件归为“(根目录)”
-    # testjs 下再细分一级（testjs/smoke、testjs/probe…），其余目录保持一级
+    # testjs 作为一个整体模块统计，不再按 units/smoke/probe/tools 细分
     $norm = $RelPath -replace '\\', '/'
     $slash = $norm.IndexOf('/')
     $module = if ($slash -lt 0) { '(根目录)' } else { $norm.Substring(0, $slash) }
-    if ($module -eq 'testjs') {
-        $rest = $norm.Substring($slash + 1)
-        $sub = $rest.IndexOf('/')
-        if ($sub -ge 0) { $module = "testjs/" + $rest.Substring(0, $sub) }
-        else { $module = 'testjs/(根目录)' }
-    }
 
     [PSCustomObject]@{
         FilePath = $RelPath

@@ -174,7 +174,7 @@ export default {
   bottom: 6px;
   width: 2px;
   background: var(--color-border, rgba(0, 0, 0, 0.12));
-  border-radius: 2px;
+  border-radius: var(--radius-xs);
 }
 .timeline-row {
   position: relative;
@@ -201,7 +201,7 @@ export default {
   min-width: 0;
   background: var(--color-surface-hover, rgba(255, 255, 255, 0.5));
   border: 1px solid var(--color-border, rgba(0, 0, 0, 0.08));
-  border-radius: 10px;
+  border-radius: var(--radius-control);
   padding: 8px 12px;
 }
 </style>

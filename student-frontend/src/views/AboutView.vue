@@ -452,6 +452,6 @@ const libGroups = [
 }
 .bg-surface .overflow-y-auto::-webkit-scrollbar-thumb {
   background: rgba(128, 128, 128, 0.25);
-  border-radius: 4px;
+  border-radius: var(--radius-xs);
 }
 </style>

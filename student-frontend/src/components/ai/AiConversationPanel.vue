@@ -94,12 +94,12 @@ export default {
   background-image: linear-gradient(rgba(255, 205, 130, 0.01), rgba(255, 205, 130, 0.01));
 }
 
-/* 抽屉内所有圆角（面板 / 会话条目 / 加载更多 / ＋、✕ 按钮）统一为「标题卡片、弹窗卡片」的主题卡片圆角：
-   glass / win11 = 20px，glass2 = 22px，其余主题回落到 --radius-card（基础 8px、极简 0）。
-   !important 用于压掉毛玻璃主题给 button 硬编码的 12px 皮肤与 .dlg-close 的 --radius-md。 */
+/* 抽屉内所有圆角（面板 / 会话条目 / 加载更多 / ＋、✕ 按钮）统一为「标题卡片、弹窗卡片」的主题表面圆角：
+   --radius-surface 由各主题定义（glass/win11 = 20px，glass2 = 26px，基础 = 12px，极简 = 0）。
+   !important 用于压掉毛玻璃主题给 button 的皮肤与 .dlg-close 的默认档。 */
 .conv-r,
 .conv-panel,
 .conv-panel button {
-  border-radius: var(--radius-surface, var(--radius-card, 12px)) !important;
+  border-radius: var(--radius-surface) !important;
 }
 </style>

@@ -94,7 +94,7 @@
 
       <div class="flex justify-end gap-2 flex-shrink-0">
         <button @click="$emit('cancel')" class="bg-surface-hover px-4 py-2 rounded text-text border border-border">取消</button>
-        <button @click="apply" class="bg-primary hover:bg-primary-hover text-text-inverse px-4 py-2 rounded">生成并应用</button>
+        <button @click="apply" class="bg-primary hover:bg-primary-hover text-text-inverse px-4 py-2 rounded transition-theme">生成并应用</button>
       </div>
     </div>
   </DialogShell>

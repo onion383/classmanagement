@@ -38,11 +38,24 @@
   --shadow-lg: 0 8px 28px rgba(15, 23, 42, 0.1);
   --shadow-card: 0 2px 10px rgba(15, 23, 42, 0.05);
 
-  /* 圆角 */
+  /* 圆角：尺寸档（严格单调递增，勿倒挂）。
+     win11 与 glass 同配方（同文件共用 :root:is([data-theme="glass"],[data-theme="win11"]) 选择器），
+     故各档数值与 theme-glass.css 保持一致。 */
+  --radius-xs: 4px;
   --radius-sm: 6px;
-  --radius-md: 10px;
+  --radius-md: 12px;
   --radius-lg: 14px;
-  --radius-card: 12px;
+  --radius-xl: 20px;
+  --radius-2xl: 24px;
+  --radius-3xl: 28px;
+  --radius-full: 9999px;
+  --radius: var(--radius-control);
+
+  /* 角色别名 → 尺寸档（覆盖 theme-base.css 的默认映射），与 glass 一致 */
+  --radius-control: var(--radius-md);
+  --radius-card: var(--radius-xl);
+  --radius-surface: var(--radius-xl);
+  --radius-table: 16px;
 }
 
 /* ========== 全局背景完全透明（其余样式继承毛玻璃） ========== */

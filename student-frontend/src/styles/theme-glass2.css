@@ -81,13 +81,30 @@
   --shadow-lg: var(--g2-shadow-2);
   --shadow-card: var(--g2-shadow-2);
 
+  /* 圆角：尺寸档（严格单调递增，勿倒挂）。
+     glass2 是最圆润的主题，各档数值刻意对齐本主题改动前的既有观感：
+       md 16px  → 常规控件
+       lg 22px  → .bg-surface 卡片与表格容器（原硬编码 22px，视觉不变）
+       xl 26px  → 抽屉/悬浮面板
+     档位间距 4px 递进，保证「相邻档差一档 = 圆角递增」可预期。 */
+  --radius-xs: 8px;
   --radius-sm: 12px;
   --radius-md: 16px;
   --radius-lg: 22px;
-  --radius-card: 22px;
-  /* 卡片 / 弹窗（.bg-surface）实际渲染的圆角（见下方 .bg-surface 规则用的 --radius-lg），供抽屉等复用 */
-  --radius-surface: var(--radius-lg);
-  --radius-full: 999px;
+  --radius-xl: 26px;
+  --radius-2xl: 30px;
+  --radius-3xl: 34px;
+  --radius-full: 9999px;
+  --radius: var(--radius-control);
+
+  /* 角色别名 → 尺寸档（覆盖 theme-base.css 的默认映射）。
+     control 12px：按钮（原硬编码 12px，视觉不变）
+     card   22px：.bg-surface 卡片与表格容器（原硬编码 22px，视觉不变）
+     surface 26px：抽屉/悬浮面板，比卡片更圆一档，体现层级 */
+  --radius-control: var(--radius-sm);
+  --radius-card: var(--radius-lg);
+  --radius-surface: var(--radius-xl);
+  --radius-table: var(--radius-lg);
 }
 
 /* ------------------------------------------------------------
@@ -230,7 +247,7 @@
 :root[data-theme="glass2"] .bg-sidebar {
   backdrop-filter: blur(var(--g2-blur)) saturate(var(--g2-saturate));
   border-right: 1px solid var(--g2-line-soft);
-  border-radius: 0 22px 22px 0;
+  border-radius: 0 var(--radius-lg) var(--radius-lg) 0;
   contain: paint;
   position: relative;
   z-index: 1;
@@ -260,9 +277,9 @@
   pointer-events: none;
   z-index: -1;
 }
-/* 导航项：更大的圆角，贴合玻璃面板的 16px 体系 */
+/* 导航项：控件档圆角（比卡片小一档，贴合玻璃面板的层级体系） */
 :root[data-theme="glass2"] .nav-item {
-  border-radius: 14px;
+  border-radius: var(--radius-control);
 }
 :root[data-topbar-color="light"][data-theme="glass2"] .bg-sidebar a,
 :root[data-topbar-color="light"][data-theme="glass2"] .bg-sidebar nav a {
@@ -332,7 +349,7 @@
    颜色全部由 --color-* 变量提供，实色按钮比旧主题的"白遮罩"读起来干净。
    ------------------------------------------------------------ */
 :root[data-theme="glass2"] button.rounded {
-  border-radius: 12px;
+  border-radius: var(--radius-control);
 }
 :root[data-theme="glass2"] button.rounded:not(:disabled) {
   transition:
@@ -467,7 +484,7 @@
   background-color: var(--g2-glass) !important;
   backdrop-filter: blur(var(--g2-blur)) saturate(var(--g2-saturate));
   border: 1px solid var(--g2-line) !important;
-  border-radius: var(--radius-lg);
+  border-radius: var(--radius-card);
   box-shadow: var(--g2-shadow-2), var(--g2-hl);
 }
 :root[data-theme="glass2"] .bg-surface-hover {
@@ -493,7 +510,7 @@
 :root[data-theme="glass2"] .table-scroll-wrapper {
   background-color: var(--g2-glass) !important;
   backdrop-filter: blur(var(--g2-blur)) saturate(var(--g2-saturate));
-  border-radius: var(--radius-lg);
+  border-radius: var(--radius-table);
   /* 收窄布局/绘制/样式影响到容器内部，表格内部重绘不再重采样背后的毛玻璃；
      will-change: transform 让容器常驻合成层（该容器已有 backdrop-filter，无新增副作用） */
   contain: layout paint style;
@@ -503,7 +520,8 @@
 :root[data-theme="glass2"] table {
   border-collapse: separate;
   border-spacing: 0;
-  border-radius: var(--radius-lg);
+  /* 同心：表格贴边填满 .table-scroll-wrapper，圆角与容器一致 */
+  border-radius: var(--radius-table);
   overflow: hidden;
 }
 /* 单元格带 border border-border（四边都有）→ 相邻格会双线。
@@ -689,10 +707,10 @@
 :root[data-theme="glass2"] .search-panel .bg-surface-hover {
   background-color: var(--g2-glass-strong) !important;
 }
-/* 视图切换分段控件：底面与顶栏同一材质，圆角与隔壁按钮一致（12px） */
+/* 视图切换分段控件：底面与顶栏同一材质，圆角与隔壁按钮一致（控件档） */
 :root[data-theme="glass2"] .view-switch {
   backdrop-filter: blur(var(--g2-blur)) saturate(var(--g2-saturate));
-  border-radius: 12px;
+  border-radius: var(--radius-control);
   box-shadow: var(--g2-hl);
 }
 :root[data-topbar-color="light"][data-theme="glass2"] .view-switch {

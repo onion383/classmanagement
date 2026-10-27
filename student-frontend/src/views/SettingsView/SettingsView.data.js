@@ -17,6 +17,7 @@ export function useSettingsData() {
         this.semesterId = cur ? cur.id : null
         this.semesterStart = cur ? (cur.start_date || '') : ''
         this.semesterEnd = cur ? (cur.end_date || '') : ''
+        this.semesterDateErrorText = ''
       } catch (_) { /* 后端未就绪时静默忽略 */ }
     },
     // 选择学期：同时切换为当前学期（课程表、座位补存范围、座位指数结算都按它走）
@@ -26,6 +27,8 @@ export function useSettingsData() {
       this.semesterId = id
       this.semesterStart = target.start_date || ''
       this.semesterEnd = target.end_date || ''
+      // 换学期等于换了一组日期，之前那个学期的未保存改动不再有意义
+      this.semesterDateErrorText = ''
       try {
         await axios.put('/api/schedule/semesters/current', { id })
       } catch (err) {
@@ -75,16 +78,40 @@ export function useSettingsData() {
         this.notifyError(err.response?.data?.error || '修改学期名失败')
       }
     },
-    // 改动即时保存（无需保存按钮）：写入所选学期的起止日期
+    // 学期起止日期：改完点「保存」才写入。
+    // 原来用 @change 即时保存，但那样改一半就会写库 —— 典型场景是先把开始日期往后挪，
+    // 此时结束日期还停在原处，区间瞬间变成「结束 < 开始」，把非法值存进去。
+    // 即时保存还完全静默：成功零反馈、失败只弹 alert，用户无法确认到底存上没有。
     async saveSemesterSettings() {
       if (!this.semesterId) return
+      if (this.busySemesterDate) return
+      // 先校验，不通过就不发请求（后端也拦一道，见 schedule.js 的 validateSemesterRange）
+      const err = this.semesterDateError
+      if (err) {
+        this.semesterDateErrorText = err
+        this.notifyError(err)
+        return
+      }
+      this.semesterDateErrorText = ''
+      this.busySemesterDate = true
       try {
         await axios.put(`/api/schedule/semesters/${this.semesterId}`, {
           start_date: this.semesterStart,
           end_date: this.semesterEnd,
         })
+        // 同步本地列表里的这一条：否则 semesterDatesDirty 仍会认为「有未保存的改动」，
+        // 保存按钮一直可点，用户会以为没存上而反复点。
+        const row = this.semesters.find(s => s.id === this.semesterId)
+        if (row) {
+          row.start_date = this.semesterStart
+          row.end_date = this.semesterEnd
+        }
+        this.notifySuccess('学期起止日期已保存')
       } catch (err) {
-        this.showAlert(err.response?.data?.error || '学期设置保存失败')
+        this.semesterDateErrorText = err.response?.data?.error || '学期设置保存失败'
+        this.notifyError(this.semesterDateErrorText)
+      } finally {
+        this.busySemesterDate = false
       }
     },
     // 删除学期：先弹确认框，确认后调 DELETE；删的是当前学期时后端会自动把剩下的设为当前
@@ -170,6 +197,11 @@ export function useSettingsData() {
       this.usernamePassword = ''
       this.oldPassword = ''
       this.newPassword = ''
+      this.confirmPassword = ''
+      this.pwdError = ''
+      this.busyPwd = false
+      this.usernameError = ''
+      this.busyUsername = false
       this.exportPassword = ''
       this.exportEncrypt = this.dbEncrypted
       this.exportDbPwd = ''
@@ -204,30 +236,55 @@ export function useSettingsData() {
       }
     },
     async changeUsername() {
+      if (this.busyUsername) return
+      this.usernameError = ''
+      const name = String(this.newUsername || '').trim()
+      if (!name) { this.usernameError = '请输入新用户名'; return }
+      if (name === this.user.username) { this.usernameError = '新用户名和当前用户名相同'; return }
+      if (!this.usernamePassword) { this.usernameError = '请输入当前密码'; return }
+      this.busyUsername = true
       try {
         const res = await axios.put('/api/account/username', {
-          newUsername: this.newUsername,
+          newUsername: name,
           password: this.usernamePassword,
         })
         const currentUser = JSON.parse(localStorage.getItem('currentUser'))
-        currentUser.username = this.newUsername
+        currentUser.username = name
         localStorage.setItem('currentUser', JSON.stringify(currentUser))
         this.closeModal()
         this.showAlert(res.data.message)
       } catch (err) {
-        this.showAlert(err.response?.data?.error || '修改失败')
+        // 与修改密码一致：服务端错误就地显示，别用 alert 把输入清空
+        this.usernameError = err.response?.data?.error || '修改失败，请稍后重试'
+      } finally {
+        this.busyUsername = false
       }
     },
     async changePassword() {
+      if (this.busyPwd) return
+      this.pwdError = ''
+      const oldPwd = this.oldPassword
+      const newPwd = this.newPassword
+      // 这几条后端都拦不住（PUT /account/password 原来只校验「新密码非空」），必须前端先挡：
+      // 长度、两次是否一致、是否与原密码相同。少任何一条，用户都可能把密码设成自己都打不出来的东西。
+      if (!newPwd) { this.pwdError = '请输入新密码'; return }
+      if (String(newPwd).length < 6) { this.pwdError = '新密码长度至少 6 位'; return }
+      if (newPwd !== this.confirmPassword) { this.pwdError = '两次输入的新密码不一致'; return }
+      if (oldPwd && newPwd === oldPwd) { this.pwdError = '新密码不能和原密码相同'; return }
+      this.busyPwd = true
       try {
         const res = await axios.put('/api/account/password', {
-          oldPassword: this.oldPassword,
-          newPassword: this.newPassword,
+          oldPassword: oldPwd,
+          newPassword: newPwd,
         })
         this.closeModal()
         this.showAlert(res.data.message)
       } catch (err) {
-        this.showAlert(err.response?.data?.error || '修改失败')
+        // 服务端错误（如「原密码错误」）就地显示在弹窗内：用 alert 会连带清空已输入的三个框，
+        // 用户得从头再填一遍，而这里本来就是最容易再错一次的地方。
+        this.pwdError = err.response?.data?.error || '修改失败，请稍后重试'
+      } finally {
+        this.busyPwd = false
       }
     },
     confirmLogout() {

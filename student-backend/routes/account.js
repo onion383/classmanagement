@@ -281,6 +281,11 @@ router.put('/password', auth(), async (req, res) => {
     if (!newPassword) {
       return res.status(400).json({ error: '请输入新密码' });
     }
+    // 与注册（auth.js）、切换安全等级（account.js 下方）、本机恢复改密保持一致：
+    // 少于 6 位直接拒。原先这条路径漏了这一句，等于从这里可以设一个 1 位密码。
+    if (String(newPassword).length < 6) {
+      return res.status(400).json({ error: '新密码长度至少 6 位' });
+    }
 
     const user = db.prepare('SELECT * FROM users WHERE id = ?').get(req.user.userId);
     if (!user) return res.status(401).json({ error: '账号不存在' });

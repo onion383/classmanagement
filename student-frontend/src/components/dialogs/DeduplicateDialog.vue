@@ -24,6 +24,8 @@
             :fields="localFields"
             :rows="flatRows"
             :hideSelectAll="true"
+            hideEditButton
+            emptyActionText=""
             :sortField="sortField"
             :sortOrder="sortOrder"
             @toggleSort="toggleSort"
@@ -248,7 +250,7 @@ export default {
   color: var(--color-info, #2563eb);
   padding: 5px 12px;
   border: 1px solid var(--color-info, #2563eb);
-  border-radius: 10px;
+  border-radius: var(--radius-control);
   background: transparent;
   cursor: pointer;
   transition: background-color 0.2s, color 0.2s, box-shadow 0.2s;

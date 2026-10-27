@@ -44,9 +44,9 @@
 
       <!-- 工具栏 -->
       <div class="mb-4 flex items-center gap-3 opbar">
-        <button v-preload="loadAddScoreDialog" @click="openAdd" class="bg-primary hover:bg-primary-hover text-text-inverse px-5 py-2 rounded">＋ 添加{{ isGroup ? '小组' : '个人' }}加分</button>
-        <button @click="refresh" class="bg-text-muted hover:bg-text-secondary text-text-inverse px-4 py-2 rounded flex items-center gap-1 btn-refresh"><IconGlyph name="refresh" :size="14" tint="current" /> 刷新</button>
-        <button v-preload="loadExportExcel" @click="openExport" class="bg-warning hover:bg-warning-hover text-text-inverse px-4 py-2 rounded flex items-center gap-1">📥 导出{{ isGroup ? '小组' : '个人' }}加分</button>
+        <button v-preload="loadAddScoreDialog" @click="openAdd" class="bg-primary hover:bg-primary-hover text-text-inverse px-5 py-2 rounded transition-theme">＋ 添加{{ isGroup ? '小组' : '个人' }}加分</button>
+        <button @click="refresh" class="bg-text-muted hover:bg-text-secondary text-text-inverse px-4 py-2 rounded flex items-center gap-1 btn-refresh transition-theme"><IconGlyph name="refresh" :size="14" tint="current" /> 刷新</button>
+        <button v-preload="loadExportExcel" @click="openExport" class="bg-warning hover:bg-warning-hover text-text-inverse px-4 py-2 rounded flex items-center gap-1 transition-theme">📥 导出{{ isGroup ? '小组' : '个人' }}加分</button>
       </div>
 
       <!-- 今日时间轴 -->
@@ -67,8 +67,8 @@
         </template>
         <template #ops="{ node }">
           <div class="flex items-center gap-1.5">
-            <button @click="openEdit(recordByKey(node.key))" class="bg-info hover:bg-blue-700 text-text-inverse px-2.5 py-0.5 rounded text-xs">编辑</button>
-            <button @click="askDelete(recordByKey(node.key))" class="bg-danger hover:bg-red-700 text-text-inverse px-2.5 py-0.5 rounded text-xs">删除</button>
+            <button @click="openEdit(recordByKey(node.key))" class="bg-info hover:bg-blue-700 text-text-inverse px-2.5 py-0.5 rounded text-xs transition-theme">编辑</button>
+            <button @click="askDelete(recordByKey(node.key))" class="bg-danger hover:bg-red-700 text-text-inverse px-2.5 py-0.5 rounded text-xs transition-theme">删除</button>
           </div>
         </template>
       </LeaveTimeline>
@@ -79,10 +79,10 @@
       <!-- 子标题 + 工具栏（统计范围切换右对齐） -->
       <h3 class="text-xl font-semibold text-text mb-4 flex items-center gap-2 min-h-7"><IconGlyph name="chart" :size="20" /> 加分统计</h3>
       <div class="mb-4 flex flex-wrap items-center gap-3 opbar">
-        <button @click="refreshStats" class="bg-text-muted hover:bg-text-secondary text-text-inverse px-4 py-2 rounded flex items-center gap-1.5 btn-refresh">
+        <button @click="refreshStats" class="bg-text-muted hover:bg-text-secondary text-text-inverse px-4 py-2 rounded flex items-center gap-1.5 btn-refresh transition-theme">
           <IconGlyph name="refresh" :size="14" tint="current" /> 刷新
         </button>
-        <button @click="openStatsExport" class="bg-warning hover:bg-warning-hover text-text-inverse px-4 py-2 rounded flex items-center gap-1.5">
+        <button @click="openStatsExport" class="bg-warning hover:bg-warning-hover text-text-inverse px-4 py-2 rounded flex items-center gap-1.5 transition-theme">
           <IconGlyph name="download" :size="14" tint="current" /> 导出 Excel
         </button>
         <AppSelect v-model="statMode" :options="statModeOptions" class="w-32 ml-auto" />
@@ -111,16 +111,17 @@
           :editing-cell="editingCell"
           hide-select-all
           hide-move-buttons
+          hide-add-row
+          :empty-label="isGroup ? '小组加分' : '个人加分'"
+          :empty-action-text="isGroup ? '＋ 添加小组加分' : '＋ 添加个人加分'"
+          @add-new-row-at-bottom="openAdd"
           @start-edit="startEdit"
           @save-cell="saveCell"
           @delete-row="onDeleteRow"
           @swap-rows="onSwapRows"
           @swap-columns="onSwapColumns"
-        >
-          <template #row-actions-extra="{ row }">
-            <button v-if="!row._isNew" @click="openEditRow(row)" class="bg-info hover:bg-blue-700 text-text-inverse px-1.5 py-0.5 rounded mr-1">编辑</button>
-          </template>
-        </DynamicTable>
+          @edit-row="openEditRow"
+        />
       </div>
     </div>
 

@@ -673,7 +673,7 @@ onUnmounted(() => {
   white-space: nowrap;
   background: var(--color-bg, #f9fafb);
   padding: 4px 8px;
-  border-radius: 6px;
+  border-radius: var(--radius-control);
   height: 24px;
   line-height: 16px;
   box-sizing: border-box;
@@ -686,7 +686,7 @@ onUnmounted(() => {
 
 .btn-primary {
   padding: 6px 20px;
-  border-radius: 8px;
+  border-radius: var(--radius-control);
   border: none;
   background: var(--color-primary, #22c55e);
   color: white;
@@ -734,7 +734,7 @@ onUnmounted(() => {
   position: fixed;
   z-index: 100;
   background: var(--color-surface, #fff);
-  border-radius: 12px;
+  border-radius: var(--radius-card);
   box-shadow: 0 4px 24px rgba(0,0,0,0.35);
   border: 1px solid var(--color-border, #e5e7eb);
   user-select: none;
@@ -751,7 +751,7 @@ onUnmounted(() => {
 .tb-drag-bar:active { cursor: grabbing; }
 .tb-drag-dot {
   width: 28px; height: 3px;
-  border-radius: 2px;
+  border-radius: var(--radius-xs);
   background: var(--color-text-muted, #d1d5db);
 }
 
@@ -770,7 +770,7 @@ onUnmounted(() => {
   align-items: center;
   gap: 2px;
   padding: 4px 8px;
-  border-radius: 8px;
+  border-radius: var(--radius-control);
   border: 1px solid transparent;
   background: transparent;
   cursor: pointer;
@@ -789,7 +789,7 @@ onUnmounted(() => {
   position: fixed;
   z-index: 101;
   background: var(--color-surface, #fff);
-  border-radius: 12px;
+  border-radius: var(--radius-card);
   box-shadow: 0 4px 24px rgba(0,0,0,0.35);
   border: 1px solid var(--color-border, #e5e7eb);
   padding: 8px 10px;
@@ -831,7 +831,7 @@ onUnmounted(() => {
   align-items: center;
   gap: 2px;
   padding: 3px 6px;
-  border-radius: 6px;
+  border-radius: var(--radius-control);
   border: 1px solid transparent;
   background: transparent;
   cursor: pointer;

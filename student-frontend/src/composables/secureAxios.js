@@ -47,14 +47,29 @@ export function setupSecureAxios(axios) {
       try {
         res.data = await decryptBody(d.d)
       } catch (e) {
+        // 解密失败 = 这条响应是用「另一个会话」加密的。典型场景：页面并发发多个 GET，
+        // 其中某个请求先撞上 401（会话过期/后端重启）触发重握手，模块级 sessionKey 被换掉，
+        // 其它在途请求的响应就解不开了。
+        // 旧逻辑只对「有请求体」的请求重试，GET 直接拿到 { d } 信封交回调用方——
+        // 桌面组件把信封当课表/值日数据用（settings.sections）→ 渲染崩成白板。
+        // 这里对所有方法统一：清会话、重建信道、原请求重发一次（GET 直接重发，
+        // 有 body 的按新会话重新加密），彻底自愈。
         clearSession()
         const cfg = res.config
-        if (cfg && cfg.__origData && cfg.__retrySecure !== true) {
+        if (cfg && cfg.__retryDecrypt !== true) {
+          cfg.__retryDecrypt = true
+          if (cfg.__origData) {
+            try {
+              cfg.__retrySecure = true
+              cfg.data = await encryptBody(cfg.__origData)
+            } catch (_) {
+              // 重新加密失败：旧会话的密文原样重发必然解不开，按原响应对待、由调用方兜底
+              return res
+            }
+          }
           try {
-            cfg.__retrySecure = true
-            cfg.data = await encryptBody(cfg.__origData)
             return axios(cfg)
-          } catch (_) {}
+          } catch (_) { /* 重发失败：按原响应对待 */ }
         }
       }
     }
@@ -69,6 +84,31 @@ export function setupSecureAxios(axios) {
     // 用「强制携带 token」的凭据把原请求重发一次（body 已是密文，原样复用）。
     const authRequired = err.response && err.response.status === 401
       && String(err.response.headers?.['x-auth-required'] || '') === '1'
+    // 凭据降级：安全模式下握手失败 → applyAuthHeader 退回明文 Bearer，而后端在安全模式下
+    // **不收明文凭据** → 必然 401。这不是「登录过期」，绝不能清 token 把用户踢回登录页；
+    // 应清掉会话重新握手、带 token 重发一次。
+    // 用**独立**的重试标志（__retryDegraded）：不与 auth-required 分支共用 __retryAuth，
+    // 否则「降级 → 重试 → 又撞上 auth-required」时后者会被误跳过，用户直接掉登录页。
+    if (err.response && err.response.status === 401 && cfg && cfg.__credentialDegraded
+      && cfg.__retryDegraded !== true) {
+      cfg.__retryDegraded = true
+      cfg.__forceAuthToken = true
+      clearSession()
+      if (cfg.__origData) {
+        cfg.__retrySecure = true
+        try {
+          cfg.data = await encryptBody(cfg.__origData)
+        } catch (_) {
+          // 重新加密失败：body 若还是明文就原样重发；已是密文则重发必然解不开
+          const d = cfg.data
+          const isCipher = d && typeof d === 'object' && typeof d.session === 'string' && typeof d.d === 'string'
+          if (isCipher) return Promise.reject(err)
+        }
+      }
+      try {
+        return axios(cfg)
+      } catch (_) { /* 重发失败：按原错误返回 */ }
+    }
     if (authRequired && cfg && cfg.__retryAuth !== true) {
       cfg.__retryAuth = true
       cfg.__forceAuthToken = true
@@ -78,12 +118,30 @@ export function setupSecureAxios(axios) {
         return axios(cfg)
       } catch (_) { /* 重发失败：按原错误返回 */ }
     }
+    // 会话过期：后端 15 分钟 TTL 清掉了信道会话、或后端重启 → 回 401 且 body 为 { d:'session-expired' }。
+    // **任何方法都要清会话重试一次**：旧实现要求请求带 body（cfg.__origData），于是 GET 请求
+    // （首屏绝大多数请求都是 GET）撞上过期时既不重试也不重建会话，前端会一直用已失效的
+    // 会话密钥发请求 → 全站持续 401，且会话永远回不来。
+    // 同样用**独立**标志（__retrySession）：不与 __retrySecure 共用，否则前面某个分支
+    // 置过 __retrySecure 时，这里就会被跳过（而这恰恰是最需要重建会话的场景）。
     if (err.response && err.response.status === 401 && sd && typeof sd === 'object'
-      && sd.d === 'session-expired' && cfg && cfg.__origData && cfg.__retrySecure !== true) {
+      && sd.d === 'session-expired' && cfg && cfg.__retrySession !== true) {
+      cfg.__retrySession = true
       cfg.__retrySecure = true
       clearSession()
+      if (cfg.__origData) {
+        try {
+          // 带 body 的要按**新会话**重新加密（旧密文绑定的是旧会话密钥）
+          cfg.data = await encryptBody(cfg.__origData)
+        } catch (_) {
+          // 重新握手失败（如后端暂时不可用）：body 若还是明文就原样重发（后端安全模式也收明文体）；
+          // 已是旧会话的密文则重发必然解不开 —— 此时不重发，按原错误返回
+          const d = cfg.data
+          const isCipher = d && typeof d === 'object' && typeof d.session === 'string' && typeof d.d === 'string'
+          if (isCipher) return Promise.reject(err)
+        }
+      }
       try {
-        cfg.data = await encryptBody(cfg.__origData)
         return axios(cfg)
       } catch (_) { /* 重新握手仍失败：按原错误返回，由调用方兜底 */ }
     }

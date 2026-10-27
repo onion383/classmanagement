@@ -39,10 +39,14 @@
                 candidateLabelField="姓名"
                 candidatePlaceholder="输入姓名"
                 :minTableHeight="200"
+                :emptyReady="activeLoaded"
+                :loadError="activeError"
+                errorText="座位表加载失败"
                 @cell-dblclick="onActiveCellDblClick"
                 @update:cells="onActiveCellsUpdate"
                 @swapRows="onActiveSwapRows"
                 @swapColumns="onActiveSwapColumns"
+                @retry="refreshActive"
               />
               <ExportExcel v-if="activeExportMounted" :is-visible="activeExportVisible" :rows="activeExportRows" :fields="activeExportFields" defaultFilename="当前座位表" @update:is-visible="activeExportVisible = $event" />
             </template>
@@ -62,10 +66,14 @@
                 candidateLabelField="姓名"
                 candidatePlaceholder="输入姓名"
                 :minTableHeight="200"
+                :emptyReady="masterLoaded"
+                :loadError="masterError"
+                errorText="座位模板加载失败"
                 @cell-dblclick="onMasterCellDblClick"
                 @update:cells="onMasterCellsUpdate"
                 @swapRows="onMasterSwapRows"
                 @swapColumns="onMasterSwapColumns"
+                @retry="refreshMaster"
               />
               <ExportExcel v-if="masterExportMounted" :is-visible="masterExportVisible" :rows="masterExportRows" :fields="masterExportFields" defaultFilename="座位模板" @update:is-visible="masterExportVisible = $event" />
             </template>
@@ -91,9 +99,13 @@
               :showRowNumber="true"
               :minTableHeight="200"
               candidatePlaceholder="输入权重"
+              :emptyReady="weightLoaded"
+              :loadError="weightError"
+              errorText="权重表加载失败"
               @update:cells="onWeightCellsUpdate"
               @swapRows="onWeightSwapRows"
               @swapColumns="onWeightSwapColumns"
+              @retry="refreshWeight"
             />
             <ExportExcel v-if="weightExportMounted" :is-visible="weightExportVisible" :rows="weightExportRows" :fields="weightExportFields" defaultFilename="座位位置权重表" @update:is-visible="weightExportVisible = $event" />
           </section>
@@ -389,6 +401,7 @@ const masterGrid = useSeatGrid(`${API_BASE}/seats/master`, {
 
 // 保持模板兼容的别名
 const activeLoaded = activeGrid.loaded
+const activeError = activeGrid.loadError
 const activeRows = activeGrid.rows
 const activeCols = activeGrid.cols
 const activeSeats = activeGrid.seats
@@ -402,6 +415,7 @@ const activeExportFields = activeGrid.exportFields
 const activeExportRows = activeGrid.exportRows
 
 const masterLoaded = masterGrid.loaded
+const masterError = masterGrid.loadError
 const masterRows = masterGrid.rows
 const masterCols = masterGrid.cols
 const masterSeats = masterGrid.seats
@@ -619,6 +633,7 @@ async function doApplyActiveToMaster() {
 const WEIGHT_MIN = 0
 const WEIGHT_MAX = 1
 const weightLoaded = ref(false)
+const weightError = ref(false)
 const weightWeights = ref([]) // rows×cols 数字矩阵，null 表示空
 // 行对象复用缓存：编辑一格权重时只重建真正变化的那一行，避免整表重画
 const reuseWeightRows = createRowReuseCache()
@@ -671,7 +686,8 @@ async function loadWeight() {
     const res = await axios.get(`${API_BASE}/seats/weight`)
     weightWeights.value = res.data.weights || []
     weightLoaded.value = true
-  } catch (e) { console.error(e) }
+    weightError.value = false
+  } catch (e) { console.error(e); weightError.value = true }
 }
 
 // 刷新权重表：重新从后端拉取权重矩阵（与其他两张表的「刷新」一致）

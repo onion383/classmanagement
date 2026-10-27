@@ -31,13 +31,32 @@
   --shadow-lg: 0 8px 28px rgba(15, 23, 42, 0.1);
   --shadow-card: 0 2px 10px rgba(15, 23, 42, 0.05);
 
-  /* 圆角 */
+  /* 圆角：尺寸档（严格单调递增，勿倒挂）。
+     各档数值刻意对齐本主题改动前的既有观感：
+       md 10px  → 按钮/输入框（原硬编码 12px 的控件档，见 --radius-control）
+       lg 14px  → 侧边栏链接项
+       xl 20px  → .bg-surface 卡片与弹窗（原硬编码 20px）
+       2xl 24px → 侧边栏右缘（原硬编码 18px，略放大以匹配整体节奏）
+     档位间距 4~6px 递进，保证「相邻档差一档 = 圆角递增」可预期。 */
+  --radius-xs: 4px;
   --radius-sm: 6px;
-  --radius-md: 10px;
+  --radius-md: 12px;
   --radius-lg: 14px;
-  --radius-card: 12px;
-  /* 卡片 / 弹窗（.bg-surface）实际渲染的圆角（见下方 .bg-surface 规则），供抽屉等复用保持同圆角 */
-  --radius-surface: 20px;
+  --radius-xl: 20px;
+  --radius-2xl: 24px;
+  --radius-3xl: 28px;
+  --radius-full: 9999px;
+  --radius: var(--radius-control);
+
+  /* 角色别名 → 尺寸档（覆盖 theme-base.css 的默认映射）。
+     control 12px：按钮/输入框/下拉（原硬编码 12px，视觉不变）
+     card   20px：.bg-surface 卡片与弹窗（原硬编码 20px，视觉不变）
+     table  16px：表格容器（原硬编码 16px，视觉不变）
+     surface 20px：抽屉/悬浮面板，与卡片同档（贴边嵌套时圆心才对齐） */
+  --radius-control: var(--radius-md);
+  --radius-card: var(--radius-xl);
+  --radius-surface: var(--radius-xl);
+  --radius-table: 16px;
 }
 
 /* 全局背景（仅毛玻璃：win11 为透明背景，见 theme-win11.css） */
@@ -180,7 +199,7 @@
 :root:is([data-theme="glass"], [data-theme="win11"]) .bg-sidebar {
   backdrop-filter: blur(24px) saturate(1.4);
   border-right: 1px solid rgba(15, 23, 42, 0.08);
-  border-radius: 0 18px 18px 0; /* 旧版右侧圆角 */
+  border-radius: 0 var(--radius-2xl) var(--radius-2xl) 0; /* 旧版右侧圆角 */
   contain: paint;
   position: relative;
   z-index: 1;
@@ -204,7 +223,7 @@
   color: #f1f5f9 !important;
   /* 右侧 1px 浅色 border 与 box-shadow 内侧 -1px 白线会在深蓝半透明底上透出浅蓝细线，统一改透明（勿误删） */
   border-right-color: transparent !important;
-  border-radius: 0 18px 18px 0;
+  border-radius: 0 var(--radius-2xl) var(--radius-2xl) 0;
   /* 同样的预防处理：去掉右向 4px 0 32px 的暗带投影（它会压在网格表格左列背后，
      被表格 backdrop-filter 二次采样成那条"越往右越深"的渐变线），保留顶部内侧高光。 */
   box-shadow: inset 0 1px 0 var(--alpha-white-12);
@@ -250,7 +269,7 @@
 :root:is([data-theme="glass"], [data-theme="win11"]) .bg-sidebar a,
 :root:is([data-theme="glass"], [data-theme="win11"]) .bg-sidebar nav a,
 :root:is([data-theme="glass"], [data-theme="win11"]) .bg-sidebar .rounded {
-  border-radius: 14px !important;
+  border-radius: var(--radius-lg) !important;
 }
 /* 白色调：未选中项默认深灰文字，hover 加一层深色玻璃悬浮；active 用蓝色系 */
 :root[data-topbar-color="light"]:is([data-theme="glass"], [data-theme="win11"]) .bg-sidebar a,
@@ -335,7 +354,7 @@
 :root:is([data-theme="glass"], [data-theme="win11"]) button {
   border-width: 1px;
   border-style: solid;
-  border-radius: 12px;
+  border-radius: var(--radius-control);
   transition: background-color 0.2s, box-shadow 0.2s, color 0.2s, transform 0.15s;
   position: relative;
   box-shadow:
@@ -378,13 +397,13 @@
     0 0 12px rgba(34, 197, 94, 0.15),
     inset 0 1px 0 var(--alpha-white-20);
 }
+/* 悬浮：只改文字色，且这几条是给 .tab-active 之外的老路径兜底的 ——
+   真正的悬浮视觉统一在下方 `:not(.tab-active):hover` 那组里（它优先级更高，会覆盖 box-shadow）。
+   这里不再写光晕，避免以后有人改这里却看不到效果。 */
 :root:is([data-theme="glass"], [data-theme="win11"]) button.bg-primary.text-text-inverse:hover,
 :root:is([data-theme="glass"], [data-theme="win11"]) button.bg-success.text-text-inverse:hover {
-  background: rgba(34, 197, 94, 0.44) !important;
-  box-shadow:
-    0 0 0 1px var(--alpha-white-25),
-    0 0 20px rgba(34, 197, 94, 0.25),
-    inset 0 1px 0 var(--alpha-white-30);
+  color: #0f4a24 !important;
+  background: rgba(34, 197, 94, 0.36) !important;
 }
 :root:is([data-theme="glass"], [data-theme="win11"]) button.bg-warning.text-text-inverse {
   background: rgba(245, 158, 11, 0.36) !important;
@@ -396,11 +415,8 @@
     inset 0 1px 0 var(--alpha-white-20);
 }
 :root:is([data-theme="glass"], [data-theme="win11"]) button.bg-warning.text-text-inverse:hover {
-  background: rgba(245, 158, 11, 0.44) !important;
-  box-shadow:
-    0 0 0 1px var(--alpha-white-25),
-    0 0 20px rgba(245, 158, 11, 0.25),
-    inset 0 1px 0 var(--alpha-white-30);
+  color: #78350f !important;
+  background: rgba(245, 158, 11, 0.36) !important;
 }
 :root:is([data-theme="glass"], [data-theme="win11"]) button.bg-danger.text-text-inverse {
   background: rgba(239, 68, 68, 0.36) !important;
@@ -412,11 +428,8 @@
     inset 0 1px 0 var(--alpha-white-20);
 }
 :root:is([data-theme="glass"], [data-theme="win11"]) button.bg-danger.text-text-inverse:hover {
-  background: rgba(239, 68, 68, 0.44) !important;
-  box-shadow:
-    0 0 0 1px var(--alpha-white-25),
-    0 0 20px rgba(239, 68, 68, 0.25),
-    inset 0 1px 0 var(--alpha-white-30);
+  color: #7f1d1d !important;
+  background: rgba(239, 68, 68, 0.36) !important;
 }
 :root:is([data-theme="glass"], [data-theme="win11"]) button.bg-info.text-text-inverse {
   background: rgba(59, 130, 246, 0.36) !important;
@@ -428,11 +441,8 @@
     inset 0 1px 0 var(--alpha-white-20);
 }
 :root:is([data-theme="glass"], [data-theme="win11"]) button.bg-info.text-text-inverse:hover {
-  background: rgba(59, 130, 246, 0.44) !important;
-  box-shadow:
-    0 0 0 1px var(--alpha-white-25),
-    0 0 20px rgba(59, 130, 246, 0.25),
-    inset 0 1px 0 var(--alpha-white-30);
+  color: #1e3a8a !important;
+  background: rgba(59, 130, 246, 0.36) !important;
 }
 /* ========== 切换栏 Tabs 选中态：仅把字改成白色，玻璃背景保持不变 ========== */
 :root:is([data-theme="glass"], [data-theme="win11"]) button.tab-active.bg-info.text-text-inverse,
@@ -453,15 +463,14 @@
   backdrop-filter: blur(12px) saturate(1.3);
   color: #9a3412 !important;
   border: none;
-  box-shadow:
-    inset 0 0 0 40px var(--alpha-white-50),
-    0 0 14px rgba(251, 146, 60, 0.18) !important;
+  /* 去掉原本那圈橙色外发光：悬浮态不发光，静止态也一并去掉，
+     否则鼠标上去光晕消失，按钮反而是"变平"而不是"点亮" */
+  box-shadow: inset 0 0 0 40px var(--alpha-white-50) !important;
 }
 :root:is([data-theme="glass"], [data-theme="win11"]) button.btn-refresh:hover {
   color: #7c2d12 !important;
-  box-shadow:
-    inset 0 0 0 40px var(--alpha-white-56),
-    0 0 20px rgba(251, 146, 60, 0.3) !important;
+  /* 与其它彩色按钮一致：只加深文字，不做外发光 */
+  box-shadow: inset 0 0 0 40px var(--alpha-white-56) !important;
 }
 
 /* ========== 操作栏按钮：叠加微弱白色遮罩提升可读性（仅操作栏，不作用到弹窗等其它按钮）
@@ -473,10 +482,10 @@
     inset 0 0 0 40px var(--alpha-white-50),
     0 0 14px var(--alpha-white-12) !important;
 }
+/* 操作栏按钮悬浮：与彩色按钮一致 —— 只加深内遮罩，不做外发光 */
 :root:is([data-theme="glass"], [data-theme="win11"]) .opbar button:hover:not(.view-switch-btn) {
   box-shadow:
-    inset 0 0 0 40px var(--alpha-white-56),
-    0 0 18px var(--alpha-white-18) !important;
+    inset 0 0 0 40px var(--alpha-white-56) !important;
 }
 /* ========== 所有彩色玻璃按钮统一新风格（去边框 + 模糊 + 白遮罩；排除切换栏选中态） ========== */
 :root:is([data-theme="glass"], [data-theme="win11"]) button.bg-primary.text-text-inverse:not(.tab-active),
@@ -490,14 +499,26 @@
     inset 0 0 0 40px var(--alpha-white-50),
     0 0 14px var(--alpha-white-12) !important;
 }
+/* 悬浮：**只让文字加深一档**，不做外发光、不动底色。
+   遮罩显式写回静止值（white-50）是为了盖掉前面规则里遗留的彩色光晕 —— 那圈光晕在浅色玻璃上
+   既看不见（白色时）又显得廉价（彩色时），索性整条去掉。
+   想更强的话，优先级：文字再深一档 > 加 1px 同色描边 > 最后才考虑光晕。 */
 :root:is([data-theme="glass"], [data-theme="win11"]) button.bg-primary.text-text-inverse:not(.tab-active):hover,
-:root:is([data-theme="glass"], [data-theme="win11"]) button.bg-success.text-text-inverse:not(.tab-active):hover,
-:root:is([data-theme="glass"], [data-theme="win11"]) button.bg-warning.text-text-inverse:not(.tab-active):hover,
-:root:is([data-theme="glass"], [data-theme="win11"]) button.bg-danger.text-text-inverse:not(.tab-active):hover,
+:root:is([data-theme="glass"], [data-theme="win11"]) button.bg-success.text-text-inverse:not(.tab-active):hover {
+  color: #0f4a24 !important;
+  box-shadow: inset 0 0 0 40px var(--alpha-white-50) !important;
+}
+:root:is([data-theme="glass"], [data-theme="win11"]) button.bg-warning.text-text-inverse:not(.tab-active):hover {
+  color: #78350f !important;
+  box-shadow: inset 0 0 0 40px var(--alpha-white-50) !important;
+}
+:root:is([data-theme="glass"], [data-theme="win11"]) button.bg-danger.text-text-inverse:not(.tab-active):hover {
+  color: #7f1d1d !important;
+  box-shadow: inset 0 0 0 40px var(--alpha-white-50) !important;
+}
 :root:is([data-theme="glass"], [data-theme="win11"]) button.bg-info.text-text-inverse:not(.tab-active):hover {
-  box-shadow:
-    inset 0 0 0 40px var(--alpha-white-56),
-    0 0 18px var(--alpha-white-18) !important;
+  color: #1e3a8a !important;
+  box-shadow: inset 0 0 0 40px var(--alpha-white-50) !important;
 }
 
 /* ========== 视图切换（分段控件）：滑块与两个标签不套用上面的「荧光边框」按钮皮肤 ==========
@@ -513,9 +534,9 @@
 :root:is([data-theme="glass"], [data-theme="win11"]) .view-switch button::before {
   display: none;
 }
-/* 轨道圆角与同排「添加职务」等按钮一致（glass 按钮皮肤为 12px） */
+/* 轨道圆角与同排「添加职务」等按钮一致（走 --radius-control，随主题变化） */
 :root:is([data-theme="glass"], [data-theme="win11"]) .view-switch {
-  border-radius: 12px;
+  border-radius: var(--radius-control);
 }
 
 :root:is([data-theme="glass"], [data-theme="win11"]) button:disabled {
@@ -543,7 +564,7 @@
 :root:is([data-theme="glass"], [data-theme="win11"]) select {
   background-color: rgba(255, 255, 255, var(--glass-opacity, 0.4)) !important;
   border: 1px solid var(--alpha-black-12) !important;
-  border-radius: 12px;
+  border-radius: var(--radius-control);
   backdrop-filter: blur(10px) saturate(1.1);
   transition: border-color 0.2s, box-shadow 0.2s, background-color 0.2s;
 }
@@ -584,9 +605,9 @@
   color: var(--color-text, #111827);
 }
 
-/* ========== 登录页角色下拉框：圆角与账号/密码输入框统一（12px） ========== */
+/* ========== 登录页角色下拉框：圆角与账号/密码输入框统一（走 --radius-control） ========== */
 :root:is([data-theme="glass"], [data-theme="win11"]) .login-bg select {
-  border-radius: 12px;
+  border-radius: var(--radius-control);
 }
 
 /* ========== 登录页账号/密码输入框：毛玻璃适配（半透明磨砂，与卡片一致） ========== */
@@ -631,7 +652,7 @@
   backdrop-filter: blur(20px) saturate(1.1);
   /* 四周 1px 发光白边：与侧边栏的白线同强度（0.35），去掉原来叠加的外圈 0 0 0 1px 阴影，避免出现双重边 */
   border: 1px solid var(--alpha-white-35);
-  border-radius: 20px;
+  border-radius: var(--radius-card);
   position: relative;
   /* contain: paint 限制绘制边界，告诉浏览器子元素不超出父容器绘制，
      减少 backdrop-filter 无效区域的 GPU 合成计算，且不影响外观 */
@@ -712,7 +733,7 @@
 
 /* ========== 毛玻璃表格 ========== */
 :root:is([data-theme="glass"], [data-theme="win11"]) .table-scroll-wrapper {
-  border-radius: 16px;
+  border-radius: var(--radius-table);
   background-color: rgba(255, 255, 255, calc(var(--glass-opacity, 0.4) + 0.02)) !important;
   backdrop-filter: blur(16px);
   /* contain: layout paint style —— 把布局/绘制/样式影响收窄到容器内部：
@@ -736,7 +757,9 @@
   content: '';
   position: absolute;
   inset: 0;
-  border-radius: 15px;
+  /* 同心：描边层内缩 1px（padding:1px），圆角须同步减去 1px，
+     否则描边弧与容器弧错开 1px，在圆角处看到双线。 */
+  border-radius: calc(var(--radius-table) - 1px);
   padding: 1px;
   background: linear-gradient(
     180deg,
@@ -759,7 +782,8 @@
   content: '';
   position: absolute;
   inset: 0;
-  border-radius: 15px;
+  /* 同心：同白天版，内缩 1px 的描边层圆角同步减去 1px */
+  border-radius: calc(var(--radius-table) - 1px);
   border: 1px solid rgba(15, 23, 42, 0.18);
   pointer-events: none;
   z-index: 7;
@@ -779,7 +803,8 @@
 :root:is([data-theme="glass"], [data-theme="win11"]) table {
   border-collapse: separate;
   border-spacing: 0;
-  border-radius: 16px;
+  /* 同心：表格贴边填满 .table-scroll-wrapper，圆角与容器一致 */
+  border-radius: var(--radius-table);
   overflow: hidden;
 }
 /* 滚动容器内的表格例外：overflow 非 visible 会让 <table> 自己变成一个滚动容器，
@@ -869,7 +894,7 @@
 /* ========== 网状表格（GridView）毛玻璃 ========== */
 :root:is([data-theme="glass"], [data-theme="win11"]) .grid-view-container {
   position: relative;
-  border-radius: 16px;
+  border-radius: var(--radius-table);
   background-color: var(--alpha-white-30) !important;
   /* 单层整表模糊：原来每个 th/td 各有一层 blur(12px)，一张 8×10 的表就是 80 层，
      页面滚动时逐帧重采样导致掉帧。这里收敛成容器这 1 层，半径提到 30px 补厚度。 */
@@ -924,7 +949,8 @@
 :root:is([data-theme="glass"], [data-theme="win11"]) .grid-view-container table {
   border-collapse: separate;
   border-spacing: 0;
-  border-radius: 16px;
+  /* 同心：网格表贴边填满 .grid-view-container，圆角与容器一致 */
+  border-radius: var(--radius-table);
   overflow: hidden;
 }
 :root:is([data-theme="glass"], [data-theme="win11"]) .grid-view-container table th {
@@ -1089,7 +1115,7 @@
   background-color: var(--alpha-white-50) !important;
   backdrop-filter: blur(16px);
   border: none !important;
-  border-radius: 16px !important;
+  border-radius: var(--radius-table) !important;
   box-shadow:
     0 0 0 1px var(--alpha-white-12),
     0 0 16px var(--alpha-white-04),
@@ -1208,7 +1234,7 @@
   background-color: var(--alpha-white-95) !important;
   backdrop-filter: blur(14px) saturate(1.1);
   border: 1px solid rgba(59, 130, 246, 0.4) !important;
-  border-radius: 10px !important;
+  border-radius: var(--radius-control) !important;
   box-shadow:
     0 0 0 1px var(--alpha-white-40),
     0 8px 28px rgba(15, 23, 42, 0.18);
@@ -1238,7 +1264,7 @@
   background-color: var(--alpha-white-95) !important;
   backdrop-filter: blur(14px) saturate(1.1);
   border: 1px solid rgba(59, 130, 246, 0.4) !important;
-  border-radius: 10px !important;
+  border-radius: var(--radius-control) !important;
   box-shadow:
     0 0 0 1px var(--alpha-white-40),
     0 8px 28px rgba(15, 23, 42, 0.18);
@@ -1269,7 +1295,7 @@
   background-color: rgba(255, 255, 255, calc(var(--glass-opacity, 0.4) - 0.02)) !important;
   backdrop-filter: blur(16px) saturate(1.1);
   border: 1px solid rgba(15, 23, 42, 0.08);
-  border-radius: 10px;
+  border-radius: var(--radius-control);
   box-shadow:
     0 1px 6px rgba(15, 23, 42, 0.05),
     inset 0 1px 0 var(--alpha-white-35);

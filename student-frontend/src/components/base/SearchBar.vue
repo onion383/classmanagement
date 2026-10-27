@@ -25,7 +25,7 @@
             placeholder="输入关键字..."
             class="w-48 border border-border rounded px-2 py-1 text-sm focus:outline-none focus:border-info"
           />
-          <button @click="$emit('close')" class="bg-surface-hover border border-border px-2 py-1 text-sm rounded cursor-pointer hover:bg-border text-text">取消</button>
+          <button @click="$emit('close')" class="bg-surface-hover border border-border px-2 py-1 text-sm rounded cursor-pointer hover:bg-border text-text transition-theme">取消</button>
         </div>
       </transition>
     </div>

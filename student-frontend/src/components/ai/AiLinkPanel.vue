@@ -103,10 +103,10 @@ export default {
   /* 极淡暖黄调，与左侧抽屉一致 */
   background-image: linear-gradient(rgba(255, 205, 130, 0.01), rgba(255, 205, 130, 0.01));
 }
-/* 抽屉内圆角统一为主题卡片圆角，压掉毛玻璃主题给 button 硬编码的 12px 皮肤与 .dlg-close 的 --radius-md */
+/* 抽屉内圆角统一为主题表面圆角，压掉毛玻璃主题给 button 的皮肤与 .dlg-close 的默认档。 */
 .link-panel,
 .link-panel button {
-  border-radius: var(--radius-surface, var(--radius-card, 12px)) !important;
+  border-radius: var(--radius-surface) !important;
 }
 /* 内嵌网页是矩形，只让外层面板裁角 */
 .link-host { overflow: hidden; }

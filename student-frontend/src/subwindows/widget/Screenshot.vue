@@ -179,7 +179,7 @@ onUnmounted(() => {
   white-space: nowrap;
   background: var(--color-bg, #f9fafb);
   padding: 4px 8px;
-  border-radius: 6px;
+  border-radius: var(--radius-control);
   height: 24px;
   line-height: 16px;
   box-sizing: border-box;
@@ -192,7 +192,7 @@ onUnmounted(() => {
 
 .btn-primary {
   padding: 6px 20px;
-  border-radius: 8px;
+  border-radius: var(--radius-control);
   border: none;
   background: var(--color-primary, #22c55e);
   color: white;

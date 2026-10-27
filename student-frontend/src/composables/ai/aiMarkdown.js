@@ -34,21 +34,56 @@ export function parseRecordSpec(raw) {
     return null
   }
 }
+// 饼图最多保留的扇区数，与后端 show_chart 的聚合规则保持一致
+const PIE_MAX_SLICES = 6
+
+// 饼图 Top N：按数值从大到小取前 5 项，其余合并成「其他」；已有「其他」也并入这个桶。
+// 后端已经聚合过，这里再兜一层，保证历史消息或模型手写的数据块也不会画出 12 个小扇区。
+function aggregatePie(labels, values) {
+  if (labels.length <= PIE_MAX_SLICES) return { labels, values }
+  const named = []
+  let rest = 0
+  labels.forEach((label, i) => {
+    const v = Math.max(0, values[i])
+    if (label === '其他') rest += v
+    else named.push({ label, value: v })
+  })
+  named.sort((a, b) => b.value - a.value)
+  const head = named.slice(0, PIE_MAX_SLICES - 1)
+  rest += named.slice(PIE_MAX_SLICES - 1).reduce((sum, p) => sum + p.value, 0)
+  const out = {
+    labels: head.map((p) => p.label),
+    values: head.map((p) => p.value),
+  }
+  if (rest > 0) {
+    out.labels.push('其他')
+    out.values.push(rest)
+  }
+  return out
+}
+
 // 回复里的 ```chart 代码块：AI 只给「类型 + 标签 + 数值」，由 AiChart 组件绘制
 export function parseChartSpec(raw) {
   try {
     const spec = JSON.parse(raw.trim())
-    const type = ['bar', 'pie', 'line'].includes(spec?.type) ? spec.type : 'bar'
+    const type = ['bar', 'barh', 'pie', 'line'].includes(spec?.type) ? spec.type : 'bar'
     const labels = Array.isArray(spec?.labels) ? spec.labels.map((x) => String(x == null ? '' : x)) : []
     const values = Array.isArray(spec?.values) ? spec.values.map(Number) : []
-    const n = Math.min(labels.length, values.length)
+    const n = Math.min(labels.length, values.length, 12)
     if (!n) return null
+    let outLabels = labels.slice(0, n)
+    let outValues = values.slice(0, n).map((v) => (Number.isFinite(v) ? v : 0))
+    if (type === 'pie') {
+      const pie = aggregatePie(outLabels, outValues)
+      outLabels = pie.labels
+      outValues = pie.values
+    }
     return {
       type,
       title: String(spec?.title || ''),
       unit: String(spec?.unit || ''),
-      labels: labels.slice(0, n),
-      values: values.slice(0, n).map((v) => (Number.isFinite(v) ? v : 0)),
+      labels: outLabels,
+      values: outValues,
     }
   } catch (_) {
     return null

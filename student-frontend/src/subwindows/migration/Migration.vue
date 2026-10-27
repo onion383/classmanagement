@@ -336,7 +336,7 @@ export default {
   color: var(--color-text-secondary);
   background: var(--color-surface-hover);
   border: 1px solid var(--color-border);
-  border-radius: 6px;
+  border-radius: var(--radius-control);
   word-break: break-all;
 }
 .mig-reason {
@@ -363,7 +363,7 @@ export default {
 .mig-btn {
   padding: 8px 18px;
   border: none;
-  border-radius: 8px;
+  border-radius: var(--radius-control);
   font-size: 14px;
   font-weight: 500;
   color: var(--color-text-inverse);

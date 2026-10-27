@@ -341,7 +341,7 @@
   display: inline-block;
   width: 9px;
   height: 9px;
-  border-radius: 2px;
+  border-radius: var(--radius-xs);
   background: currentColor;
   flex-shrink: 0;
 }
@@ -350,7 +350,7 @@
    （底色 / 模糊 / 边框 / 顶部高光都跟主题走，不再额外叠 30% 白，避免和外层聊天卡片不是一套颜色），
    只把圆角和阴影收成输入框的尺度。 */
 .bg-surface.composer-glass {
-  border-radius: var(--radius-md, 10px) !important;
+  border-radius: var(--radius-control) !important;
   box-shadow: none !important;
 }
 
@@ -360,7 +360,7 @@
 .comp-send {
   border: none !important;
   box-shadow: none !important;
-  border-radius: var(--radius-md, 10px) !important;
+  border-radius: var(--radius-control) !important;
 }
 .comp-perm::before,
 .comp-send::before {
@@ -429,7 +429,7 @@
   gap: 2px;
   max-width: 100%;
   padding: 2px 4px 2px 8px;
-  border-radius: 8px;
+  border-radius: var(--radius-control);
   border: 1px solid var(--color-border);
   background: color-mix(in srgb, var(--color-primary) 12%, transparent);
   color: var(--color-primary);
@@ -439,7 +439,7 @@
 .skill-chip-x {
   cursor: pointer;
   padding: 1px 3px;
-  border-radius: 5px;
+  border-radius: var(--radius-xs);
   font-size: 10px;
   line-height: 1;
   opacity: 0.65;

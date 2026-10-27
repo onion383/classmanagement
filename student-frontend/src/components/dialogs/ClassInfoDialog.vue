@@ -28,7 +28,7 @@
 
       <div class="flex justify-end gap-2">
         <button type="button" @click="$emit('cancel')" class="px-4 py-2 rounded-lg glass-cancel">取消</button>
-        <button type="button" @click="submit" class="px-4 py-2 rounded-lg bg-primary text-text-inverse hover:bg-primary-hover">保存</button>
+        <button type="button" @click="submit" class="px-4 py-2 rounded-lg bg-primary text-text-inverse hover:bg-primary-hover transition-theme">保存</button>
       </div>
     </div>
   </DialogShell>

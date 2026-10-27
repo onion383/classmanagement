@@ -440,7 +440,7 @@ watch(
 
 .panel {
   background: var(--color-surface, #ffffff);
-  border-radius: 16px;
+  border-radius: var(--radius-surface);
   padding: 16px;
   box-shadow: 0 4px 18px rgba(0, 0, 0, 0.18);
   border: 1px solid var(--color-border, #e5e7eb);
@@ -531,7 +531,7 @@ watch(
   color: var(--color-danger, #ef4444);
   background: color-mix(in srgb, var(--color-danger, #ef4444) 8%, transparent);
   border: 1px solid color-mix(in srgb, var(--color-danger, #ef4444) 22%, transparent);
-  border-radius: 10px;
+  border-radius: var(--radius-control);
   cursor: pointer;
   transition: background 0.15s ease, border-color 0.15s ease, color 0.15s ease;
 }
@@ -582,7 +582,7 @@ watch(
   backdrop-filter: var(--sidebar-glass-blur, blur(24px) saturate(1.4));
   -webkit-backdrop-filter: var(--sidebar-glass-blur, blur(24px) saturate(1.4));
   border: 1px solid var(--color-border, #e5e7eb);
-  border-radius: 10px;
+  border-radius: var(--radius-control);
   box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.35);
 }
 
@@ -604,7 +604,7 @@ watch(
   backdrop-filter: var(--sidebar-glass-blur, blur(24px) saturate(1.4));
   -webkit-backdrop-filter: var(--sidebar-glass-blur, blur(24px) saturate(1.4));
   border: 1px solid var(--color-border, #e5e7eb);
-  border-radius: 10px;
+  border-radius: var(--radius-control);
   box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.35);
   transition: background 0.15s ease, color 0.15s ease, border-color 0.15s ease;
 }
@@ -631,7 +631,7 @@ watch(
   justify-content: center;
   gap: 6px;
   padding: 14px 8px;
-  border-radius: 12px;
+  border-radius: var(--radius-card);
   border: 1px solid var(--color-border, #e5e7eb);
   background: var(--color-bg, #f9fafb);
   cursor: pointer;
@@ -670,7 +670,7 @@ watch(
 .drag-indicator {
   width: 36px;
   height: 4px;
-  border-radius: 2px;
+  border-radius: var(--radius-xs);
   background: var(--color-text-muted, #d1d5db);
 }
 
@@ -717,7 +717,7 @@ watch(
 
 .btn-back {
   padding: 6px 16px;
-  border-radius: 8px;
+  border-radius: var(--radius-control);
   border: 1px solid var(--color-border, #e5e7eb);
   background: var(--color-bg, #f9fafb);
   color: var(--color-text, #111827);
@@ -861,7 +861,7 @@ watch(
 /* 一键截屏 / 注释加载保存页的内层玻璃块是整块铺满的方形，自身没有圆角，
    与面板的圆角不匹配（看着像直角块被裁在里面）。这里补上圆角。 */
 :root:is([data-theme="glass"], [data-theme="win11"], [data-theme="glass2"]) .tool-panel .screenshot {
-  border-radius: 12px;
+  border-radius: var(--radius-card);
 }
 /* 悬停：改为半透明白，替代原来的不透明底色 */
 :root:is([data-theme="glass"], [data-theme="win11"], [data-theme="glass2"]) .tool-panel :is(.arrow, .tb-btn, .tb-btn-sub):hover {

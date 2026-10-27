@@ -13,6 +13,7 @@
           </div>
 
           <!-- 主题卡片：点卡片立即生效（无需保存），与引导页「主题选择」一致 -->
+          <!-- 列表来自 store 的 allThemes，已剔除被暂时屏蔽的主题（见 stores/theme.js 的 HIDDEN_THEME_IDS） -->
           <div class="theme-grid">
             <button
               v-for="t in themeStore.allThemes"
@@ -31,14 +32,14 @@
             </button>
           </div>
 
-          <!-- 动画效果总开关：立即生效 -->
-          <label class="anim-toggle">
-            <input type="checkbox" :checked="themeStore.animationsEnabled" @change="onAnimationsChange" />
+          <!-- 动画效果总开关：立即生效，与系统设置同一控件 -->
+          <div class="anim-toggle">
             <span class="anim-toggle-text">
               <span class="anim-toggle-label">启用动画效果</span>
               <span class="anim-toggle-desc">关闭后禁用全部过渡与动画（含窗口淡入淡出、弹窗与列表动效）</span>
             </span>
-          </label>
+            <AppSwitch :model-value="themeStore.animationsEnabled" aria-label="启用动画效果" @change="onAnimationsChange" />
+          </div>
 
           <p class="mt-3 text-xs text-text-muted">点击主题即可实时预览效果。</p>
         </div>
@@ -50,6 +51,7 @@
 <script setup>
 import { useThemeStore } from '../../stores/theme'
 import { Palette } from '@lucide/vue'
+import AppSwitch from './AppSwitch.vue'
 
 defineProps({ visible: { type: Boolean, default: false } })
 defineEmits(['close'])
@@ -70,8 +72,8 @@ function previewStyle(id) {
   return { background: p.bg, '--tp-side': p.side, '--tp-bar': p.bar }
 }
 
-function onAnimationsChange(e) {
-  themeStore.setAnimationsEnabled(e.target.checked)
+function onAnimationsChange(value) {
+  themeStore.setAnimationsEnabled(!!value)
 }
 </script>
 
@@ -87,7 +89,7 @@ function onAnimationsChange(e) {
   gap: 6px;
   padding: 9px;
   border: 1px solid var(--color-border);
-  border-radius: 10px;
+  border-radius: var(--radius-control);
   background: var(--color-bg);
   cursor: pointer;
   transition: border-color 0.15s ease, background-color 0.15s ease;
@@ -96,11 +98,14 @@ function onAnimationsChange(e) {
   border-color: var(--color-primary);
   background: var(--color-primary-light);
 }
+/* 同心嵌套链：预览窗内缩在主题卡片里 → 圆角 = 主题卡片圆角 − 内缩间距；
+   窗内的小色块再内缩一层 → 圆角 = 预览窗圆角 − 内缩间距。
+   三层圆弧因此共享圆心，视觉上是一条连续的弧，而非三条各自为政的错位弧。 */
 .theme-preview {
   position: relative;
   display: block;
   height: 52px;
-  border-radius: 6px;
+  border-radius: calc(var(--radius-control) - var(--radius-concentric-gap));
   border: 1px solid var(--color-border);
   overflow: hidden;
 }
@@ -110,7 +115,7 @@ function onAnimationsChange(e) {
   top: 5px;
   bottom: 5px;
   width: 26%;
-  border-radius: 4px;
+  border-radius: var(--radius-xs);
   background: var(--tp-side, var(--color-surface));
   opacity: 0.95;
 }
@@ -120,7 +125,7 @@ function onAnimationsChange(e) {
   right: 5px;
   top: 5px;
   height: 10px;
-  border-radius: 4px;
+  border-radius: var(--radius-xs);
   background: var(--tp-bar, var(--color-primary));
   opacity: 0.9;
 }
@@ -130,7 +135,7 @@ function onAnimationsChange(e) {
   right: 5px;
   top: 20px;
   bottom: 5px;
-  border-radius: 4px;
+  border-radius: var(--radius-xs);
   background: var(--color-surface);
   opacity: 0.75;
 }
@@ -147,18 +152,19 @@ function onAnimationsChange(e) {
 .anim-toggle {
   display: flex;
   align-items: center;
+  justify-content: space-between;
   gap: 10px;
   margin-top: 12px;
   padding: 10px 12px;
   border: 1px solid var(--color-border);
-  border-radius: 10px;
+  border-radius: var(--radius-control);
   background: var(--color-bg);
-  cursor: pointer;
 }
 .anim-toggle-text {
   display: flex;
   flex-direction: column;
   gap: 2px;
+  min-width: 0;
 }
 .anim-toggle-label {
   font-size: 14px;

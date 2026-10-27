@@ -53,20 +53,29 @@ export function recordGridSnapshotUndo(key, table, oldArr, newArr, label) {
 
 // ==================== 记录一条动态表 增/改/删 撤销 ====================
 // row 为完整记录对象（须含 id 及所有可回填列字段）。
+// 返回 Promise<撤销记录 id | null>：调用方拿到 id 后可以 undoById(id) 精确撤销这一条，
+// 不必走 performUndo 的「当前激活表」上下文（用户删完立刻切页面时，那个上下文已经换表了）。
+// 不接返回值的既有调用方行为不变。
 function pushRow(type, key, row) {
   try {
-    pushUndo({ key, type, label: row ? `${row.姓名 || row.group_name || row.主题 || row.名称 || `#${row.id}`}` : '', payload: { table: key, row } }).then(() => refreshUndoStatus(true)).catch(() => {})
+    return pushUndo({ key, type, label: row ? `${row.姓名 || row.group_name || row.主题 || row.名称 || `#${row.id}`}` : '', payload: { table: key, row } })
+      .then(res => {
+        refreshUndoStatus(true)
+        return (res && res.data && res.data.id) || null
+      })
+      .catch(() => null)
   } catch {
-    /* 撤销记录失败不影响主流程 */
+    return Promise.resolve(null)
   }
 }
 // 添加加分/记录：undo=删除该行，redo=重新插入
 export function recordRowInsert(key, row) {
   pushRow('row_insert', key, row)
 }
-// 删除加分/记录：undo=恢复该行，redo=再次删除
+// 删除加分/记录：undo=恢复该行，redo=再次删除。
+// 返回 Promise<撤销记录 id | null>，供「撤销」提示条直接按 id 撤销（见 pushRow 说明）。
 export function recordRowDelete(key, row) {
-  pushRow('row_delete', key, row)
+  return pushRow('row_delete', key, row)
 }
 // 编辑加分/记录（整条替换）：payload { rowId, oldRow, newRow }
 export function recordRowUpdate(key, oldRow, newRow) {

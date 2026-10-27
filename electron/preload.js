@@ -1,4 +1,4 @@
-const { contextBridge, ipcRenderer } = require('electron')
+const { contextBridge, ipcRenderer, webUtils } = require('electron')
 
 // 阻止把页面内的链接/图片拖出窗口（拖到桌面/浏览器会生成快捷方式或交给外部程序打开）。
 // 仅在拖拽源为 <a> 或 <img>（含其子元素）时取消 dragstart；不影响表格排序等
@@ -96,5 +96,15 @@ contextBridge.exposeInMainWorld('electron', {
       return Promise.reject(new Error(`Invalid invoke channel: ${channel}`))
     }
     return ipcRenderer.invoke(channel, ...args)
+  },
+
+  // 取拖入文件的真实路径（Electron 32 起 File.path 已移除，必须走 webUtils）。
+  // 失败返回空串，调用方回退旧字段 file.path。
+  getPathForFile: (file) => {
+    try {
+      return webUtils.getPathForFile(file) || ''
+    } catch (_) {
+      return ''
+    }
   },
 })

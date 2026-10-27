@@ -35,6 +35,8 @@
         <DynamicTable
           :fields="previewFields"
           :rows="previewRows"
+          emptyActionText=""
+          hideEditButton
           :editingCell="editingCell"
           @startEdit="startEditCell"
           @saveCell="saveCell"

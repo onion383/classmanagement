@@ -31,11 +31,29 @@
   --shadow-lg: none;
   --shadow-card: none;
 
-  /* 圆角：直角 */
+  /* 圆角：直角主题 —— 全部尺寸档归零。
+     之前只把 sm/md/lg/card 归零，xl/2xl/3xl 三档漏掉，而 Tailwind 的
+     rounded-xl/2xl/3xl 走的是 Tailwind 默认值（.75rem/1rem/1.5rem），
+     于是这个「直角」主题里 rounded-xl 仍带 12px 圆角，语义自相矛盾。
+     现在全档归零，rounded-* 系列在极简主题下真正是直角。 */
+  --radius-xs: 0px;
   --radius-sm: 0px;
   --radius-md: 0px;
   --radius-lg: 0px;
-  --radius-card: 0px;
+  --radius-xl: 0px;
+  --radius-2xl: 0px;
+  --radius-3xl: 0px;
+  --radius-full: 9999px;
+  /* bare `rounded`（无后缀）在本主题下也应是直角 → 映射到 control 档（=0）。
+     但 --radius-full 保留 9999px：rounded-full 用于头像/圆形元素，
+     「直角主题」指的是矩形不做圆角，不是把圆也变成方的。 */
+  --radius: var(--radius-control);
+
+  /* 角色别名 → 尺寸档（覆盖 theme-base.css 的默认映射），本主题全为 0 */
+  --radius-control: var(--radius-md);
+  --radius-card: var(--radius-lg);
+  --radius-surface: var(--radius-xl);
+  --radius-table: var(--radius-xl);
 }
 
 /* ========== 无边框透明窗口（窗外亚克力）适配：极简主题 ==========

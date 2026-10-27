@@ -31,10 +31,14 @@
               candidateLabelField="label"
               candidatePlaceholder="输入科目"
               :allowDuplicate="true"
+              :emptyReady="_activeLoadOk"
+              :loadError="activeError"
+              errorText="课表加载失败"
               @update:cells="onActiveCellsUpdate"
               @swapRows="onActiveSwapRows"
               @swapColumns="onActiveSwapColumns"
               @update:row-meta="onActiveRowMeta"
+              @retry="loadActive"
             />
 
             <SettingsDialog
@@ -82,10 +86,14 @@
               candidateLabelField="label"
               candidatePlaceholder="输入科目"
               :allowDuplicate="true"
+              :emptyReady="_masterLoadOk"
+              :loadError="masterError"
+              errorText="课表加载失败"
               @update:cells="onMasterCellsUpdate"
               @swapRows="onMasterSwapRows"
               @swapColumns="onMasterSwapColumns"
               @update:row-meta="onMasterRowMeta"
+              @retry="loadMaster"
             />
 
             <SettingsDialog
@@ -303,10 +311,17 @@ export default {
 
       // ========== 全局 ==========
       semesterStart: '',
-      loaded: false,
+      // 注：这里原来有个 `loaded: false`，但全项目没有任何地方把它置 true，
+      // 属于死变量（当初 GridView 空态绑它 → 空态永远不显示）。已删除：
+      // 空态的就绪判定改用 _activeLoadOk / _masterLoadOk。
       // 加载状态：_xxInFlight 防重复请求；_xxLoadOk 记录是否成功，供重进页面时补拉失败项
       _activeInFlight: 0,
       _activeLoadOk: false,
+      // 驱动表格「加载失败态」（告警 + 重试）。和 _activeLoadOk 的区别：
+      // 那个是「最近一次拉取是否成功」，这个只在失败时亮起、成功即熄灭，
+      // 用来区分「还没加载过」和「加载失败了」。
+      activeError: false,
+      masterError: false,
       _masterInFlight: 0,
       _masterLoadOk: false,
       activeTab: 'schedule',

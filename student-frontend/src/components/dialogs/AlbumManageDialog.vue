@@ -35,7 +35,7 @@
               </p>
             </div>
             <button v-if="a.kind !== 'virtual'" @click="openFolder(a)" class="text-text-muted hover:text-text px-2 py-1 text-sm flex-shrink-0" title="在文件管理器中打开">📂 打开文件夹</button>
-            <button @click="confirmDelete = a" class="bg-danger hover:bg-danger/80 text-text-inverse text-sm px-3 py-1.5 rounded flex-shrink-0 ml-4">删除</button>
+            <button @click="confirmDelete = a" class="bg-danger hover:bg-danger/80 text-text-inverse text-sm px-3 py-1.5 rounded flex-shrink-0 ml-4 transition-theme">删除</button>
           </div>
         </div>
       </div>

@@ -69,9 +69,15 @@ student-frontend/sticky-test.html
 # 该目录含泄漏 blob SHA 清单等敏感内容，绝不入库。
 doc/开发文档/
 
+# 代码审查报告（仅本地留档，不入库）
+doc/代码审查/
+
 # 设计和支付原图（需要入库，勿忽略）
 !student-frontend/origin/
 !student-frontend/origin/*
+
+# 本地截图目录（桌面小组件等界面实拍图，仅供本地查看，不入库）
+.screenshots/
 
 # 缓存
 .vite/

@@ -107,6 +107,20 @@ function currentSemester() {
     || db.prepare('SELECT id, name, start_date, end_date FROM semesters ORDER BY id DESC LIMIT 1').get();
 }
 
+// 校验学期起止日期：结束不能早于开始。
+// 为什么必须拦：semesterRange() 被值日/座位的快照补存直接消费，
+// 那里 `if (upper < start) return '学期范围外'` —— 存反了会让整段补存静默跳过，
+// 表现为「历史记录一直是空的」，而设置页完全看不出哪里错了。
+// 允许只填一端（另一端空字符串 = 该侧不限），但两端都有值时必须有序。
+function validateSemesterRange(start_date, end_date) {
+  const s = String(start_date || '').trim();
+  const e = String(end_date || '').trim();
+  if (!s || !e) return null;
+  // YYYY-MM-DD 字典序即时间序，直接比字符串即可
+  if (e < s) return '学期结束日期不能早于开始日期';
+  return null;
+}
+
 // 学期列表（按开始日期倒序，未填日期的排最后）+ 当前学期
 router.get('/semesters', (req, res) => {
   try {
@@ -128,6 +142,8 @@ router.post('/semesters', (req, res) => {
     const name = String(body.name || '').trim() || def.name;
     const start_date = body.start_date || def.start_date;
     const end_date = body.end_date || def.end_date;
+    const rangeErr = validateSemesterRange(start_date, end_date);
+    if (rangeErr) return res.status(400).json({ error: rangeErr });
     db.prepare('UPDATE semesters SET is_current = 0').run();
     const info = db.prepare('INSERT INTO semesters (name, start_date, end_date, is_current) VALUES (?,?,?,1)')
       .run(name, start_date, end_date);
@@ -162,6 +178,8 @@ router.put('/semesters/:id', (req, res) => {
     const name = body.name != null ? (String(body.name).trim() || row.name) : row.name;
     const start_date = body.start_date != null ? body.start_date : row.start_date;
     const end_date = body.end_date != null ? body.end_date : row.end_date;
+    const rangeErr = validateSemesterRange(start_date, end_date);
+    if (rangeErr) return res.status(400).json({ error: rangeErr });
     db.prepare('UPDATE semesters SET name = ?, start_date = ?, end_date = ? WHERE id = ?')
       .run(name, start_date, end_date, id);
     res.json({ message: '学期已保存' });
@@ -199,16 +217,24 @@ router.get('/settings', (req, res) => {
 
 router.put('/settings', (req, res) => {
   try {
-    const { semester_start, semester_end } = req.body;
+    const body = req.body || {};
     const cur = currentSemester();
+    // 只更新请求里**真正带了的**字段。
+    // 之前是无条件写两个字段：课表页保存课表设置时只传 semester_start，
+    // 于是 end_date 被写成 ''，用户在设置页配好的结束日期被悄悄清空 ——
+    // 而结束日期正是值日/座位快照补存的范围上界。
+    const start_date = body.semester_start != null ? body.semester_start : (cur ? cur.start_date : '');
+    const end_date = body.semester_end != null ? body.semester_end : (cur ? cur.end_date : '');
+    const rangeErr = validateSemesterRange(start_date, end_date);
+    if (rangeErr) return res.status(400).json({ error: rangeErr });
     if (cur) {
       db.prepare('UPDATE semesters SET start_date = ?, end_date = ? WHERE id = ?')
-        .run(semester_start || '', semester_end || '', cur.id);
+        .run(start_date, end_date, cur.id);
     } else {
       // 没有任何学期时直接建一条当前学期，避免设置无处可存
       const def = autoSemester();
       db.prepare('INSERT INTO semesters (name, start_date, end_date, is_current) VALUES (?,?,?,1)')
-        .run(def.name, semester_start || '', semester_end || '');
+        .run(def.name, start_date, end_date);
     }
     res.json({ message: '设置已保存' });
   } catch (err) {

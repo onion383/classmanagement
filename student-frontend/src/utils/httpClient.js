@@ -1,6 +1,6 @@
 import axios from 'axios'
 import { setupSecureAxios } from '../composables/secureAxios'
-import { applyAuthHeader } from '../composables/secureChannel'
+import { applyAuthHeader, safe } from '../composables/secureChannel'
 import { waitForBackendReady, isBackendUnreachable } from './backendReady'
 import { storeMediaToken } from './apiUrl'
 
@@ -53,6 +53,11 @@ export function setupApiClient({
     })
     // 记录了「本次确实携带 token」，响应成功后据此把会话标记为已绑定身份
     if (carriedToken) config.__authProofToken = true
+    // 凭据降级：安全模式下 applyAuthHeader 握手失败会退回明文 Bearer，而后端在安全模式下
+    // 不收明文凭据 → 这次请求必然 401。标记出来，响应拦截器遇到这种 401 时**不**按「登录过期」
+    // 处理（否则一次握手抖动就把用户的 token 清掉、直接踢回登录页），而是让 secureAxios
+    // 重建会话后重试。
+    if (safe() && !config.headers['X-Auth-Proof']) config.__credentialDegraded = true
     return config
   })
 
@@ -81,7 +86,9 @@ export function setupApiClient({
       // 登录态失效（401，且非安全通道会话过期 / 信道凭据待重试）：交调用方决定是否清 token 并跳登录
       if (error.response && error.response.status === 401
         && !isSecureSessionExpired(error) && !isAuthRequired(error)) {
-        onAuthExpired?.(error, config)
+        // 凭据降级造成的 401（同上）：握手失败退回明文，而后端不收明文 → 不是登录过期，
+        // 不能清 token 把用户踢回登录页。secureAxios 会重建会话后重试一次。
+        if (!config?.__credentialDegraded) onAuthExpired?.(error, config)
       }
 
       // 主动取消的请求不是故障，既不探测也不重试

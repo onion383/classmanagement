@@ -10,10 +10,7 @@
           <!-- 启用开关 -->
           <div class="flex items-center justify-between mb-6">
             <span class="text-sm font-medium text-text">启用 AI</span>
-            <label class="inline-flex items-center cursor-pointer">
-              <input type="checkbox" :checked="enabled" @change="toggleEnabled" class="w-4 h-4 rounded border-border text-primary focus:ring-primary cursor-pointer" />
-              <span class="ml-2 text-sm" :class="enabled ? 'text-text' : 'text-text-muted'">{{ enabled ? '已启用' : '已禁用' }}</span>
-            </label>
+            <AppSwitch :model-value="enabled" aria-label="启用 AI" @change="toggleEnabled" />
           </div>
 
           <!-- 密钥管理 -->
@@ -59,15 +56,18 @@
                 </div>
               </div>
               <div class="flex items-center gap-4 flex-shrink-0" @click.stop>
-                <label class="inline-flex items-center gap-1.5 cursor-pointer" title="推理（思考模式）：DeepSeek / 智谱 / 通义 支持">
-                  <input
-                    type="checkbox"
-                    :checked="m.reasoning"
-                    @change="toggleReasoning(m, $event)"
-                    class="w-4 h-4 rounded border-border text-primary focus:ring-primary cursor-pointer"
-                  />
-                  <span class="text-xs" :class="m.reasoning ? 'text-text' : 'text-text-muted'">推理</span>
-                </label>
+                <div class="inline-flex items-center gap-1">
+                  <label class="inline-flex items-center gap-1.5 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      :checked="m.reasoning"
+                      @change="toggleReasoning(m, $event)"
+                      class="w-4 h-4 rounded border-border text-primary focus:ring-primary cursor-pointer"
+                    />
+                    <span class="text-xs" :class="m.reasoning ? 'text-text' : 'text-text-muted'">推理</span>
+                  </label>
+                  <AppHelp text="推理（思考模式）：DeepSeek / 智谱 / 通义 支持" aria-label="推理说明" :size="13" :z-index="10006" />
+                </div>
                 <button @click="openEdit(m)" class="text-primary hover:underline text-sm cursor-pointer">编辑</button>
                 <button @click="removeModel(m)" class="text-danger hover:underline text-sm cursor-pointer">删除</button>
               </div>
@@ -93,7 +93,9 @@
 
 <script>
 import axios from 'axios'
+import AppHelp from '../base/AppHelp.vue'
 import AppSelect from '../base/AppSelect.vue'
+import AppSwitch from '../base/AppSwitch.vue'
 import AddModelDialog from './AddModelDialog.vue'
 import ConfirmDialog from '../base/ConfirmDialog.vue'
 import '../../styles/dialog-transition.css'
@@ -101,7 +103,7 @@ import DialogShell from '../base/DialogShell.vue'
 
 export default {
   name: 'AiSettingsDialog',
-  components: { AppSelect, AddModelDialog, ConfirmDialog, DialogShell },
+  components: { AppHelp, AppSelect, AppSwitch, AddModelDialog, ConfirmDialog, DialogShell },
   props: {
     show: { type: Boolean, default: false },
   },
@@ -209,8 +211,8 @@ export default {
       await this.load()
       this.$emit('saved')
     },
-    async toggleEnabled(e) {
-      this.enabled = e.target.checked
+    async toggleEnabled(value) {
+      this.enabled = !!value
       try {
         await axios.put('/api/ai/config', { enabled: this.enabled })
         this.$emit('saved')

@@ -207,7 +207,7 @@ onUnmounted(() => {
   gap: 4px;
   margin-bottom: 16px;
   background: var(--color-bg, #f9fafb);
-  border-radius: 10px;
+  border-radius: var(--radius-control);
   padding: 4px;
 }
 
@@ -215,7 +215,7 @@ onUnmounted(() => {
   flex: 1;
   padding: 6px 0;
   border: none;
-  border-radius: 8px;
+  border-radius: var(--radius-control);
   background: transparent;
   color: var(--color-text-secondary, #6b7280);
   font-size: 13px;
@@ -254,7 +254,7 @@ onUnmounted(() => {
   display: flex;
   align-items: center;
   justify-content: center;
-  border-radius: 4px;
+  border-radius: var(--radius-xs);
 }
 
 .arrow:hover {
@@ -298,7 +298,7 @@ onUnmounted(() => {
 
 .timer-controls button {
   padding: 5px 8px;
-  border-radius: 8px;
+  border-radius: var(--radius-control);
   border: none;
   font-size: 12px;
   cursor: pointer;

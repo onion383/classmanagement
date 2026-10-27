@@ -41,6 +41,25 @@ const PRESETS = [
   { id: 'minimal', name: '极简主题', editable: true },
 ]
 
+// ===== 暂时屏蔽的主题（只挡「选不到」，实现全部保留）=====
+//
+// 为什么屏蔽 win11：
+//   Win11 主题的核心是「页面全透明 + 窗外 DWM 亚克力模糊」——背景模糊完全交给系统材质，
+//   而这个效果**不可控**：本机实测（Win11 正式版 26300）无论 Electron 还是纯原生 Win32
+//   （DwmSetWindowAttribute 设 DWMWA_SYSTEMBACKDROP_TYPE=Acrylic，返回 hr=0 成功），
+//   渲染出来都是均匀中性灰 rgb(211,211,211)，壁纸的蓝色一点都透不出来；
+//   观感还随 Windows build / 显卡驱动 / 虚拟显示器（如向日葵 IDD）变化，无法保证一致。
+//   详见 doc/小组件.md「磨砂背景」一节的实测记录。
+//
+// 保留什么、屏蔽什么：
+//   · 保留：styles/theme-win11.css、applyTheme 里的 win11 分支、主进程的亚克力开关、
+//     themeLoader 的 win11 样式映射 —— 实现代码一行没动，将来要恢复只改这一处。
+//   · 屏蔽：不出现在任何主题选择入口（主题选择器弹窗 / 引导页 / 设置页下拉），
+//     且 setTheme 拒绝应用它（避免 AI 改设置等旁路把它设进来）。
+//
+// 恢复方法：把下面数组清空（改回 const HIDDEN_THEME_IDS = [] 即可）。
+const HIDDEN_THEME_IDS = ['win11']
+
 // 数值型设置的读取：**不能用 `parseFloat(x) || 默认值`**。
 // 不透明度滑块的 min 是 0，「完全透明」是合法取值，而 0 会被 `||` 当成"没读到"→ 重载后变回默认值。
 const readNum = (key, fallback) => {
@@ -111,12 +130,20 @@ export const useThemeStore = defineStore('theme', () => {
   // 组件启动时置 true → 只借主题的配色，背景图与遮罩一律不画。
   const suppressBackgroundImage = ref(false)
 
+  // 可供选择的主题：预设 + 自定义，但**剔除被暂时屏蔽的主题**（见 HIDDEN_THEME_IDS）。
+  // 主题选择器弹窗（ThemePickerDialog）与引导页（Setup）都用它，
+  // 所以屏蔽一处即可让全部入口都选不到 win11。
   const allThemes = computed(() => [
-    ...PRESETS,
+    ...PRESETS.filter(p => !HIDDEN_THEME_IDS.includes(p.id)),
     ...customThemes.value.map(t => ({ ...t, editable: true })),
   ])
 
-  const currentThemeMeta = computed(() => allThemes.value.find(t => t.id === currentTheme.value) || PRESETS[0])
+  // 当前主题的元信息：在**完整**列表里查（不剔除被屏蔽的），
+  // 避免本地正好存着被屏蔽的主题时元信息落空（回落成第一个预设）。
+  const currentThemeMeta = computed(() => {
+    const all = [...PRESETS, ...customThemes.value.map(t => ({ ...t, editable: true }))]
+    return all.find(t => t.id === currentTheme.value) || PRESETS[0]
+  })
 
   const isPreset = computed(() => PRESETS.some(p => p.id === currentTheme.value))
 
@@ -139,6 +166,13 @@ export const useThemeStore = defineStore('theme', () => {
     else setTimeout(run, 1000)
   }
 
+  // 关闭动画时延迟给根元素打 no-animations 的定时器（见 setAnimationsEnabled）
+  let noAnimTimer = null
+
+  const syncNoAnimations = () => {
+    document.documentElement.classList.toggle('no-animations', !animationsEnabled.value)
+  }
+
   const applyTheme = () => {
     document.documentElement.dataset.theme = currentTheme.value
     // 全局日/夜模式：写 data-mode，styles/theme-night.css 据此叠加夜间配色
@@ -153,7 +187,7 @@ export const useThemeStore = defineStore('theme', () => {
     // 标题栏/侧边栏毛玻璃配色：写 data-topbar-color，CSS 据此切深蓝/白色调
     document.documentElement.dataset.topbarColor = topbarColor.value
     // 动画总开关：关闭时给根元素打 no-animations，配合全局 CSS 瞬时化所有动效
-    document.documentElement.classList.toggle('no-animations', !animationsEnabled.value)
+    syncNoAnimations()
     Object.entries(customColors.value).forEach(([key, value]) => {
       document.documentElement.style.setProperty(`--${key}`, value)
     })
@@ -272,6 +306,13 @@ export const useThemeStore = defineStore('theme', () => {
   }
 
   const setTheme = (themeId) => {
+    // 被暂时屏蔽的主题（见 HIDDEN_THEME_IDS）：拒绝应用。
+    // 入口虽已屏蔽，但 setTheme 还有 AI 改设置（composables/ai/aiExec.js）等旁路调用，
+    // 这里统一拦一道，避免主题被从别处设进来。
+    if (HIDDEN_THEME_IDS.includes(themeId)) {
+      console.warn('[theme] 主题已暂时屏蔽，忽略设置：', themeId)
+      return
+    }
     currentTheme.value = themeId
     localStorage.setItem(THEME_KEY, themeId)
     applyTheme()
@@ -362,11 +403,24 @@ export const useThemeStore = defineStore('theme', () => {
     document.documentElement.dataset.topbarColor = value
   }
 
-  // 动画总开关：立即生效（写 localStorage + 重应用主题类）
+  // 动画总开关：写 localStorage 后切换全局 no-animations。
+  // 关闭时必须等开关自己的过渡跑完再加类 —— 否则类在当前事件里同步生效，
+  // 这一下会被 !important 的瞬时化规则当场掐断，表现为「开启有动画、关闭直接硬切」。
+  // 三处入口（设置页 / 主题弹窗 / 引导页）现在都用 AppSwitch，留 180ms 覆盖 120ms 行程。
   const setAnimationsEnabled = (value) => {
     animationsEnabled.value = !!value
     localStorage.setItem(ANIMATIONS_KEY, value ? '1' : '0')
-    applyTheme()
+    clearTimeout(noAnimTimer)
+    if (animationsEnabled.value) {
+      // 开启：立即恢复动效，让滑块从当前位置滑过去
+      syncNoAnimations()
+    } else {
+      // 关闭：留出滑块行程，再全局瞬时化（之后所有动效仍是立刻生效）
+      noAnimTimer = setTimeout(() => {
+        noAnimTimer = null
+        syncNoAnimations()
+      }, 180)
+    }
   }
 
   // 系统深浅色偏好：跟随系统开启时据此决定日/夜

@@ -107,7 +107,7 @@
         <!-- 流式输出中：已输出完的行即时按 markdown 渲染，未输出完的行先按纯文本占位 -->
         <template v-else-if="m._live">
           <div v-if="m._liveHtml" class="markdown-body whitespace-normal break-words" v-html="m._liveHtml"></div>
-          <div v-if="m._liveTail" class="markdown-body whitespace-pre-wrap break-words">{{ m._liveTail }}</div>
+          <div v-if="m._liveTail" class="markdown-body whitespace-pre-wrap break-words"><AiStreamTail :text="m._liveTail" /></div>
         </template>
         <div v-else class="markdown-body whitespace-pre-wrap break-words">{{ m.content }}</div>
         <!-- 已开启推理但本次没收到思考内容 → 说明该模型/接口不返回思维链 -->
@@ -195,9 +195,12 @@
 </template>
 
 <style scoped>
-/* 对话气泡圆角：提问框右下角小圆，回答框左下角小圆（镜像对称），用固定值确保生效 */
-.user-bubble { border-radius: 16px 16px 6px 16px !important; }
-.assistant-bubble { border-radius: 16px 16px 16px 6px !important; }
+/* 对话气泡圆角：提问框右下角小圆，回答框左下角小圆（镜像对称）。
+   主体走 --radius-surface（气泡是浮层角色）；尾巴那一角取「主体 − 间距」的同心值，
+   保证尾巴收口与主体圆弧同源，改主题时二者一起缩放、不会脱节。
+   用固定值确保生效（!important 压过主题的 button/div 皮肤）。 */
+.user-bubble { border-radius: var(--radius-surface) var(--radius-surface) var(--radius-control) var(--radius-surface) !important; }
+.assistant-bubble { border-radius: var(--radius-surface) var(--radius-surface) var(--radius-surface) var(--radius-control) !important; }
 
 /* 助手消息的 markdown 排版（加粗/斜体/表格/列表/代码） */
 .markdown-body :deep(p) { margin: 0 0 0.5em; }
@@ -207,14 +210,14 @@
 .markdown-body :deep(code) {
   background: var(--color-surface-hover, #f1f5f9);
   padding: 0.1em 0.35em;
-  border-radius: 4px;
+  border-radius: var(--radius-xs);
   font-size: 0.9em;
   font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
 }
 .markdown-body :deep(pre) {
   background: var(--color-surface-hover, #f1f5f9);
   padding: 0.6em 0.8em;
-  border-radius: 6px;
+  border-radius: var(--radius-control);
   overflow-x: auto;
   margin: 0.35em 0;
 }
@@ -251,7 +254,7 @@
   display: inline-block;
   width: 9px;
   height: 9px;
-  border-radius: 2px;
+  border-radius: var(--radius-xs);
   background: currentColor;
   flex-shrink: 0;
 }
@@ -260,6 +263,7 @@
 <script>
 import AiChart from '../AiChart.vue'
 import AiRecordTable from '../tables/AiRecordTable.vue'
+import AiStreamTail from './AiStreamTail.vue'
 import {
   hasProcess, processTitle, stepIcon, stepClass, stepSeconds, toggleStepDetail,
   hasReasonStep, tokenSpeed, extractFileName, extractUserText, summarizeProposalChanges,
@@ -268,7 +272,7 @@ import { TABLE_ROUTE } from '../../composables/ai/aiConstants.js'
 
 export default {
   name: 'AiChatMessages',
-  components: { AiChart, AiRecordTable },
+  components: { AiChart, AiRecordTable, AiStreamTail },
   props: {
     messages: { type: Array, default: () => [] },
     busy: { type: Boolean, default: false },

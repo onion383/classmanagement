@@ -83,7 +83,7 @@
               <img :src="attachedFile.dataUrl" class="max-h-32 max-w-64" />
               <button
                 @click="clearAttachment"
-                class="absolute -top-1.5 -right-1.5 w-5 h-5 bg-danger text-white rounded-full flex items-center justify-center text-xs leading-none cursor-pointer hover:bg-danger-hover"
+                class="absolute -top-1.5 -right-1.5 w-5 h-5 bg-danger text-white rounded-full flex items-center justify-center text-xs leading-none cursor-pointer hover:bg-danger-hover transition-theme"
                 title="移除"
               >✕</button>
             </div>
@@ -282,7 +282,7 @@
   top: -22px;
   left: 0;
   padding: 1px 6px;
-  border-radius: 6px;
+  border-radius: var(--radius-control);
   background: rgba(0, 0, 0, 0.6);
   color: #fff;
   font-size: 11px;
@@ -297,14 +297,14 @@
   display: flex;
   gap: 8px;
   padding: 6px;
-  border-radius: 12px;
+  border-radius: var(--radius-surface);
   background: rgba(255, 255, 255, 0.55);
   backdrop-filter: blur(10px);
   border: 1px solid rgba(255, 255, 255, 0.45);
 }
 .region-btn {
   padding: 5px 16px;
-  border-radius: 8px;
+  border-radius: var(--radius-control);
   border: 1px solid var(--color-border, #e2e8f0);
   background: var(--color-surface, #fff);
   color: var(--color-text, #111827);
@@ -328,7 +328,7 @@
   left: 50%;
   transform: translateX(-50%);
   padding: 6px 12px;
-  border-radius: 10px;
+  border-radius: var(--radius-control);
   background: rgba(0, 0, 0, 0.55);
   color: #fff;
   font-size: 12px;
@@ -384,18 +384,20 @@
 }
 
 /* 标题下方的大框（聊天区 / 加载态 / 未启用态）统一到主题卡片圆角，
-   与抽屉、弹窗一致：glass / win11 = 20px，glass2 = 22px，其余主题回落 --radius-card。 */
+   与抽屉、弹窗一致。--radius-surface 现已在所有主题都有定义（不再需要 fallback 链）。 */
 .chat-surface {
-  border-radius: var(--radius-surface, var(--radius-card, 12px));
+  border-radius: var(--radius-surface);
 }
 
 /* 聊天区顶部工具条：卡片上沿一整条第二层毛玻璃。
    顶角沿用外层卡片圆角、底角 0，由底部 1px 主题边框色横线切开，
-   形成「圆角矩形被水平线砍一刀」的上半部。 */
+   形成「圆角矩形被水平线砍一刀」的上半部。
+   同心：工具条贴住 .chat-surface 的上沿（间距 0），故圆角须与外层完全一致，
+   否则工具条两角与外框两角错开，能看见两条不衔接的弧。 */
 .chat-toolbar {
   border-bottom: 1px solid var(--color-border);
-  border-top-left-radius: var(--radius-surface, var(--radius-card, 12px));
-  border-top-right-radius: var(--radius-surface, var(--radius-card, 12px));
+  border-top-left-radius: var(--radius-surface);
+  border-top-right-radius: var(--radius-surface);
 }
 /* 只在日间给工具条提亮（白 30%，不发黑）；
    夜间不叠白：卡片底本是深蓝，叠白会把整条工具条冲淡发白。 */

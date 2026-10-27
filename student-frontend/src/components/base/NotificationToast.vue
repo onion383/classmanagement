@@ -21,6 +21,14 @@
             <span class="nt-msg">{{ item.message }}</span>
           </div>
 
+          <!-- 动作按钮（如「撤销」）：放在消息右侧而不是下方。
+               配色**复用操作列「修改」按钮的那套类**（bg-info + text-text-inverse），
+               不自己写 background —— glass / win11 主题对 `button.bg-info.text-text-inverse`
+               有 !important 覆盖（半透明淡蓝底 + 深蓝字），直写 var(--color-info) 会吃不到那层。 -->
+          <button v-if="item.action" type="button" class="nt-action bg-info text-text-inverse" @click="onAction(item)">
+            {{ item.action.label }}
+          </button>
+
           <!-- 关闭按钮：方形毛玻璃外观统一走全局 .dlg-close -->
           <button class="dlg-close" @click="remove(item.id)">&times;</button>
 
@@ -71,6 +79,19 @@ function onLeave(item) {
   item._startTime = Date.now()
   item.timer = setTimeout(() => remove(item.id), item._remaining)
 }
+
+// 动作按钮（如「撤销」）：先收掉提示条再执行，避免用户连点撤两次
+function onAction(item) {
+  const action = item.action
+  remove(item.id)
+  if (!action || typeof action.onClick !== 'function') return
+  try {
+    const ret = action.onClick()
+    if (ret && typeof ret.catch === 'function') ret.catch(err => console.error('[通知动作]', err))
+  } catch (err) {
+    console.error('[通知动作]', err)
+  }
+}
 </script>
 
 <style>
@@ -94,7 +115,7 @@ function onLeave(item) {
   max-width: 420px;
   padding: 14px 16px;
   background: var(--color-surface, #fff);
-  border-radius: var(--radius-lg, 12px);
+  border-radius: var(--radius-surface);
   box-shadow: 0 4px 24px rgba(0, 0, 0, 0.12), 0 1px 4px rgba(0, 0, 0, 0.06);
   border: 1px solid var(--color-border, #e5e7eb);
   pointer-events: auto;
@@ -166,6 +187,32 @@ function onLeave(item) {
   white-space: pre-line;
 }
 
+/* 动作按钮（撤销）：只负责尺寸和排布，**底色/文字色交给 bg-info / text-text-inverse 类**，
+   这样与表格操作列的「修改」按钮逐像素一致（包括 glass / win11 主题对
+   button.bg-info.text-text-inverse 的那层 !important 覆盖）。
+   垂直居中而不是贴顶：它和两行文字的消息块并排，贴顶会显得吊在半空 */
+.nt-action {
+  flex-shrink: 0;
+  align-self: center;
+  /* 尺寸对齐操作列按钮的 py-0.5 px-2 rounded（2px / 8px / 4px），只有字号明确写死 13px ——
+     它的父级是提示条（正文 13px），继承下来正好，不会比消息文字还大 */
+  padding: 2px 8px;
+  font-size: 13px;
+  font-weight: 500;
+  font-family: inherit;
+  line-height: 1.4;
+  border: 0;
+  border-radius: var(--radius-xs);
+  cursor: pointer;
+  transition: filter 0.15s ease;
+}
+.nt-action:hover { filter: brightness(1.08); }
+.nt-action:active { filter: brightness(0.96); }
+.nt-action:focus-visible {
+  outline: 2px solid color-mix(in srgb, var(--color-info, #3b82f6) 60%, transparent);
+  outline-offset: 2px;
+}
+
 /* 关闭按钮：方形毛玻璃外观统一走全局 .dlg-close（见 styles/utilities.css），
    这里只按吐司的紧凑尺寸收小一档（22px，与左侧图标同高）。 */
 .nt-toast .dlg-close {
@@ -196,7 +243,7 @@ function onLeave(item) {
   to   { width: 0%;   }
 }
 
-/* ========== 进出动画 ========== */
+/* ========== 进出动画（保持原样：从右侧滑入/滑出）========== */
 .nt-enter-active {
   transition: all 0.35s cubic-bezier(0.22, 1, 0.36, 1);
 }

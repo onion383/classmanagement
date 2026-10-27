@@ -4,7 +4,7 @@
     <button
       @click="goPrev"
       :disabled="!hasPrev"
-      class="px-3 py-1 rounded bg-surface-hover hover:bg-border disabled:opacity-40 text-text whitespace-nowrap"
+      class="px-3 py-1 rounded bg-surface-hover hover:bg-border disabled:opacity-40 text-text whitespace-nowrap transition-theme"
     >
       ◀ 上一周
     </button>
@@ -12,7 +12,7 @@
     <button
       @click="goNext"
       :disabled="!hasNext"
-      class="px-3 py-1 rounded bg-surface-hover hover:bg-border disabled:opacity-40 text-text whitespace-nowrap"
+      class="px-3 py-1 rounded bg-surface-hover hover:bg-border disabled:opacity-40 text-text whitespace-nowrap transition-theme"
     >
       下一周 ▶
     </button>
@@ -90,7 +90,7 @@ export default {
   padding: 12px 16px;
   /* 保留原来 py-4 的上下留白，避免与上方表格/下方按钮贴在一起 */
   margin: 16px 0;
-  border-radius: 16px;
+  border-radius: var(--radius-surface);
   border: 1px solid var(--color-border, #e5e7eb);
 }
 /* 中间的时间单独框起来，作为这条栏的视觉中心 */
@@ -98,7 +98,7 @@ export default {
   box-sizing: border-box;
   width: 250px;
   padding: 4px 14px;
-  border-radius: 10px;
+  border-radius: var(--radius-control);
   border: 1px solid var(--color-border, #e5e7eb);
   background: var(--color-surface-hover, #f3f4f6);
   color: var(--color-text, #111827);

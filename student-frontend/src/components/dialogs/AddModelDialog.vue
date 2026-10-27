@@ -30,7 +30,7 @@
               <button
                 @click="discover"
                 :disabled="discovering"
-                class="flex-shrink-0 border border-border text-text px-3 py-2 rounded hover:bg-surface-hover disabled:opacity-40 text-sm cursor-pointer"
+                class="flex-shrink-0 border border-border text-text px-3 py-2 rounded hover:bg-surface-hover disabled:opacity-40 text-sm cursor-pointer transition-theme"
               >{{ discovering ? '识别中…' : '识别' }}</button>
             </template>
             <template v-else>
@@ -55,7 +55,7 @@
           <p class="text-xs text-text-muted">{{ isEdit ? '点击「确定」将自动检测模型连通性，通过后才保存；API Key 留空表示保持不变。' : '点击「确定」将自动检测模型连通性，通过后才保存；密钥仅存本机数据库，同一服务商可留空复用已有密钥。' }}</p>
 
           <div class="flex items-center justify-end gap-3 pt-1">
-            <button @click="close" class="border border-border text-text px-4 py-2 rounded hover:bg-surface-hover cursor-pointer">取消</button>
+            <button @click="close" class="border border-border text-text px-4 py-2 rounded hover:bg-surface-hover cursor-pointer transition-theme">取消</button>
             <button
               @click="submit"
               :disabled="testing"

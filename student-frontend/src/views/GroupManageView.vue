@@ -17,10 +17,10 @@
     <div class="flex flex-nowrap items-center gap-3 mb-4 overflow-x-auto">
       <button v-if="activeDim" @click="openSettings" class="bg-primary hover:bg-primary-hover text-text-inverse px-4 py-2 rounded transition-theme flex items-center gap-1.5" title="当前维度设置"><IconGlyph name="settings" :size="14" tint="current" /> 设置</button>
       <button v-preload="loadSmartGroupDialog" @click="onSmartGroup" class="bg-primary hover:bg-primary-hover text-text-inverse px-4 py-2 rounded transition-theme">🧠 智能分组</button>
-      <button @click="loadAll" class="bg-text-muted hover:bg-text-secondary text-text-inverse px-4 py-2 rounded flex items-center gap-1.5 btn-refresh">
+      <button @click="loadAll" class="bg-text-muted hover:bg-text-secondary text-text-inverse px-4 py-2 rounded flex items-center gap-1.5 btn-refresh transition-theme">
         <IconGlyph name="refresh" :size="14" tint="current" /> 刷新
       </button>
-      <button v-preload="loadExportExcel" @click="openExport" class="bg-warning hover:bg-warning-hover text-text-inverse px-4 py-2 rounded flex items-center gap-1.5">
+      <button v-preload="loadExportExcel" @click="openExport" class="bg-warning hover:bg-warning-hover text-text-inverse px-4 py-2 rounded flex items-center gap-1.5 transition-theme">
         <IconGlyph name="download" :size="14" tint="current" /> 导出分组
       </button>
     </div>

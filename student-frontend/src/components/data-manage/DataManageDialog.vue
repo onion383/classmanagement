@@ -50,7 +50,10 @@
             <div class="flex items-center justify-between gap-3 px-3 py-2 border-b border-border hover:bg-surface-hover transition-theme">
               <div class="min-w-0">
                 <div class="text-sm text-text truncate">AI 记忆文件</div>
-                <div class="text-xs text-text-muted">系统长期记忆，随对话自动注入</div>
+                <div class="flex items-center gap-1.5">
+                  <span class="text-xs text-text-muted">系统长期记忆</span>
+                  <AppHelp text="随对话自动注入" aria-label="AI 记忆文件说明" :size="12" :z-index="10002" />
+                </div>
               </div>
               <div class="flex items-center gap-2 shrink-0">
                 <button class="row-btn" disabled title="AI 记忆文件不可删除">删除</button>
@@ -121,6 +124,7 @@
 
 <script>
 import axios from 'axios'
+import AppHelp from '../base/AppHelp.vue'
 import ConfirmDialog from '../base/ConfirmDialog.vue'
 import MarkdownEditDialog from './MarkdownEditDialog.vue'
 import ExportChatDialog from './ExportChatDialog.vue'
@@ -132,7 +136,7 @@ import { INVOKE } from '../../electronChannels.js'
 
 export default {
   name: 'DataManageDialog',
-  components: { ConfirmDialog, MarkdownEditDialog, ExportChatDialog, ExportMarkdownDialog },
+  components: { AppHelp, ConfirmDialog, MarkdownEditDialog, ExportChatDialog, ExportMarkdownDialog },
   props: {
     visible: { type: Boolean, default: false },
   },
@@ -316,7 +320,7 @@ export default {
   font-size: 13px;
   line-height: 1;
   padding: 6px 12px;
-  border-radius: 8px;
+  border-radius: var(--radius-control);
   border: 1px solid var(--color-border);
   background: color-mix(in srgb, var(--color-text) 6%, transparent);
   color: var(--color-text);

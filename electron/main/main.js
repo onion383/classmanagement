@@ -1,12 +1,3 @@
-// ===== 桌面组件独立进程分流（必须在任何主应用逻辑之前）=====
-// Explorer 重启会销毁桌面壳 Progman、级联销毁挂在其下的子窗口，Electron 随之原生崩溃；
-// 因此桌面组件跑在独立进程里，由本入口通过 --desktop-widget-host 拉起后直接进入 host 模块，
-// 不再执行单实例锁 / 后端 / 主窗口等主应用逻辑。详见 desktop-widget-host.js 顶部注释。
-if (process.argv.includes('--desktop-widget-host')) {
-  require('../desktop-widget-host')
-  return
-}
-
 // 只保留 main.js 自身还在用的出口：托盘/菜单/通知/快捷键随各自模块迁出后不再需要
 // （Menu/Tray/nativeImage/globalShortcut/Notification → tray.js 等，screen → widget.js）
 const { app, BrowserWindow, ipcMain, shell, protocol, Menu, clipboard } = require('electron')
@@ -167,6 +158,8 @@ backend.registerBackendIpc({
 // 主窗口引用以 getter 注入，开发用「就绪后再导航」加载器以闭包注入
 widget.registerWidgetIpc({
   getMainWindow: () => mainWindow,
+  // 主窗口关闭到托盘后，桌面组件点击面板需要重建主窗口
+  createMainWindow: () => createMainWindow(),
   loadUrlWithRetry: devLoader.loadUrlWithRetry,
 })
 
@@ -520,7 +513,7 @@ webviewGuard.registerWebviewGuard({ getMainWindow: () => mainWindow, isDev })
 
 // 工具箱浮窗相关 IPC（widget-resize / widget-move-to / widget-center / widget-fullscreen /
 //   widget-set-visible / widget-drag-* / widget-context-menu / get-session-widget-visible /
-//   get-main-token 等）已迁至 widget.js 的 registerWidgetIpc
+//   get-session-widget-visible / desktop-widget-* 等）已迁至 widget.js 的 registerWidgetIpc
 
 // 安全通道主密钥：提供给渲染进程（含工具箱/桌面组件）参与前后端 HKDF 派生态。
 ipcMain.handle('get-master-key', () => getMasterKey())

@@ -97,7 +97,12 @@ function performHandshake(clientPubB64) {
 
 function getSessionKey(sessionId) {
   const s = sessions.get(sessionId);
-  return s ? s.key : null;
+  if (!s) return null;
+  // 滑动续期：活跃会话不该按「握手时刻」算 15 分钟就过期。
+  // 否则一个用了几小时的窗口，会在某次**别的进程**握手触发 cleanupSessions() 时被清掉，
+  // 前端随后一直拿到 session-expired（首屏 GET 又不重试）→ 全站 401。
+  s.createdAt = Date.now();
+  return s.key;
 }
 function destroySession(sessionId) { sessions.delete(sessionId); }
 

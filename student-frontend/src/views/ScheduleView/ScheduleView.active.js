@@ -43,9 +43,13 @@ export function useScheduleActive({ API_BASE, DEFAULT_SECTIONS }) {
         } catch (e) { console.error(e); }
 
         this._activeLoadOk = true;
+        this.activeError = false;
       } catch (e) {
-        // 加载失败不再静默：留标记供重进页面时补拉，并给出提示
+        // 加载失败不再静默：留标记供重进页面时补拉，并给出提示。
+        // activeError 是给表格组件的「加载失败态」用的 —— 失败要显示告警 + 重试，
+        // 而不是让用户对着一张空表以为数据丢了。
         this._activeLoadOk = false;
+        this.activeError = true;
         this.notifyError('实行课表加载失败，请稍后重试');
         console.error(e);
       } finally {

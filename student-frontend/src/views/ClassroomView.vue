@@ -14,33 +14,33 @@
     <template v-else>
     <!-- 工具栏按钮 -->
     <div class="mb-4 flex flex-wrap items-center gap-3 opbar">
-      <button @click="openAddDialog" v-preload="loadAddStudentDialog" class="bg-primary hover:bg-primary-hover text-text-inverse px-5 py-2 rounded">
+      <button @click="openAddDialog" v-preload="loadAddStudentDialog" class="bg-primary hover:bg-primary-hover text-text-inverse px-5 py-2 rounded transition-theme">
         ＋ 添加学生
       </button>
       <button @click="searchPanelOpen = !searchPanelOpen" class="btn-search px-4 py-2 rounded flex items-center gap-1.5" title="搜索">
         <IconGlyph name="search" :size="14" tint="current" /> 搜索
       </button>
-      <button @click="refreshStudents" class="bg-text-muted hover:bg-text-secondary text-text-inverse px-4 py-2 rounded flex items-center gap-1 btn-refresh" title="刷新表格">
+      <button @click="refreshStudents" class="bg-text-muted hover:bg-text-secondary text-text-inverse px-4 py-2 rounded flex items-center gap-1 btn-refresh transition-theme" title="刷新表格">
         <IconGlyph name="refresh" :size="14" tint="current" /> 刷新
       </button>
       <button
         @click="onBatchDelete"
         :disabled="selectedCount === 0"
-        class="bg-danger hover:bg-danger-hover text-text-inverse px-4 py-2 rounded disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-1.5"
+        class="bg-danger hover:bg-danger-hover text-text-inverse px-4 py-2 rounded disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-1.5 transition-theme"
       >
         <IconGlyph name="trash" :size="14" tint="current" /> 批量删除 ({{ selectedCount }})
       </button>
-      <button @click="importDialogVisible = true" v-preload="loadImportExcel" class="bg-warning hover:bg-warning-hover text-text-inverse px-4 py-2 rounded flex items-center gap-1.5">
+      <button @click="importDialogVisible = true" v-preload="loadImportExcel" class="bg-warning hover:bg-warning-hover text-text-inverse px-4 py-2 rounded flex items-center gap-1.5 transition-theme">
         <IconGlyph name="download" :size="14" tint="current" /> 从 Excel 导入
       </button>
       <button
         @click="openExport"
         v-preload="loadExportExcel"
-        class="bg-warning hover:bg-warning-hover text-text-inverse px-4 py-2 rounded flex items-center gap-1.5"
+        class="bg-warning hover:bg-warning-hover text-text-inverse px-4 py-2 rounded flex items-center gap-1.5 transition-theme"
       >
         <IconGlyph name="download" :size="14" tint="current" /> 导出 Excel
       </button>
-      <button @click="dedupeDialogVisible = true" v-preload="loadDeduplicateDialog" class="bg-danger hover:bg-danger-hover text-text-inverse px-4 py-2 rounded flex items-center gap-1.5">
+      <button @click="dedupeDialogVisible = true" v-preload="loadDeduplicateDialog" class="bg-danger hover:bg-danger-hover text-text-inverse px-4 py-2 rounded flex items-center gap-1.5 transition-theme">
         <IconGlyph name="search" :size="14" tint="current" /> 去除重复数据
       </button>
     </div>
@@ -85,10 +85,16 @@
       :displayIndexes="displayIndexes"
       :newRow="newRow"
       :protectedColumns="['学号', '姓名']"
+      emptyLabel="学生"
+      :load-error="loadError"
+      error-text="学生名单加载失败"
+      @retry="fetchStudents"
       :sortField="sortField"
       :sortOrder="sortOrder"
       :editingCell="editingCell"
       :search-active="searchActive"
+      :search-no-result="searchNoResult"
+      @clear-search="onClearSearch"
       @contextmenu="openContextMenu"
       @search="onOpenStructuralSearch"
       @toggleSort="toggleSort"
@@ -104,6 +110,7 @@
       @swapColumns="onSwapColumns"
       @selectionChange="onSelectionChange"
       @moveSelectedRows="onMoveSelectedRows"
+      @edit-row="openEditDialog"
     />
 
     <ExportExcel
@@ -138,7 +145,9 @@
       :visible="addDialogVisible"
       :fields="visibleFields"
       :required-field="'姓名'"
-      @confirm="onAddStudent"
+      :title="editingRow ? '修改学生' : '添加学生'"
+      :initial-values="addInitialValues"
+      @confirm="onSubmitStudent"
       @cancel="addDialogVisible = false"
     />
     </template>
@@ -152,7 +161,8 @@ import SearchBar from '../components/base/SearchBar.vue'
 import DynamicTable from '../components/tables/DynamicTable/DynamicTable.vue'
 import Tabs from '../components/base/Tabs.vue'
 import { useTableCRUD } from '../composables/useTableCRUD.js'
-import { useUndoShortcut } from '../composables/useUndo.js'
+import { useUndoShortcut, recordRowDelete } from '../composables/useUndo.js'
+import { undoById } from '../api/undo'
 import { useNotification } from '../composables/useNotification.js'
 import { applyRouteRowFocus } from '../composables/useRowFocus.js'
 
@@ -223,16 +233,17 @@ watch(() => inst.proxy.$route.query.focus, applyFocus)
 // 为了兼容原有模板，创建别名
 const students = table.rows
 const {
-  newRow, editingCell, contextMenu, dialog, columnForm,
+  newRow, editingCell, contextMenu, dialog, columnForm, loadError,
   sortField, sortOrder, searchField, searchKeyword,
   selectedCount, selectedRowKeys,
   importDialogVisible, dedupeDialogVisible,
   displayRows, displayIndexes, visibleFields, allBusinessFields,
+  searchNoResult,
   fetchRows, applyUndoChange, showAlert, showConfirm, onDialogConfirm, onDialogCancel, onDialogExtra,
   startEditCell, saveCell,
   addNewRowAtBottom, cancelNewRow, saveNewRow,
   moveRow,
-  toggleSort, openSearch, closeSearch, openContextMenu,
+  toggleSort, openSearch, closeSearch, clearSearchKeyword, openContextMenu,
   onUpdateNewRow, onBatchDelete,
   onMoveSelectedRows, onSwapRows, onSwapColumns,
   onSelectionChange, onImportData, onDeleteDuplicates
@@ -247,7 +258,7 @@ watch(() => dialog.value.visible, v => { if (v) dialogMounted.value = true })
 watch(() => contextMenu.value.visible, v => { if (v) contextMenuMounted.value = true })
 
 const fetchStudents = fetchRows
-const { success: notifySuccess, error: notifyError } = useNotification()
+const { success: notifySuccess, error: notifyError, undoable: notifyUndo } = useNotification()
 
 // 搜索面板显隐（点工具「搜索」按钮弹出；表头🔍 触发的列搜索也用同一面板）
 const searchPanelOpen = ref(false)
@@ -262,6 +273,12 @@ const onPickSearchField = name => {
   openSearch(name)
 }
 const onOpenStructuralSearch = onPickSearchField
+
+// 表格空态里的「清除搜索」：清掉关键字、恢复全表。
+// 保留搜索列的选择（不清 searchField），用户可以直接换个词再搜，不用重新选列。
+const onClearSearch = () => {
+  clearSearchKeyword()
+}
 
 // 工具栏搜索下拉的可选列：剔除 id / position 等结构性字段，仅保留业务字段
 const searchableFields = computed(() =>
@@ -284,20 +301,41 @@ async function refreshStudents() {
   } catch (e) { /* 错误已在 fetchRows 内部处理 */ }
 }
 
+// 弹窗处于编辑模式时持有的那一行；null = 新增模式。
+// 弹窗共用一套表单，差异全在这里：预填该行、标题改「修改学生」、提交走 PUT /:id。
+const editingRow = ref(null)
+const addInitialValues = computed(() => (editingRow.value ? { ...editingRow.value } : {}))
+
 function openAddDialog() {
   // 打开弹窗前，若存在未保存的内联新行先取消，避免两套新增状态并存
   if (newRow.value) newRow.value = null
+  editingRow.value = null
   addDialogVisible.value = true
 }
 
-async function onAddStudent(data) {
+// 操作列「修改」：打开同一个弹窗，只是预填 + 走更新分支
+function openEditDialog(row) {
+  if (newRow.value) newRow.value = null
+  editingRow.value = row
+  addDialogVisible.value = true
+}
+
+async function onSubmitStudent(data) {
+  const isEdit = !!editingRow.value
   try {
-    await axios.post(`${API_BASE}/students`, data)
-    addDialogVisible.value = false
-    await fetchStudents()
-    notifySuccess('已添加学生')
+    if (isEdit) {
+      await axios.put(`${API_BASE}/students/${editingRow.value.id}`, data)
+      addDialogVisible.value = false
+      await fetchStudents()
+      notifySuccess('已保存修改')
+    } else {
+      await axios.post(`${API_BASE}/students`, data)
+      addDialogVisible.value = false
+      await fetchStudents()
+      notifySuccess('已添加学生')
+    }
   } catch (err) {
-    notifyError(err.response?.data?.error || '添加失败')
+    notifyError(err.response?.data?.error || (isEdit ? '保存失败' : '添加失败'))
   }
 }
 
@@ -324,15 +362,29 @@ async function deleteStudent(id) {
   }
 
   if (!rel.total) {
-    showConfirm('确定删除该学生吗？', async () => {
-      try {
-        await axios.delete(`${API_BASE}/students/${id}`)
-        await finish()
+    // 无关联记录的学生：直接删 + 撤销条，不弹二次确认。删除可撤销（recordRowDelete 存整行，
+    // 撤销走后端真恢复），比弹窗更顺；弹窗还会正好挡住用户要确认的那一行。
+    // 有关联的那种情况（下面那段）仍然保留弹窗 —— 级联删除要讲清影响，撤销成本也高。
+    const row = students.value.find(s => s.id === id)
+    try {
+      // 先开行动画窗：必须在数据变化之前，否则那一行已经从列表里消失、离场动画播不出来
+      dynamicTable.value?.beginRowsAnimWindow()
+      await axios.delete(`${API_BASE}/students/${id}`)
+      await finish()
+      // 删完再登记撤销；拿到 id 后走 undoById，不依赖 performUndo 的「当前激活表」
+      const undoId = row ? await recordRowDelete('students', row) : null
+      if (undoId) {
+        notifyUndo(`已删除学生「${row['姓名']}」`, async () => {
+          dynamicTable.value?.beginRowsAnimWindow() // 恢复也是行数变化，同样给行出入动画
+          await undoById(undoId)
+          await finish()
+        })
+      } else {
         notifySuccess('已删除学生')
-      } catch (err) {
-        showAlert(err.response?.data?.error || '删除失败')
       }
-    })
+    } catch (err) {
+      showAlert(err.response?.data?.error || '删除失败')
+    }
     return
   }
 
@@ -347,6 +399,7 @@ async function deleteStudent(id) {
 
   showConfirm(msg, async () => {
     try {
+      dynamicTable.value?.beginRowsAnimWindow() // 级联删除同样要行离场动画
       await axios.post(`${API_BASE}/students/${id}/delete-with-relations`, {
         relations: { leave: true, score: true, seat: true, duty: true }
       })
@@ -359,6 +412,7 @@ async function deleteStudent(id) {
     extraText: '仅删学生',
     onExtra: async () => {
       try {
+        dynamicTable.value?.beginRowsAnimWindow()
         await axios.delete(`${API_BASE}/students/${id}`)
         await finish()
         notifySuccess('已删除学生（保留关联记录）')

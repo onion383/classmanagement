@@ -202,6 +202,7 @@
           <!-- ===== 主题选择 ===== -->
           <template v-else-if="current === 'theme'">
             <div class="pane">
+              <!-- 列表来自 store 的 allThemes，已剔除被暂时屏蔽的主题（见 stores/theme.js 的 HIDDEN_THEME_IDS） -->
               <div class="theme-grid">
                 <button
                   v-for="t in themeStore.allThemes"
@@ -227,13 +228,13 @@
                 </div>
                 <span class="mode-hint">{{ nightSupported ? '当前主题支持夜间配色' : '当前主题不支持夜间配色，固定为日间' }}</span>
               </div>
-              <label class="anim-toggle">
-                <input type="checkbox" :checked="themeStore.animationsEnabled" @change="onAnimationsChange" />
+              <div class="anim-toggle">
                 <span class="anim-toggle-text">
                   <span class="anim-toggle-label">启用动画效果</span>
                   <span class="anim-toggle-desc">关闭后禁用全部过渡与动画（含窗口淡入淡出、弹窗与列表动效）</span>
                 </span>
-              </label>
+                <AppSwitch :model-value="themeStore.animationsEnabled" aria-label="启用动画效果" @change="onAnimationsChange" />
+              </div>
               <p class="f-hint">默认使用毛玻璃主题，点击即可实时预览效果。</p>
             </div>
           </template>
@@ -326,6 +327,7 @@ import { waitForBackendReady } from '../../utils/backendReady'
 import { SEND, INVOKE, RECEIVE } from '../../electronChannels.js'
 import { storeMediaToken } from '../../utils/apiUrl'
 import AppSelect from '../../components/base/AppSelect.vue'
+import AppSwitch from '../../components/base/AppSwitch.vue'
 import ViewSwitch from '../../components/base/ViewSwitch.vue'
 import ConfirmDialog from '../../components/base/ConfirmDialog.vue'
 import { Sun, Moon } from '@lucide/vue'
@@ -357,7 +359,7 @@ const SECURITY_LEVELS = [
 
 export default {
   name: 'Setup',
-  components: { AppSelect, ViewSwitch, ConfirmDialog },
+  components: { AppSelect, AppSwitch, ViewSwitch, ConfirmDialog },
   props: {
     // 首屏画面，由 src/setup/main.js 依据主进程 launch-plan / URL 参数解析后传入
     initialScreen: { type: String, default: 'welcome' },
@@ -528,8 +530,8 @@ export default {
       this.themeStore.setMode(value)
     },
     // 动画效果总开关：立即生效
-    onAnimationsChange(e) {
-      this.themeStore.setAnimationsEnabled(e.target.checked)
+    onAnimationsChange(value) {
+      this.themeStore.setAnimationsEnabled(!!value)
     },
     // ---------- 预热进度 ----------
     applyWarmup(w) {
@@ -884,7 +886,7 @@ export default {
   min-width: 132px;
   padding: 0 22px;
   font-size: 14px;
-  border-radius: 8px;
+  border-radius: var(--radius-control);
   cursor: pointer;
   transition: background-color .12s ease, border-color .12s ease;
   -webkit-app-region: no-drag;
@@ -923,7 +925,7 @@ export default {
   backdrop-filter: blur(14px) saturate(1.15);
   -webkit-backdrop-filter: blur(14px) saturate(1.15);
   border: 1px solid rgba(255, 255, 255, 0.35);
-  border-radius: 12px;
+  border-radius: var(--radius-surface);
   box-shadow: 0 2px 10px rgba(15, 23, 42, 0.06);
 }
 
@@ -965,7 +967,7 @@ export default {
   align-items: center;
   gap: 10px;
   padding: 8px 10px;
-  border-radius: 8px;
+  border-radius: var(--radius-control);
   font-size: 15px;
   color: var(--color-text-muted);
 }
@@ -1080,7 +1082,7 @@ export default {
   color: var(--color-text);
   background: var(--color-bg);
   border: 1px solid var(--color-border);
-  border-radius: 8px;
+  border-radius: var(--radius-control);
   outline: none;
   transition: border-color 0.15s ease, box-shadow 0.15s ease;
 }
@@ -1098,7 +1100,7 @@ export default {
   color: var(--color-text-secondary);
   background: var(--color-bg);
   border: 1px solid var(--color-border);
-  border-radius: 8px;
+  border-radius: var(--radius-control);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -1158,7 +1160,7 @@ export default {
 .notice-item {
   padding: 12px 14px;
   border: 1px solid var(--color-border);
-  border-radius: 10px;
+  border-radius: var(--radius-control);
   background: var(--color-bg);
 }
 .notice-title {
@@ -1184,7 +1186,7 @@ export default {
   color: var(--color-text);
   background: var(--color-bg);
   border: 1px solid var(--color-border);
-  border-radius: 10px;
+  border-radius: var(--radius-control);
   word-break: break-all;
   user-select: text;
 }
@@ -1207,7 +1209,7 @@ export default {
   gap: 6px;
   padding: 9px;
   border: 1px solid var(--color-border);
-  border-radius: 10px;
+  border-radius: var(--radius-control);
   background: var(--color-bg);
   cursor: pointer;
   transition: border-color 0.15s ease, background-color 0.15s ease;
@@ -1220,7 +1222,7 @@ export default {
   position: relative;
   display: block;
   height: 52px;
-  border-radius: 6px;
+  border-radius: var(--radius-control);
   border: 1px solid var(--color-border);
   overflow: hidden;
 }
@@ -1230,7 +1232,7 @@ export default {
   top: 5px;
   bottom: 5px;
   width: 26%;
-  border-radius: 4px;
+  border-radius: var(--radius-xs);
   background: var(--tp-side, var(--color-surface));
   opacity: 0.95;
 }
@@ -1240,7 +1242,7 @@ export default {
   right: 5px;
   top: 5px;
   height: 10px;
-  border-radius: 4px;
+  border-radius: var(--radius-xs);
   background: var(--tp-bar, var(--color-primary));
   opacity: 0.9;
 }
@@ -1250,7 +1252,7 @@ export default {
   right: 5px;
   top: 20px;
   bottom: 5px;
-  border-radius: 4px;
+  border-radius: var(--radius-xs);
   background: var(--color-surface);
   opacity: 0.75;
 }
@@ -1282,17 +1284,18 @@ export default {
 .anim-toggle {
   display: flex;
   align-items: center;
+  justify-content: space-between;
   gap: 10px;
   padding: 10px 12px;
   border: 1px solid var(--color-border);
-  border-radius: 10px;
+  border-radius: var(--radius-control);
   background: var(--color-bg);
-  cursor: pointer;
 }
 .anim-toggle-text {
   display: flex;
   flex-direction: column;
   gap: 2px;
+  min-width: 0;
 }
 .anim-toggle-label {
   font-size: 14px;
@@ -1383,7 +1386,7 @@ export default {
 .btn-ghost,
 .btn-info {
   padding: 8px 18px;
-  border-radius: 8px;
+  border-radius: var(--radius-control);
   font-size: 14px;
   font-weight: 500;
   cursor: pointer;

@@ -22,8 +22,9 @@ export default {
   align-items: center;
   justify-content: center;
   gap: 12px;
-  /* 与同位置的表格容器保持同样的圆角与描边，避免切换时视觉跳变 */
-  border-radius: 16px;
+  /* 与同位置的表格容器保持同样的圆角与描边，避免切换时视觉跳变。
+     故取 --radius-table（表格容器档），而不是另选一档。 */
+  border-radius: var(--radius-table);
   border: 1px solid var(--color-border, #e5e7eb);
 }
 .snapshot-empty-icon {

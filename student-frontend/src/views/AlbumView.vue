@@ -30,7 +30,7 @@
       <button v-preload="loadNewAlbumDialog" @click="openNewAlbum" class="bg-primary hover:bg-primary-hover text-text-inverse px-4 py-2 rounded transition-theme flex items-center gap-1.5">
         <IconGlyph name="folder" :size="14" tint="current" /> 新建相册
       </button>
-      <button v-preload="loadAlbumManageDialog" @click="openManage" class="bg-text-muted hover:bg-text-secondary text-text-inverse px-4 py-2 rounded flex items-center gap-1.5 btn-refresh">
+      <button v-preload="loadAlbumManageDialog" @click="openManage" class="bg-text-muted hover:bg-text-secondary text-text-inverse px-4 py-2 rounded flex items-center gap-1.5 btn-refresh transition-theme">
         <IconGlyph name="settings" :size="14" tint="current" /> 管理相册
       </button>
       <button v-preload="loadAlbumTaskDialog" @click="openTask" class="bg-warning hover:bg-warning-hover text-text-inverse px-4 py-2 rounded transition-theme flex items-center gap-1.5">
@@ -40,7 +40,7 @@
       <button
         @click="toggleSelectMode"
         :disabled="activeTab === 'gallery' ? albums.length === 0 : !activeAlbum"
-        class="bg-text-muted hover:bg-text-secondary text-text-inverse px-4 py-2 rounded flex items-center gap-1.5 btn-refresh disabled:opacity-50"
+        class="bg-text-muted hover:bg-text-secondary text-text-inverse px-4 py-2 rounded flex items-center gap-1.5 btn-refresh disabled:opacity-50 transition-theme"
         title="进入 / 退出多选（时间轴选照片，相册视图选虚拟相册合并）"
       >
         <IconGlyph name="check" :size="14" tint="current" /> 多选
@@ -49,7 +49,7 @@
         <IconGlyph name="download" :size="14" tint="current" /> 导出相册索引
       </button>
       <!-- 刷新：从标题栏移到菜单栏，增量更新当前相册的照片索引 -->
-      <button @click="refreshAll" :disabled="busyScan || !activeAlbumId" class="bg-text-muted hover:bg-text-secondary text-text-inverse px-4 py-2 rounded flex items-center gap-1.5 btn-refresh disabled:opacity-50" :title="activeAlbumIsVirtual ? '按已有索引更新拍摄时间与缩略图（不遍历文件夹）' : '增量更新当前相册的照片索引'">
+      <button @click="refreshAll" :disabled="busyScan || !activeAlbumId" class="bg-text-muted hover:bg-text-secondary text-text-inverse px-4 py-2 rounded flex items-center gap-1.5 btn-refresh disabled:opacity-50 transition-theme" :title="activeAlbumIsVirtual ? '按已有索引更新拍摄时间与缩略图（不遍历文件夹）' : '增量更新当前相册的照片索引'">
         <IconGlyph name="refresh" :size="14" tint="current" /> {{ busyScan ? '刷新中…' : '刷新' }}
       </button>
       <!-- 视图切换：紧跟「刷新」右侧并右对齐 -->
@@ -283,11 +283,11 @@
     <Transition name="preview">
     <div v-if="viewer" class="fixed inset-0 bg-black/90 z-[10004] flex flex-col" @click.self="closeViewer">
       <!-- 关闭按钮（右上角） -->
-      <button @click="closeViewer" class="z-20 w-10 h-10 rounded-full bg-white/10 hover:bg-white/25 text-white text-lg flex items-center justify-center" style="position:absolute!important;top:16px!important;right:16px!important;" title="关闭">✕</button>
+      <button @click="closeViewer" class="z-20 w-10 h-10 rounded-full bg-white/10 hover:bg-white/25 text-white text-lg flex items-center justify-center transition-theme" style="position:absolute!important;top:16px!important;right:16px!important;" title="关闭">✕</button>
       <!-- 上一张（左侧边缘居中） -->
-      <button @click="prevPhoto" class="z-20 w-11 h-11 rounded-full bg-white/10 hover:bg-white/25 text-white text-xl flex items-center justify-center" style="position:absolute!important;left:16px!important;top:50%!important;transform:translateY(-50%)!important;" title="上一张">‹</button>
+      <button @click="prevPhoto" class="z-20 w-11 h-11 rounded-full bg-white/10 hover:bg-white/25 text-white text-xl flex items-center justify-center transition-theme" style="position:absolute!important;left:16px!important;top:50%!important;transform:translateY(-50%)!important;" title="上一张">‹</button>
       <!-- 下一张（右侧边缘居中） -->
-      <button @click="nextPhoto" class="z-20 w-11 h-11 rounded-full bg-white/10 hover:bg-white/25 text-white text-xl flex items-center justify-center" style="position:absolute!important;right:16px!important;top:50%!important;transform:translateY(-50%)!important;" title="下一张">›</button>
+      <button @click="nextPhoto" class="z-20 w-11 h-11 rounded-full bg-white/10 hover:bg-white/25 text-white text-xl flex items-center justify-center transition-theme" style="position:absolute!important;right:16px!important;top:50%!important;transform:translateY(-50%)!important;" title="下一张">›</button>
       <!-- 视频播放区 -->
       <div v-if="isVideo(viewer)" class="flex-1 flex items-center justify-center p-6 overflow-hidden preview-media">
         <video
@@ -315,8 +315,8 @@
       <div class="flex items-center justify-center gap-3 p-4 bg-black/40 flex-wrap">
         <!-- 视频控制 -->
         <template v-if="isVideo(viewer)">
-          <button @click="togglePlay" class="w-10 h-10 rounded-full bg-white/10 hover:bg-white/20 text-white text-sm" :title="playing ? '暂停' : '播放'">{{ playing ? '⏸' : '▶' }}</button>
-          <button @click="skip(-10)" class="h-10 px-3 rounded-full bg-white/10 hover:bg-white/20 text-white text-xs" title="后退 10 秒">« -10s</button>
+          <button @click="togglePlay" class="w-10 h-10 rounded-full bg-white/10 hover:bg-white/20 text-white text-sm transition-theme" :title="playing ? '暂停' : '播放'">{{ playing ? '⏸' : '▶' }}</button>
+          <button @click="skip(-10)" class="h-10 px-3 rounded-full bg-white/10 hover:bg-white/20 text-white text-xs transition-theme" title="后退 10 秒">« -10s</button>
           <div class="flex items-center gap-2 min-w-[260px] max-w-full">
             <span class="text-white text-xs tabular-nums w-12 text-right">{{ fmtTime(currentTime) }}</span>
             <input
@@ -332,23 +332,23 @@
             />
             <span class="text-white text-xs tabular-nums w-12">{{ fmtTime(duration) }}</span>
           </div>
-          <button @click="skip(10)" class="h-10 px-3 rounded-full bg-white/10 hover:bg-white/20 text-white text-xs" title="前进 10 秒">+10s »</button>
+          <button @click="skip(10)" class="h-10 px-3 rounded-full bg-white/10 hover:bg-white/20 text-white text-xs transition-theme" title="前进 10 秒">+10s »</button>
           <AppSelect v-model="playbackRate" @change="changeRate" class="w-20" title="播放倍数" :options="[{ value: 0.5, label: '0.5x' }, { value: 0.75, label: '0.75x' }, { value: 1, label: '1x' }, { value: 1.25, label: '1.25x' }, { value: 1.5, label: '1.5x' }, { value: 2, label: '2x' }]" />
           <span class="text-white/30">|</span>
         </template>
         <!-- 图片控制 -->
         <template v-else>
-          <button @click="rotate(-1)" class="w-10 h-10 rounded-full bg-white/10 hover:bg-white/20 text-white text-sm">⟲</button>
-          <button @click="rotate(1)" class="w-10 h-10 rounded-full bg-white/10 hover:bg-white/20 text-white text-sm">⟳</button>
-          <button @click="zoomOut" class="w-10 h-10 rounded-full bg-white/10 hover:bg-white/20 text-white">−</button>
+          <button @click="rotate(-1)" class="w-10 h-10 rounded-full bg-white/10 hover:bg-white/20 text-white text-sm transition-theme">⟲</button>
+          <button @click="rotate(1)" class="w-10 h-10 rounded-full bg-white/10 hover:bg-white/20 text-white text-sm transition-theme">⟳</button>
+          <button @click="zoomOut" class="w-10 h-10 rounded-full bg-white/10 hover:bg-white/20 text-white transition-theme">−</button>
           <span class="text-white text-xs w-14 text-center">{{ Math.round(zoom * 100) }}%</span>
-          <button @click="zoomIn" class="w-10 h-10 rounded-full bg-white/10 hover:bg-white/20 text-white">＋</button>
-          <button @click="resetView" class="px-3 h-10 rounded-full bg-white/10 hover:bg-white/20 text-white text-xs">复位</button>
+          <button @click="zoomIn" class="w-10 h-10 rounded-full bg-white/10 hover:bg-white/20 text-white transition-theme">＋</button>
+          <button @click="resetView" class="px-3 h-10 rounded-full bg-white/10 hover:bg-white/20 text-white text-xs transition-theme">复位</button>
           <span class="text-white/30">|</span>
         </template>
-        <button @click="saveAs(viewer)" class="px-4 h-10 rounded-full bg-white/10 hover:bg-white/20 text-white text-sm">另存</button>
-        <button @click="openFolderViewer" class="px-4 h-10 rounded-full bg-white/10 hover:bg-white/20 text-white text-sm">打开文件夹</button>
-        <button @click="deletePhoto(viewer)" class="px-4 h-10 rounded-full bg-danger hover:bg-danger/80 text-white text-sm">删除（回收站）</button>
+        <button @click="saveAs(viewer)" class="px-4 h-10 rounded-full bg-white/10 hover:bg-white/20 text-white text-sm transition-theme">另存</button>
+        <button @click="openFolderViewer" class="px-4 h-10 rounded-full bg-white/10 hover:bg-white/20 text-white text-sm transition-theme">打开文件夹</button>
+        <button @click="deletePhoto(viewer)" class="px-4 h-10 rounded-full bg-danger hover:bg-danger/80 text-white text-sm transition-theme">删除（回收站）</button>
       </div>
     </div>
     </Transition>

@@ -14,8 +14,8 @@
               <div class="text-xs text-text-secondary">{{ rec._range }}</div>
             </div>
             <div class="flex gap-2 shrink-0">
-              <button @click="$emit('not', rec)" class="bg-surface-hover border border-border px-3 py-1 rounded text-xs text-text cursor-pointer hover:bg-border">未返校</button>
-              <button @click="$emit('ret', rec)" class="bg-success hover:bg-green-700 text-text-inverse px-3 py-1 rounded text-xs border-none cursor-pointer">已经返校并销假</button>
+              <button @click="$emit('not', rec)" class="bg-surface-hover border border-border px-3 py-1 rounded text-xs text-text cursor-pointer hover:bg-border transition-theme">未返校</button>
+              <button @click="$emit('ret', rec)" class="bg-success hover:bg-green-700 text-text-inverse px-3 py-1 rounded text-xs border-none cursor-pointer transition-theme">已经返校并销假</button>
             </div>
           </div>
         </div>

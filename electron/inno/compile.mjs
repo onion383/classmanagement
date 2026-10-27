@@ -50,23 +50,45 @@ function findFromRegistry() {
   return null
 }
 
+// 常见安装目录：系统盘 Program Files 之外，也覆盖自定义盘符（如 D:\software）里的
+// 便携/手动解压安装——这类安装不会写注册表，不能只靠 findFromRegistry。
+function findFromCommonDirs() {
+  const roots = []
+  const addRoot = (dir) => {
+    if (dir && existsSync(dir) && !roots.includes(dir)) roots.push(dir)
+  }
+  addRoot(process.env.ProgramFiles)
+  addRoot(process.env['ProgramFiles(x86)'])
+  if (process.env.LOCALAPPDATA) addRoot(path.join(process.env.LOCALAPPDATA, 'Programs'))
+  if (process.platform === 'win32') {
+    for (const letter of 'CDEFGHIJKLMNOPQRSTUVWXYZ') {
+      const drive = `${letter}:\\`
+      if (!existsSync(drive)) continue
+      addRoot(path.join(drive, 'Program Files'))
+      addRoot(path.join(drive, 'Program Files (x86)'))
+      addRoot(path.join(drive, 'software'))
+    }
+  }
+  const candidates = []
+  for (const root of roots) {
+    // 7 优先于 6（两者都能编译当前脚本）
+    candidates.push(path.join(root, 'Inno Setup 7', 'ISCC.exe'))
+    candidates.push(path.join(root, 'Inno Setup 6', 'ISCC.exe'))
+  }
+  for (const c of candidates) {
+    if (existsSync(c)) return c
+  }
+  return null
+}
+
 function resolveIscc() {
   if (process.env.INNO_SETUP_ISCC && existsSync(process.env.INNO_SETUP_ISCC)) {
     return process.env.INNO_SETUP_ISCC
   }
   const onPath = findOnPath()
   if (onPath) return onPath
-  const pf = process.env.ProgramFiles || 'C:\\Program Files'
-  const pf86 = process.env['ProgramFiles(x86)'] || 'C:\\Program Files (x86)'
-  const candidates = [
-    path.join(pf86, 'Inno Setup 6', 'ISCC.exe'),
-    path.join(pf, 'Inno Setup 6', 'ISCC.exe'),
-    path.join(pf86, 'Inno Setup 7', 'ISCC.exe'),
-    path.join(pf, 'Inno Setup 7', 'ISCC.exe'),
-  ]
-  for (const c of candidates) {
-    if (existsSync(c)) return c
-  }
+  const common = findFromCommonDirs()
+  if (common) return common
   return findFromRegistry()
 }
 

@@ -2,12 +2,36 @@ const express = require('express');
 const router = express.Router();
 const { db } = require('../db');
 
+// 桌面小组件「常用软件」最多 8 个（4 列 × 2 行）。
+// 渲染层会隐藏多余的添加入口，这里再兜一层：即使直接调接口也写不进第 9 个。
+const MAX_DESKTOP_APPS = 8;
+
+// 读取并裁剪已存列表：历史数据若超过 8 个，也按上限返回，避免界面被撑出第三行
+function parseStoredApps(raw) {
+  try {
+    const arr = JSON.parse(raw || '[]');
+    return Array.isArray(arr) ? arr.slice(0, MAX_DESKTOP_APPS) : [];
+  } catch (_) {
+    return [];
+  }
+}
+
+// 写入前的统一清洗：字段类型收敛 + 丢弃空路径 + 截断到上限
+function normalizeApps(list) {
+  if (!Array.isArray(list)) return null;
+  return list.map((it, index) => ({
+    id: String(it?.id || `app-${Date.now()}-${index}`),
+    name: String(it?.name ?? '').slice(0, 30),
+    path: String(it?.path ?? '').trim(),
+    icon: typeof it?.icon === 'string' ? it.icon : '',
+  })).filter((it) => it.path).slice(0, MAX_DESKTOP_APPS);
+}
+
 // 获取小组件设置
 router.get('/', (req, res) => {
   try {
     const settings = db.prepare('SELECT * FROM widget_settings WHERE id = 1').get();
-    let desktopApps = [];
-    try { desktopApps = JSON.parse(settings.desktop_apps || '[]'); } catch (_) { desktopApps = []; }
+    const desktopApps = parseStoredApps(settings.desktop_apps);
     res.json({
       success: true,
       data: {
@@ -26,13 +50,10 @@ router.get('/', (req, res) => {
 router.put('/', (req, res) => {
   try {
     const { toolboxEnabled, noteSavePath, screenshotSavePath, desktopApps } = req.body;
-    const appsJson = Array.isArray(desktopApps)
-      ? JSON.stringify(desktopApps.map((it) => ({
-          id: String(it?.id || ''),
-          name: String(it?.name ?? '').slice(0, 30),
-          path: String(it?.path ?? '').trim(),
-          icon: typeof it?.icon === 'string' ? it.icon : '',
-        })))
+    // 只传了其他字段（如工具箱开关）时保持原列表不动；传了列表才按上限重写
+    const normalized = normalizeApps(desktopApps);
+    const appsJson = normalized
+      ? JSON.stringify(normalized)
       : db.prepare('SELECT desktop_apps FROM widget_settings WHERE id = 1').get()?.desktop_apps || '[]';
     db.prepare(`
       UPDATE widget_settings SET
@@ -57,9 +78,7 @@ router.put('/', (req, res) => {
 router.get('/apps', (req, res) => {
   try {
     const settings = db.prepare('SELECT desktop_apps FROM widget_settings WHERE id = 1').get();
-    let apps = [];
-    try { apps = JSON.parse(settings.desktop_apps || '[]'); } catch (_) { apps = []; }
-    res.json({ success: true, data: apps });
+    res.json({ success: true, data: parseStoredApps(settings.desktop_apps) });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -67,13 +86,8 @@ router.get('/apps', (req, res) => {
 
 router.put('/apps', (req, res) => {
   try {
-    const list = Array.isArray(req.body?.desktopApps) ? req.body.desktopApps : [];
-    const clean = list.map((it, index) => ({
-      id: String(it?.id || `app-${Date.now()}-${index}`),
-      name: String(it?.name ?? '').slice(0, 30),
-      path: String(it?.path ?? '').trim(),
-      icon: typeof it?.icon === 'string' ? it.icon : '',
-    })).filter((it) => it.path);
+    // 超出 8 个的部分直接丢弃：前端已阻止继续添加，这里保证接口层同样不可突破
+    const clean = normalizeApps(req.body?.desktopApps) || [];
     db.prepare('UPDATE widget_settings SET desktop_apps = ? WHERE id = 1').run(JSON.stringify(clean));
     res.json({ success: true, data: clean });
   } catch (err) {

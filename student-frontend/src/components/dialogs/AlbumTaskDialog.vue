@@ -22,11 +22,11 @@
                 </div>
                 <span class="text-xs text-text-muted tabular-nums w-[68px] text-right">{{ allProgressText }}</span>
                 <button @click="togglePauseAll" class="task-btn bg-surface text-text border border-border">{{ allPaused ? '继续' : '暂停' }}</button>
-                <button @click="stopAll" class="task-btn bg-danger hover:bg-danger/80 text-text-inverse">停止</button>
+                <button @click="stopAll" class="task-btn bg-danger hover:bg-danger/80 text-text-inverse transition-theme">停止</button>
               </template>
               <template v-else>
-                <button @click="enqueueAll('incremental')" class="task-btn bg-info hover:bg-info-hover text-text-inverse">增量更新</button>
-                <button @click="enqueueAll('full')" class="task-btn bg-warning hover:bg-warning/80 text-text-inverse">全量更新</button>
+                <button @click="enqueueAll('incremental')" class="task-btn bg-info hover:bg-info-hover text-text-inverse transition-theme">增量更新</button>
+                <button @click="enqueueAll('full')" class="task-btn bg-warning hover:bg-warning/80 text-text-inverse transition-theme">全量更新</button>
                 <button @click="stopAll" disabled class="task-btn bg-surface text-text border border-border disabled:opacity-40 disabled:cursor-not-allowed">停止</button>
               </template>
             </div>
@@ -53,11 +53,11 @@
                   {{ taskOf(a.id).scanned }} / {{ taskOf(a.id).total || '?' }}
                 </span>
                 <button @click="togglePause(a.id)" :disabled="taskOf(a.id).cancelled" class="task-btn bg-surface text-text border border-border disabled:opacity-50">{{ taskOf(a.id).paused ? '继续' : '暂停' }}</button>
-                <button @click="stopRow(a.id)" :disabled="taskOf(a.id).cancelled" class="task-btn bg-danger hover:bg-danger/80 text-text-inverse disabled:opacity-50">停止</button>
+                <button @click="stopRow(a.id)" :disabled="taskOf(a.id).cancelled" class="task-btn bg-danger hover:bg-danger/80 text-text-inverse disabled:opacity-50 transition-theme">停止</button>
               </template>
               <template v-else>
-                <button @click="enqueue([{ albumId: a.id, mode: 'incremental' }])" class="task-btn bg-info hover:bg-info-hover text-text-inverse">增量更新</button>
-                <button @click="enqueue([{ albumId: a.id, mode: 'full' }])" class="task-btn bg-warning hover:bg-warning/80 text-text-inverse">全量更新</button>
+                <button @click="enqueue([{ albumId: a.id, mode: 'incremental' }])" class="task-btn bg-info hover:bg-info-hover text-text-inverse transition-theme">增量更新</button>
+                <button @click="enqueue([{ albumId: a.id, mode: 'full' }])" class="task-btn bg-warning hover:bg-warning/80 text-text-inverse transition-theme">全量更新</button>
                 <button @click="stopRow(a.id)" :disabled="!isQueued(a.id)" class="task-btn bg-surface text-text border border-border disabled:opacity-40 disabled:cursor-not-allowed">停止</button>
               </template>
             </div>
@@ -299,7 +299,7 @@ onBeforeUnmount(stopPolling)
   padding: 4px 0;
   font-size: 12px;
   line-height: 1.4;
-  border-radius: 6px;
+  border-radius: var(--radius-control);
   text-align: center;
   white-space: nowrap;
   transition: background-color 0.2s ease;

@@ -108,12 +108,47 @@
   --shadow-lg: 0 10px 15px rgba(0, 0, 0, 0.1);
   --shadow-card: 0 1px 3px rgba(0, 0, 0, 0.1);
 
-  /* 圆角 */
+  /* ==================== 圆角体系 ====================
+     三层结构，各主题只改「尺寸档」数值，角色别名与同心关系保持全局一致：
+
+     ① 尺寸档（size scale）：xs → sm → md → lg → xl → 2xl → 3xl → full
+        严格单调递增（xs < sm < md < lg < xl < 2xl < 3xl），任何主题都不得倒挂。
+        Tailwind 的 rounded-* 工具类全部桥接到这一档（见 styles/index.css 的 @theme），
+        所以 rounded-lg 永远小于 rounded-xl —— 之前 xl/2xl/3xl 没桥接，
+        导致 rounded-xl 恒为 Tailwind 默认的 12px，在 glass2 下反而小于 rounded-lg(22px)。
+
+     ② 角色别名（role）：按用途命名，组件只引用角色，不直接写数值。
+        control 控件（按钮/输入框） · card 卡片 · surface 弹窗/抽屉 · table 表格容器
+        角色 → 尺寸档的映射也由各主题决定（极简主题全部压到 0 = 直角）。
+
+     ③ 同心对（concentric）：内层圆角 = 外层圆角 − 内外间距，
+        使内外圆弧圆心落在同一点（视觉上是一条连续的弧，而非两条错开的弧）。
+        用 calc() 表达，间距变化时内层自动跟随，不需要手工配对。 */
+  --radius-xs: 2px;
   --radius-sm: 4px;
-  --radius-md: 8px;
-  --radius-lg: 12px;
-  --radius-card: 8px;
+  --radius-md: 6px;
+  --radius-lg: 8px;
+  --radius-xl: 12px;
+  --radius-2xl: 16px;
+  --radius-3xl: 24px;
   --radius-full: 9999px;
+
+  /* Tailwind bare `rounded`（无后缀）走 --radius 变量，这里桥到控件档。
+     785 处 `rounded` 用法（按钮、输入框、徽标…）因此也能随主题变化。 */
+  --radius: var(--radius-control);
+
+  /* 角色别名 → 尺寸档。极简主题（theme-minimal.css）把这几项全部覆盖为 0。
+     base 是「中性」主题：控件 6px、卡片 8px、弹窗 12px、表格 12px。
+     表格与弹窗同取 xl（12px），因为基础主题下表格容器与弹窗卡片是同一视觉层级，
+     且表格贴边嵌套在卡片内时，圆角一致才不会露出错位的双弧。 */
+  --radius-control: var(--radius-md);   /* 按钮、输入框、下拉、复选框 */
+  --radius-card: var(--radius-lg);      /* 卡片、内嵌面板、统计块 */
+  --radius-surface: var(--radius-xl);   /* 弹窗、抽屉、悬浮面板 */
+  --radius-table: var(--radius-xl);     /* 表格容器（.table-scroll-wrapper / .grid-view-container） */
+
+  /* 同心间距：外层圆角减去这个值 = 内层圆角。
+     12px 的间距用在「卡片内缩 12px 处放圆角块」这种典型嵌套上。 */
+  --radius-concentric-gap: 12px;
 }
 
 /* ========== 无边框透明窗口（窗外亚克力）适配：基础主题 ==========

@@ -70,11 +70,25 @@ html, body {
   --shadow-lg: var(--shadow-lg);
   --shadow-card: var(--shadow-card);
 
+  /* 圆角：把 Tailwind 的 rounded-* 工具类桥接到主题的尺寸档。
+     写法是自引用（--radius-lg: var(--radius-lg)）：Tailwind 把它当成
+     「引用同名 CSS 变量」而非字面量，产出 .rounded-lg{border-radius:var(--radius-lg)}，
+     于是该工具类在运行时取 :root 上的主题值 —— 换主题时圆角随之改变。
+     注意必须覆盖**全部**档位（xs…3xl）：漏掉任何一档，该档就会退回 Tailwind
+     默认的 rem 值（如 rounded-xl = .75rem = 12px），既不随主题变化，
+     还会造成层级倒挂（glass2 下 rounded-lg=22px 竟大于 rounded-xl=12px）。 */
+  --radius-xs: var(--radius-xs);
   --radius-sm: var(--radius-sm);
   --radius-md: var(--radius-md);
   --radius-lg: var(--radius-lg);
+  --radius-xl: var(--radius-xl);
+  --radius-2xl: var(--radius-2xl);
+  --radius-3xl: var(--radius-3xl);
   --radius-card: var(--radius-card);
   --radius-full: var(--radius-full);
+  /* bare `rounded`（无后缀，Tailwind 用 --radius 这个变量）同样桥接。
+     它在项目里出现 785 处，是用量最大的一档，不桥接就等于最大的一块圆角写死。 */
+  --radius: var(--radius-control);
 }
 
 /* sortablejs 拖拽动画 */
@@ -150,6 +164,8 @@ input[type="checkbox"]:indeterminate::after {
   height: 2px;
   border: none;
   background-color: var(--color-text-inverse);
+  /* 勾选标记：高度 2px 的横杠，半高圆角 1px 才是圆头。
+     与卡片圆角体系无关（写死的是自身高度的一半）。 */
   border-radius: 1px;
   transform: rotate(0deg);
   clip-path: inset(0 0 0 0);
@@ -329,7 +345,7 @@ html.theme-switching *::after {
   color: var(--color-text, #111827);
   background-color: var(--color-surface, #ffffff);
   border: 1px solid var(--color-border, #e5e7eb);
-  border-radius: 14px;
+  border-radius: var(--radius-surface);
   box-shadow:
     0 18px 44px rgba(15, 23, 42, 0.16),
     0 2px 8px rgba(15, 23, 42, 0.06);
@@ -360,7 +376,7 @@ html.theme-switching *::after {
   color: var(--color-text-secondary, #6b7280);
   background-color: color-mix(in srgb, var(--color-surface-hover, #f3f4f6) 85%, transparent);
   border: 1px solid transparent !important;   /* 清掉毛玻璃主题给 button 的 1px 边框 */
-  border-radius: 9px;
+  border-radius: var(--radius-control);
   box-shadow: none !important;
   cursor: pointer;
   transition: background-color 0.14s ease, color 0.14s ease, transform 0.12s ease;
@@ -394,7 +410,7 @@ html.theme-switching *::after {
   color: inherit;
   background-color: color-mix(in srgb, var(--color-surface-hover, #f3f4f6) 70%, transparent);
   border: 1px solid var(--color-border, #e5e7eb);
-  border-radius: 9px;
+  border-radius: var(--radius-control);
   outline: none;
   transition: border-color 0.16s ease, box-shadow 0.16s ease, background-color 0.16s ease;
 }
@@ -453,7 +469,7 @@ html.theme-switching *::after {
   color: var(--color-text, #111827);
   background-color: transparent;
   border: none !important;
-  border-radius: 7px;
+  border-radius: var(--radius-control);
   box-shadow: none !important;
   cursor: pointer;
   /* 逐条错开浮入：仅新建的元素播放（搜索时新出现的行） */
@@ -522,7 +538,7 @@ html.theme-switching *::after {
   color: var(--color-text-secondary, #6b7280);
   background: transparent;
   border: none !important;
-  border-radius: 6px;
+  border-radius: var(--radius-control);
   box-shadow: none !important;
   cursor: pointer;
   transition: color 0.14s ease, background-color 0.14s ease;

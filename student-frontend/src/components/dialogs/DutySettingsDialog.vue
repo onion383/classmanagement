@@ -55,7 +55,7 @@
                 <input v-model.number="it.count" type="number" min="1" class="w-14 border rounded px-1 py-0.5 text-sm" />
               </div>
 
-              <button class="text-danger hover:bg-danger/10 rounded px-1.5 py-0.5 text-sm" title="删除" @click="removeItem(i)">删除</button>
+              <button class="text-danger hover:bg-danger/10 rounded px-1.5 py-0.5 text-sm transition-theme" title="删除" @click="removeItem(i)">删除</button>
             </div>
 
             <div v-if="!localItems.length" class="text-center py-6 text-text-muted/60 text-sm">
@@ -92,12 +92,12 @@
                   @keyup.enter="confirmAdd"
                   @blur="confirmAdd"
                 />
-                <button class="text-info hover:bg-info/10 rounded px-1.5 py-0.5 text-sm" @click="confirmAdd">✓</button>
-                <button class="text-text-muted hover:bg-surface-hover rounded px-1.5 py-0.5 text-sm" @click="cancelAdd">✕</button>
+                <button class="text-info hover:bg-info/10 rounded px-1.5 py-0.5 text-sm transition-theme" @click="confirmAdd">✓</button>
+                <button class="text-text-muted hover:bg-surface-hover rounded px-1.5 py-0.5 text-sm transition-theme" @click="cancelAdd">✕</button>
               </template>
               <button
                 v-else
-                class="px-3 py-1.5 rounded-lg border border-dashed border-text-muted text-text-secondary text-sm hover:bg-surface-hover"
+                class="px-3 py-1.5 rounded-lg border border-dashed border-text-muted text-text-secondary text-sm hover:bg-surface-hover transition-theme"
                 @click="startAdd"
               >+ 添加项目</button>
             </div>

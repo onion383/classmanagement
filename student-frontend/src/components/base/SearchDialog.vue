@@ -26,8 +26,24 @@
           </div>
 
           <!-- p-1：聚焦/高亮项有外发光时，滚动容器 overflow 会裁掉四边 -->
-          <div ref="listEl" class="h-[360px] max-h-[60vh] overflow-y-auto p-1 space-y-1">
-            <div v-if="!results.length && !remoteSearching" class="h-full flex items-center justify-center text-sm text-text-muted">无匹配结果</div>
+          <!-- 空态时关掉纵向滚动：空态块是 height:100%，加上容器的 p-1 内边距会高出几像素，
+               overflow-y-auto 就会冒出一条多余的滚动条。空态本来也不需要滚动。 -->
+          <div
+            ref="listEl"
+            class="h-[360px] max-h-[60vh] p-1 space-y-1"
+            :class="results.length || remoteSearching ? 'overflow-y-auto' : 'overflow-y-hidden'"
+          >
+            <!-- 搜索无结果：与列表型表格的空态同款版式（图标 + 文案 + 按钮）。
+                 给出「清除搜索」而不是只留一句提示：搜不到时最该做的是换个词或清掉重来，
+                 给个一键清除的入口，比让用户自己退格更快。 -->
+            <div v-if="!results.length && !remoteSearching" class="sd-empty">
+              <svg class="sd-empty-icon" viewBox="0 0 48 48" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true">
+                <circle cx="21" cy="21" r="12" opacity="0.75" />
+                <path d="M30 30l10 10" stroke-linecap="round" opacity="0.85" />
+              </svg>
+              <p class="sd-empty-text">暂无搜索结果</p>
+              <button type="button" class="sd-empty-btn" @click="clearKeyword">清除搜索</button>
+            </div>
             <template v-else>
               <button
                 v-for="(r, idx) in results"
@@ -176,6 +192,14 @@ function confirmActive() {
   if (r) goToResult(r)
 }
 
+// 清除搜索：清空关键字并把焦点留在输入框，方便直接换个词再搜。
+// 远程结果也要一并清掉 —— keyword 变化会触发 watch → scheduleRemoteSearch，
+// 关键字为空时它会自行清空 remoteResults，这里只需管本地文本与焦点。
+function clearKeyword() {
+  keyword.value = ''
+  nextTick(() => inputEl.value?.focus())
+}
+
 function goToResult(r) {
   if (!r) return
   emit('close')
@@ -185,3 +209,61 @@ function goToResult(r) {
   router.push(target)
 }
 </script>
+
+<style scoped>
+/* 搜索无结果：版式对齐列表型表格的 .dt-empty（图标 + 文案 + 按钮）。
+   列表型表格在毛玻璃页面上，所以那边用透明底 + backdrop-filter；
+   这里在弹窗的白底卡片里，改为浅灰底块，避免看起来像块补丁。 */
+.sd-empty {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 14px;
+  text-align: center;
+  /* 抵消父容器 space-y-1 给首元素加的 margin-top，否则整块被顶下去、底部溢出 */
+  margin-top: -4px;
+  animation: sd-empty-in 0.3s ease both;
+}
+@keyframes sd-empty-in {
+  from { opacity: 0; transform: translateY(6px); }
+  to { opacity: 1; transform: none; }
+}
+.sd-empty-icon {
+  width: 44px;
+  height: 44px;
+  color: var(--color-text-muted, #94a3b8);
+  opacity: 0.9;
+}
+.sd-empty-text {
+  margin: 0;
+  font-size: 15px;
+  letter-spacing: 0.5px;
+  color: var(--color-text-muted, #94a3b8);
+}
+/* 按钮配色与 DynamicTable 的 .dt-empty-btn 保持一致（#d9e5f8 底 + #1e3a6b 字） */
+.sd-empty-btn {
+  min-width: 100px;
+  padding: 7px 18px;
+  font-size: 14px;
+  font-family: inherit;
+  line-height: 1.4;
+  color: #1e3a6b;
+  background: #d9e5f8;
+  border: 1px solid #c3d6f2;
+  border-radius: var(--radius-control);
+  cursor: pointer;
+  box-shadow: 0 2px 8px rgba(30, 58, 107, 0.10);
+  transition: transform 0.15s ease, background-color 0.2s ease, border-color 0.2s ease, color 0.2s ease;
+}
+.sd-empty-btn:hover {
+  background: #c9d9f2;
+  border-color: #a9c3ea;
+}
+.sd-empty-btn:active { transform: scale(0.98); }
+.sd-empty-btn:focus-visible {
+  outline: 2px solid rgba(30, 58, 107, 0.55);
+  outline-offset: 2px;
+}
+</style>

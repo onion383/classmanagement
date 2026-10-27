@@ -265,7 +265,7 @@ watch(() => [props.items.length, props.total], () => {
   right: 30px;
   transform: translateY(-50%);
   padding: 3px 8px;
-  border-radius: 6px;
+  border-radius: var(--radius-control);
   font-size: 12px;
   line-height: 1.4;
   white-space: nowrap;

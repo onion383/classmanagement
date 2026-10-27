@@ -126,7 +126,7 @@
         @contextmenu.prevent="onAiContextMenu"
         v-preload="preloadAiAssistant"
         @click="onIconClick"
-        class="fixed z-[20000] w-12 h-12 rounded-full bg-primary hover:bg-primary-hover text-text-inverse text-xl shadow-lg flex items-center justify-center cursor-move select-none"
+        class="fixed z-[20000] w-12 h-12 rounded-full bg-primary hover:bg-primary-hover text-text-inverse text-xl shadow-lg flex items-center justify-center cursor-move select-none transition-theme"
         :style="iconStyle"
         title="AI 助手（左键打开/关闭浮窗，右键菜单，可拖动）"
       >🤖</button>
@@ -674,6 +674,14 @@ export default {
       window.electron?.send(SEND.SHUTDOWN_ACTION, { type: 'ready' })
       this.ipcFromMain = window.electron?.on(RECEIVE.FROM_MAIN, (data) => {
         if (!data) return
+        // 桌面小组件点击面板：主进程已唤醒主窗口，这里只负责切到对应页面
+        if (data.type === 'navigate') {
+          const path = typeof data.path === 'string' ? data.path : ''
+          if (path.startsWith('/') && this.$route.fullPath !== path) {
+            this.$router.push(path).catch(() => {})
+          }
+          return
+        }
         // 版本更新：新版本下载完成后给一条常驻提示（可在「关于」页点「重启并安装」）
         if (data.type === 'update-state') {
           const s = data.state || {}
@@ -777,7 +785,7 @@ export default {
 .backend-overlay .fail-msg { font-size: 13px; color: #b91c1c; }
 .backend-overlay .fail-row { display: flex; gap: 10px; }
 .backend-overlay .fail-btn {
-  font-size: 13px; padding: 6px 16px; border-radius: 6px; cursor: pointer;
+  font-size: 13px; padding: 6px 16px; border-radius: var(--radius-control); cursor: pointer;
   border: 1px solid rgba(30, 64, 175, .35); background: #fff; color: #1e40af;
 }
 .backend-overlay .fail-btn.primary { background: #1e40af; border-color: #1e40af; color: #fff; }
@@ -810,7 +818,7 @@ export default {
   height: 26px;
   border: none !important;
   box-shadow: none !important;
-  border-radius: 6px;
+  border-radius: var(--radius-control);
   background: transparent;
   color: inherit;
   cursor: pointer;
@@ -836,7 +844,7 @@ export default {
   border: none !important;
   box-shadow: none !important;
   outline: none !important;
-  border-radius: 8px !important;
+  border-radius: var(--radius-control) !important;
 }
 .tb-search-row::before { display: none !important; }
 /* 右侧三个控制按钮及其容器必须可点击（脱离拖拽区） */

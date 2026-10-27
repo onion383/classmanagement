@@ -147,7 +147,7 @@ const frontSettingTool = {
   },
 };
 
-const CHART_TYPES = ['bar', 'pie', 'line'];
+const CHART_TYPES = ['bar', 'barh', 'pie', 'line'];
 
 const chartTool = {
   type: 'function',
@@ -157,9 +157,9 @@ const chartTool = {
     parameters: {
       type: 'object',
       properties: {
-        type: { type: 'string', enum: CHART_TYPES, description: 'bar=柱状图（对比）, pie=饼图（占比）, line=折线图（趋势）' },
+        type: { type: 'string', enum: CHART_TYPES, description: 'bar=纵向柱状图（少量短标签对比）, barh=横向柱状图（学生姓名/班级名等长标签或条目较多时用，建议按数值从大到小排列）, pie=饼图（占比，最多 6 项，超出会自动合并为「其他」）, line=折线图（趋势）' },
         title: { type: 'string', description: '图表标题，如「各类型请假占比」' },
-        labels: { type: 'array', items: { type: 'string' }, description: '各数据点的名称（x 轴标签 / 扇区名），最多 12 项' },
+        labels: { type: 'array', items: { type: 'string' }, description: '各数据点的名称（x 轴标签 / 扇区名），最多 12 项；饼图超过 6 项会自动合并' },
         values: { type: 'array', items: { type: 'number' }, description: '与 labels 一一对应的数值（饼图请用正数），最多 12 项' },
         unit: { type: 'string', description: '数值单位（可选），如「元」「人」「次」' },
       },

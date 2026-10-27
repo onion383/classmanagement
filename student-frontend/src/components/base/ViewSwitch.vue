@@ -95,7 +95,7 @@ onUnmounted(() => {
   /* 防止被工具栏 flex 压窄，保证各段并排、不换行 */
   flex: none;
   padding: var(--vs-pad);
-  border-radius: 8px;
+  border-radius: var(--radius-control);
   background: var(--color-surface, #ffffff);
   overflow: hidden;
 }
@@ -131,15 +131,15 @@ onUnmounted(() => {
   padding: 0;
   border: none;
   pointer-events: none;
-  /* 独立圆角（与外层同心：外层圆角 − 内边距）。glass 主题的全局规则会把
-     .view-switch button 的圆角强制归零，故这里用 !important 保住内嵌块自身的圆角。 */
-  border-radius: 4px !important;
+  /* 独立圆角（与外层同心：外层圆角 − 内边距 --vs-pad）。
+     glass 主题的全局规则会把 .view-switch button 的圆角强制归零，故这里用 !important 保住内嵌块自身的圆角。 */
+  border-radius: calc(var(--radius-control) - var(--vs-pad)) !important;
   transition:
     transform 0.26s cubic-bezier(0.34, 1.35, 0.64, 1),
     width 0.26s cubic-bezier(0.34, 1.35, 0.64, 1);
 }
 :root:is([data-theme="glass"], [data-theme="win11"], [data-theme="glass2"]) .view-switch-thumb {
-  border-radius: 8px !important;
+  border-radius: calc(var(--radius-control) - var(--vs-pad)) !important;
 }
 .view-switch-btn {
   position: relative;

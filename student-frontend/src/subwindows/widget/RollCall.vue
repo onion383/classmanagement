@@ -161,7 +161,7 @@ onUnmounted(() => {
   align-items: center;
   gap: 10px;
   background: var(--color-bg, #f9fafb);
-  border-radius: 12px;
+  border-radius: var(--radius-card);
   padding: 12px 10px;
   border: 1px solid var(--color-border, #e5e7eb);
   height: 72px;
@@ -237,7 +237,7 @@ onUnmounted(() => {
 
 .btn-primary {
   padding: 6px 20px;
-  border-radius: 8px;
+  border-radius: var(--radius-control);
   border: none;
   background: var(--color-primary, #22c55e);
   color: white;

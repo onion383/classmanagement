@@ -17,7 +17,7 @@
 //   · **串行**执行。冒烟脚本会各占端口、临时目录（testjs/tmp/…），并行会互相干扰。
 //   · stdio 直接透传，脚本自己的彩色输出/断言信息原样可见，不做二次包装。
 //   · 需要后端在跑的脚本（见 NEEDS_BACKEND）在后端未就绪时判为 SKIP 而非失败——
-//     这类脚本测的是「注册/登录/隐私模式」整条链路，没有后端本来就没法跑。
+//     这类脚本（auth-smoke）测的是「注册/登录/隐私模式」整条链路，没有后端本来就没法跑。
 //     启动后端：npm run electron:dev，或 node student-backend/app.js。
 //   · .py 脚本用 `python` 跑；找不到 python 则 SKIP（字体校验那类依赖 fontTools）。
 //   · **退出码 3 = 脚本自己判定「环境不具备，跳过」**（如缺 fontTools），不计失败。
@@ -31,7 +31,7 @@ const { spawn } = require('node:child_process')
 const SMOKE_DIR = path.join(__dirname, 'smoke')
 const NODE_EXT = new Set(['.cjs', '.mjs', '.js'])
 // 必须后端在跑的脚本（文件名 → 说明）。启动方式见文件头。
-const NEEDS_BACKEND = new Set(['auth-e2e-probe.js', 'auth-privacy-probe.js'])
+const NEEDS_BACKEND = new Set(['auth-smoke.js'])
 const BACKEND_PORT = 3000
 const BACKEND_HOST = '127.0.0.1'
 

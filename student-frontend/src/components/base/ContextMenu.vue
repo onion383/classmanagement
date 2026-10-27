@@ -7,7 +7,7 @@
     <div
       v-for="item in items"
       :key="item.label"
-      class="px-4 py-2 cursor-pointer hover:bg-surface-hover text-sm text-text"
+      class="px-4 py-2 cursor-pointer hover:bg-surface-hover text-sm text-text transition-theme"
       @click="item.action"
     >
       {{ item.label }}

@@ -3,11 +3,64 @@
   <div
     ref="scrollWrapper"
     class="table-scroll-wrapper overflow-x-auto overflow-y-auto"
-    :class="{ 'is-scrollable': vScroll }"
+    :class="{ 'is-scrollable': vScroll, 'dt-scroll-empty': emptyVisible || emptyPending }"
     :style="fitContent ? { maxHeight: fixedMaxHeight + 'px' } : { height: fixedMaxHeight + 'px' }"
     @scroll.passive="onBodyScroll"
   >
-    <table class="w-full border-separate border-spacing-0 mt-0">
+    <!-- 空态：整块替换整张表 —— **表头也不渲染**。
+         表头留着会暗示「下面应该有行」，而空表时下方只是一片空白，反而更难看；
+         整块换成一张毛玻璃的「还没有数据 + 添加」面板，才是一个完整的空页。
+         去掉 <table> 是安全的：所有依赖表格 DOM 的方法都先判空
+         （_doSnapshotWidths 有 !tbl 早退、updateVScroll 用 !!tbl、列宽/行拖拽只由表头/行触发）。
+         高度取 100%：外层 .table-scroll-wrapper 本就是固定高度（非 fitContent 时 height=maxHeight），
+         空态块铺满它才不会只顶一半、下面留一片白。 -->
+    <!-- 加载失败：和「没有数据」必须分开。两者都表现为表里空空，
+         但用户该做的事完全不同 —— 没数据要去添加，加载失败只要重试。 -->
+    <div v-if="loadError" class="dt-empty dt-error">
+      <svg class="dt-empty-icon" viewBox="0 0 48 48" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true">
+        <path d="M24 8 4 42h40L24 8Z" stroke-linejoin="round" opacity="0.75" />
+        <path d="M24 20v10" stroke-linecap="round" />
+        <circle cx="24" cy="36" r="1.6" fill="currentColor" stroke="none" />
+      </svg>
+      <p class="dt-empty-text">{{ errorText }}</p>
+      <button type="button" class="dt-empty-btn" @click="$emit('retry')">重试</button>
+    </div>
+
+    <div v-else-if="emptyVisible" class="dt-empty">
+      <!-- 搜索无结果：图标换成放大镜（区别于「真的没数据」的表格图标） -->
+      <svg v-if="searchNoResult" class="dt-empty-icon" viewBox="0 0 48 48" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true">
+        <circle cx="21" cy="21" r="12" opacity="0.75" />
+        <path d="M30 30l10 10" stroke-linecap="round" opacity="0.85" />
+      </svg>
+      <svg v-else class="dt-empty-icon" viewBox="0 0 48 48" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true">
+        <rect x="7" y="11" width="34" height="26" rx="4" stroke-dasharray="4 4" opacity="0.55" />
+        <path d="M16 20h16M16 26h11" stroke-linecap="round" opacity="0.85" />
+      </svg>
+      <p class="dt-empty-text">{{ searchNoResult ? emptySearchMessage : emptyMessage }}</p>
+      <!-- 搜索无结果：只给「清除搜索」。「点击添加」在这里是误导 ——
+           数据其实都在，只是没匹配上关键字，让人去添加新记录只会越搞越乱。
+           空态按钮与 hideAddRow 解耦：hideAddRow 只表示「不要内联新增行」，
+           页面仍可借这个按钮打开自己的新增弹窗（如加分管理）；不需要的页面传 emptyActionText=""。 -->
+      <button
+        v-if="searchNoResult"
+        type="button"
+        class="dt-empty-btn"
+        @click="$emit('clearSearch')"
+      >清除搜索</button>
+      <button
+        v-else-if="emptyActionText && !readonly"
+        type="button"
+        class="dt-empty-btn"
+        @click="onAddRowBarClick"
+      >{{ emptyActionText }}</button>
+    </div>
+
+    <!-- 判定中：同高静默占位，**不渲染表头**。
+         放在空态和表格之间，长度恒定（外层容器本来就是固定高度），所以从占位 → 空态
+         或占位 → 表格都不会有高度跳动。 -->
+    <div v-else-if="emptyPending" class="dt-empty-pending" aria-hidden="true"></div>
+
+    <table v-else class="w-full border-separate border-spacing-0 mt-0">
       <thead>
         <tr ref="theadRow">
           <TransitionGroup :name="colAnimDone ? 'col-flip' : 'static-col'" tag="">
@@ -78,7 +131,7 @@
         </tr>
       </thead>
 
-      <tbody ref="tbodyRef" :class="{ 'row-search': rowAnimEnabled }">
+      <tbody ref="tbodyRef" :class="{ 'row-search': searchActive || filterAnimating }">
         <!--
           行的过渡容器只在「搜索/筛选错峰动画」开启时才真正是 TransitionGroup，其余时候退化成 Fragment。
 
@@ -92,7 +145,7 @@
         -->
         <component
           :is="rowWrapper"
-          :name="rowAnimEnabled ? 'row-flip' : undefined"
+          :name="rowAnimEnabled && !rowsAnimSilent ? 'row-flip' : undefined"
           tag=""
           :data-rows="rowAnimEnabled ? 'animated' : 'plain'"
           @enter="staggerEnter"
@@ -143,7 +196,10 @@
                 :class="{ 'dt-col-src-hidden': colDragIndex === fieldIndex }"
                 @click="onCellClick($event, row, field)"
               >
-                <!-- 拖拽手柄（仅在非去重模式或允许移动时显示，按住拖行） -->
+                <!-- 拖拽手柄（按住拖行）。上下移按钮去掉后，**行排序只剩这一个入口**，
+                     所以 hideMoveButtons 的语义变成了「禁用本表的行排序」——
+                     请假记录按时间排、不允许手动调序，那张表就把它设成 true。
+                     别把它和 hideEditButton 混用：前者关排序，后者关「修改」按钮。 -->
                 <span
                   v-if="fieldIndex === 0 && !hideMoveButtons && !readonly"
                   class="absolute left-1 top-1/2 -translate-y-1/2 drag-handle cursor-grab select-none text-text-muted hover:text-text-secondary"
@@ -197,29 +253,23 @@
                   <button @click="requestCancelNewRow" class="bg-text-muted text-text-inverse border-none py-0.5 px-2 cursor-pointer rounded">取消</button>
                 </template>
                 <template v-else>
-                  <!-- 上移 / 下移（仅在非去重模式显示） -->
+                  <!-- 修改：取代原来的上移/下移，抛出 editRow 由各页面打开自己的「添加/编辑」弹窗
+                       （弹窗和新增共用一套，只是预填 + 走 PUT）。组件本身不碰编辑逻辑 ——
+                       各页表单字段差异太大，只有页面自己知道该弹什么。
+                       没接 @edit-row 的表请传 hideEditButton，否则是个点了没反应的按钮。
+                       排序能力没有丢：靠行首的 ⠿ 拖拽（.drag-handle），比一步步点箭头更适合长表。 -->
                   <button
-                    v-if="!hideMoveButtons"
-                    @click="$emit('moveRow', row, 'up')"
-                    class="move-arrow-btn bg-text-muted text-text-inverse border border-border/40 py-0.5 px-1.5 mr-0.5 cursor-pointer rounded"
-                    title="上移"
-                  >↑</button>
-                  <button
-                    v-if="!hideMoveButtons"
-                    @click="$emit('moveRow', row, 'down')"
-                    class="move-arrow-btn bg-text-muted text-text-inverse border border-border/40 py-0.5 px-1.5 mr-0.5 cursor-pointer rounded"
-                    title="下移"
-                  >↓</button>
+                    v-if="!hideEditButton"
+                    @click="$emit('editRow', row)"
+                    class="bg-info text-text-inverse border-none py-0.5 px-2 mr-1 cursor-pointer rounded"
+                    title="修改本行"
+                  >修改</button>
                   <!-- 删除按钮始终保留 -->
                   <button @click="$emit('deleteRow', row.id)" class="bg-danger text-text-inverse border-none py-0.5 px-1.5 cursor-pointer rounded">删除</button>
                 </template>
                 </slot>
               </td>
             </template>
-          </tr>
-          <!-- 空表提示：仅父组件显式传入 emptyText 时渲染（默认保持原样，不影响其他表格） -->
-          <tr v-if="emptyText && !bodyRows.length" key="__dt-empty">
-            <td :colspan="tableColSpan" class="px-3 py-8 text-center text-text-muted">{{ emptyText }}</td>
           </tr>
           <!-- 筛选后无结果：给一行提示，避免整表空白让人以为数据丢了 -->
           <tr v-if="filterNoResult" key="__dt-filter-empty" class="dt-filter-empty">
@@ -235,10 +285,11 @@
   </div>
 
   <!-- 添加一行：放在滚动容器下方，始终固定可见（数据滚动时不随之滚走）
-       存在新增行时按钮切换为「取消添加一行」，点击可放弃本次新增 -->
+       存在新增行时按钮切换为「取消添加一行」，点击可放弃本次新增
+       空态时隐藏：空态块里已经有一个同样的添加入口，两个并排出现会重复 -->
   <transition name="add-row-flip" :duration="addRowAnimated ? undefined : 0">
     <div
-      v-if="!readonly && !hideAddRow"
+      v-if="!readonly && !hideAddRow && !emptyVisible && !emptyPending"
       :key="'add-row-' + addRowAnimKey"
       :class="['add-row-bar bg-bg text-center py-2 mt-2 font-medium rounded-xl cursor-pointer', hasNewRow ? 'text-text-secondary' : 'text-primary']"
       @click="onAddRowBarClick"
@@ -325,16 +376,34 @@ export default {
     editingCell: { type: Object, default: null },
     maxRows: { type: Number, default: 10 },
     hideSelectAll: { type: Boolean, default: false },
-    hideMoveButtons: { type: Boolean, default: false },   // 新增：控制移动按钮和拖拽手柄的显示
-    // 操作列固定宽度（px）：默认 135 容纳 ↑↓/删除；使用 row-actions-extra 增加按钮时可调大
-    opColumnWidth: { type: Number, default: 135 },
+    // 禁用本表的行排序：上下移按钮已移除，现在只作用于行首 ⠿ 拖拽手柄
+    // （请假记录按时间排、不允许手动调序，那张表传 true）
+    hideMoveButtons: { type: Boolean, default: false },
+    // 隐藏操作列里的「修改」按钮。给「自己已经提供了编辑入口」的表用：
+    // 成绩管理在 #row-actions-extra 里自带「编辑」按钮，不改会并排出现两个做同一件事的按钮。
+    hideEditButton: { type: Boolean, default: false },
+    // 操作列固定宽度（px）：默认 105 容纳「修改 + 删除」；使用 row-actions-extra 增加按钮时可调大
+    opColumnWidth: { type: Number, default: 105 },
     hideAddRow: { type: Boolean, default: false },        // 新增：隐藏底部「点击添加一行」
     noRowDrag: { type: Boolean, default: false },         // 新增：禁用整行拖拽（避免与双击内联编辑冲突）
     editOnClick: { type: Boolean, default: false },       // 新增：单击单元格直接进入编辑（配合失焦保存）
     readonly: { type: Boolean, default: false },          // 新增：纯只读展示（历史快照等）
     // 只读表的自定义操作列：传入表头文字即显示该列，内容由 #row-actions 插槽提供
     actionsHeader: { type: String, default: '' },
-    emptyText: { type: String, default: '' },              // 只读空表提示文案（不传则不渲染空行）
+    emptyText: { type: String, default: '' },              // 完整的空表提示文案（老接口；传了 emptyLabel 时以 emptyLabel 拼句为准）
+    // ---- 空态（毛玻璃提示块 + 新增入口）----
+    // 只填名词（「班费」「学生」「请假记录」…），文案由组件拼成「还没有 XX 数据」，
+    // 与 GridView 的空态措辞保持一致；都不传则退回 `emptyText`，再退回「还没有数据」。
+    emptyLabel: { type: String, default: '' },
+    // 空态按钮文案。传空字符串即不渲染按钮；只读表 / 禁用「添加一行」的表也会自动不显示
+    // （那种表点了也加不了行，留着是个死按钮）。
+    emptyActionText: { type: String, default: '点击添加' },
+    // 数据是否已就绪。false 时不渲染空态 —— 异步加载期间 rows 也是空数组，
+    // 不区分的话会在数据回来前先闪一下「还没有数据」。
+    emptyReady: { type: Boolean, default: true },
+    // 加载失败：显示告警图标 + 重试，而不是让用户对着一张空表猜是不是数据丢了
+    loadError: { type: Boolean, default: false },
+    errorText: { type: String, default: '表格加载失败' },
     // 高度随内容自适应（maxHeight 变成上限而不是固定高度），适合小数据量只读表
     fitContent: { type: Boolean, default: false },
     // 隐藏整列勾选框（保留行操作，不需要批量选择时使用）
@@ -344,6 +413,10 @@ export default {
     // 与 rows 对齐的序号数组（可选）。由数据源统一派生，避免把序号写回行对象而破坏行引用复用。
     displayIndexes: { type: Array, default: null },
     searchActive: { type: Boolean, default: false },       // 搜索过滤进行中：行进入/离开时启用上下级联动画方向
+    // 关键字搜索把数据筛光了（由父组件判定）：表格自己分不清「本来就没数据」和
+    // 「有数据但没匹配上关键字」——这两者要给用户不同的提示和不同的按钮。
+    // 为 true 时空态换成「暂无 XX 的搜索结果」+「清除搜索」。
+    searchNoResult: { type: Boolean, default: false },
     // 行虚拟滚动阈值（滞后双阈值）：行数 ≥ virtualFrom 开启「只渲染可视窗口」，传 0 可整体关闭（走整表 DOM）；
     // 行数 ≤ virtualOffBelow 退回整表，两者之间维持当前状态，防止行数在阈值附近增删时整表 ↔ 窗口来回切换。
     // 【定稿】default = 1（全面虚拟）：实测（testjs/virtual-bench，2026-10-20）挂载 30 行起即快于整表，
@@ -364,11 +437,21 @@ export default {
     'startEdit', 'saveCell', 'moveRow', 'deleteRow', 'addNewRowAtBottom',
     'updateNewRow', 'manageReceipt', 'swapRows', 'swapColumns', 'moveSelectedRows',
     'selectionChange',
+    // 操作列「修改」：带上整行，页面据此打开自己的编辑弹窗（各页表单字段不同，只有页面知道该弹什么）
+    'editRow',
+    // 加载失败态里的「重试」
+    'retry',
+    // 搜索无结果态里的「清除搜索」
+    'clearSearch',
   ],
   data() {
     return {
       internalEditCell: null,
       selectedRowKeys: [],
+      // 空态是否真正显示。不跟着 showEmptyBase 立刻变：条件成立后先挂 260ms，
+      // 数据在这期间到达就一次都不显示 —— 否则每次进页面都会先闪一下「还没有数据」。
+      emptyVisible: false,
+      _emptyTimer: null,
       dragIndex: null,
       dragOverIndex: null,
       colDragIndex: null,
@@ -394,6 +477,13 @@ export default {
       // 纵向滚动判定：按固定高度（fixedMaxHeight）判断，内容超高才出现纵向滚动条，
       // 而不再按行数判断——多行/换行导致的行高不同也能正确触发，表头随之吸顶。
       vScroll: false,
+      // 行增删后的短动画窗：只有它开着，行容器才切成 TransitionGroup ——
+      // 被删掉的那行才播离场、恢复的那行才播入场。平时保持 Fragment（见 beginRowsAnimWindow）。
+      rowsAnimWindow: false,
+      // 窗口刚打开的那一帧静默：容器从 Fragment 换成 TransitionGroup 时现存行都算新节点，
+      // 不禁掉入场动画会整表弹一遍
+      rowsAnimSilent: false,
+      _rowsAnimTimer: null,
       // 表格最大高度：内容超过此高度即启用纵向滚动（固定高度判断），默认 400，可由父组件按内容调整
       fixedMaxHeight: this.maxHeight,
       // 列筛选状态：{ 列名: Set(允许出现的值) }。值为空表示该列未筛选（不参与过滤）
@@ -454,8 +544,39 @@ export default {
       this.rows.forEach((r, i) => pos.set(r, i));
       return this.bodyRows.map(r => (pos.has(r) ? pos.get(r) : -1));
     },
-    // 筛选后一行都不剩：提示用
-    filterNoResult() { return this.columnFilterActive && this.bodyRows.length === 0; },
+    // 筛选后一行都不剩：提示用。
+    // 搜索无结果时不算「筛选没结果」——父组件的关键字搜索已经把行筛空了，
+    // 这时该给的是「暂无 XX 的搜索结果 + 清除搜索」，不是「没有符合筛选条件的数据」。
+    filterNoResult() { return this.columnFilterActive && this.bodyRows.length === 0 && !this.searchNoResult; },
+    // ===== 空态 =====
+    emptyMessage() {
+      if (this.emptyLabel) return `还没有${this.emptyLabel}数据`;
+      return this.emptyText || '还没有数据';
+    },
+    // 搜索无结果的文案：和「还没有 XX 数据」区分开。
+    // 「还没有数据」暗示要去添加，「暂无搜索结果」暗示数据在、只是没匹配上 ——
+    // 用户该做的动作完全不同（清除搜索 vs 添加记录）。
+    emptySearchMessage() {
+      return this.emptyLabel ? `暂无${this.emptyLabel}的搜索结果` : '暂无搜索结果';
+    },
+    // 三个条件：数据已就绪、一行都没有、且不是「筛选把数据筛空了」
+    // （筛选无结果有单独的提示行，不能说成「还没有数据」）。
+    showEmptyBase() {
+      return this.emptyReady && this.bodyRows.length === 0 && !this.filterNoResult;
+    },
+    // 「判定中」：空态条件已经成立，但还没到延迟上屏的时间。
+    // 这期间**既不算表格也不算空态**，模板里只放一块同高的静默占位、不渲染表头 ——
+    // 否则首帧会先画出表头，260ms 后确认没数据、表头又被空态换掉，闪一下。
+    // 数据若在这 260ms 内到达，showEmptyBase 立刻变 false，表格（表头）随即出现，不会被拖慢。
+    emptyPending() {
+      return this.showEmptyBase && !this.emptyVisible;
+    },
+    // 空态的种类：'' = 不显示空态；'data' = 真的没数据；'search' = 搜索没匹配上。
+    // 分开是因为两者的文案、按钮、用户的下一步动作都不同。
+    emptyKind() {
+      if (!this.showEmptyBase) return '';
+      return this.searchNoResult ? 'search' : 'data';
+    },
     // ===== 行虚拟滚动 =====
     // 是否启用窗口化渲染：走滞后开关 virtualActive（见 syncVirtualActive），小表格保持整表 DOM。
     // virtualFrom <= 0 时整体关闭（走整表 DOM），与旧行为一致。
@@ -512,9 +633,10 @@ export default {
     // 虚拟滚动下直接关掉：滚动本身就在不停换行，播进出动画只会变成整屏闪。
     // 注意判据是「窗口真的截断了行」而不是「virtualOn」——行全都在窗口里时虚拟滚动等同没开，
     // 这时动画照旧（否则把阈值调小做验证时，小表格的筛选动画会被无辜关掉）。
+    // rowsAnimWindow：行增删（删除 / 撤销恢复 / 保存新行）后的短窗口，见 openRowsAnimWindow。
     rowAnimEnabled() {
       const truncating = this.virtualOn && (this.virtualEnd - this.virtualStart) < this.bodyRows.length;
-      return !truncating && (!!this.searchActive || this.filterAnimating);
+      return !truncating && (!!this.searchActive || this.filterAnimating || this.rowsAnimWindow);
     },
     // 行容器组件：错峰动画窗口内（搜索中 / 筛选面板打开）用 TransitionGroup，否则用 RowsFragment 做「透明包裹」，
     // 让 <tr> 始终是 <tbody> 的直接子节点。两者都必须能在实例上取到（模板表达式不会
@@ -534,6 +656,19 @@ export default {
     },
   },
   watch: {
+    // 空态延迟上屏（见 data 里 emptyVisible 的说明）：条件成立不是立刻显示，
+    // 取消时立刻收回，不给「闪一下又消失」留窗口。
+    // 搜索无结果（emptyKind === 'search'）例外：那是用户主动输入关键字后的确定结论，
+    // 立刻给反馈才对；再等 260ms 会让人觉得「按了没反应」。
+    emptyKind: {
+      immediate: true,
+      handler(v) {
+        if (this._emptyTimer) { clearTimeout(this._emptyTimer); this._emptyTimer = null; }
+        if (!v) { this.emptyVisible = false; return; }
+        if (v === 'search') { this.emptyVisible = true; return; }
+        this._emptyTimer = setTimeout(() => { this._emptyTimer = null; this.emptyVisible = true; }, 260);
+      },
+    },
     hasNewRow(val) {
       // 取消新增行 → 底部添加行重现，仅此后播放上浮动画
       if (!val) this.addRowAnimated = true;
@@ -686,6 +821,10 @@ export default {
   },
   beforeUnmount() {
     if (this._ro) { this._ro.disconnect(); this._ro = null; }
+    // 空态延迟定时器：卸载后还在跑会往已销毁的实例上写状态
+    if (this._emptyTimer) { clearTimeout(this._emptyTimer); this._emptyTimer = null; }
+    // 行动画窗定时器同理
+    if (this._rowsAnimTimer) { clearTimeout(this._rowsAnimTimer); this._rowsAnimTimer = null; }
     document.removeEventListener('click', this.handleClickOutside);
     document.removeEventListener('keydown', this.handleGlobalEnter);
     document.removeEventListener('click', this.onFilterDocClick);
@@ -1272,6 +1411,25 @@ export default {
       const tbl = this.$el.querySelector('table');
       this.vScroll = !!tbl && tbl.scrollHeight > this.fixedMaxHeight;
     },
+    // 行数要变化了（删掉一行 / 撤销恢复一行）——由父组件在**动手之前**调用。
+    // 为什么必须提前：行容器平时是 Fragment（性能考虑，见 rowAnimEnabled），
+    // 只有已经在 TransitionGroup 里的行，被移出时才会播离场动画。
+    // 如果等 rows 更新完再切换容器，那时旧行已经没了、新容器也从未渲染过它，
+    // 离场动画就永远不会播；反而所有现存行会被当成新节点整表重播一遍入场。
+    // 所以顺序是：先切容器（首帧静默，见 rowsAnimSilent）→ 再改数据 → 只有真正增删的那一行有动画。
+    beginRowsAnimWindow() {
+      if (this._rowsAnimTimer) clearTimeout(this._rowsAnimTimer);
+      // 首帧静默：容器刚换成 TransitionGroup 时，现存行都会被视为新节点，
+      // 不禁掉入场就会整表一起弹一遍。静默只覆盖这一次 patch，下一帧就恢复正常。
+      this.rowsAnimSilent = true;
+      this.rowsAnimWindow = true;
+      this.$nextTick(() => { this.rowsAnimSilent = false; });
+      // 450ms ≈ 离场 0.3s / 入场 0.3s，再留一点余量；窗口一过退回 Fragment。
+      this._rowsAnimTimer = setTimeout(() => {
+        this._rowsAnimTimer = null;
+        this.rowsAnimWindow = false;
+      }, 450);
+    },
   },
 };
 </script>
@@ -1345,7 +1503,7 @@ th.col-header {
   height: 20px;
   padding: 0;
   border: none !important;
-  border-radius: 5px;
+  border-radius: var(--radius-xs);
   background: transparent;
   box-shadow: none !important;
   color: rgba(255, 255, 255, 0.72);
@@ -1364,13 +1522,95 @@ th.col-header {
   color: var(--color-warning, #f59e0b);
   background: rgba(255, 255, 255, 0.2);
 }
-/* 筛选后零结果的提示行 */
+/* 判定中的静默占位：与空态同高、完全透明。
+   唯一目的就是「还不知道有没有数据的这 260ms 里别画表头」，
+   避免表头先出现、确认没数据后又被空态替换的那种闪跳。 */
+.dt-empty-pending {
+  width: 100%;
+  height: 100%;
+  min-height: 240px;
+  background: transparent;
+}
 .dt-filter-empty td {
   padding: 18px 8px;
   border: 1px solid var(--color-border, #e5e7eb);
   text-align: center;
   color: var(--color-text-muted, #9ca3af);
   font-size: 13px;
+}
+/* ===== 空态：直接浮在外层毛玻璃上 =====
+   空态块自己**不画背景、也不再叠 backdrop-filter**：外层卡片已经是毛玻璃，
+   这里再加一层模糊等于在玻璃上又盖一层遮罩，观感会变浊。
+   height:100% 是因为外层滚动容器已经是固定高度；min-height 只兜 fitContent 的场景。 */
+.dt-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 16px;
+  width: 100%;
+  height: 100%;
+  min-height: 240px;
+  padding: 24px 20px;
+  box-sizing: border-box;
+  text-align: center;
+  background: transparent;
+  animation: dt-empty-in 0.3s ease both;
+}
+/* 空表时容器不再铺 surface 白底：表格的底色只在「有表格」时才有意义，
+   空态要的是让页面的光斑透上来。
+   同时撤掉 scrollbar-gutter: stable —— 那条是为「有数据时滚动条忽隐忽现导致列宽抖动」
+   而恒定预留的，空表根本没有可滚内容，留着就是右侧一条莫名其妙的空白竖带
+   （用户截图里看到的就是它）。overflow 一起关掉：空态块高度就是容器高度，不需要滚动。 */
+.table-scroll-wrapper.dt-scroll-empty {
+  background-color: transparent;
+  scrollbar-gutter: auto;
+  overflow: hidden;
+}
+@keyframes dt-empty-in {
+  from { opacity: 0; transform: translateY(6px); }
+  to { opacity: 1; transform: none; }
+}
+.dt-empty-icon {
+  width: 48px;
+  height: 48px;
+  color: var(--color-text-muted, #94a3b8);
+  opacity: 0.9;
+}
+.dt-empty-text {
+  margin: 0;
+  font-size: 16px;
+  letter-spacing: 0.5px;
+  color: var(--color-text-muted, #94a3b8);
+}
+/* 加载失败态：复用空态的版式，只换图标颜色和文字深浅 ——
+   让用户一眼看出「还是这块区域，只是结论不同」 */
+.dt-error .dt-empty-icon { color: var(--color-danger, #ef4444); }
+.dt-error .dt-empty-text { color: var(--color-text-secondary, #64748b); }
+/* 空态按钮：淡蓝底 + 深蓝字（#D9E5F8 太浅，配白字只有 1.3:1，读不出来）。
+   这组色值在 GridView 的 .grid-empty-btn 里有一份完全相同的副本，改颜色要两边一起改。 */
+.dt-empty-btn {
+  min-width: 108px;
+  padding: 8px 20px;
+  font-size: 14px;
+  font-family: inherit;
+  line-height: 1.4;
+  color: #1e3a6b;
+  background: #d9e5f8;
+  border: 1px solid #c3d6f2;
+  border-radius: var(--radius-control);
+  cursor: pointer;
+  box-shadow: 0 2px 8px rgba(30, 58, 107, 0.10);
+  transition: transform 0.15s ease;
+}
+/* 悬停不做任何变化：这是空态的引导按钮，不是可反复试探的操作项，
+   上浮 / 换色 / 加阴影反而让空态显得「活」得过分。按下时留一个轻微缩放作为手感反馈。 */
+.dt-empty-btn:active {
+  transform: scale(0.98);
+}
+.dt-empty-btn:focus-visible {
+  outline: 2px solid rgba(30, 58, 107, 0.55);
+  outline-offset: 2px;
 }
 /* 虚拟滚动垫片行：只负责把总高度撑出来，不能有边框/内边距/背景，否则会多出横线 */
 .dt-vpad { pointer-events: none; }
@@ -1392,9 +1632,15 @@ th.col-header {
 .table-scroll-wrapper {
   position: relative;
   background-color: var(--color-surface, #ffffff);
-  /* 恒定预留纵向滚动条槽位：数据刷新时纵向滚动条可能瞬时出现/消失，
-     若内容宽度随之变化，已钉住的列宽会短暂超出容器 → 横向滚动条闪一下。
-     预留后内容宽度恒定，不再出现该闪烁。槽位与表格底色一致，观感无变化。 */
+  /* 这里**不再**恒定写 scrollbar-gutter: stable。
+     那个写法的本意是「数据刷新时滚动条瞬时出现/消失 → 内容宽度变化 → 已钉住的列宽短暂溢出 →
+     横向滚动条闪一下」，但它把代价转嫁给了所有行数不多的表：只要滚动条不会出现，
+     预留的槽位就是右边一条永远填不满的空带（只有一条数据的表也带着）。
+     现在改成按需：只在 is-scrollable（内容真的超出 fixedMaxHeight）时才预留 —— 见下一条。 */
+}
+/* 内容真的超高时才预留槽位：此时纵向滚动条会长期存在，预留能避免上述列宽抖动；
+   不超高时完全不占位，右侧不会再有一条空带。 */
+.table-scroll-wrapper.is-scrollable {
   scrollbar-gutter: stable;
 }
 .table-scroll-wrapper.is-scrollable::after {
@@ -1432,7 +1678,9 @@ th:hover .drag-handle { color: white; }
 .row-flip-move { transition: transform 0.32s cubic-bezier(0.34, 1.08, 0.64, 1) !important; }
 /* 列交换(FLIP)：拖列换位后其它列平滑滑开，与行交换动画一致 */
 .col-flip-move { transition: transform 0.32s cubic-bezier(0.34, 1.08, 0.64, 1); }
-/* 整表数据区(tbody)进入：从左往右弹入，与单行动画一致（translateX(-20px)+过冲回弹），不含表头 */
+/* 整表数据区(tbody)首次进入：从左往右弹入，不含表头。
+   注意这里保持横向：单行增删（.row-flip-*）已改成纵向浮入/下沉，两者刻意不同 ——
+   整表是「一次性出现」，横向扫入更能表达「整块内容就位」；单行是「一行进出」，纵向更自然。 */
 .table-enter { animation: table-slide-in 0.35s cubic-bezier(0.34, 1.56, 0.64, 1); }
 @keyframes table-slide-in {
   from { opacity: 0; transform: translateX(-20px); }
@@ -1450,11 +1698,15 @@ tr.row-pop-out { animation: row-pop-out 0.12s cubic-bezier(0.5, 0, 0.85, 0.3) fo
   from { opacity: 1; transform: translateY(0); }
   to { opacity: 0; transform: translateY(-18px); }
 }
-/* 新增行上浮：过冲回弹曲线（冲进来轻轻弹一下） */
-.row-flip-enter-active { transition: opacity 0.3s cubic-bezier(0.22, 1, 0.36, 1), transform 0.3s cubic-bezier(0.34, 1.56, 0.64, 1); }
-/* 取消新增行返回：先快后慢的非线性曲线 */
-.row-flip-leave-active { position: absolute; width: 100%; transition: opacity 0.25s cubic-bezier(0.22, 1, 0.36, 1), transform 0.25s cubic-bezier(0.22, 1, 0.36, 1); }
-.row-flip-enter-from, .row-flip-leave-to { opacity: 0; transform: translateX(-20px); }
+/* 默认场景（删掉一行 / 撤销恢复一行 / 新增行保存）：
+   直接复用底部「＋ 点击添加一行 / 取消添加一行」那组曲线 ——
+   进场从下方 16px 弹性浮上来，离场向下 10px 淡出。表格行和那条添加栏用同一套动作语言，
+   删除和恢复不再是「瞬间消失/瞬间出现」。
+   搜索/筛选场景由下面的 .row-search 覆盖成垂直级联方向，互不干扰。 */
+.row-flip-enter-active { transition: opacity 0.25s cubic-bezier(0.22, 1, 0.36, 1), transform 0.3s cubic-bezier(0.34, 1.56, 0.64, 1); }
+.row-flip-leave-active { position: absolute; width: 100%; transition: opacity 0.3s cubic-bezier(0.22, 1, 0.36, 1), transform 0.18s cubic-bezier(0.22, 1, 0.36, 1); }
+.row-flip-enter-from { opacity: 0; transform: translateY(16px); }
+.row-flip-leave-to { opacity: 0; transform: translateY(10px); }
 /* 搜索级联：去掉水平滑出，改用垂直位移（与「从上往下/从下往上」级联方向一致），避免与级联打架 */
 .row-search .row-flip-enter-from { transform: translateY(14px); }
 .row-search .row-flip-leave-to { transform: translateY(-14px); }

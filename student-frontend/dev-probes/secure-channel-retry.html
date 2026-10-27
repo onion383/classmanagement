@@ -1,0 +1,89 @@
+<!doctype html>
+<html>
+<head><meta charset="utf-8"><title>secureAxios 拦截器自测</title></head>
+<body>
+<pre id="out">running…</pre>
+<script type="module">
+// 一次性自测页（验证后即删除）：用假的 axios 驱动 secureAxios 的错误处理分支，
+// 检查「GET 撞上 session-expired 会重建会话并重试」等关键行为。
+window.__SECURE_CHANNEL__ = true
+const log = []
+const out = document.getElementById('out')
+const done = (ok, msg) => { log.push((ok ? 'PASS ' : 'FAIL ') + msg); out.textContent = log.join('\n') }
+
+const { setupSecureAxios } = await import('/src/composables/secureAxios.js')
+
+// 假 axios：记录重发次数（注意：拦截器回调是注册**之后**才挂上来的，
+// 所以必须把同一个函数对象既当 callable 又当配置载体，不能用 Object.assign 事后拷贝）
+function makeFake() {
+  const f = function (cfg) { f.calls.push(cfg); return Promise.resolve({ data: {}, config: cfg, headers: {} }) }
+  f.calls = []
+  f.interceptors = {
+    request: { use: (fn) => { f.reqFn = fn } },
+    response: { use: (ok, err) => { f.okFn = ok; f.errFn = err } },
+  }
+  return f
+}
+
+const fake = makeFake()
+setupSecureAxios(fake)
+
+// 场景 1：GET 请求撞上 session-expired（旧实现不会重试 → 全站持续 401）
+{
+  const cfg = { url: '/api/me', method: 'get', headers: {} }
+  const err = { response: { status: 401, data: { d: 'session-expired' }, headers: {} }, config: cfg }
+  await fake.errFn(err).catch(() => {})
+  done(fake.calls.length === 1, 'GET 遇 session-expired 会重发一次（实际重发 ' + fake.calls.length + ' 次）')
+  done(cfg.__retrySession === true, 'session-expired 分支打了独立重试标志 __retrySession')
+}
+
+// 场景 2：带 body 的请求撞上 session-expired（应重发，且 body 不被二次封装）
+{
+  const f2 = makeFake()
+  setupSecureAxios(f2)
+  const cfg = { url: '/api/x', method: 'post', headers: {}, __origData: { a: 1 } }
+  const err = { response: { status: 401, data: { d: 'session-expired' }, headers: {} }, config: cfg }
+  await f2.errFn(err).catch(() => {})
+  done(f2.calls.length === 1, 'POST 遇 session-expired 会重发一次（实际 ' + f2.calls.length + ' 次）')
+}
+
+// 场景 3：凭据降级（握手失败退回明文 Bearer）造成的 401 → 必须重试，且带 token 重发
+{
+  const f3 = makeFake()
+  setupSecureAxios(f3)
+  const cfg = { url: '/api/y', method: 'get', headers: {}, __credentialDegraded: true }
+  const err = { response: { status: 401, data: { error: '未登录' }, headers: {} }, config: cfg }
+  await f3.errFn(err).catch(() => {})
+  done(f3.calls.length === 1, '凭据降级的 401 会重建会话重试（实际 ' + f3.calls.length + ' 次）')
+  done(cfg.__forceAuthToken === true, '降级重试会强制携带 token')
+  done(cfg.__retryDegraded === true, '降级分支用独立重试标志（不占用 __retryAuth）')
+}
+
+// 场景 4：auth-required（绑定失效）仍按原逻辑重试，且不与降级分支互相吞掉
+{
+  const f4 = makeFake()
+  setupSecureAxios(f4)
+  const cfg = { url: '/api/z', method: 'get', headers: {} }
+  const err = { response: { status: 401, data: { d: 'auth-required' }, headers: { 'x-auth-required': '1' } }, config: cfg }
+  await f4.errFn(err).catch(() => {})
+  done(f4.calls.length === 1, 'auth-required 会重发一次（实际 ' + f4.calls.length + ' 次）')
+  done(cfg.__retryAuth === true, 'auth-required 分支标记 __retryAuth')
+}
+
+// 场景 5：先降级后 auth-required —— 两个分支要能接力（降级用了独立标志，不吞掉后者）
+{
+  const f5 = makeFake()
+  setupSecureAxios(f5)
+  const cfg = { url: '/api/w', method: 'get', headers: {}, __credentialDegraded: true }
+  const err1 = { response: { status: 401, data: { error: '未登录' }, headers: {} }, config: cfg }
+  await f5.errFn(err1).catch(() => {})
+  const err2 = { response: { status: 401, data: { d: 'auth-required' }, headers: { 'x-auth-required': '1' } }, config: cfg }
+  await f5.errFn(err2).catch(() => {})
+  done(f5.calls.length === 2, '降级→auth-required 能接力重试（实际 ' + f5.calls.length + ' 次）')
+}
+
+console.log('PROBE_RESULT ' + JSON.stringify(log))
+window.__probeDone = true
+</script>
+</body>
+</html>

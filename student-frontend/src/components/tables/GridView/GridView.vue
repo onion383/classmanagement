@@ -12,7 +12,40 @@
       :class="{ 'scrollbar-gutter-stable': vScroll }"
       :style="maxHeight > 0 ? { maxHeight: maxHeight + 'px' } : null"
     >
-      <table class="w-full border-collapse select-none">
+      <!-- 空态：**网状表不再显示**。
+           课表 / 值日 / 座位这类表的「空」本身就是一张待填的网格 —— 有行列结构、
+           格子能直接双击填，再盖一层「还没有数据 + 按钮」只会把这条路挡住，
+           用户还得先点个按钮才能开始填。空表自己就是最好的指示。
+           （列表型表格 DynamicTable 不适用这条：那边空表就是一片空白，必须给空态。）
+           加载失败态保留 —— 它承载的信息空表给不了：到底是没数据还是没加载出来。 -->
+      <div
+        v-if="loadError"
+        class="grid-empty grid-error"
+        :style="{ minHeight: Math.max(0, minTableHeight - 2) + 'px' }"
+      >
+        <svg class="grid-empty-icon" viewBox="0 0 48 48" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true">
+          <path d="M24 8 4 42h40L24 8Z" stroke-linejoin="round" opacity="0.75" />
+          <path d="M24 20v10" stroke-linecap="round" />
+          <circle cx="24" cy="36" r="1.6" fill="currentColor" stroke="none" />
+        </svg>
+        <p class="grid-empty-text">{{ errorText }}</p>
+        <button type="button" class="grid-empty-btn" @click="$emit('retry')">重试</button>
+      </div>
+
+      <!-- 判定中（数据还没就绪）：只留同高静默占位，**不渲染表头**。
+           课表 / 值日 / 座位的 rows 是「结构行」（按节次、劳动项目、座位行数生成），
+           数据没回来时 rows 是空数组 —— 此时若直接渲染表格，就只有一排表头没有内容，
+           数据到达后再变成满表，形成「表头先空着 → 突然长满」的跳变。
+           所以先判定、再决定画占位还是画表格：表头要么一直有、要么一直不出现。
+           minHeight 减 2 是为了抵掉外层容器上下各 1px 边框。 -->
+      <div
+        v-else-if="!emptyReady"
+        class="grid-empty-pending"
+        :style="{ minHeight: Math.max(0, minTableHeight - 2) + 'px' }"
+        aria-hidden="true"
+      ></div>
+
+      <table v-else class="w-full border-collapse select-none">
         <thead>
           <!--
             标题行：只在有 title 时存在（课表在用）。它与下面的列头行都在 thead 里，
@@ -233,6 +266,17 @@ export default {
     candidatePlaceholder: { type: String, default: '' },
     allowDuplicate: { type: Boolean, default: false },
     minTableHeight: { type: Number, default: 400 },
+    // ---- 以下是加载状态相关的 props ----
+    // 网状表（课表/值日/座位）**不再渲染空态**：空表本身就是一张待填的网格，
+    // 有行列结构、格子能直接双击填，再盖一层「还没有数据 + 按钮」只会挡路。
+    // emptyReady 仍需要：它决定「数据还没就绪」时画占位还是画表格。
+    // rows 为空到底是「正在加载」还是「确实没有数据」，组件无从判断，必须由调用方告知。
+    // false 时不渲染表格，保持同高静默占位。
+    emptyReady: { type: Boolean, default: true },
+    // 加载失败：与「没有数据」必须区分开。失败时显示告警图标 + 重试按钮，
+    // 而不是让用户对着一张空表猜「是不是数据丢了」。
+    loadError: { type: Boolean, default: false },
+    errorText: { type: String, default: '表格加载失败' },
     // 内层滚动容器的最大高度（px），内容超高即容器内纵向滚动、表头吸顶；<= 0 表示不限制
     // （保持旧行为：表格随内容撑高，滚的是外层页面）。与 DynamicTable 的 maxHeight 同款语义。
     // 默认 560 的取值：数据格固定 40px 高，560 ≈ 表头 + 12 行。座位表（6 行）、值日表
@@ -242,7 +286,8 @@ export default {
     rowHeaderLabel: { type: String, default: '行号' },  // 新增：行号/首列表头文案（座位用「行号」，值日用「劳动项目」）
     disableRowDrag: { type: Boolean, default: false },  // 新增：禁用行号列的整行拖拽排序（值日多行分组时关闭，避免拖单个子行）
   },
-  emits: ['update:cells', 'swapRows', 'swapColumns', 'update:row-meta', 'cell-dblclick'],
+  // retry：加载失败态里的「重试」被按下，由父组件重新拉数据。
+  emits: ['update:cells', 'swapRows', 'swapColumns', 'update:row-meta', 'cell-dblclick', 'retry'],
   data() {
     return {
       selecting: false, selectionStart: null, selectionEnd: null, longPressTimer: null, longPressActive: false,
@@ -391,7 +436,7 @@ export default {
     createCellGhost(rowIdx, colIdx) {
       const cell = this.rows[rowIdx].cells[colIdx];
       const ghost = document.createElement('div');
-      ghost.style.cssText = 'position:fixed;pointer-events:none;z-index:10000;padding:4px 10px;background:#eff6ff;color:#1e3a8a;border:1px solid #93c5fd;border-radius:4px;font-size:14px;';
+      ghost.style.cssText = 'position:fixed;pointer-events:none;z-index:10000;padding:4px 10px;background:#eff6ff;color:#1e3a8a;border:1px solid #93c5fd;border-radius:var(--radius-xs,4px);font-size:14px;';
       ghost.textContent = cell.course || '(空)'; document.body.appendChild(ghost); this._cellGhost = ghost;
       const moveHandler = (e) => { ghost.style.left = (e.clientX + 15) + 'px'; ghost.style.top = (e.clientY - 25) + 'px'; };
       document.addEventListener('mousemove', moveHandler); this._cellGhostMoveHandler = moveHandler;
@@ -594,5 +639,80 @@ thead th.grid-head-title { z-index: 6; }
 @keyframes table-slide-in {
   from { opacity: 0; transform: translateX(-20px); }
   to { opacity: 1; transform: translateX(0); }
+}
+
+/* ---- 空态：直接浮在毛玻璃上（不铺白底）----
+   空态块不画背景，露出外层容器 / 页面的玻璃；再由 backdrop-filter 把背后真正模糊出来。
+   之前铺 var(--color-surface) 相当于在毛玻璃上又盖一层白纸，glass 主题下尤其明显。
+   （.grid-view-container 在毛玻璃主题下本来就有 backdrop-filter，这里叠一层是同向加强。） */
+.grid-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 16px;
+  padding: 24px 20px;
+  box-sizing: border-box;
+  text-align: center;
+  background: transparent;
+  backdrop-filter: blur(22px) saturate(1.3);
+  -webkit-backdrop-filter: blur(22px) saturate(1.3);
+  animation: grid-empty-in 0.3s ease both;
+}
+@keyframes grid-empty-in {
+  from { opacity: 0; transform: translateY(6px); }
+  to { opacity: 1; transform: none; }
+}
+.grid-empty-icon {
+  width: 48px;
+  height: 48px;
+  color: var(--color-text-muted, #94a3b8);
+  opacity: 0.9;
+}
+.grid-empty-text {
+  margin: 0;
+  font-size: 16px;
+  letter-spacing: 0.5px;
+  color: var(--color-text-muted, #94a3b8);
+}
+/* 判定中的静默占位：与空态同高、完全透明。
+   只为了让「数据还没就绪」这段时间不画出表头，避免表头先出现再被空态替换的跳变。 */
+.grid-empty-pending {
+  width: 100%;
+  background: transparent;
+}
+/* 加载失败态：复用空态的整体版式，只把图标换成告警色 ——
+   版式一致，用户一眼能看出「这是同一块区域在给不同结论」，不会以为是两个模块 */
+.grid-error .grid-empty-icon {
+  color: var(--color-danger, #ef4444);
+}
+.grid-error .grid-empty-text {
+  color: var(--color-text-secondary, #64748b);
+}
+/* 空态按钮：淡蓝底 + 深蓝字（#D9E5F8 太浅，配白字只有 1.3:1，读不出来）。
+   这组色值在 DynamicTable 的 .dt-empty-btn 里有一份完全相同的副本，改颜色要两边一起改。
+   现在网状表只用于「加载失败 → 重试」这一个场景（空态已移除）。 */
+.grid-empty-btn {
+  min-width: 108px;
+  padding: 8px 20px;
+  font-size: 14px;
+  font-family: inherit;
+  line-height: 1.4;
+  color: #1e3a6b;
+  background: #d9e5f8;
+  border: 1px solid #c3d6f2;
+  border-radius: var(--radius-control);
+  cursor: pointer;
+  box-shadow: 0 2px 8px rgba(30, 58, 107, 0.10);
+  transition: transform 0.15s ease;
+}
+/* 悬停不做任何变化：这是空态的引导按钮，不是可反复试探的操作项，
+   上浮 / 换色 / 加阴影反而让空态显得「活」得过分。按下时留一个轻微缩放作为手感反馈。 */
+.grid-empty-btn:active {
+  transform: scale(0.98);
+}
+.grid-empty-btn:focus-visible {
+  outline: 2px solid rgba(30, 58, 107, 0.55);
+  outline-offset: 2px;
 }
 </style>

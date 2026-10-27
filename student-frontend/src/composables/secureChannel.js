@@ -79,8 +79,15 @@ export async function applyAuthHeader(headers, token, { forceToken = false } = {
       const withToken = forceToken || !authBound
       h['X-Auth-Proof'] = await encryptAuthProof(withToken ? token : '')
       return withToken
-    } catch (_) {
-      // 握手异常时退化为明文头：后端会以 auth-required 拒绝并触发一次重建会话的重试
+    } catch (e) {
+      // 握手异常时退化为明文头：后端会以 auth-required 拒绝并触发一次重建会话的重试。
+      // 注意：安全模式下后端不收明文 Bearer（resolveAuth 只认信道凭据），这条降级路径
+      // 必然 401——开发模式下在 console 里留痕，否则「拿不到 master key / 握手失败」
+      // 在桌面组件窗口里完全静默（console 由 main.widget.js 收进 desktop-layer.log）。
+      // 正式打包版不输出（import.meta.env.DEV 在构建期摇掉，不留运行时代码）。
+      if (import.meta.env.DEV) {
+        console.warn('[secure-channel] 信道凭据生成失败，降级明文 Bearer：', e?.message || e)
+      }
       h.Authorization = `Bearer ${token}`
       return true
     }

@@ -5,7 +5,7 @@
 .skeleton-block {
   box-sizing: border-box;
   height: 320px;
-  border-radius: var(--radius-md, 0.5rem);
+  border-radius: var(--radius-control);
   background: linear-gradient(90deg,
     rgba(127, 127, 127, 0.07) 25%,
     rgba(127, 127, 127, 0.14) 50%,
@@ -37,9 +37,8 @@
 }
 
 /* 弹窗右上角关闭按钮：方形毛玻璃小块（× / ✕）。
-   圆角走主题的 --radius-md，随各主题（glass 10 / glass2 16 / win11 10 / base 8 / minimal 0）
-   变化，与同主题下弹窗卡片的圆角观感保持一致。
-   glass / win11 主题给「所有 button」统一加了 1px 描边 + 12px 圆角 + 荧光描边环（::before），
+   圆角走主题的 --radius-control，随各主题变化，与同主题下弹窗卡片的圆角观感保持一致。
+   glass / win11 主题给「所有 button」统一加了 1px 描边 + 圆角 + 荧光描边环（::before），
    其特异性(0,2,1)高于组件 scoped 规则(0,2,0)，会把关闭钮压成「带细线边框的圆角块」，
    故这里用 !important 全部压掉 border / border-radius / box-shadow，并关掉 ::before 描边环。
    各弹窗只需在按钮上加 class="dlg-close"，定位类（absolute / top / right 等）照常保留。 */
@@ -51,7 +50,7 @@
   height: 28px;
   flex-shrink: 0;
   border: none !important;
-  border-radius: var(--radius-md, 10px) !important;
+  border-radius: var(--radius-control) !important;
   background: color-mix(in srgb, var(--color-text) 7%, transparent);
   backdrop-filter: blur(10px) saturate(1.15);
   -webkit-backdrop-filter: blur(10px) saturate(1.15);
@@ -86,7 +85,7 @@
    只保留淡深底（不再加深色描边），底色由文字色按比例调出，跟随主题深浅。 */
 .ai-dark-frame {
   background: color-mix(in srgb, var(--color-text) 5%, transparent);
-  border-radius: var(--radius-md, 10px);
+  border-radius: var(--radius-control);
 }
 
 /* 弹窗遮罩：透明底（不加纯色压暗）+ 背景模糊（基础/极简主题），磨砂虚化下层页面；
@@ -116,7 +115,7 @@
   justify-content: center;
   padding: 0;
   border: none;
-  border-radius: 8px;
+  border-radius: var(--radius-control);
   background: transparent;
   box-shadow: none;
   color: currentColor;

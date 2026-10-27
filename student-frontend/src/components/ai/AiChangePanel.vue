@@ -163,16 +163,18 @@ export default {
   /* 极淡暖黄调，与左右两个抽屉一致 */
   background-image: linear-gradient(rgba(255, 205, 130, 0.01), rgba(255, 205, 130, 0.01));
 }
-/* 抽屉内圆角统一为主题卡片圆角，压掉毛玻璃主题给 button 硬编码的 12px 皮肤与 .dlg-close 的 --radius-md */
+/* 抽屉内圆角统一为主题表面圆角，压掉毛玻璃主题给 button 的皮肤与 .dlg-close 的默认档。 */
 .change-panel,
 .change-panel button {
-  border-radius: var(--radius-surface, var(--radius-card, 12px)) !important;
+  border-radius: var(--radius-surface) !important;
 }
 /* 内容区再套一层卡片：在抽屉的毛玻璃之上叠一层主题卡片底 + 描边，
    让明细内容浮在卡片上，而不是直接贴在玻璃上。
-   底色用 color-mix 由 --color-surface 派生（深色模式随之变暗，不额外提亮）。 */
+   底色用 color-mix 由 --color-surface 派生（深色模式随之变暗，不额外提亮）。
+   同心：.inner-card 内缩在抽屉的 p-3（12px）之内，圆角 = 抽屉圆角 − 12px，
+   内外圆弧共享圆心；改抽屉圆角时内层自动跟随，不会脱节。 */
 .inner-card {
-  border-radius: var(--radius-surface, var(--radius-card, 12px));
+  border-radius: calc(var(--radius-surface) - var(--radius-concentric-gap));
   border: 1px solid var(--color-border);
   background: color-mix(in srgb, var(--color-surface, #fff) 45%, transparent);
 }

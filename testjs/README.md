@@ -24,17 +24,15 @@ npm run test:units        # node --test "testjs/units/*.test.js"
 
 | 文件 | 覆盖范围 |
 | --- | --- |
-| `schema.test.js` | 建表最终形态：四个合并表、旧逻辑名退化为只读视图、播种行数、`domain_history` payload → 三域历史视图的 JSON 映射、二次 `initSchema` 幂等、`slotStore` 逻辑名/可写列映射 |
-| `sanitize.test.js` | `cleanText` / `normBool` / `normNumber` / `strictDate` / `cleanPath` / `sanitizeField`（含课表、座位、值日等逻辑表名规则）/ `normalizeSeats` |
-| `recoveryKey.test.js` | 恢复密钥的归一化、格式化、哈希稳定性与常数时间比较 |
-| `heatColor.test.js` | 前端热力配色端点、钳制与前景色选择 |
-| `backendLogic.test.js` | 请假时间窗校验、SQL 时间戳格式（会注入临时 `DATA_DIR` 与测试主密钥） |
-| `pdfText.test.js` | 前端 `collectPdfText` 的循环引用、超深递归、null/函数输入等边界 |
+| `backend.test.js` | 后端数据层与纯逻辑：建表最终形态（四个合并表、旧逻辑名退化为只读视图、播种行数、`domain_history` payload → 三域历史视图的 JSON 映射、二次 `initSchema` 幂等、`slotStore` 逻辑名/可写列映射）、`sanitize` 系列清洗/校验、恢复密钥归一化/哈希/常数时间比较、请假时间窗与 SQL 时间戳 |
+| `frontend.test.js` | 前端纯函数：图表命中算法（分带/行/饼图扇区/图例）、AI 图表数据解析（类型白名单、项数上限、饼图 Top N + 其他）、热力配色、`collectPdfText` 边界（循环引用/超深递归/空输入）、表格关键字过滤与「无结果」判定 |
+| `albumScan.test.js` | 相册扫描的「索引被误删/清空」防护 |
+| `refresh-virtual.test.js` | 虚拟相册刷新（按索引更新、补 EXIF/缩略图、源文件缺失保留行、幂等） |
 
 新增测试：在 `units/` 下建 `*.test.js`，用 `node:test` 的 `test()` 写即可，无需改配置。
 需要 `student-backend` 依赖（如 `better-sqlite3`）时，用
-`createRequire(path.join(ROOT, 'student-backend/package.json'))` 解析，见 `schema.test.js`。
-前端是 ESM 的模块，用 `pathToFileURL` + 动态 `import()` 加载，见 `heatColor.test.js`。
+`createRequire(path.join(ROOT, 'student-backend/package.json'))` 解析，见 `backend.test.js`。
+前端是 ESM 的模块，用 `pathToFileURL` + 动态 `import()` 加载，见 `frontend.test.js`。
 
 ## 2. 冒烟测试 `smoke/` —— 统一入口
 
@@ -50,19 +48,19 @@ node testjs/run-smoke.cjs --bail     # 第一个失败就停
 
 约定：
 - 退出码 `0` = 通过，非 0 = 失败；**退出码 `3` = 脚本自己判定「环境不具备，跳过」**（如缺 `fontTools`），不计失败。
-- 需要后端在跑的脚本（`auth-e2e-probe.js`、`auth-privacy-probe.js`）在后端未监听 3000 端口时判为跳过。
+- 需要后端在跑的脚本（`auth-smoke.js`）在后端未监听 3000 端口时判为跳过。
 - `.py` 脚本找不到 python 时跳过。
 
 | 脚本 | 覆盖范围 |
 | --- | --- |
 | `api-smoke.cjs` | 后端基础接口连通 |
-| `auth-e2e-probe.js` | 注册 → 确认 → 登录 → 隐私模式全链路（**需后端**） |
-| `auth-privacy-probe.js` | 隐私模式下的接口鉴权（**需后端**） |
+| `auth-smoke.js` | 认证链路：注册 → 确认 → 登录 → 改密 → 改名，以及隐私模式下的口令包裹/恢复词校验（**需后端**，默认端口 3999，`PORT` 可覆盖） |
 | `collator-equiv-probe.js` | `Intl.Collator` 与前端等价排序一致性 |
 | `unzip-safe-test.cjs` | 自研安全解压：符号链接/路径穿越/绝对路径/反斜杠全部拦截 |
 | `pptx-guard-test.cjs` | PPTX 导入的守卫生效 |
 | `thumbs-cache-test.cjs` | 缩略图缓存目录与命中逻辑 |
 | `theme-setting-probe.mjs` | 主题设置项读写 |
+| `secure-channel-retry.js` | 安全信道 401 重试：会话过期 / 凭据降级 / 绑定失效时是否正确重发（**需 Vite 开发服务器**，页面在 `student-frontend/dev-probes/`，经 `tools/electron-page-probe.cjs` 跑） |
 | `pdf-subset-verify.mjs` | PDF 字体动态子集产出核对 |
 | `font-subset-verify.py` | 子集 cmap 是否覆盖实际绘制的全部字符（需 `fontTools`） |
 
@@ -77,8 +75,17 @@ node testjs/run-smoke.cjs --bail     # 第一个失败就停
 | `mode-probe.mjs` | 日/夜模式切换开销测量 |
 | `ocr-probe.mjs` | OCR 可用性（Windows 有效） |
 | `pdf-leak-probe.mjs` | PDF 导出内存泄漏核查（看 V8 external，不看 rss） |
+| `widget-bottom-regression.ps1` | 桌面组件置底模式的回归检查：`-Drags N` 次合成拖动，逐项断言位移正确、尺寸不变、松手后仍压在 `Progman` 之上、无 `Application Error`（需应用在跑且置底模式已开） |
+| `widget-shot.ps1` | 把组件窗口临时提到最前截图（`-Out` 指定路径），截完自动按「第一个可见窗口之下」压回去，用于核对圆角/透明/蓝色 |
+| `toplevel-bottom-probe.cjs` | 「顶层置底」最小原型：顶层窗口 + 透明 CSS 圆角 + 真实鼠标拖动 + z 序自检，不含业务代码，可独立跑 |
+| `inject-drag.ps1` | 用 `SetCursorPos` + `mouse_event` 合成一次真实左键拖动（虚拟化坐标），配合上面几个脚本做输入验证 |
 
 `measure-startup.mjs` 的数据隔离在 `%LOCALAPPDATA%\BanjiiStartupMeasure`，不碰真实用户数据。
+
+> **关于已删除的 `pipe-*` 评估脚本**：它们曾用于「命名管道 + ACL 通信层方案」的评估与实测。
+> 该方案已因引入 5 层间接而收益仅约 1ms、且 axios fetch adapter 对 204 响应误判导致页面闪跳，
+> **最终全量回退**。评估结论与实测数据保留在 `doc/开发文档/通信层方案评估-命名管道与ACL.md`，
+> 脚本本身不再随仓库维护（需要复跑时见 `git stash` 中的 `pipe-migration-wip`）。
 
 ## 4. 工具 `tools/`
 

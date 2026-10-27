@@ -36,9 +36,12 @@ export function useScheduleMaster({ API_BASE, DEFAULT_SECTIONS }) {
         }
         this.masterCells = this.adjustCells(this.masterCells, this.masterSettings);
         this._masterLoadOk = true;
+        this.masterError = false;
       } catch (e) {
-        // 加载失败不再静默：留标记供重进页面时补拉，并给出提示
+        // 加载失败不再静默：留标记供重进页面时补拉，并给出提示。
+        // masterError 驱动表格的「加载失败态」（告警 + 重试），与「没有数据」区分开。
         this._masterLoadOk = false;
+        this.masterError = true;
         this.notifyError('一般课表加载失败，请稍后重试');
         console.error(e);
       } finally {

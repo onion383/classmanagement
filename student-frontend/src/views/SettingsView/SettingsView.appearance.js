@@ -11,8 +11,8 @@ export function useSettingsAppearance() {
       this.themeStore.setTheme(this.selectedThemeId)
     },
     // 提示合并（立即生效，无需保存）
-    onMergeNotificationsChange(e) {
-      this.mergeNotifications = e.target.checked
+    onMergeNotificationsChange(value) {
+      this.mergeNotifications = !!value
       localStorage.setItem('mergeNotifications', this.mergeNotifications ? '1' : '0')
     },
     // 图标样式：线性图标 / Emoji
@@ -28,12 +28,12 @@ export function useSettingsAppearance() {
       this.themeStore.setMode(value)
     },
     // 跟随系统开关：立即生效，开启时按系统深色/浅色偏好切换
-    onFollowSystemChange(e) {
-      this.themeStore.setFollowSystem(e.target.checked)
+    onFollowSystemChange(value) {
+      this.themeStore.setFollowSystem(!!value)
     },
     // 动画效果总开关：立即生效，无需保存
-    onAnimationsChange(e) {
-      this.themeStore.setAnimationsEnabled(e.target.checked)
+    onAnimationsChange(value) {
+      this.themeStore.setAnimationsEnabled(!!value)
     },
     // Background image
     async onBgImageFileChange(e) {
@@ -117,8 +117,8 @@ export function useSettingsAppearance() {
         console.error('保存工具箱设置失败:', err)
       }
     },
-    onToolboxChange(e) {
-      this.toolboxEnabled = e.target.checked
+    onToolboxChange(value) {
+      this.toolboxEnabled = !!value
       if (!this.loaded) return
       this.saveWidgetSettings()
       // 立即生效（不再有「本次启用」这个会话开关）：
@@ -132,33 +132,13 @@ export function useSettingsAppearance() {
       } catch (_) {}
     },
     // 切换「启用桌面小组件」：持久化到 localStorage，并即时通知主进程创建/关闭桌面小组件窗口
-    onDesktopWidgetChange(e) {
-      this.desktopWidgetEnabled = e.target.checked
+    onDesktopWidgetChange(value) {
+      this.desktopWidgetEnabled = !!value
       try { localStorage.setItem('desktopWidgetEnabled', this.desktopWidgetEnabled ? '1' : '0') } catch (_) {}
       window.electron?.send(SEND.DESKTOP_WIDGET_ENABLED, this.desktopWidgetEnabled)
     },
-    // 读取「桌面组件常驻最底层」的真实状态：该状态由主进程持有（连续启动崩溃时会被自动关闭），
-    // 设置页的开关只是镜像，加载时必须同步，否则界面显示和实际层级会不一致。
-    async loadDesktopLayerState() {
-      try {
-        const st = await window.electron?.invoke(INVOKE.GET_DESKTOP_LAYER_STATE)
-        if (st) {
-          this.desktopLayerEnabled = !!st.desktopLayerEnabled
-          this.desktopLayerAutoDisabled = !!st.autoDisabled
-        }
-      } catch (_) {}
-    },
-    // 切换「桌面组件常驻最底层」：主进程改状态并重启组件子进程
-    // （窗口层级在创建时决定，只能重启才生效；用户手动改过后清掉「自动降级」提示）
-    // 注意：开启后组件挂成桌面层子窗口，**系统亚克力会失效**（DWM 材质只对顶层窗口生效），
-    // 背景会退化成纯色 —— 这是 Windows 层面的取舍，两者不可兼得。
-    onDesktopLayerChange(e) {
-      this.desktopLayerEnabled = e.target.checked
-      if (this.desktopLayerEnabled) this.desktopLayerAutoDisabled = false
-      window.electron?.send(SEND.DESKTOP_WIDGET_DESKTOP_LAYER, this.desktopLayerEnabled)
-    },
-    async onUsbAutoOpenChange(e) {
-      this.usbAutoOpen = e.target.checked
+    async onUsbAutoOpenChange(value) {
+      this.usbAutoOpen = !!value
       try {
         await window.electron?.invoke(INVOKE.SET_USB_AUTO_OPEN, this.usbAutoOpen)
       } catch (_) {

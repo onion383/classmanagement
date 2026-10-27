@@ -55,8 +55,8 @@
       </div>
 
       <div class="flex justify-end gap-2 mt-4">
-        <button type="button" @click="$emit('cancel')" class="px-4 py-2 rounded-lg bg-text-muted text-text-inverse hover:bg-text-secondary">取消</button>
-        <button type="button" @click="submit" class="px-4 py-2 rounded-lg bg-primary text-text-inverse hover:bg-primary-hover">确认保存</button>
+        <button type="button" @click="$emit('cancel')" class="px-4 py-2 rounded-lg bg-text-muted text-text-inverse hover:bg-text-secondary transition-theme">取消</button>
+        <button type="button" @click="submit" class="px-4 py-2 rounded-lg bg-primary text-text-inverse hover:bg-primary-hover transition-theme">确认保存</button>
       </div>
     </div>
   </DialogShell>
@@ -74,7 +74,10 @@ export default {
     visible: { type: Boolean, default: false },
     fields: { type: Array, default: () => [] },
     requiredField: { type: String, default: '' },
-    title: { type: String, default: '添加学生' }
+    title: { type: String, default: '添加学生' },
+    // 编辑模式：传入要修改的那一行，打开弹窗时用它预填表单。
+    // 不传（或传空对象）= 新增模式，表单保持空白。
+    initialValues: { type: Object, default: () => ({}) }
   },
   data() {
     return { form: {} }
@@ -95,6 +98,14 @@ export default {
       const form = {}
       this.fields.forEach(f => {
         form[f.name] = (f.type === '整数' || f.type === '小数') ? '' : ''
+      })
+      // 编辑模式：用传入行的值覆盖（只覆盖表单里真实存在的字段，多出来的键忽略）。
+      // 数字型统一转字符串，交给 v-model.number 在输入时转回来 —— 这里若给 number，
+      // 空值 '' 会被 v-model.number 渲染成空，两者行为一致，但混用类型容易出「1 变 '1'」的比较问题。
+      const src = this.initialValues || {}
+      Object.keys(form).forEach(k => {
+        const v = src[k]
+        if (v !== null && v !== undefined && v !== '') form[k] = String(v)
       })
       this.form = form
     },

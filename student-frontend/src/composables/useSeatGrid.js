@@ -60,6 +60,9 @@ export function useSeatGrid(apiBase, options = {}) {
   const { getStudentName = () => '', getStudentId = () => null, undo = null, cellBase = null } = options
 
   const loaded = ref(false)
+  // 加载失败标志：原来失败只 console.error，loaded 一直是 false →
+  // 表格永远停在「判定中」占位，看起来像卡住了。提到外面让表格能显示告警 + 重试。
+  const loadError = ref(false)
   const rows = ref(6)
   const cols = ref(7)
   const seats = ref([])
@@ -147,7 +150,8 @@ export function useSeatGrid(apiBase, options = {}) {
       settings.value = res.data.settings || {}
       showAisle.value = settings.value.showAisle !== false
       loaded.value = true
-    } catch (e) { console.error(e) }
+      loadError.value = false
+    } catch (e) { console.error(e); loadError.value = true }
   }
 
   async function save() {
@@ -279,7 +283,7 @@ export function useSeatGrid(apiBase, options = {}) {
   }
 
   return {
-    loaded, rows, cols, seats, mode, showAisle, settings, settingsVisible, currentEditExcludeIds,
+    loaded, loadError, rows, cols, seats, mode, showAisle, settings, settingsVisible, currentEditExcludeIds,
     colHeaders, displayRows, exportFields, exportRows,
     load, save, saveSeats, onCellsUpdate, onSwapRows, onSwapColumns, onCellDblClick, saveSettings,
     generateColHeaders, getDisplayColCount, isAisleCol
