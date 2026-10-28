@@ -712,8 +712,11 @@ export default {
       const a = document.createElement('a')
       a.href = url
       a.download = `恢复密钥-${this.account.username || 'account'}.txt`
+      // 挂到 DOM 再点击，且延迟回收 URL：立即 revokeObjectURL 可能让下载拿到空文件
+      document.body.appendChild(a)
       a.click()
-      URL.revokeObjectURL(url)
+      document.body.removeChild(a)
+      setTimeout(() => URL.revokeObjectURL(url), 1000)
       this.recovery.saved = true
       this.errorMsg = ''
     },

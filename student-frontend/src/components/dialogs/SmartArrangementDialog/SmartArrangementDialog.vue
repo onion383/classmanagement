@@ -10,7 +10,7 @@
       <ConfirmDialog
         :visible="draftConfirmVisible"
         title="确认应用草稿"
-        message="检测到你使用了草稿，是否确认应用？<br>点击「确认」正式应用到座位表后，草稿将会被清空。"
+        :message="'检测到你使用了草稿，是否确认应用？\n点击「确认」正式应用到座位表后，草稿将会被清空。'"
         confirm-text="确认"
         cancel-text="取消"
         :show-cancel="true"

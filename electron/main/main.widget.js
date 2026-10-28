@@ -435,6 +435,13 @@ function registerWidgetIpc(opts = {}) {
   if (typeof opts.createMainWindow === 'function') createMainWindow = opts.createMainWindow
   if (typeof opts.loadUrlWithRetry === 'function') loadUrlWithRetry = opts.loadUrlWithRetry
 
+  // 浮窗控制通道的统一发送方校验：只接受本进程创建的 widgetWindow 渲染层。
+  // 各窗口同 origin，不校验时任何被注入的渲染层都能借这些通道移动/全屏/隐藏浮窗；
+  // widget-exit 与 desktop-widget-* 早已有同等校验，这里把剩余通道补齐到同一强度。
+  const fromWidgetWindow = (event) => {
+    return !!widgetWindow && !widgetWindow.isDestroyed() && event.sender === widgetWindow.webContents
+  }
+
   // 主窗口渲染层空闲回报：同时创建工具箱浮窗，并（按启用状态）创建/关闭桌面小组件窗口
   ipcMain.on('widgets-ready', (event, enabled) => {
     const mainWindow = getMainWindow()
@@ -542,7 +549,7 @@ function registerWidgetIpc(opts = {}) {
   // 入参 [width, height] 为「视觉内容」尺寸；窗口实际会比它大 2*M，四周多出的部分用于绘制阴影。
   // 窗口位置保持不变——因为渲染层内容相对窗口固定偏移 M，所以视觉内容在屏幕上的位置不会变。
   ipcMain.on('widget-resize', (event, [width, height]) => {
-    if (widgetWindow && !widgetWindow.isDestroyed()) {
+    if (fromWidgetWindow(event)) {
       const M = WIDGET_SHADOW_MARGIN
       widgetWindow.setContentSize(width + M * 2, height + M * 2)
       const [actualW, actualH] = widgetWindow.getContentSize()
@@ -567,7 +574,7 @@ function registerWidgetIpc(opts = {}) {
 
   // 将窗口移动到指定位置
   ipcMain.on('widget-move-to', (event, position) => {
-    if (widgetWindow && !widgetWindow.isDestroyed()) {
+    if (fromWidgetWindow(event)) {
       const { height: screenH } = screen.getPrimaryDisplay().workAreaSize
       const [, winHeight] = widgetWindow.getSize()
       if (position === 'left-middle') {
@@ -579,23 +586,23 @@ function registerWidgetIpc(opts = {}) {
   })
 
   // 将窗口居中显示（同时保存居中前的位置，以便关闭工具后恢复）
-  ipcMain.on('widget-center', () => {
-    if (widgetWindow && !widgetWindow.isDestroyed()) {
+  ipcMain.on('widget-center', (event) => {
+    if (fromWidgetWindow(event)) {
       lastIconPosition = widgetWindow.getPosition()
       widgetWindow.center()
     }
   })
 
   // 恢复图标之前保存的位置
-  ipcMain.on('widget-restore-position', () => {
-    if (widgetWindow && !widgetWindow.isDestroyed() && lastIconPosition) {
+  ipcMain.on('widget-restore-position', (event) => {
+    if (fromWidgetWindow(event) && lastIconPosition) {
       widgetWindow.setPosition(lastIconPosition[0], lastIconPosition[1])
     }
   })
 
   // 全屏小组件（用于注释工具）
-  ipcMain.on('widget-fullscreen', () => {
-    if (widgetWindow && !widgetWindow.isDestroyed()) {
+  ipcMain.on('widget-fullscreen', (event) => {
+    if (fromWidgetWindow(event)) {
       preFullscreenBounds = {
         pos: widgetWindow.getPosition(),
         size: widgetWindow.getContentSize()
@@ -610,8 +617,8 @@ function registerWidgetIpc(opts = {}) {
   })
 
   // 从全屏恢复
-  ipcMain.on('widget-restore', () => {
-    if (widgetWindow && !widgetWindow.isDestroyed() && preFullscreenBounds) {
+  ipcMain.on('widget-restore', (event) => {
+    if (fromWidgetWindow(event) && preFullscreenBounds) {
       widgetWindow.setPosition(preFullscreenBounds.pos[0], preFullscreenBounds.pos[1])
       widgetWindow.setContentSize(preFullscreenBounds.size[0], preFullscreenBounds.size[1])
       widgetWindow.setAlwaysOnTop(true)
@@ -623,14 +630,14 @@ function registerWidgetIpc(opts = {}) {
 
   // 设置窗口是否忽略鼠标事件（true=透明区域穿透，false=正常接收）
   ipcMain.on('widget-set-ignore-mouse', (event, ignore) => {
-    if (widgetWindow && !widgetWindow.isDestroyed()) {
+    if (fromWidgetWindow(event)) {
       widgetWindow.setIgnoreMouseEvents(ignore, { forward: true })
     }
   })
 
   // 设置工具箱可见性
   ipcMain.on('widget-set-visible', (event, visible) => {
-    if (widgetWindow && !widgetWindow.isDestroyed()) {
+    if (fromWidgetWindow(event)) {
       if (visible) {
         widgetWindow.setOpacity(1)
         widgetWindow.setIgnoreMouseEvents(false)
@@ -644,7 +651,7 @@ function registerWidgetIpc(opts = {}) {
 
   // 拖动开始：记录窗口初始位置、尺寸和鼠标初始位置
   ipcMain.on('widget-drag-start', (event, { screenX, screenY }) => {
-    if (widgetWindow && !widgetWindow.isDestroyed()) {
+    if (fromWidgetWindow(event)) {
       dragStartWindowPos = widgetWindow.getPosition()
       dragStartWindowSize = widgetWindow.getSize()
       dragStartMousePos = [screenX, screenY]
@@ -688,7 +695,7 @@ function registerWidgetIpc(opts = {}) {
 
   // 拖动中：使用 setContentBounds 与 setContentSize 保持一致，避免 setBounds/setSize 边界计算差异
   ipcMain.on('widget-drag-move', (event, { screenX, screenY }) => {
-    if (widgetWindow && !widgetWindow.isDestroyed() && dragStartWindowPos && dragStartMousePos && dragStartWindowSize) {
+    if (fromWidgetWindow(event) && dragStartWindowPos && dragStartMousePos && dragStartWindowSize) {
       const dx = screenX - dragStartMousePos[0]
       const dy = screenY - dragStartMousePos[1]
       let newX = Math.round(dragStartWindowPos[0] + dx)
@@ -706,8 +713,8 @@ function registerWidgetIpc(opts = {}) {
   })
 
   // 拖动结束：确保尺寸正确
-  ipcMain.on('widget-drag-end', () => {
-    if (widgetWindow && !widgetWindow.isDestroyed()) {
+  ipcMain.on('widget-drag-end', (event) => {
+    if (fromWidgetWindow(event)) {
       const w = currentWidgetSize[0]
       const h = currentWidgetSize[1]
       widgetWindow.setContentSize(w, h)

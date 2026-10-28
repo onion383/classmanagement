@@ -101,8 +101,12 @@
    各弹窗遮罩是手写的固定暗层（fixed inset-0 + bg-black/40~50）。
    在 Win11（背景透明的亚克力窗口）里，给这些遮罩额外叠加一层 CSS 模糊，
    使弹窗下层的页面/桌面内容被磨砂，贴近毛玻璃弹窗的质感。
-   限定 win11 主题，不影响毛玻璃/极简等其它主题。 */
-:root[data-theme="win11"] [class*="inset-0"][class*="bg-black/"]:not([class*="bg-black/9"]) {
+   限定 win11 主题，不影响毛玻璃/极简等其它主题。
+   必须同时带 fixed 才匹配（与 utilities.css 对齐）：避免把内容层里「绝对定位铺满某格子的
+   hover 压暗层」误判成弹窗遮罩，导致压暗消失且图片发虚。
+   另外排除 bg-black/9、bg-black/8：深色全屏看图遮罩（相册 bg-black/90、班费票据 bg-black/80）
+   需要保持深底，不能被改成透明底 + 模糊。 */
+:root[data-theme="win11"] [class*="fixed"][class*="inset-0"][class*="bg-black/"]:not([class*="bg-black/9"]):not([class*="bg-black/8"]) {
   /* 弹窗遮罩：透明底（不加纯色压暗）+ 背景模糊，磨砂虚化下层页面 */
   background-color: rgba(0, 0, 0, 0);
   backdrop-filter: blur(18px) saturate(1.1);

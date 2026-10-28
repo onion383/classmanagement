@@ -34,6 +34,7 @@
 
 <script>
 import '../../styles/dialog-transition.css'
+import { sanitizeFileName } from '../../utils/fileName.js'
 
 export default {
   name: 'MarkdownEditDialog',
@@ -65,7 +66,9 @@ export default {
   methods: {
     cancel() { this.$emit('update:visible', false) },
     save() {
-      const name = this.name.trim()
+      // 文件名会落成磁盘上的 <name>.md：非法字符/末尾点空格先清洗，
+      // 清成空串（只输了非法字符）时直接不保存，避免创建出诡异的空名文件
+      const name = sanitizeFileName(this.name, '')
       if (!name) return
       this.$emit('save', { original: this.originalName, name, content: this.content })
     },

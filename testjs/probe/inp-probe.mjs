@@ -556,12 +556,31 @@ async function driveRoute(cdp, route, out) {
 }
 
 // ---------------------------------------------------------------- 主流程
+// 本脚本可能自行拉起 Vite：必须保留句柄并在退出时清理，否则 dev server 会残留占用端口。
+let viteChild = null
+function stopVite() {
+  if (!viteChild || viteChild.killed) return
+  const pid = viteChild.pid
+  try {
+    if (process.platform === 'win32') spawn('taskkill', ['/pid', String(pid), '/T', '/F'], { stdio: 'ignore' })
+    else process.kill(-pid, 'SIGTERM')
+  } catch (_) {
+    try { viteChild.kill() } catch (_) {}
+  }
+  viteChild = null
+}
+
 async function ensureRunner() {
   if (await waitForMainTarget(1200)) return { launched: false }
 
   if (!(await viteUp())) {
     console.log('[inp] Vite 未就绪，启动开发服务器…')
-    spawn('npm', ['run', 'dev'], { cwd: FRONTEND, stdio: 'inherit', shell: true })
+    viteChild = spawn('npm', ['run', 'dev'], {
+      cwd: FRONTEND,
+      stdio: 'inherit',
+      shell: true,
+      detached: process.platform !== 'win32',
+    })
     const deadline = Date.now() + 30000
     while (Date.now() < deadline && !(await viteUp())) await sleep(500)
     if (!(await viteUp())) throw new Error('Vite 开发服务器 30s 内未就绪')
@@ -679,6 +698,7 @@ async function main() {
     console.log('\n[inp] 测量结束（one-shot）。')
     cdp.close()
     if (child) child.kill()
+    stopVite()
     process.exit(0)
   }
   console.log('\n[inp] 测量结束。窗口保持打开，可自行再操作；Ctrl+C 退出脚本。')
@@ -759,9 +779,13 @@ function report(out, raw, measures, probe) {
 
 // 清理：结束脚本时一并关掉它启动的子进程
 function wireCleanup() {
-  const kill = () => { try { process.exit(0) } catch {} }
+  const kill = () => {
+    stopVite()
+    try { process.exit(0) } catch {}
+  }
   process.on('SIGINT', kill)
   process.on('SIGTERM', kill)
+  process.on('exit', stopVite)
 }
 
 wireCleanup()

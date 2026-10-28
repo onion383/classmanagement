@@ -214,6 +214,9 @@ const als = new AsyncLocalStorage();
 const connCache = new Map();
 // 缓存连接数量上限（LRU 驱逐策略：超过上限时关闭并移出最久未使用的连接）
 const CONN_CACHE_MAX = 10;
+// 每个库当前「正在被请求使用」的计数（见 withDb）：
+// 驱逐时跳过计数 > 0 的连接，否则会把仍在执行查询的连接 close() 掉（B04-01）。
+const connUseCount = new Map();
 
 // 记录对某连接的访问（命中时刷新 LRU 顺序）
 function touchConn(slug) {
@@ -224,12 +227,34 @@ function touchConn(slug) {
   }
 }
 
-// 写入缓存，超限时按 LRU 驱逐最久未使用的连接
+// 请求开始/结束使用某库连接（成对调用；withDb 已包好，业务侧不用管）
+function beginConnUse(slug) {
+  connUseCount.set(slug, (connUseCount.get(slug) || 0) + 1);
+}
+function endConnUse(slug) {
+  const n = (connUseCount.get(slug) || 0) - 1;
+  if (n > 0) connUseCount.set(slug, n);
+  else connUseCount.delete(slug);
+}
+
+// 写入缓存，超限时按 LRU 驱逐最久未使用的连接。
+// 正在被请求使用的连接不驱逐：直接 close() 会让在途查询抛「database is closed」。
+// 若候选全都在用，允许暂时超出上限，等请求结束后下一次写入再收缩。
 function setCachedConn(slug, conn) {
   connCache.set(slug, conn);
-  while (connCache.size > CONN_CACHE_MAX) {
+  let guard = 0;
+  while (connCache.size > CONN_CACHE_MAX && guard++ < CONN_CACHE_MAX * 2) {
     const oldestKey = connCache.keys().next().value;
     if (oldestKey == null) break;
+    // 刚插入的这条也不能驱逐：getConn 是先 setCachedConn 再交给 withDb 的，
+    // 此刻它的使用计数还是 0，按「空闲最旧」淘汰会把调用方马上要用的连接直接 close。
+    if (oldestKey === slug || (connUseCount.get(oldestKey) || 0) > 0) {
+      // 只把顺序挪到末尾（下一次优先淘汰别的），不关闭连接
+      const keep = connCache.get(oldestKey);
+      connCache.delete(oldestKey);
+      connCache.set(oldestKey, keep);
+      continue;
+    }
     const evicted = connCache.get(oldestKey);
     connCache.delete(oldestKey);
     try { evicted.close(); } catch (_) { /* 关闭失败可忽略 */ }
@@ -424,6 +449,8 @@ module.exports = {
   als,
   connCache,
   CONN_CACHE_MAX,
+  beginConnUse,
+  endConnUse,
   touchConn,
   setCachedConn,
   applyPerfPragmas,

@@ -41,7 +41,12 @@ const BATCH_MAX = 200
 export function parseThumbBatch(buffer, idsHeader) {
   const ids = (idsHeader || '').split(',').filter(Boolean).map(Number).filter(Boolean)
   if (!ids.length || !buffer || !buffer.byteLength) return []
-  const ab = buffer.buffer.slice(buffer.byteOffset, buffer.byteOffset + buffer.byteLength)
+  // 兼容 ArrayBuffer（fetch res.arrayBuffer()）与 TypedArray 视图两种入参：
+  // 生产调用方传的是 ArrayBuffer，直接读 .buffer/.byteOffset 会得到 undefined 并抛错。
+  const ab = buffer instanceof ArrayBuffer
+    ? buffer
+    : (ArrayBuffer.isView(buffer) ? buffer.buffer.slice(buffer.byteOffset, buffer.byteOffset + buffer.byteLength) : null)
+  if (!ab) return []
   const dv = new DataView(ab)
   const out = []
   let off = 0

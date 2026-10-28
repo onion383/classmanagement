@@ -25,8 +25,11 @@ app.whenReady().then(async () => {
   win.webContents.on('console-message', (e) => {
     console.log(String(e.message || ''))
   })
-  win.webContents.on('did-fail-load', (e, code, desc) => {
-    console.log('PROBE_LOAD_FAIL ' + code + ' ' + desc)
+  win.webContents.on('did-fail-load', (e, code, desc, validatedUrl, isMainFrame) => {
+    console.log('PROBE_LOAD_FAIL ' + code + ' ' + desc + (validatedUrl ? ' ' + validatedUrl : ''))
+    // 主框架加载失败必须让脚本以非零码退出，否则外层只能看到 PROBE_DONE 而误判成功。
+    // -3 = ERR_ABORTED（页面主动跳转/被取消），属于正常流程，不视为失败。
+    if (isMainFrame !== false && code !== -3) app.exit(4)
   })
   try {
     await win.loadURL(url)

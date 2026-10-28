@@ -541,8 +541,12 @@ function fitCanvas() {
 
   ;[bgCanvas.value, hlCanvas.value, drawCanvas.value].forEach(c => {
     if (!c) return
-    c.width = canvasW
-    c.height = canvasH
+    // 只有内部分辨率变化时才重设 width/height：给 canvas 赋 width/height 会清空位图，
+    // 窗口缩放/布局变化时无脑重设会把用户已画的标注与笔迹全部抹掉。
+    if (c.width !== canvasW || c.height !== canvasH) {
+      c.width = canvasW
+      c.height = canvasH
+    }
     c.style.width = displayW + 'px'
     c.style.height = displayH + 'px'
     c.style.left = ox + 'px'
@@ -561,7 +565,13 @@ function placeToolbar() {
 
 let ro = null
 onMounted(async () => {
-  await loadScreenshot()
+  // onMounted 的 async 回调返回值无人接收：loadScreenshot 一旦抛错就是未处理的 Promise 拒绝。
+  // 这里显式捕获并留日志，画布/工具栏照常初始化（没有截图时只是空画布）。
+  try {
+    await loadScreenshot()
+  } catch (e) {
+    console.error('[note] 加载截屏失败', e)
+  }
   if (canvasArea.value) {
     ro = new ResizeObserver(() => {
       if (bgImage) fitCanvas()

@@ -56,4 +56,18 @@ function buildUpdate(table, data, id) {
   return db.prepare(`UPDATE ${table} SET ${setClause} WHERE id = ?`).run(...Object.values(data), Number(id));
 }
 
-module.exports = { now, cleanUp, maxPosition, buildInsert, buildUpdate };
+// YYYY-MM-DD 且是真实存在的日期。
+// 快照接口此前只校验「非空」，任意字符串都能入库，mondayOf/parseDateStr 会把它
+// 解析成 NaN 日期（'NaN-NaN-NaN'），历史列表出现无法删除的幽灵周。
+// 除了格式，还要拒绝 2026-02-30 这类「格式对但日期不存在」的输入。
+function isDateStr(value) {
+  const s = String(value === undefined || value === null ? '' : value).trim();
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(s)) return false;
+  const d = new Date(`${s}T00:00:00`);
+  if (isNaN(d.getTime())) return false;
+  return d.getFullYear() === Number(s.slice(0, 4))
+    && d.getMonth() + 1 === Number(s.slice(5, 7))
+    && d.getDate() === Number(s.slice(8, 10));
+}
+
+module.exports = { now, isDateStr, cleanUp, maxPosition, buildInsert, buildUpdate };

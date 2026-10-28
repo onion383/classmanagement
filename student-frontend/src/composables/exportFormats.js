@@ -6,13 +6,18 @@
 // =========================================================================
 import { INVOKE } from '../electronChannels.js'
 import { loadPdfFontBase64, collectPdfText } from '../utils/pdfFont.js'
+import { sanitizeFileName } from '../utils/fileName.js'
+import { csvCell } from '../utils/csvCell.js'
 import { toRaw } from 'vue'
 
 // 保存文件：Electron 下弹系统保存对话框，用户确认后才写入；浏览器则直接下载
 export async function saveFileWithDialog(defaultName, blob) {
+  // 文件名来自用户输入，落盘前统一清洗（非法字符 / 末尾点空格 / 超长），
+  // 这里是所有导出格式的唯一出口，改这一处即可覆盖全部调用方
+  const safeName = sanitizeFileName(defaultName)
   if (window.electron && typeof window.electron.invoke === 'function') {
     const arrayBuffer = await blob.arrayBuffer()
-    const result = await window.electron.invoke(INVOKE.SAVE_FILE, { defaultName, data: arrayBuffer })
+    const result = await window.electron.invoke(INVOKE.SAVE_FILE, { defaultName: safeName, data: arrayBuffer })
     if (result && !result.canceled && result.filePath) {
       // 保存成功后用系统默认应用打开文件
       window.electron.invoke(INVOKE.OPEN_FILE, { filePath: result.filePath }).catch(() => {})
@@ -22,7 +27,7 @@ export async function saveFileWithDialog(defaultName, blob) {
   const url = URL.createObjectURL(blob)
   const a = document.createElement('a')
   a.href = url
-  a.download = defaultName
+  a.download = safeName
   a.click()
   URL.revokeObjectURL(url)
   return true
@@ -126,8 +131,7 @@ async function exportHTML(cols, body, name, title) {
 }
 
 async function exportCSV(cols, body, name) {
-  const cell = (v) => { const t = s(v); return /[",\n]/.test(t) ? '"' + t.replace(/"/g, '""') + '"' : t }
-  const csv = '\uFEFF' + [cols, ...body].map((row) => row.map(cell).join(',')).join('\r\n')
+  const csv = '\uFEFF' + [cols, ...body].map((row) => row.map(csvCell).join(',')).join('\r\n')
   return saveFileWithDialog(`${name}.csv`, new Blob([csv], { type: 'text/csv;charset=utf-8;' }))
 }
 

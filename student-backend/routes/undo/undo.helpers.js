@@ -82,9 +82,13 @@ function rowName(row, id) {
 }
 
 // 相册排序：按给定 id 顺序整块重写 sort_order（1 起）。相册删除后 id 可能不再存在，跳过即可。
+// 整块重排必须原子：中途失败会留下「一半新序、一半旧序」的错乱排序。
 function applyAlbumOrder(ids) {
-  const upd = db.prepare('UPDATE albums SET sort_order = ? WHERE id = ?')
-  ;(ids || []).forEach((id, i) => upd.run(i + 1, Number(id)))
+  const tx = db.transaction(() => {
+    const upd = db.prepare('UPDATE albums SET sort_order = ? WHERE id = ?')
+    ;(ids || []).forEach((id, i) => upd.run(i + 1, Number(id)))
+  })
+  tx()
 }
 // 分组结构：整块重建某维度下的组与成员。
 // snapshot = [{ id, name, gender, sort_order, members: [{ id, member_name, remark, sort_order }] }]

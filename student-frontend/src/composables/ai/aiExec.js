@@ -184,12 +184,12 @@ export default {
           } else if (operation === 'update') {
             // 先取旧值，再写入，撤销时可还原到旧值
             const oldRow = await this._fetchRow(end.undoKey, data.id)
+            // 拿不到旧值就无法登记撤销：宁可中止这条修改，也不留下「改了但撤不回」的状态（B12-03）
+            if (!oldRow) throw new Error(`没有找到要修改的记录（id=${data.id}），已取消该修改`)
             await axios.put(`${end.url}/${data.id}`, this.cleanPayload(data.changes || {}))
-            if (oldRow) {
-              const newRow = { ...oldRow, ...(data.changes || {}) }
-              const uid = await this._pushUndo('row_update', end.undoKey, this._rowName(newRow), { table: end.undoKey, rowId: data.id, oldRow, newRow }, origin)
-              if (uid != null) undoIds.push(uid)
-            }
+            const newRow = { ...oldRow, ...(data.changes || {}) }
+            const uid = await this._pushUndo('row_update', end.undoKey, this._rowName(newRow), { table: end.undoKey, rowId: data.id, oldRow, newRow }, origin)
+            if (uid != null) undoIds.push(uid)
           } else if (operation === 'delete') {
             // 先取整条记录，再删除，撤销时可整条恢复
             const oldRow = await this._fetchRow(end.undoKey, data.id)
@@ -297,8 +297,18 @@ export default {
         case 'iconStyle': store.setIconStyle(String(value)); break
         case 'topbarColor': store.setTopbarColor(String(value)); break
         case 'animations': store.setAnimationsEnabled(!!value); break
-        case 'bgMaskOpacity': store.setBgMaskOpacity(Number(value)); break
-        case 'glassOpacity': store.setGlassOpacity(Number(value)); break
+        case 'bgMaskOpacity': {
+          // 直接 Number(value) 会把 'abc' 变成 NaN：CSS 变量写成 NaN 后透明度设置失效，
+          // 且 NaN 会被 localStorage 持久化，下次启动只能靠 readNum 兜底。先校验再设。
+          const n = Number(value)
+          if (Number.isFinite(n)) store.setBgMaskOpacity(n)
+          break
+        }
+        case 'glassOpacity': {
+          const n = Number(value)
+          if (Number.isFinite(n)) store.setGlassOpacity(n)
+          break
+        }
         case 'mergeNotifications': localStorage.setItem('mergeNotifications', value ? '1' : '0'); break
       }
     },

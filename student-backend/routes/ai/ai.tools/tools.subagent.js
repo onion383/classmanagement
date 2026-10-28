@@ -1,6 +1,7 @@
 // ===== run_subagent 工具：只读子助手（schema + 并行调度 + 契约解析） =====
 // runTool 由 tools.js 门面提供；这里用惰性包装打破 tools ⇄ tools.subagent 的循环引用。
 let runTool = (...args) => require('./tools').runTool(...args);
+const { toolResultContent } = require('../ai.helpers');
 
 // ===== run_subagent 工具：启动「只读子助手」并行处理独立子任务 =====
 // 子助手在受限上下文（角色名 + 一句话任务 + 期望字段 + 口径）与受限工具子集
@@ -54,6 +55,11 @@ function parseSubagentResult(text, task) {
   return { task, result: raw, basis: '', count: 0, samples: [], error: '子助手未按契约返回 JSON', needs_user_decision: [] };
 }
 
+// 子助手只能调用「只读工具白名单」里的名字。
+// 名单的唯一来源是 ai.subagent-tools.js（同一份也用于下发给模型的工具清单），
+// 这里在执行侧再做一次强制校验：模型返回清单外的名字一律拒绝。
+const { isSubagentToolAllowed } = require('../ai.subagent-tools');
+
 // 单个子任务：独立上下文 + 受限只读工具子集，循环取数直至子助手给出最终 JSON
 async function runOneSubagent(cfg, item, ctx) {
   const { consumeStream, buildSubagentPrompt, getSubagentTools } = require('../ai.llm');
@@ -83,9 +89,16 @@ async function runOneSubagent(cfg, item, ctx) {
       let targs = {};
       try { targs = JSON.parse(tc.arguments || '{}'); } catch (_) {}
       let result;
-      try { result = (await runTool(tc.name, targs, subCtx)).result; }
-      catch (e) { result = { error: e.message || '子助手工具执行失败' }; }
-      history.push({ role: 'tool', tool_call_id: tc.id, content: JSON.stringify(result) });
+      // 工具清单只是「告诉模型有哪些工具」，模型仍可能返回清单外的名字
+      // （旧会话/换模型/被提示注入诱导）。子助手的只读边界必须在这里强制校验，
+      // 否则 save_memory / undo_change / ask_user / propose_* 都能被子助手直接触发。
+      if (!isSubagentToolAllowed(tc.name)) {
+        result = { error: `子助手不允许调用「${tc.name}」：只读子助手只能使用查询/统计/校验类工具` };
+      } else {
+        try { result = (await runTool(tc.name, targs, subCtx)).result; }
+        catch (e) { result = { error: e.message || '子助手工具执行失败' }; }
+      }
+      history.push({ role: 'tool', tool_call_id: tc.id, content: toolResultContent(result) });
     }
   }
   return { task, result: null, basis: '', count: 0, samples: [], error: '子助手超过最大轮数仍未给出结论', needs_user_decision: [] };
@@ -110,4 +123,4 @@ async function runSubagent(args, ctx) {
   return { results, count: results.length };
 }
 
-module.exports = { subagentTool, runSubagent };
+module.exports = { subagentTool, runSubagent, isSubagentToolAllowed };

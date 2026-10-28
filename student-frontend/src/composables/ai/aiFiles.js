@@ -1,19 +1,26 @@
 import axios from 'axios'
 import { useNotification } from '../useNotification.js'
 import { INVOKE } from '../../electronChannels.js'
+import { sanitizeFileName } from '../../utils/fileName.js'
+import { csvCell } from '../../utils/csvCell.js'
 
 export function readAsDataURL(file) {
-  return new Promise((resolve) => {
+  return new Promise((resolve, reject) => {
     const reader = new FileReader()
     reader.onload = (e) => resolve(e.target.result)
+    // 原实现只有 onload：读盘失败/取消时 Promise 永远不 resolve，调用方一直卡在 await
+    reader.onerror = () => reject(reader.error || new Error('读取文件失败'))
+    reader.onabort = () => reject(new Error('读取已取消'))
     reader.readAsDataURL(file)
   })
 }
 
 function readAsText(file) {
-  return new Promise((resolve) => {
+  return new Promise((resolve, reject) => {
     const reader = new FileReader()
     reader.onload = (e) => resolve(e.target.result)
+    reader.onerror = () => reject(reader.error || new Error('读取文件失败'))
+    reader.onabort = () => reject(new Error('读取已取消'))
     reader.readAsText(file)
   })
 }
@@ -34,8 +41,23 @@ async function uploadAndParse(file) {
   }
 }
 
-// 读取文件提取文本内容
+// 读取文件提取文本内容。
+// 外层兜底：FileReader 失败被转成「错误文本附件」，避免调用方拿到未处理的拒绝。
 export async function readFile(file) {
+  try {
+    return await readFileInner(file)
+  } catch (e) {
+    return {
+      name: file.name || '文件',
+      isImage: false,
+      dataUrl: '',
+      textContent: `文件名：${file.name || ''}\n\n错误：读取文件失败（${e.message || '未知错误'}）`,
+      sizeLabel: ''
+    }
+  }
+}
+
+async function readFileInner(file) {
   const name = file.name
   const ext = name.split('.').pop().toLowerCase()
   const sizeLabel = file.size > 1048576
@@ -64,9 +86,11 @@ export async function readFile(file) {
 // ===== AI 导出文件：由 export_file 工具下发规格，前端生成字节并弹系统保存对话框 =====
 // 保存走 Electron 的 save-file 通道（浏览器环境退回直接下载）
 async function saveExportWithDialog(defaultName, blob) {
+  // 文件名由 AI 生成 / 用户输入，落盘前统一清洗（非法字符 / 末尾点空格 / 超长）
+  const safeName = sanitizeFileName(defaultName)
   if (window.electron && typeof window.electron.invoke === 'function') {
     const arrayBuffer = await blob.arrayBuffer()
-    const result = await window.electron.invoke(INVOKE.SAVE_FILE, { defaultName, data: arrayBuffer })
+    const result = await window.electron.invoke(INVOKE.SAVE_FILE, { defaultName: safeName, data: arrayBuffer })
     if (result && !result.canceled && result.filePath) {
       // 保存成功后用系统默认应用打开文件
       window.electron.invoke(INVOKE.OPEN_FILE, { filePath: result.filePath }).catch(() => {})
@@ -76,10 +100,10 @@ async function saveExportWithDialog(defaultName, blob) {
   const url = URL.createObjectURL(blob)
   const a = document.createElement('a')
   a.href = url
-  a.download = defaultName
+  a.download = safeName
   a.click()
   URL.revokeObjectURL(url)
-  return defaultName
+  return safeName
 }
 
 // 按规格生成文件并保存：xlsx 用 ExcelJS，其余为纯文本序列化
@@ -120,8 +144,7 @@ async function saveAiExport(spec) {
       const buf = await wb.xlsx.writeBuffer()
       blob = new Blob([buf], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' })
     } else if (format === 'csv') {
-      const esc = (v) => { const s = String(v == null ? '' : v); return /[",\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s }
-      const csv = '\uFEFF' + [columns, ...dataRows].map((row) => row.map(esc).join(',')).join('\r\n')
+      const csv = '\uFEFF' + [columns, ...dataRows].map((row) => row.map(csvCell).join(',')).join('\r\n')
       blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' })
     } else if (format === 'md') {
       const esc = (v) => String(v == null ? '' : v).replace(/\\/g, '\\\\').replace(/\|/g, '\\|').replace(/\r?\n/g, '<br>')

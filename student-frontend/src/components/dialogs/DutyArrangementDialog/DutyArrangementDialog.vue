@@ -169,6 +169,8 @@ export default {
       rejectText: '',
       arranged: false,
       satisfaction: {},
+      // 恢复草稿时 tree 的赋值会触发深度 watch，先压住它，避免刚恢复的 arranged 立刻被重置
+      _restoringDraft: false,
       // 分组维度（来自分组管理接口）
       dimensions: [],
       groups: [],
@@ -219,12 +221,14 @@ export default {
         this.rejectText = ''
         // 草稿恢复：若存在草稿则先恢复（树 + 预览），让用户接着上次继续
         if (this.draft && this.draft.exists && this.draft.conditions && this.draft.conditions.length) {
+          this._restoringDraft = true
           this.tree = this.draft.conditions.map(c => ({ ...c, children: c.children || [] }))
           if (this.draft.cells && Object.keys(this.draft.cells).length) {
             this.previewCells = this.draft.cells
             this.arranged = true
             this.previewVersion++
           }
+          this.$nextTick(() => { this._restoringDraft = false })
         } else {
           this.tree = [{ key: 'random', label: '随机排表', children: [] }]
         }
@@ -234,10 +238,13 @@ export default {
     tree: {
       deep: true,
       handler() {
+        if (this._restoringDraft) return
         this.arranged = false
       }
     }
   },
+  // 提示条自动消失的定时器：弹窗关闭后仍在跑会往已销毁的实例写 rejectText
+  beforeUnmount() { clearTimeout(this._rejectTimer) },
   methods: {
     ...useDutyArrangementPipeline(OPTIONS),
     ...useDutyArrangementOptions(OPTIONS),

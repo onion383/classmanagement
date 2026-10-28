@@ -56,7 +56,13 @@ const user = ref({})
 
 // 每次打开时重新读取登录态（localStorage 非响应式，用 watch 保证用户名/权限是最新的）
 watch(() => props.visible, (v) => {
-  if (v) user.value = JSON.parse(localStorage.getItem('currentUser') || '{}')
+  if (!v) return
+  // 本地数据可能被手工改坏（非 JSON）：解析失败时退回空对象，不能让弹窗打不开
+  try {
+    user.value = JSON.parse(localStorage.getItem('currentUser') || '{}') || {}
+  } catch (_) {
+    user.value = {}
+  }
 }, { immediate: true })
 
 const roleText = computed(() => (user.value.role === 'teacher' ? '班主任' : '科任老师'))

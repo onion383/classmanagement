@@ -35,6 +35,7 @@
 
 import { spawn, spawnSync } from 'node:child_process'
 import { existsSync, mkdirSync, writeFileSync, readdirSync, readFileSync, rmSync, statSync } from 'node:fs'
+import os from 'node:os'
 import path from 'node:path'
 import http from 'node:http'
 import { fileURLToPath } from 'node:url'
@@ -45,7 +46,8 @@ const BACKEND_APP = path.join(BACKEND_DIR, 'app.js')
 // 隔离目录默认放 LOCALAPPDATA（不放项目目录）：项目目录易被杀软实时扫描锁住文件，
 // 会让 Chromium 的 GPU 持久缓存报「另一个程序正在使用此文件」并导致 GPU 进程启动失败。
 // 可用环境变量 BANJI_ISO 覆盖，例如 $env:BANJI_ISO="D:\tmp\banji-measure"
-const ISO_ROOT = process.env.BANJI_ISO || path.join(process.env.LOCALAPPDATA || ROOT, 'BanjiiStartupMeasure')
+// 非 Windows（无 LOCALAPPDATA）时退到系统临时目录：早期退回 ROOT 会把测量数据写进仓库
+const ISO_ROOT = process.env.BANJI_ISO || path.join(process.env.LOCALAPPDATA || os.tmpdir(), 'BanjiiStartupMeasure')
 const ISO_USER_DATA = path.join(ISO_ROOT, 'user-data')
 const ISO_DATA = path.join(ISO_ROOT, 'data')
 const LOG_DIR = path.join(ISO_ROOT, 'logs')

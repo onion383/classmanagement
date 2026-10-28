@@ -3,6 +3,7 @@ const router = express.Router();
 const { db } = require('../db');
 const store = require('../services/slotStore');
 const { validateRow } = require('../services/businessRules');
+const { isDateStr } = require('../utils/sql');
 
 // cells 结构：{ 劳动项目名: { 星期几: [学生姓名,...] } }
 // settings 结构：{ days: ['周一',...], items: [{name, difficulty, count}, ...] }
@@ -400,6 +401,8 @@ router.post('/snapshot', (req, res) => {
     // 过渡期兼容：旧前端仍传 week_start，没有 snap_date 时以其作为快照日期
     const snapDate = body.snap_date || body.week_start;
     if (!snapDate) return res.status(400).json({ error: '缺少快照日期' });
+    // 快照日期直接落库并据此推导周一：非法串会生成 NaN 周键，历史列表出现幽灵周
+    if (!isDateStr(snapDate)) return res.status(400).json({ error: '快照日期格式不正确（应为 YYYY-MM-DD）' });
     const mode = normalizeMode(body.mode);
     store.histUpsert('duty', {
       weekStart: mondayOf(snapDate),

@@ -46,7 +46,7 @@ export default {
     },
   },
   methods: {
-    // 只保留最近 12 个动画片段，更早的合并成纯文本
+    // 超过 24 个片段时把最早的合并成纯文本，只保留最近 12 个动画片段（24 是触发压缩的阈值）
     compact() {
       if (this.segments.length <= 24) return
       const moved = this.segments.splice(0, this.segments.length - 12)

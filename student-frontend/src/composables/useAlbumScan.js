@@ -10,12 +10,15 @@ import axios from 'axios'
 
 const authHeaders = () => ({ Authorization: 'Bearer ' + (localStorage.getItem('token') || '') })
 
-// 未结束的轮询定时器集合：组件卸载时统一 stopAll，避免页面切走后还在发请求
-const timers = new Set()
-
+// 未结束的轮询定时器：**每个调用方一份**（不是模块级单例）。
+// 页面级刷新与管理弹窗各自持有实例，任一方卸载只清理自己的定时器，
+// 否则一方 stopAll() 会把另一方正在进行的轮询一起清掉，waitScan 的 Promise 永远不 resolve。
 const POLL_INTERVAL = 800
 
 export function useAlbumScan() {
+  // 本实例发起的轮询定时器（每个调用方一份，互不影响）
+  const timers = new Set()
+
   /**
    * 等待某个相册的扫描结束
    * @param {number} id 相册 id
@@ -50,7 +53,7 @@ export function useAlbumScan() {
     })
   }
 
-  // 停止并清空所有轮询（组件卸载时调用）
+  // 停止并清空本实例发起的轮询（组件卸载时调用；不会影响其它调用方）
   function stopAll() {
     for (const t of timers) clearInterval(t)
     timers.clear()

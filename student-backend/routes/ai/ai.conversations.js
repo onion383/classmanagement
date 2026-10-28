@@ -3,6 +3,7 @@ const { db } = require('../../db');
 const dbManager = require('../../dbManager/dbManager');
 const { currentSettings } = require('./ai.config');
 const { buildSystemPrompt, callLLM, consumeStream, getMainTools } = require('./ai.llm');
+const { toolResultContent } = require('./ai.helpers');
 // 工具执行器惰性加载：仅在执行工具/取工具信息时才 require
 const tools = () => require('./ai.tools/tools');
 const { loadConversationContext, compressConversation, CONTEXT_COMPRESS_AT, compressingConvs } = require('./ai.memory');
@@ -10,6 +11,13 @@ const { loadConversationContext, compressConversation, CONTEXT_COMPRESS_AT, comp
 const { encodeStreamEvent } = require('../../services/secureChannel');
 
 const router = express.Router();
+
+// 会话是否存在：写消息/删会话/读消息前统一校验。
+// 不做这一步时，向不存在的会话追加消息会留下孤儿行（SQLite 未开外键约束），
+// 读消息则返回空列表，前端无法区分「新会话」与「会话已被删除」。
+function conversationExists(id) {
+  return !!db.prepare('SELECT 1 FROM ai_conversations WHERE id = ?').get(id);
+}
 
 // POST /api/ai/chat —— body: { messages: [{ role, content }] }
 router.post('/chat', async (req, res) => {
@@ -62,7 +70,7 @@ router.post('/chat', async (req, res) => {
           if (out.ask) ask = out.ask;
           if (out.exportFile) exportFile = out.exportFile;
           if (out.exportImage) exportImage = out.exportImage;
-          history.push({ role: 'tool', tool_call_id: tc.id, content: JSON.stringify(out.result) });
+          history.push({ role: 'tool', tool_call_id: tc.id, content: toolResultContent(out.result) });
         }
         // 一旦出现写提案，立即返回给前端确认，不再继续让模型渲染
         if (proposal) {
@@ -121,6 +129,7 @@ router.get('/conversations', (req, res) => {
 // DELETE /api/ai/conversations/:id —— 删除会话（含其消息）
 router.delete('/conversations/:id', (req, res) => {
   try {
+    if (!conversationExists(req.params.id)) return res.status(404).json({ error: '会话不存在' });
     db.prepare('DELETE FROM ai_messages WHERE conversation_id = ?').run(req.params.id);
     db.prepare('DELETE FROM ai_conversations WHERE id = ?').run(req.params.id);
     res.json({ success: true });
@@ -149,6 +158,7 @@ function parseMessageRows(rows) {
 // 响应附 hasMore：是否仍有更早的消息未返回，前端据此决定是否继续上翻加载。
 router.get('/conversations/:id/messages', (req, res) => {
   try {
+    if (!conversationExists(req.params.id)) return res.status(404).json({ error: '会话不存在' });
     const limit = Number(req.query.limit);
     const beforeId = Number(req.query.before_id);
     const hasLimit = Number.isInteger(limit) && limit > 0;
@@ -180,6 +190,7 @@ router.get('/conversations/:id/messages', (req, res) => {
 // POST /api/ai/conversations/:id/messages —— 追加一条消息；默认截断过长历史
 router.post('/conversations/:id/messages', (req, res) => {
   try {
+    if (!conversationExists(req.params.id)) return res.status(404).json({ error: '会话不存在' });
     const { role, content, process, attachments } = req.body;
     if (!role || typeof content !== 'string') return res.status(400).json({ error: '缺少消息内容' });
     // 过程块（步骤 / 思维链 / 耗时）以 JSON 字符串落库
@@ -207,6 +218,7 @@ router.post('/conversations/:id/messages', (req, res) => {
 // 用于「反馈轮次并入原助手消息」：后续轮次的输出继续写回同一条助手消息，时间轴保持连续
 router.put('/conversations/:id/messages/:mid', (req, res) => {
   try {
+    if (!conversationExists(req.params.id)) return res.status(404).json({ error: '会话不存在' });
     const { content, process } = req.body;
     if (typeof content !== 'string') return res.status(400).json({ error: '缺少消息内容' });
     let processJson = '';
@@ -394,7 +406,7 @@ router.post('/chat/stream', async (req, res) => {
           if (out.proposal) proposal = out.proposal;
           if (out.ask) ask = out.ask;
           const result = out.result;
-          history.push({ role: 'tool', tool_call_id: tc.id, content: JSON.stringify(result) });
+          history.push({ role: 'tool', tool_call_id: tc.id, content: toolResultContent(result) });
           // 工具执行结束 → 更新同一步骤为 done/error，并附上摘要与耗时
           const step = {
             id: sid,

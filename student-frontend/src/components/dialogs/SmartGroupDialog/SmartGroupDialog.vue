@@ -205,6 +205,8 @@ export default {
       }
     }
   },
+  // 提示条自动消失的定时器：弹窗关闭后仍在跑会往已销毁的实例写 rejectText
+  beforeUnmount() { clearTimeout(this._rejectTimer) },
   methods: {
     studentById(id) {
       return this.students.find(s => String(s.id) === String(id)) || null

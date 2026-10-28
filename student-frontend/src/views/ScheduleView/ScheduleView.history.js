@@ -1,6 +1,7 @@
 // ===== 课程表：历史快照（周列表、快照加载、保存本周、删除本周、周切换） =====
 // 纯代码搬运自 ScheduleView.vue 的 methods，未改写逻辑；通过展开注册到组件 methods。
 import axios from 'axios'
+import { localDateStr } from '../../utils/dateTime.js'
 
 export function useScheduleHistory(API_BASE) {
   return {
@@ -68,7 +69,9 @@ export function useScheduleHistory(API_BASE) {
       try {
         const activeRes = await axios.get(`${API_BASE}/schedule`);
         const { cells, settings } = activeRes.data;
-        const weekStart = this.getMonday(new Date()).toISOString().slice(0, 10);
+        // 必须取本地日期：getMonday 返回的是本地时间，若再 toISOString 转 UTC，
+        // 东八区周一 00:00–08:00 之间会算成周日，快照存到错误的一周
+        const weekStart = localDateStr(this.getMonday(new Date()));
         await axios.post(`${API_BASE}/schedule/snapshot`, {
           week_start: weekStart,
           cells,
@@ -94,7 +97,7 @@ export function useScheduleHistory(API_BASE) {
         this.notifySuccess('该周快照已删除');
         if (this.historyCurrentWeek === week) this.historySnapshot = null;
         await this.fetchHistoryWeeks();
-      } catch (e) { alert('删除失败'); console.error(e); }
+      } catch (e) { this.notifyError('删除失败'); console.error(e); }
     },
   }
 }

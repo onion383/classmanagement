@@ -63,6 +63,7 @@
 
 <script>
 import DynamicTable from '../tables/DynamicTable/DynamicTable.vue';
+import { parseSheet } from '../../utils/importSheet.js';
 import '../../styles/dialog-transition.css';
 
 export default {
@@ -127,6 +128,12 @@ export default {
         // 选中文件后自动解析预览，无需再点击「解析预览」
         await this.parseFile();
       };
+      // 读盘失败（文件被移动/权限不足/设备断开）时必须给出提示，
+      // 否则界面停在「请选择一个文件进行解析」，用户以为是自己没选中文件
+      reader.onerror = () => {
+        this.fileData = null;
+        this.parseError = '文件读取失败，请重新选择文件';
+      };
       reader.readAsArrayBuffer(file);
     },
     async parseFile() {
@@ -141,50 +148,13 @@ export default {
         const sheet = workbook.Sheets[sheetName];
         const data = XLSX.utils.sheet_to_json(sheet, { header: 1, defval: '', raw: false });
         if (!data || data.length === 0) { this.parseError = '文件无有效数据'; return; }
-        // 智能提取表头：跳过标题行/空行，选举“前 10 行内列数最多”的一行作为表头
-        // 因为 xlsx 导出时第一行是文件名标题行（只有 1 格），直接取第一条会误把它当表头
-        let headerRowIndex = -1;
-        let headerRow = [];
-        {
-          let bestCount = -1;
-          for (let i = 0; i < Math.min(data.length - 1, 10); i++) {
-            const row = data[i];
-            const next = data[i + 1];
-            if (row.some(cell => cell !== '' && cell !== null) && next.some(c => c !== '' && c !== null)) {
-              const count = row.filter(c => c !== '' && c !== null).length;
-              if (count > bestCount) {
-                bestCount = count;
-                headerRowIndex = i;
-                headerRow = row.map(c => String(c).trim()).filter(h => h.length > 0);
-              }
-            }
-          }
-        }
-        if (headerRowIndex === -1) {
-          headerRow = data[0].map(c => String(c).trim());
-          headerRowIndex = 0;
-        }
-        const validHeaders = headerRow.filter(h => h !== '');
-        if (validHeaders.length === 0) { this.parseError = '未识别到列标题'; return; }
-        this.previewFields = validHeaders.map(h => ({ name: h, type: '文字' }));
-        const rawRows = data.slice(headerRowIndex + 1).filter(row => row.some(cell => cell !== '' && cell !== null));
-        const cleanedRows = [];
-        let skipped = 0;
-        for (const row of rawRows) {
-          const obj = {};
-          let missing = false;
-          validHeaders.forEach((header, idx) => {
-            const val = row[idx] !== undefined ? String(row[idx]).trim() : '';
-            obj[header] = val;
-          });
-          for (const required of this.requiredFields) {
-            if (!obj[required] || obj[required].trim() === '') { missing = true; break; }
-          }
-          if (missing) skipped++;
-          else cleanedRows.push(obj);
-        }
-        this.filteredCount = skipped;
-        this.previewRows = cleanedRows.map((row, idx) => ({
+        // 表头识别与行映射抽到 utils/importSheet.js：
+        // 表头保留原始列下标，空表头只跳过自己，不会让它右边的列整体左移（串列）
+        const parsed = parseSheet(data, this.requiredFields);
+        if (parsed.fields.length === 0) { this.parseError = '未识别到列标题'; return; }
+        this.previewFields = parsed.fields.map(h => ({ name: h, type: '文字' }));
+        this.filteredCount = parsed.skipped;
+        this.previewRows = parsed.rows.map((row, idx) => ({
           ...row,
           _rowKey: `import_${this.rowKeyCounter++}`,
           _isNew: false,

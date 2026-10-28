@@ -7,6 +7,7 @@
 const { db } = require('../../db')
 const dbManager = require('../../dbManager/dbManager')
 const { moveToTrash, restoreToOriginal, deleteThumb } = require('../../albumOps')
+const { SEAT_MAX_ROWS, SEAT_MAX_COLS } = require('../../services/sanitize')
 const {
   readGridArray, writeGridArray, cellText,
   insertRow, deleteRowById, updateRowById, writeDocCols, rowName,
@@ -142,6 +143,8 @@ const executors = {
     validate({ table, row, col }) {
       if (!(table in GRID_SOURCES)) return '网格表无效'
       if (!Number.isInteger(row) || !Number.isInteger(col) || row < 0 || col < 0) return '参数不完整'
+      // 与 /api/seats 的 50×30 上限保持一致，避免撤销记录把越界坐标写回 JSON 网格。
+      if (row >= SEAT_MAX_ROWS || col >= SEAT_MAX_COLS) return `坐标超出范围（最多 ${SEAT_MAX_ROWS} 行 × ${SEAT_MAX_COLS} 列）`
       return null
     },
     apply({ table, row, col, value }) {
@@ -252,18 +255,24 @@ const executors = {
       return null
     },
     async undo({ album, photos }) {
-      db.prepare('INSERT INTO albums (id, name, folder_path, sort_order, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)')
-        .run(album.id, album.name || '', album.folder_path || '', album.sort_order || 0, album.created_at || '', album.updated_at || '')
+      // 相册 + 全部照片索引必须一起恢复：中途失败时不能留下「相册已回、照片只回一半」的半状态。
       const ins = db.prepare('INSERT INTO album_photos (id, album_id, file_path, file_name, file_size, mtime, photo_date, exif_date, date_src, thumb_path) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)')
-      for (const ph of photos || []) {
-        ins.run(ph.id, album.id, ph.file_path || '', ph.file_name || '', ph.file_size || 0, ph.mtime || '', ph.photo_date || '', ph.exif_date || '', ph.date_src || '', '')
-      }
+      db.transaction(() => {
+        db.prepare('INSERT INTO albums (id, name, folder_path, kind, sort_order, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)')
+          .run(album.id, album.name || '', album.folder_path || '', album.kind === 'virtual' ? 'virtual' : 'folder', album.sort_order || 0, album.created_at || '', album.updated_at || '')
+        for (const ph of photos || []) {
+          ins.run(ph.id, album.id, ph.file_path || '', ph.file_name || '', ph.file_size || 0, ph.mtime || '', ph.photo_date || '', ph.exif_date || '', ph.date_src || '', '')
+        }
+      })()
     },
     async redo({ album, photos }) {
       const slug = dbManager.currentSlug();
       for (const ph of photos || []) await deleteThumb(ph, slug).catch(() => {})
-      db.prepare('DELETE FROM album_photos WHERE album_id = ?').run(album.id)
-      db.prepare('DELETE FROM albums WHERE id = ?').run(album.id)
+      // 照片索引与相册行必须一起删：中途失败不能留下「相册已删、照片还挂着一个不存在的 album_id」。
+      db.transaction(() => {
+        db.prepare('DELETE FROM album_photos WHERE album_id = ?').run(album.id)
+        db.prepare('DELETE FROM albums WHERE id = ?').run(album.id)
+      })()
     },
     describe(p, mode) {
       const name = p.album ? (p.album.name || `#${p.album.id}`) : ''
@@ -284,8 +293,11 @@ const executors = {
       const photos = db.prepare('SELECT id, file_name FROM album_photos WHERE album_id = ?').all(album.id)
       const slug = dbManager.currentSlug();
       for (const ph of photos) await deleteThumb(ph, slug).catch(() => {})
-      db.prepare('DELETE FROM album_photos WHERE album_id = ?').run(album.id)
-      db.prepare('DELETE FROM albums WHERE id = ?').run(album.id)
+      // 撤销「添加相册」：照片索引与相册行一起删，避免只删了一半导致孤儿索引。
+      db.transaction(() => {
+        db.prepare('DELETE FROM album_photos WHERE album_id = ?').run(album.id)
+        db.prepare('DELETE FROM albums WHERE id = ?').run(album.id)
+      })()
       const albumRouter = require('../album')
       if (albumRouter && albumRouter.cancelScan) albumRouter.cancelScan(album.id)
     },
@@ -315,29 +327,34 @@ const executors = {
       return null
     },
     async undo({ target_album_id, records }) {
-      const delTarget = db.prepare('DELETE FROM album_photos WHERE album_id = ? AND file_path = ?')
-      const ins = db.prepare('INSERT OR IGNORE INTO album_photos (id, album_id, file_path, file_name, file_size, mtime, photo_date, exif_date, date_src, thumb_path) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)')
-      for (const r of records || []) {
-        if (!r || !r.file_path) continue
-        // 只删本次真正插入的行；移动前目标相册里就有的同一文件不能删
-        if (r.inserted) delTarget.run(target_album_id, r.file_path)
-        // 来源行被搬走的，按原 id 还原（缩略图交给 /thumb 按需重建）
-        if (r.source_removed && Number.isInteger(r.source_photo_id)) {
-          ins.run(r.source_photo_id, r.source_album_id, r.file_path, r.file_name || '', r.file_size || 0, r.mtime || '', r.photo_date || '', r.exif_date || '', r.date_src || '', '')
+      // 目标侧删除与来源侧还原必须同一事务：半途失败会让照片索引「两边都没有」。
+      db.transaction(() => {
+        const delTarget = db.prepare('DELETE FROM album_photos WHERE album_id = ? AND file_path = ?')
+        const ins = db.prepare('INSERT OR IGNORE INTO album_photos (id, album_id, file_path, file_name, file_size, mtime, photo_date, exif_date, date_src, thumb_path) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)')
+        for (const r of records || []) {
+          if (!r || !r.file_path) continue
+          // 只删本次真正插入的行；移动前目标相册里就有的同一文件不能删
+          if (r.inserted) delTarget.run(target_album_id, r.file_path)
+          // 来源行被搬走的，按原 id 还原（缩略图交给 /thumb 按需重建）
+          if (r.source_removed && Number.isInteger(r.source_photo_id)) {
+            ins.run(r.source_photo_id, r.source_album_id, r.file_path, r.file_name || '', r.file_size || 0, r.mtime || '', r.photo_date || '', r.exif_date || '', r.date_src || '', '')
+          }
         }
-      }
+      })()
     },
     async redo({ target_album_id, records }) {
       // thumb_path 置空：redo 插回目标侧的是新行（无 id / 无缩略图缓存），
       // 缩略图由 /thumb 按需生成。末尾那个 '' 就是 thumb_path 的实参 ——
       // 少传一个会直接抛「Too few parameter values were provided」。
-      const ins = db.prepare('INSERT OR IGNORE INTO album_photos (album_id, file_path, file_name, file_size, mtime, photo_date, exif_date, date_src, thumb_path) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)')
-      const del = db.prepare('DELETE FROM album_photos WHERE id = ?')
-      for (const r of records || []) {
-        if (!r || !r.file_path) continue
-        if (r.inserted) ins.run(target_album_id, r.file_path, r.file_name || '', r.file_size || 0, r.mtime || '', r.photo_date || '', r.exif_date || '', r.date_src || '', '')
-        if (r.source_removed && Number.isInteger(r.source_photo_id)) del.run(r.source_photo_id)
-      }
+      db.transaction(() => {
+        const ins = db.prepare('INSERT OR IGNORE INTO album_photos (album_id, file_path, file_name, file_size, mtime, photo_date, exif_date, date_src, thumb_path) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)')
+        const del = db.prepare('DELETE FROM album_photos WHERE id = ?')
+        for (const r of records || []) {
+          if (!r || !r.file_path) continue
+          if (r.inserted) ins.run(target_album_id, r.file_path, r.file_name || '', r.file_size || 0, r.mtime || '', r.photo_date || '', r.exif_date || '', r.date_src || '', '')
+          if (r.source_removed && Number.isInteger(r.source_photo_id)) del.run(r.source_photo_id)
+        }
+      })()
     },
     describe(p, mode) {
       const name = p.target_album_name ? `「${p.target_album_name}」` : ''

@@ -25,8 +25,17 @@ function subscribe() {
     if (msg.type === 'backend-ready') {
       ready = true
       for (const fn of [...waiters]) fn()
+    } else if (msg.type === 'backend-resetting') {
+      // 后端重启/退出后主进程会广播该事件，本地就绪标记必须同步复位，
+      // 否则后续请求会一直以为「已就绪」而不等待新的 backend-ready。
+      ready = false
     }
   })
+}
+
+// 请求实际遇到「后端不可达」时由拦截器调用：说明之前的就绪标记已过期
+export function resetBackendReady() {
+  ready = false
 }
 
 // 「后端不可达」判定：无响应（连接被拒/中断）或网关错误都算同一类故障。

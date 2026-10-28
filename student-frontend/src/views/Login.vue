@@ -419,7 +419,8 @@ export default {
       this.confirmTitle = '重要提醒';
       this.confirmText = '我已确认保存，继续注册';
       this.cancelText = '返回保存恢复密钥';
-      this.confirmMessage = '<b>恢复密钥</b>是忘记密码后<b>唯一的恢复凭证</b>，在这里只会出现一次，请<b>仔细检查恢复密钥</b>是否已经保存到安全的地方，如果密码和恢复密钥同时丢失，将会<b>无法访问该账号</b>';
+      // ConfirmDialog 按纯文本插值渲染（非 v-html），这里不能带 HTML 标签
+      this.confirmMessage = '恢复密钥是忘记密码后唯一的恢复凭证，在这里只会出现一次，请仔细检查恢复密钥是否已经保存到安全的地方，如果密码和恢复密钥同时丢失，将会无法访问该账号';
       this.confirmVisible = true;
     },
     async confirmRecovery() {

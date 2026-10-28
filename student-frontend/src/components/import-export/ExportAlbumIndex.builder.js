@@ -22,10 +22,15 @@ const MONTH_RE = /^(\d{4})-(\d{2})$/;
 const YEAR_RE = /^(\d{4})$/;
 
 // 取文件所在目录：路径末段是文件名，去掉它（兼容 \ 与 / 混用）
+// 边界：/a.jpg 的目录是 "/"（老实现 idx>0 不成立时整条路径都当目录）；
+//       C:\a.jpg 的目录是 "C:\"（老实现会把盘符后面的反斜杠一起切掉，得到 "C:"）
 export function dirOf(filePath) {
   const fp = String(filePath || '');
   const idx = Math.max(fp.lastIndexOf('\\'), fp.lastIndexOf('/'));
-  return idx > 0 ? fp.slice(0, idx) : fp;
+  if (idx < 0) return '';                        // 纯文件名，没有目录段
+  if (idx === 0) return fp.slice(0, 1);          // 根目录（Unix / 或 UNC 前导符）
+  if (idx === 2 && /^[a-zA-Z]:$/.test(fp.slice(0, 2))) return fp.slice(0, 3); // 盘符根 C:\
+  return fp.slice(0, idx);
 }
 
 // 分组键：天=YYYY-MM-DD、月=YYYY-MM、年=YYYY；读不到拍摄时间的归到空串（渲染成「未知时间」）

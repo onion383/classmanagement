@@ -33,10 +33,11 @@ export default {
       const a = last && last.ask
       return a && !a.answered && !a.dismissed ? a : null
     },
-    // 多问题分页：当前页的那一题
+    // 多问题分页：当前页的那一题（分页下标越界时返回 null，不抛错）
     askCurrent() {
       const a = this.pendingAsk
-      return a ? a.questions[this.askPage] : null
+      const qs = a && Array.isArray(a.questions) ? a.questions : []
+      return qs[this.askPage] || null
     },
     // 当前页能否翻到下一题（无选项的题视为可过；多选需至少选中 1 项且「其他」已填写）
     askCanAdvance() {
@@ -45,7 +46,8 @@ export default {
     // 所有题都作答有效才能提交（无选项的题不阻塞）
     askCanSubmit() {
       const a = this.pendingAsk
-      return !!a && a.questions.every((q) => this.isAskQuestionReady(q))
+      const qs = a && Array.isArray(a.questions) ? a.questions : []
+      return qs.length > 0 && qs.every((q) => this.isAskQuestionReady(q))
     },
     // 待确认的写提案（只有最后一条助手消息可能是待确认状态）
     pendingProposal() {

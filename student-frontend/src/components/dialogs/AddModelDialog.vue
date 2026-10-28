@@ -192,8 +192,16 @@ export default {
           api_key: this.form.api_key,
         })
         if (res.data && res.data.success) {
-          this.discovered = res.data.models
-          this.form.model = this.discovered[0]
+          // models 可能是空数组：直接取 [0] 会得到 undefined，切到 select 模式后
+          // 点保存时 form.model.trim() 就抛 TypeError。空列表应退回手动填写。
+          const models = Array.isArray(res.data.models) ? res.data.models.filter(Boolean) : []
+          if (models.length === 0) {
+            this.mode = 'input'
+            this.discoverError = '未识别到可用模型，请手动填写模型名'
+            return
+          }
+          this.discovered = models
+          this.form.model = models[0]
           this.mode = 'select'
         } else {
           this.mode = 'input'
@@ -208,7 +216,8 @@ export default {
     },
     async submit() {
       this.error = ''
-      if (!this.form.model.trim()) { this.error = '请填写模型名'; return }
+      // 模型名可能来自「识别」返回的空列表（undefined）：先兜成字符串再 trim
+      if (!String(this.form.model || '').trim()) { this.error = '请填写模型名'; return }
       this.testing = true
       try {
         const res = this.isEdit

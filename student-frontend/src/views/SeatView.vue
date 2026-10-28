@@ -576,7 +576,10 @@ async function applySmartArrangement(result) {
     recordGridSnapshotUndo('座位表', undoTable, before, result.seats, '智能排表')
     notifySuccess('已应用智能排表')
   } catch (e) {
-    notifySuccess('应用失败')
+    // 原实现在 catch 里仍调 notifySuccess('应用失败')：明明是失败却弹绿色成功条，
+    // 用户会以为座位已生效（实际没写库）。改为错误提示并保留控制台细节。
+    notifyError('应用智能排表失败，座位未保存')
+    console.error(e)
   }
 }
 
@@ -879,14 +882,20 @@ async function fetchHistoryWeeks(options) {
   } catch (e) { console.error(e) }
 }
 
+// 历史快照请求序号：连续切换周时先发的请求可能后到，旧周的快照不能覆盖新周（B06-06）
+let historySeq = 0
+
 async function loadHistorySnapshot(options) {
   if (!historyCurrentWeek.value) return
+  const my = ++historySeq
   // 静默模式：不动 historyLoading（它现在只决定「空态是否敢下结论」），
   // 加载期间沿用旧表/表头原地替换数据，避免表格区高度撑高再回弹导致下方操作栏“闪一下”
   const silent = !!(options && options.silent)
   if (!silent) historyLoading.value = true
   try {
     const res = await axios.get(`${API_BASE}/seats/history/${historyCurrentWeek.value}`)
+    // 期间又切了周（或有更新的请求发出）：这次响应已过期，丢弃，避免旧周覆盖新周
+    if (my !== historySeq) return
     historySnapshot.value = res.data
     if (res.data) {
       historySnapDate.value = res.data.snap_date || ''
@@ -901,7 +910,12 @@ async function loadHistorySnapshot(options) {
       historySnapDate.value = ''
       historyData.value = { mode: 'single', rows: 0, cols: 0, seats: [], showAisle: false }
     }
-  } catch (e) { console.error(e) } finally { if (!silent) historyLoading.value = false }
+  } catch (e) {
+    if (my === historySeq) console.error(e)
+  } finally {
+    // 只由最新请求关闭 loading：旧请求的 finally 不能把新请求的加载态提前抹掉
+    if (!silent && my === historySeq) historyLoading.value = false
+  }
   await loadSeatIndex()
 }
 

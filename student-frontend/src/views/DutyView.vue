@@ -634,6 +634,20 @@ function persistSettings(extra) {
   return axios.put(`${API_BASE}/duty/save`, payload)
 }
 
+// 拖拽排序后的即时保存：原来是 fire-and-forget，请求失败时界面已改、库里没改，
+// 用户以为成功，刷新后改动「凭空消失」。这里统一 await + 失败提示 + 重新拉取回滚界面。
+async function persistSettingsSafe(extra, action) {
+  try {
+    await persistSettings(extra)
+  } catch (e) {
+    notifyError(`${action}失败，改动未保存`)
+    console.error(e)
+    try {
+      await Promise.all([fetchSettings(), loadActive(), loadMaster(), loadWeight()])
+    } catch (_) { /* 回滚也失败时保持提示，不再叠加错误 */ }
+  }
+}
+
 function swapItems(oldIndex, newIndex) {
   if (oldIndex === newIndex) return
   const arr = [...settingsItems.value]
@@ -642,7 +656,7 @@ function swapItems(oldIndex, newIndex) {
   const [moved] = arr.splice(oldIndex, 1)
   arr.splice(newIndex, 0, moved)
   settingsItems.value = arr
-  persistSettings()
+  persistSettingsSafe({}, '调整项目顺序')
 }
 
 // 把「按 keys 顺序排好的值」从 from 移到 to（移动语义），键（表头）保持不动。
@@ -669,7 +683,7 @@ function swapDays(oldIndex, newIndex) {
   // 表头固定：不重排 settingsDays，只把这两天的值日名单按「移动」重排
   activeCells.value = moveDataInKeyedCells(activeCells.value, keys, oldIndex, newIndex)
   masterCells.value = moveDataInKeyedCells(masterCells.value, keys, oldIndex, newIndex)
-  persistSettings({ active: true, master: true })
+  persistSettingsSafe({ active: true, master: true }, '调整星期顺序')
 }
 
 // ==================== 保存设置 ====================
@@ -912,7 +926,7 @@ function onWeightSwapRows(oldIndex, newIndex) {
   const next = {}
   arr.forEach(it => { next[it.name] = prev[it.name] || {} })
   dutyWeights.value = next
-  persistSettings({ active: true, master: true })
+  persistSettingsSafe({ active: true, master: true }, '调整权重表顺序')
   saveWeight()
 }
 function onWeightSwapColumns(oldIndex, newIndex) {
@@ -1073,14 +1087,20 @@ async function fetchHistoryWeeks(options = {}) {
   } catch (e) { console.error(e) }
 }
 
+// 历史快照请求序号：连续切换周时先发的请求可能后到，旧周快照不能覆盖新周（B06-10）
+let historySeq = 0
+
 async function loadHistorySnapshot(options = {}) {
   if (!historyCurrentWeek.value) return
+  const my = ++historySeq
   // 静默刷新：不动 historyLoading（它现在只决定「空态是否敢下结论」），仅替换数据，
   // 避免表格重建触发动画
   const silent = !!(options && options.silent)
   if (!silent) historyLoading.value = true
   try {
     const res = await axios.get(`${API_BASE}/duty/history/${historyCurrentWeek.value}?mode=${dutyMode.value}`)
+    // 期间又切了周：这次响应已过期，丢弃（否则旧周快照会覆盖新周）
+    if (my !== historySeq) return
     historySnapshot.value = res.data
     if (res.data) {
       const s = (res.data.settings && res.data.settings) || {}
@@ -1094,7 +1114,12 @@ async function loadHistorySnapshot(options = {}) {
     }
     // 切换周后重新结算值日指数
     await loadDutyIndex()
-  } catch (e) { console.error(e) } finally { if (!silent) historyLoading.value = false }
+  } catch (e) {
+    if (my === historySeq) console.error(e)
+  } finally {
+    // 只由最新请求关闭 loading，旧请求不能把新请求的加载态提前抹掉
+    if (!silent && my === historySeq) historyLoading.value = false
+  }
 }
 
 // 周切换：静默加载（不动 historyLoading），避免表格区高度先被撑高、

@@ -96,21 +96,29 @@ async function fetchPhotos(id) {
 // 相册增删后缓存失效，由父组件重建组件或再次打开时刷新
 function clearCache() { photoCache.clear() }
 
+// 重建序号：切换相册/分组方式/排序时旧请求可能后到，旧结果不能覆盖新结果（B11-04）
+let rebuildSeq = 0
+
 async function rebuild() {
+  const my = ++rebuildSeq
   const targets = albumId.value === 'all' ? props.albums : props.albums.filter(a => a.id === albumId.value)
-  if (!targets.length) { rows.value = []; return }
+  if (!targets.length) { rows.value = []; loading.value = false; return }
   loading.value = true
   try {
     const data = []
     for (const a of targets) {
       data.push({ id: a.id, name: a.name, photos: await fetchPhotos(a.id) })
     }
+    // 期间又触发了重建（切相册/改分组/改排序）：丢弃这一批，避免旧结果覆盖
+    if (my !== rebuildSeq) return
     rows.value = buildIndexRows(data, groupMode.value, order.value)
   } catch (err) {
+    if (my !== rebuildSeq) return
     rows.value = []
     useNotification().error(err.response?.data?.error || '读取照片索引失败')
   } finally {
-    loading.value = false
+    // 只由最新一次重建关闭 loading
+    if (my === rebuildSeq) loading.value = false
   }
 }
 

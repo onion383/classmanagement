@@ -175,6 +175,15 @@ export default {
             }
           }
         }
+        // 流结束后缓冲区可能还剩最后一帧（对端未以换行结尾）：补解析一次
+        if (buf.trim()) {
+          let tailMsg
+          try { tailMsg = JSON.parse(buf.trim()) } catch (_) { tailMsg = null }
+          if (tailMsg?.type === 'done') {
+            if (tailMsg.ok) ok = true
+            else failMsg = tailMsg.message || '转换失败'
+          }
+        }
         if (ok) {
           this.state = 'done'
           this.percent = 100
@@ -182,7 +191,8 @@ export default {
           setTimeout(() => window.electron?.send(SEND.MIGRATION_DISMISS, { ok: true }), 700)
         } else {
           this.state = 'error'
-          this.errorMessage = failMsg
+          // 没收到 done（进程提前退出/输出被截断）时 failMsg 为空，必须给可读兜底文案
+          this.errorMessage = failMsg || '转换未完成：未收到完成消息，请重试或查看日志'
         }
       } catch (err) {
         this.state = 'error'

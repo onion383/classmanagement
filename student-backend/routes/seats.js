@@ -3,14 +3,19 @@ const router = express.Router();
 const { db } = require('../db');
 const store = require('../services/slotStore');
 const { validateRow } = require('../services/businessRules');
-const { normalizeSeats } = require('../services/sanitize');
-
-const MAX_ROWS = 50;
-const MAX_COLS = 30;
+const { normalizeSeats, SEAT_MAX_ROWS, SEAT_MAX_COLS } = require('../services/sanitize');
+const { isDateStr } = require('../utils/sql');
 
 function validateSeatSize(rows, cols) {
-  if (rows < 1 || rows > MAX_ROWS) return `行数需在 1 ~ ${MAX_ROWS} 之间`;
-  if (cols < 1 || cols > MAX_COLS) return `列数需在 1 ~ ${MAX_COLS} 之间`;
+  if (rows < 1 || rows > SEAT_MAX_ROWS) return `行数需在 1 ~ ${SEAT_MAX_ROWS} 之间`;
+  if (cols < 1 || cols > SEAT_MAX_COLS) return `列数需在 1 ~ ${SEAT_MAX_COLS} 之间`;
+  return null;
+}
+
+// PATCH /cell 的 row/col 是 0 基坐标，不能直接套用 validateSeatSize（它校验的是 1 基数量）。
+function validateCellCoord(row, col) {
+  if (row < 0 || row >= SEAT_MAX_ROWS) return `行坐标需在 0 ~ ${SEAT_MAX_ROWS - 1} 之间`;
+  if (col < 0 || col >= SEAT_MAX_COLS) return `列坐标需在 0 ~ ${SEAT_MAX_COLS - 1} 之间`;
   return null;
 }
 
@@ -94,6 +99,8 @@ router.patch('/cell', (req, res) => {
   try {
     const { row, col, value } = req.body
     if (!Number.isInteger(row) || !Number.isInteger(col)) return res.status(400).json({ error: '参数格式错误' })
+    const coordErr = validateCellCoord(row, col)
+    if (coordErr) return res.status(400).json({ error: coordErr })
     updateSingleCell('seat_layout', row, col, value)
     res.json({ message: '已更新' })
   } catch (err) { res.status(500).json({ error: err.message }) }
@@ -103,6 +110,8 @@ router.patch('/master/cell', (req, res) => {
   try {
     const { row, col, value } = req.body
     if (!Number.isInteger(row) || !Number.isInteger(col)) return res.status(400).json({ error: '参数格式错误' })
+    const coordErr = validateCellCoord(row, col)
+    if (coordErr) return res.status(400).json({ error: coordErr })
     updateSingleCell('seat_template', row, col, value)
     res.json({ message: '已更新' })
   } catch (err) { res.status(500).json({ error: err.message }) }
@@ -398,6 +407,8 @@ router.post('/snapshot', (req, res) => {
   try {
     const { snap_date, mode, rows, cols, seats, settings } = req.body;
     if (!snap_date) return res.status(400).json({ error: '缺少快照日期' });
+    // 快照日期直接落库并据此推导周一：非法串会生成 NaN 周键，历史列表出现幽灵周
+    if (!isDateStr(snap_date)) return res.status(400).json({ error: '快照日期格式不正确（应为 YYYY-MM-DD）' });
 
     // 走廊列根据 mode 和 settings.showAisle 动态生成，无需存储
     store.histUpsert('seat', {

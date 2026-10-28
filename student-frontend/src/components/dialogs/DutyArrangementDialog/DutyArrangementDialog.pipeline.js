@@ -220,6 +220,12 @@ export function useDutyArrangementPipeline(OPTIONS) {
       slotOrder.sort((a, b) => a.w - b.w)
       const assigned = new Array(slots.length).fill('')
       // 多对多：若学生数 < 槽位数，循环使用（仍按账本降序轮询）；反之多余学生不上表
+      // 名单为空时 students.length === 0，i % 0 = NaN，students[NaN] 为 undefined，
+      // 取 .name 会直接抛 TypeError。空名单应返回「全部留空」，由调用方提示未选学生。
+      if (students.length === 0) {
+        this.trackSatisfaction('fair', 0, 0)
+        return new Array(slots.length).fill('')
+      }
       for (let i = 0; i < slotOrder.length; i++) {
         assigned[slotOrder[i].i] = students[i % students.length].name
       }

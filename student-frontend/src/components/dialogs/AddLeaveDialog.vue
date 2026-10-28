@@ -160,6 +160,8 @@ export default {
       }
     }
   },
+  // 下拉延迟收起定时器：弹窗关掉（组件卸载）后仍在跑就会往已销毁的实例上写状态
+  beforeUnmount() { clearTimeout(this.hideTimer) },
   methods: {
     // datetime-local 输入值格式
     toInput(d) {

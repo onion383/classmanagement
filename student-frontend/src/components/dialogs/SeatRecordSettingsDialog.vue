@@ -139,7 +139,7 @@ export default {
     confirmMessage() {
       const week = this.pendingDeleteWeek
       if (!week) return ''
-      return `确定删除 <b>${this.weekRangeText(week)}</b> 这一周的座位记录吗？删除后不可恢复。`
+      return `确定删除 ${this.weekRangeText(week)} 这一周的座位记录吗？删除后不可恢复。`
     }
   },
   watch: {

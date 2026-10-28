@@ -157,7 +157,11 @@ export function useSeatGrid(apiBase, options = {}) {
   async function save() {
     try {
       await axios.put(apiBase, { rows: rows.value, cols: cols.value, seats: seats.value, mode: mode.value, settings: { showAisle: showAisle.value } })
-    } catch (e) { console.error(e) }
+      return true
+    } catch (e) {
+      console.error(e)
+      return false
+    }
   }
 
   // 单格更新：有 cellBase（单格接口）则只提单格，否则回退到整块 save
@@ -173,7 +177,7 @@ export function useSeatGrid(apiBase, options = {}) {
     return true
   }
 
-  function onCellsUpdate(newRows) {
+  async function onCellsUpdate(newRows) {
     // 计算新座位矩阵并逐格对比旧值，只对发生变化的格子做单格提交 + 撤销记录
     const prev = seats.value.map(r => [...r])
     syncCellsToSeats(newRows)
@@ -185,21 +189,33 @@ export function useSeatGrid(apiBase, options = {}) {
       const nr = next[r] || []
       const maxC = Math.max(pr.length, nr.length)
       for (let c = 0; c < maxC; c++) {
-        if (pr[c] !== nr[c]) {
-          changed.push([r, c])
-          if (undo) recordGridCellUndo(undo.key, undo.table, r, c, pr[c] ?? null, nr[c] ?? null)
-        }
+        if (pr[c] !== nr[c]) changed.push([r, c])
       }
     }
     if (cellBase && changed.length) {
-      // 串行提交每个格子，避免并发 PATCH 到达顺序乱序导致数据覆盖
+      // 串行提交每个格子，避免并发 PATCH 到达顺序乱序导致数据覆盖。
+      // 撤销记录必须在**该格保存成功之后**再登记：原实现先登记后保存，
+      // 保存失败时按 Ctrl+Z 会「撤销」一个根本没落库的改动（B12-06）。
       ;(async () => {
         for (const [r, c] of changed) {
-          await saveSingleCell(r, c, next[r]?.[c] ?? null)
+          const ok = await saveSingleCell(r, c, next[r]?.[c] ?? null)
+          if (!ok) {
+            // 保存失败：以库里的真实数据为准回滚界面，并停止后续格子（避免半新半旧）
+            await load()
+            return
+          }
+          if (undo) recordGridCellUndo(undo.key, undo.table, r, c, prev[r]?.[c] ?? null, next[r]?.[c] ?? null)
         }
       })()
     } else {
-      save()
+      const ok = await save()
+      if (!ok) {
+        await load() // 整块保存失败：回滚到库中真实数据
+        return
+      }
+      if (undo) {
+        for (const [r, c] of changed) recordGridCellUndo(undo.key, undo.table, r, c, prev[r]?.[c] ?? null, next[r]?.[c] ?? null)
+      }
     }
   }
 

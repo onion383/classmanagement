@@ -14,7 +14,11 @@ const { hash: bcryptHash, compare: bcryptCompare } = require('../services/bcrypt
 const { SECRET, auth, TOKEN_SIGN_OPTS, TOKEN_COOKIE_MAX_AGE, signMediaToken } = require('../middleware/auth');
 const secureChannel = require('../services/secureChannel');
 const { pickPhrase, deriveRestoreHash, formatPhrase } = require('../services/recoveryKey');
+const { normalizeUsername, usernameError } = require('../services/usernameRules');
 const sessions = require('../services/sessions');
+// 备份恢复会用备份包里的整库文件覆盖当前库，表结构可能与恢复前不同：
+// 恢复后必须让 AI 的列名缓存失效（否则后续 AI 写入/查询仍按旧列集合校验）。
+const aiHelpers = require('./ai/ai.helpers');
 
 // 重置恢复密钥：为当前登录账号生成一组新的 12 词恢复密钥并保存哈希。
 // 生成的密钥只在本次响应返回一次（前端提示先保存再确认）。
@@ -114,6 +118,8 @@ router.post('/restore', auth(), (req, res) => {
       ? dbManager.decryptBundleKey({ key, wrappedByPassword, wrappedByMnemonic, password, mnemonic })
       : null;
     const result = dbManager.restoreBundle({ slug: curSlug, username: req.user.username, data, dbKey, encrypted: isEncrypted });
+    // 整库被覆盖：表结构可能变了，AI 列缓存必须失效
+    aiHelpers.clearTableColumnsCache();
     // 一并恢复 AI 长期记忆（旧包无该字段则跳过，不影响恢复）
     if (typeof memory === 'string') dbManager.writeMemory(curSlug, memory);
     res.json({ message: '恢复成功', slug: result.slug });
@@ -190,6 +196,8 @@ router.post('/restore-offline', (req, res) => {
     }
 
     const result = dbManager.restoreBundle({ slug, username, data, dbKey, encrypted: isEncrypted });
+    // 整库被覆盖：表结构可能变了，AI 列缓存必须失效
+    aiHelpers.clearTableColumnsCache();
     // 一并恢复 AI 长期记忆（旧包无该字段则跳过，不影响恢复）
     if (typeof memory === 'string') dbManager.writeMemory(result.slug || slug, memory);
     // 恢复成功后直接签发登录态，前端据此跳转首页，无需再次手动登录
@@ -229,7 +237,13 @@ router.put('/username', auth(), async (req, res) => {
     if (!newUsername || !password) {
       return res.status(400).json({ error: '请输入新用户名和当前密码' });
     }
-    const newName = String(newUsername).trim();
+    // 与注册共用同一套账号名规则：原实现只 trim，空白/超长/带路径分隔符的名字都能改成，
+    // registry 与 users 表会一起变脏；这里补上长度与字符白名单校验。
+    const newName = normalizeUsername(newUsername);
+    const nameErr = usernameError(newName);
+    if (nameErr) {
+      return res.status(400).json({ error: nameErr });
+    }
 
     const user = db.prepare('SELECT * FROM users WHERE id = ?').get(req.user.userId);
     if (!await bcryptCompare(password, user.password)) {
@@ -298,13 +312,13 @@ router.put('/password', auth(), async (req, res) => {
     // 只有「既不是恢复词解锁、也不是本机恢复」时才需要校验旧密码。
     // 保持原短路语义：这两种情况下完全不比对密码（既省一次 bcrypt 计算，行为也与原来一致）。
     if (!byMnemonic && !byLocalRecover) {
-      // 旧密码为空时不必比对；非空才做一次异步比对
-      let oldOk = false;
-      if (oldPassword) {
-        oldOk = await bcryptCompare(oldPassword, user.password);
-      }
-      if (!oldOk) {
-        return res.status(400).json({ error: '原密码错误' });
+      // 免密账号（user.password 为空）没有旧密码可比对，直接允许设置首个密码；
+      // 隐私库即使 password 为空也必须校验，避免绕过库钥匙包裹。
+      if (isPrivacy || user.password) {
+        const oldOk = oldPassword ? await bcryptCompare(oldPassword, user.password) : false;
+        if (!oldOk) {
+          return res.status(400).json({ error: '原密码错误' });
+        }
       }
     }
 
@@ -319,12 +333,18 @@ router.put('/password', auth(), async (req, res) => {
 
     const hashed = await bcryptHash(newPassword, 10);
     db.prepare('UPDATE users SET password = ? WHERE id = ?').run(hashed, req.user.userId);
-    // 「本机信息恢复」的 token 只授权这一次改密码：改完立即换发不含 recover 的常规 token，
-    // 否则它在 30 天内都能免旧密码再次改密码。
+    // 「本机信息恢复」的 token 只授权这一次改密码：改完立即换发不含 recover 的常规 token。
+    // 注意：JWT 是无状态的，只换发新 token 并不能让旧 recover token 失效 ——
+    // 它仍带着 recover 标记、仍命中「PUT /api/account/password」白名单，
+    // 于是泄露的旧 token 可以在 30 天内反复免旧密码改密。
+    // 因此这里吊销旧会话并新建 sid：旧 token 的 sid 不在名单里，立即失效；
+    // 新 token 必须使用新 sid（沿用旧 sid 会把自己也一起吊销）。
     if (byLocalRecover) {
+      sessions.revoke(req.user.sid);
+      const sid = sessions.create(req.user.userId);
       const payload = {
         userId: req.user.userId, username: req.user.username, role: req.user.role,
-        dbSlug: req.user.dbSlug, sid: req.user.sid,
+        dbSlug: req.user.dbSlug, sid,
       };
       const token = useJwt().sign(payload, SECRET, TOKEN_SIGN_OPTS);
       if (req.sessionId) secureChannel.bindAuth(req.sessionId, token);

@@ -6,10 +6,18 @@ const { sanitizeField } = require('./sanitize');
 const COLUMN_NAME_RE = /^[a-zA-Z0-9_\u4e00-\u9fa5]+$/;
 const RESERVED_COLUMNS = ['id', 'position', 'atPosition'];
 
+// 表名白名单：本模块把 tableName 直接拼进 SQL，列名有 assertValidColumn 把守，
+// 表名此前完全依赖调用方自觉。这里补一层纵深防御，新调用方漏白名单也不会变成注入入口。
+const ALLOWED_TABLES = new Set(['students', 'fee_records', 'leave_records']);
+
 function assertValidColumn(name) {
   if (!name || RESERVED_COLUMNS.includes(name) || !COLUMN_NAME_RE.test(name)) {
     throw new Error('字段名不合法');
   }
+}
+
+function assertValidTable(name) {
+  if (!ALLOWED_TABLES.has(name)) throw new Error('表名不合法');
 }
 
 // 列名 → 类型 映射（取自 table_meta；缺省按「文字」处理），供写入时按类型清洗
@@ -20,6 +28,7 @@ function fieldTypeMap(tableName) {
 }
 
 function queryAll(tableName) {
+  assertValidTable(tableName);
   const results = db.prepare(`SELECT * FROM ${tableName} ORDER BY position ASC`).all();
   let fields = getFields(tableName);
   if (fields.length === 0 && results.length > 0) {
@@ -29,6 +38,7 @@ function queryAll(tableName) {
 }
 
 function insertRow(tableName, data) {
+  assertValidTable(tableName);
   const atPosition = data.atPosition;
   delete data.atPosition;
 
@@ -63,6 +73,7 @@ function insertRow(tableName, data) {
 }
 
 function updateRow(tableName, id, data) {
+  assertValidTable(tableName);
   const keys = Object.keys(data);
   if (keys.length === 0) throw new Error('没有字段');
 
@@ -81,6 +92,7 @@ function updateRow(tableName, id, data) {
 }
 
 function deleteRow(tableName, id, options = {}) {
+  assertValidTable(tableName);
   const { minCount = 0 } = options;
 
   if (minCount > 0) {
@@ -96,6 +108,7 @@ function deleteRow(tableName, id, options = {}) {
 }
 
 function moveRow(tableName, id, direction) {
+  assertValidTable(tableName);
   if (!id || !direction) throw new Error('缺少参数');
 
   const row = db.prepare(`SELECT position FROM ${tableName} WHERE id = ?`).get(id);
@@ -118,6 +131,7 @@ function moveRow(tableName, id, direction) {
 }
 
 function addColumn(tableName, columnName, dataType, after) {
+  assertValidTable(tableName);
   if (!columnName || !/^[a-zA-Z0-9_\u4e00-\u9fa5]+$/.test(columnName)) throw new Error('列名不合法');
   if (columnName === 'id' || columnName === 'position') throw new Error('不能使用保留字段');
 
@@ -144,7 +158,12 @@ function addColumn(tableName, columnName, dataType, after) {
     .run(tableName, columnName, dataType || '文字', sortOrder);
 }
 
+// 删除字段：只删 table_meta 里的登记，不执行 ALTER TABLE DROP COLUMN。
+// SQLite 的 DROP COLUMN 在旧版本不可用，且物理删列会让已导出/引用的旧数据不可逆丢失；
+// 因此物理列会保留为「隐形列」——列表页按 table_meta 展示时看不到它，但 SELECT * 仍能读到旧值。
+// 这样做也保证「误删字段」可以通过重新加同名列的方式找回数据（新值仍写在原列上）。
 function deleteColumn(tableName, columnName, options = {}) {
+  assertValidTable(tableName);
   const { protectedColumns = [] } = options;
 
   if (columnName === 'id' || columnName === 'position') throw new Error('不能删除保留字段');
@@ -160,12 +179,14 @@ function deleteColumn(tableName, columnName, options = {}) {
 }
 
 function reorderRows(tableName, ids) {
+  assertValidTable(tableName);
   if (!ids || !Array.isArray(ids)) throw new Error('ids 必须为数组');
   const stmt = db.prepare(`UPDATE ${tableName} SET position = ? WHERE id = ?`);
   ids.forEach((id, index) => stmt.run(index + 1, id));
 }
 
 function moveColumn(tableName, columnName, targetColumnName, position) {
+  assertValidTable(tableName);
   if (!columnName || columnName === 'id' || columnName === 'position') {
     throw new Error('列名不合法或为保留字段');
   }
@@ -197,6 +218,7 @@ function moveColumn(tableName, columnName, targetColumnName, position) {
 }
 
 function importRows(tableName, fields, rows) {
+  assertValidTable(tableName);
   if (!fields || !rows || !Array.isArray(fields) || !Array.isArray(rows)) {
     throw new Error('缺少有效的字段或数据');
   }
@@ -236,8 +258,11 @@ function importRows(tableName, fields, rows) {
 }
 
 function renameColumn(tableName, oldName, newName) {
+  assertValidTable(tableName);
   if (!oldName || !newName) throw new Error('缺少参数');
-  if (!/^[a-zA-Z0-9_\u4e00-\u9fa5]+$/.test(newName)) throw new Error('列名不合法');
+  // 新旧列名都必须走白名单：oldName 会原样拼进 SQL，只校验 newName 会被引号闭合注入。
+  assertValidColumn(oldName);
+  assertValidColumn(newName);
   if (oldName === newName) throw new Error('新列名与旧列名相同');
 
   const existing = db.prepare('SELECT column_name FROM table_meta WHERE table_name = ? AND column_name = ?').get(tableName, newName);

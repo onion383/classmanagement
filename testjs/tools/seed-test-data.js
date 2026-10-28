@@ -3,17 +3,29 @@
 // 用法： node seed-test-data.js
 //       可选环境变量：SEED_BASE（默认 http://127.0.0.1:3000）
 //                     SEED_USER / SEED_PASSWORD（默认 测试班主任 / test1234）
+//       安全开关：--yes（或 SEED_ASSUME_YES=1）——见下方注释
 // 说明：后端运行态已持有正确的主密钥，故这里走 HTTP 注册/登录/写业务数据，
 //       生成的账号在应用内可直接登录。脚本可重复执行：已存在的数据会跳过或按同名重建，
 //       不会重复插入学生/班费/加减分/活动/倒计时/职务。
+//
+// ⚠ 该脚本会**覆盖**目标库的座位/课表/值日/分组/班级信息等测试数据。
+//   因此默认只允许「本机回环地址 + 默认测试账号」直接运行；换成真实账号或远程地址时
+//   必须显式加 --yes，避免在用户正在使用的班级库上误运行。
 'use strict';
 
 const BASE = process.env.SEED_BASE || 'http://127.0.0.1:3000';
 
 // ============ 账号（可用环境变量覆盖，便于多次灌不同账号） ============
-const USERNAME = process.env.SEED_USER || '测试班主任';
+const DEFAULT_USERNAME = '测试班主任';
+const USERNAME = process.env.SEED_USER || DEFAULT_USERNAME;
 const PASSWORD = process.env.SEED_PASSWORD || 'test1234';
 const ROLE = 'teacher';
+
+// 覆盖式写入的显式确认：命令行 --yes 或环境变量（供 CI 使用）
+const ALLOW_OVERWRITE = process.argv.includes('--yes') || process.env.SEED_ASSUME_YES === '1';
+// 只有指向本机、且用的是默认测试账号时才允许「无确认」运行
+const IS_LOOPBACK = /^https?:\/\/(127\.0\.0\.1|localhost|\[::1\])(:|\/|$)/i.test(BASE);
+const IS_DEFAULT_ACCOUNT = USERNAME === DEFAULT_USERNAME;
 
 // 登录后写入，后续所有请求自动携带
 let TOKEN = '';
@@ -52,7 +64,20 @@ function mondayOf(s) {
 }
 
 async function main() {
-  // ---------- 0. 预检：后端必须已在运行（否则直接报 fetch failed，难以定位） ----------
+  // ---------- 0. 目标确认（防止在真实班级库上误覆盖） ----------
+  const target = `后端 ${BASE} · 账号「${USERNAME}」`;
+  if (!ALLOW_OVERWRITE && !(IS_LOOPBACK && IS_DEFAULT_ACCOUNT)) {
+    console.error(
+      `⚠ 拒绝写入：${target}\n` +
+      '  该脚本会用测试数据覆盖座位 / 课表 / 值日 / 分组 / 班级信息。\n' +
+      '  只有「本机回环地址 + 默认测试账号」可以直接运行；其他目标请先确认不是正在使用的班级库，\n' +
+      '  再加 --yes 重新执行（CI 可用环境变量 SEED_ASSUME_YES=1）。'
+    );
+    process.exit(1);
+  }
+  console.log(`目标：${target}${ALLOW_OVERWRITE ? '（已显式确认覆盖）' : ''}`);
+
+  // ---------- 0.1 预检：后端必须已在运行（否则直接报 fetch failed，难以定位） ----------
   try {
     const probe = await fetch(BASE + '/api/accounts');
     if (!probe.ok) throw new Error(`HTTP ${probe.status}`);

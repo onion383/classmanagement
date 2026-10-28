@@ -135,15 +135,31 @@ function resolveFfmpegPath() {
   return '';
 }
 
+// 下载锁文件：同一时刻只允许一个下载任务。进程崩溃会留下该文件，
+// 因此带过期时间，超过后视为残留锁并清掉重试，避免永久卡在「已有下载在跑」。
+const INFLIGHT_PATH = path.join(CACHE_DIR, '.inflight');
+const INFLIGHT_STALE_MS = 30 * 60 * 1000;
+
+async function hasFreshInflight() {
+  try {
+    const st = await fsp.stat(INFLIGHT_PATH);
+    return Date.now() - st.mtimeMs < INFLIGHT_STALE_MS;
+  } catch (_) {
+    return false;
+  }
+}
+
 // 异步下载并缓存 LGPL 版 FFmpeg；成功后返回可执行文件路径，失败返回 ''
 async function ensureFfmpeg() {
   try {
     const local = resolveFfmpegPath();
     if (local) return local;
 
-    if (exists(path.join(CACHE_DIR, '.inflight'))) return ''; // 已有并发下载在跑，直接跳过
+    if (await hasFreshInflight()) return ''; // 已有并发下载在跑，直接跳过
+    // 上次中断残留的锁（进程崩溃/超时）直接清掉再重试
+    await fsp.rm(INFLIGHT_PATH, { force: true }).catch(() => {});
     await fsp.mkdir(CACHE_DIR, { recursive: true });
-    await fsp.writeFile(path.join(CACHE_DIR, '.inflight'), '1', 'utf8');
+    await fsp.writeFile(INFLIGHT_PATH, '1', 'utf8');
 
     const zipPath = path.join(CACHE_DIR, 'tmp.mp4zip');
     console.log(`[ffmpeg] 未找到 ffmpeg，正在下载 LGPL 版: ${LGPL_URL}`);
@@ -174,12 +190,12 @@ async function ensureFfmpeg() {
     }
 
     await fsp.unlink(zipPath).catch(() => {});
-    await fsp.unlink(path.join(CACHE_DIR, '.inflight')).catch(() => {});
+    await fsp.unlink(INFLIGHT_PATH).catch(() => {});
 
     const found = findFfmpeg([CACHE_DIR]);
     return found || '';
   } catch (err) {
-    await fsp.rm(path.join(CACHE_DIR, '.inflight'), { force: true }).catch(() => {});
+    await fsp.rm(INFLIGHT_PATH, { force: true }).catch(() => {});
     await fsp.rm(path.join(CACHE_DIR, 'tmp.mp4zip'), { force: true }).catch(() => {});
     console.error('[ffmpeg] LGPL 下载失败：', err.message);
     return '';

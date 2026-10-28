@@ -144,9 +144,11 @@ router.post('/semesters', (req, res) => {
     const end_date = body.end_date || def.end_date;
     const rangeErr = validateSemesterRange(start_date, end_date);
     if (rangeErr) return res.status(400).json({ error: rangeErr });
-    db.prepare('UPDATE semesters SET is_current = 0').run();
-    const info = db.prepare('INSERT INTO semesters (name, start_date, end_date, is_current) VALUES (?,?,?,1)')
-      .run(name, start_date, end_date);
+    const info = db.transaction(() => {
+      db.prepare('UPDATE semesters SET is_current = 0').run();
+      return db.prepare('INSERT INTO semesters (name, start_date, end_date, is_current) VALUES (?,?,?,1)')
+        .run(name, start_date, end_date);
+    })();
     res.json({ message: '学期已增加', id: info.lastInsertRowid, name, start_date, end_date });
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -160,8 +162,10 @@ router.put('/semesters/current', (req, res) => {
     if (!id) return res.status(400).json({ error: '缺少学期' });
     const exists = db.prepare('SELECT id FROM semesters WHERE id = ?').get(id);
     if (!exists) return res.status(404).json({ error: '学期不存在' });
-    db.prepare('UPDATE semesters SET is_current = 0').run();
-    db.prepare('UPDATE semesters SET is_current = 1 WHERE id = ?').run(id);
+    db.transaction(() => {
+      db.prepare('UPDATE semesters SET is_current = 0').run();
+      db.prepare('UPDATE semesters SET is_current = 1 WHERE id = ?').run(id);
+    })();
     res.json({ message: '已切换当前学期' });
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -194,11 +198,13 @@ router.delete('/semesters/:id', (req, res) => {
     const id = Number(req.params.id);
     const row = db.prepare('SELECT id, is_current FROM semesters WHERE id = ?').get(id);
     if (!row) return res.status(404).json({ error: '学期不存在' });
-    db.prepare('DELETE FROM semesters WHERE id = ?').run(id);
-    if (row.is_current) {
-      const next = db.prepare('SELECT id FROM semesters ORDER BY start_date DESC, id DESC LIMIT 1').get();
-      if (next) db.prepare('UPDATE semesters SET is_current = 1 WHERE id = ?').run(next.id);
-    }
+    db.transaction(() => {
+      db.prepare('DELETE FROM semesters WHERE id = ?').run(id);
+      if (row.is_current) {
+        const next = db.prepare('SELECT id FROM semesters ORDER BY start_date DESC, id DESC LIMIT 1').get();
+        if (next) db.prepare('UPDATE semesters SET is_current = 1 WHERE id = ?').run(next.id);
+      }
+    })();
     res.json({ message: '学期已删除' });
   } catch (err) {
     res.status(500).json({ error: err.message });

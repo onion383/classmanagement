@@ -76,6 +76,7 @@ import AppSelect from '../base/AppSelect.vue'
 import AlbumPhotoPickerDialog from './AlbumPhotoPickerDialog.vue'
 import { useNotification } from '../../composables/useNotification.js'
 import { pushUndo } from '../../api/undo'
+import { warnUndoFailed } from '../../composables/useUndo.js'
 import { INVOKE } from '../../electronChannels.js'
 import '../../styles/dialog-transition.css'
 
@@ -171,7 +172,7 @@ async function submit() {
         payload: {
           album: { id: res.data.id, name: finalName, folder_path: folderPath.value, kind: 'folder', sort_order: res.data.id, created_at: '', updated_at: '' }
         }
-      }).catch(() => {})
+      }).catch(() => warnUndoFailed('添加相册'))
       useNotification().success('相册已创建，正在后台扫描照片索引…')
       emit('created', res.data.id)
       emit('close')

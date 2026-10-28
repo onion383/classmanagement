@@ -493,6 +493,7 @@ export default {
   emits: ['close'],
   data() {
     return {
+      _unmounted: false, // 卸载后异步回调（markdown 预加载）不再写组件状态
       enabled: null, // null=加载中, false=未启用, true=已启用
       busy: false,
       messages: [],
@@ -572,12 +573,16 @@ export default {
     changeDrawerOpen() { this.updateOutsideListener() },
   },
   mounted() {
+    this._unmounted = false
     // 后台预加载 markdown 库（不阻塞首次渲染）
-    ensureMarkdown().then(() => this._computeAllHtml())
+    ensureMarkdown()
+      .then(() => { if (!this._unmounted) this._computeAllHtml() })
+      .catch((e) => console.warn('[ai] markdown 预加载失败：', e && e.message))
     this.loadEnabled()
     this.loadSkillOptions()
   },
   unmounted() {
+    this._unmounted = true
     // 卸载时若仍在选区截屏，先把窗口还原，避免主窗口停在铺满整屏的状态
     if (this.regionShot) this.endRegionSelect()
     document.removeEventListener('mousedown', this.onDocMouseDown, true)

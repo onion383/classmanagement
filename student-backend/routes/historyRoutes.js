@@ -6,6 +6,7 @@
 // =========================================================================
 
 const store = require('../services/slotStore');
+const { isDateStr } = require('../utils/sql');
 
 // domain：历史域（此处恒为 'schedule'）。
 // toSnapshot(rec) -> 单周快照响应体；buildPayload(body) -> 待存 payload。
@@ -36,6 +37,8 @@ function registerHistoryRoutes(router, { domain, toSnapshot, buildPayload, listR
     try {
       const body = req.body || {};
       if (!body.week_start) return res.status(400).json({ error: '缺少周开始日期' });
+      // 只校验「非空」时任意串都能入库，非法日期会被解析成 NaN 周，历史列表出现幽灵周
+      if (!isDateStr(body.week_start)) return res.status(400).json({ error: '周开始日期格式不正确（应为 YYYY-MM-DD）' });
       store.histUpsert(domain, { weekStart: body.week_start, payload: buildPayload(body) });
       res.json({ message: '快照已保存' });
     } catch (err) {

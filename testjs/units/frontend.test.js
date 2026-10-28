@@ -388,3 +388,268 @@ test('过滤与判定口径一致：同一组输入下不出现「提示无结�
     assert.equal(noResult, filtered.length === 0, `field=${field} kw=${kw}`)
   }
 })
+
+// =========================================================================
+// csvCell：CSV 公式注入与引号转义（B11-03）
+// =========================================================================
+const loadCsvCell = () => import(pathToFileURL(path.join(__dirname, '../../student-frontend/src/utils/csvCell.js')).href)
+const loadImportSheet = () => import(pathToFileURL(path.join(__dirname, '../../student-frontend/src/utils/importSheet.js')).href)
+const loadFileName = () => import(pathToFileURL(path.join(__dirname, '../../student-frontend/src/utils/fileName.js')).href)
+const loadAlbumIndexBuilder = () => import(pathToFileURL(path.join(__dirname, '../../student-frontend/src/components/import-export/ExportAlbumIndex.builder.js')).href)
+
+test('csvCell：= + - @ 开头的值前置单引号，阻断公式注入', async () => {
+  const { csvCell } = await loadCsvCell()
+  assert.equal(csvCell('=SUM(A1:A9)'), "'=SUM(A1:A9)")
+  assert.equal(csvCell('+1'), "'+1")
+  assert.equal(csvCell('-1'), "'-1")
+  assert.equal(csvCell('@cmd'), "'@cmd")
+  assert.equal(csvCell('\tcmd'), "'\tcmd")
+  // 非公式起始字符不动
+  assert.equal(csvCell('张三'), '张三')
+  assert.equal(csvCell(0), '0')
+  assert.equal(csvCell(null), '')
+  assert.equal(csvCell(undefined), '')
+})
+
+test('csvCell：逗号/引号/换行仍按 CSV 规则加引号，注入防护在引号内也生效', async () => {
+  const { csvCell } = await loadCsvCell()
+  assert.equal(csvCell('a,b'), '"a,b"')
+  assert.equal(csvCell('say "hi"'), '"say ""hi"""')
+  assert.equal(csvCell('line1\nline2'), '"line1\nline2"')
+  assert.equal(csvCell('=HYPERLINK("http://x","y")'), `"'=HYPERLINK(""http://x"",""y"")"`)
+})
+
+// =========================================================================
+// importSheet：表头保留原始列下标（B11-01）
+// =========================================================================
+test('parseSheet：中间列空表头不会让右侧列左移（原实现会串列）', async () => {
+  const { parseSheet } = await loadImportSheet()
+  const data = [
+    ['姓名', '', '学号'],
+    ['张三', '忽略', '1001'],
+  ]
+  const parsed = parseSheet(data)
+  assert.deepEqual(parsed.fields, ['姓名', '学号'])
+  assert.deepEqual(parsed.rows, [{ 姓名: '张三', 学号: '1001' }])
+  // 关键断言：学号取的是第 2 列，而不是过滤后的第 1 列
+  assert.deepEqual(parsed.columns.map((c) => c.index), [0, 2])
+})
+
+test('parseSheet：标题行被跳过，空行被忽略，必填缺失行计入 skipped', async () => {
+  const { parseSheet } = await loadImportSheet()
+  const data = [
+    ['收支记录表'],
+    ['收支编码', '姓名'],
+    ['A1', '张三'],
+    ['', '李四'],
+    [],
+    ['A2', '王五'],
+  ]
+  const parsed = parseSheet(data, ['收支编码'])
+  assert.equal(parsed.headerRowIndex, 1)
+  assert.deepEqual(parsed.fields, ['收支编码', '姓名'])
+  assert.deepEqual(parsed.rows, [{ 收支编码: 'A1', 姓名: '张三' }, { 收支编码: 'A2', 姓名: '王五' }])
+  assert.equal(parsed.skipped, 1)
+})
+
+test('parseSheet：同名表头加序号后缀，两列数据都保留', async () => {
+  const { parseSheet } = await loadImportSheet()
+  const data = [
+    ['姓名', '备注', '备注'],
+    ['张三', 'A', 'B'],
+  ]
+  const parsed = parseSheet(data)
+  assert.deepEqual(parsed.fields, ['姓名', '备注', '备注 (2)'])
+  assert.deepEqual(parsed.rows, [{ 姓名: '张三', 备注: 'A', '备注 (2)': 'B' }])
+})
+
+// =========================================================================
+// fileName：导出/保存文件名清洗（B11-10）
+// =========================================================================
+test('sanitizeFileName：替换 Windows 非法字符并去掉末尾点/空格', async () => {
+  const { sanitizeFileName } = await loadFileName()
+  assert.equal(sanitizeFileName('a/b\\c:d*e?f"g<h>i|j.csv'), 'a_b_c_d_e_f_g_h_i_j.csv')
+  assert.equal(sanitizeFileName('导出.csv '), '导出.csv')
+  assert.equal(sanitizeFileName('导出.'), '导出')
+  assert.equal(sanitizeFileName('  '), '导出文件')
+  assert.equal(sanitizeFileName('', '空白名'), '空白名')
+  assert.equal(sanitizeFileName(null), '导出文件')
+})
+
+test('sanitizeFileName：超长文件名截断到 120 字符', async () => {
+  const { sanitizeFileName } = await loadFileName()
+  assert.equal(sanitizeFileName('名'.repeat(300)).length, 120)
+})
+
+test('sanitizeFileName：目录穿越片段被压平成纯文件名（不含路径分隔符）', async () => {
+  const { sanitizeFileName } = await loadFileName()
+  // 返回值会作为保存对话框的建议文件名，不能把 ../ 或盘符路径原样带出去
+  assert.equal(sanitizeFileName('../x'), '.._x')
+  assert.equal(sanitizeFileName('../../etc/passwd'), '.._.._etc_passwd')
+  assert.equal(sanitizeFileName('C:\\Windows\\evil.exe'), 'C__Windows_evil.exe')
+  assert.equal(sanitizeFileName('..'), '导出文件') // 只有点，去尾点后为空 → 兜底
+  assert.equal(sanitizeFileName('a\u0000b'), 'a_b')  // 控制字符一并替换
+  for (const bad of ['../x', '../../etc/passwd', 'C:\\Windows\\evil.exe', 'a\u0000b', '..\\..\\x']) {
+    const out = sanitizeFileName(bad)
+    assert.equal(/[\\/]/.test(out), false, `「${bad}」清洗后仍含路径分隔符：${out}`)
+    assert.equal(out.includes('..' + path.sep), false, `「${bad}」清洗后仍含上跳目录：${out}`)
+  }
+})
+
+// =========================================================================
+// localDateStr：本地日期键（B07-03 / B11-11）
+// =========================================================================
+const loadDateTime = () => import(pathToFileURL(path.join(__dirname, '../../student-frontend/src/utils/dateTime.js')).href)
+
+test('localDateStr：按本地时区取日期，凌晨不会被 UTC 拉回前一天', async () => {
+  const { localDateStr, formatDate } = await loadDateTime()
+  // 本地 00:30：toISOString 在东八区会得到前一天，localDateStr 必须留在当天
+  const early = new Date(2026, 0, 1, 0, 30)
+  assert.equal(localDateStr(early), '2026-01-01')
+  assert.equal(localDateStr(early), formatDate(early))
+  assert.equal(localDateStr(new Date(2026, 9, 28, 23, 59)), '2026-10-28')
+  // 不传参时用当前时间
+  assert.equal(localDateStr(), formatDate(new Date()))
+})
+
+test('localDateStr：非法日期返回空串，不产出 NaN-NaN-NaN', async () => {
+  const { localDateStr } = await loadDateTime()
+  assert.equal(localDateStr(new Date('not a date')), '')
+  assert.equal(localDateStr('2026-13-45'), '')
+})
+
+// =========================================================================
+// decodeJwtPayload：base64url 解析（P1-11 / B12-01）
+// =========================================================================
+const loadJwt = () => import(pathToFileURL(path.join(__dirname, '../../student-frontend/src/utils/jwt.js')).href)
+
+test('decodeJwtPayload：base64url 的 -/_ 与无 padding 都能解，中文用户名不乱码', async () => {
+  const { decodeJwtPayload } = await loadJwt()
+  const payload = { userId: 1, username: '班主任', exp: 1900000000, role: 'teacher' }
+  const seg = Buffer.from(JSON.stringify(payload), 'utf8').toString('base64url')
+  assert.ok(/[-_]/.test(seg), '用例必须覆盖 base64url 的特殊字符')
+  assert.equal(seg.includes('='), false, 'JWT 段本就不带 padding')
+  assert.deepEqual(decodeJwtPayload(`header.${seg}.sig`), payload)
+})
+
+test('decodeJwtPayload：缺段/非法内容返回 null，不抛错', async () => {
+  const { decodeJwtPayload } = await loadJwt()
+  assert.equal(decodeJwtPayload(''), null)
+  assert.equal(decodeJwtPayload('abc'), null)
+  assert.equal(decodeJwtPayload(null), null)
+  assert.equal(decodeJwtPayload('a.!!!.c'), null)
+})
+
+// =========================================================================
+// createSerialSaver：串行保存（P1-09 / B07-01 / B07-02）
+// =========================================================================
+const loadSerialSaver = () => import(pathToFileURL(path.join(__dirname, '../../student-frontend/src/utils/serialSaver.js')).href)
+
+test('createSerialSaver：在途期间的多次请求合并，不并发发请求', async () => {
+  const { createSerialSaver } = await loadSerialSaver()
+  let calls = 0
+  let release
+  const saver = createSerialSaver(async () => {
+    calls++
+    if (calls === 1) await new Promise((r) => { release = r })
+  })
+  const p1 = saver.request()
+  assert.equal(saver.busy, true)
+  const p2 = saver.request()
+  const p3 = saver.request()
+  assert.equal(calls, 1, '同一时刻只能有一个保存在途')
+  release()
+  assert.deepEqual(await Promise.all([p1, p2, p3]), [true, true, true])
+  assert.equal(calls, 2, '三轮请求应合并为「首轮 + 结束后一次」')
+  assert.equal(saver.busy, false)
+})
+
+test('createSerialSaver：失败返回 false 并记录错误，恢复后可再次保存', async () => {
+  const { createSerialSaver } = await loadSerialSaver()
+  let failing = true
+  let calls = 0
+  const saver = createSerialSaver(async () => {
+    calls++
+    if (failing) throw new Error('boom')
+  })
+  assert.equal(await saver.request(), false)
+  assert.equal(saver.error.message, 'boom')
+  failing = false
+  assert.equal(await saver.request(), true)
+  assert.equal(saver.error, null)
+  assert.equal(calls, 2)
+})
+
+// =========================================================================
+// fairFill：权重公平分配（P1-12 / B09-02）
+// =========================================================================
+const loadDutyPipeline = () => import(pathToFileURL(path.join(
+  __dirname, '../../student-frontend/src/components/dialogs/DutyArrangementDialog/DutyArrangementDialog.pipeline.js'
+)).href)
+
+function fairCtx(m, overrides) {
+  return {
+    studentNames: [],
+    weights: {},
+    ledger: {},
+    satisfaction: {},
+    trackSatisfaction: m.trackSatisfaction,
+    ...overrides,
+  }
+}
+
+test('fairFill：学生名单为空时返回全空槽位，不因取模 0 崩溃', async () => {
+  const { useDutyArrangementPipeline } = await loadDutyPipeline()
+  const m = useDutyArrangementPipeline([])
+  const ctx = fairCtx(m)
+  const slots = [{ item: '扫地', day: '周一', k: 0 }, { item: '拖地', day: '周二', k: 0 }]
+  assert.deepEqual(m.fairFill.call(ctx, slots), ['', ''])
+})
+
+test('fairFill：名单非空时按账本降序轮询，槽位不足则循环使用学生', async () => {
+  const { useDutyArrangementPipeline } = await loadDutyPipeline()
+  const m = useDutyArrangementPipeline([])
+  const ctx = fairCtx(m, { studentNames: ['甲', '乙'], ledger: { 甲: 5, 乙: 1 } })
+  const slots = [
+    { item: '扫地', day: '周一', k: 0 },
+    { item: '拖地', day: '周一', k: 0 },
+    { item: '擦窗', day: '周二', k: 0 },
+  ]
+  assert.deepEqual(m.fairFill.call(ctx, slots), ['甲', '乙', '甲'])
+})
+
+// =========================================================================
+// dirOf：相册索引的目录列（B11-12）
+// =========================================================================
+test('dirOf：根目录与盘符根不被整条路径吞掉', async () => {
+  const { dirOf } = await loadAlbumIndexBuilder()
+  assert.equal(dirOf('/a.jpg'), '/')
+  assert.equal(dirOf('C:\\a.jpg'), 'C:\\')
+  assert.equal(dirOf('C:/photos/a.jpg'), 'C:/photos')
+  assert.equal(dirOf('D:\\photos\\sub\\a.jpg'), 'D:\\photos\\sub')
+  assert.equal(dirOf('a.jpg'), '')
+})
+
+// =========================================================================
+// normalizeAsk / _isSingleUnpicked：畸形 ask_user 结构防御（B11-07）
+// =========================================================================
+const loadAiMessages = () => import(pathToFileURL(path.join(__dirname, '../../student-frontend/src/composables/ai/aiMessages.js')).href)
+const loadAiComposerAsk = () => import(pathToFileURL(path.join(__dirname, '../../student-frontend/src/components/ai/AiComposer/AiComposer.ask.js')).href)
+
+test('normalizeAsk：缺 questions/options 时补成数组，不抛错', async () => {
+  const { normalizeAsk } = await loadAiMessages()
+  assert.deepEqual(normalizeAsk({ answered: false }).questions, [])
+  assert.deepEqual(normalizeAsk({ questions: [{ question: '选哪个' }] }).questions[0].options, [])
+  assert.deepEqual(normalizeAsk({ questions: [{ question: 'a', options: ['x'] }] }).questions[0].options, ['x'])
+  assert.equal(normalizeAsk(null), null)
+})
+
+test('_isSingleUnpicked：缺 options 的题按「无选项」处理，不抛 TypeError', async () => {
+  const { _isSingleUnpicked } = await loadAiComposerAsk()
+  assert.equal(_isSingleUnpicked(null), false)
+  assert.equal(_isSingleUnpicked({ multiple: false }), false)
+  assert.equal(_isSingleUnpicked({ multiple: false, options: [] }), false)
+  assert.equal(_isSingleUnpicked({ multiple: false, options: ['a'] }), true)
+  assert.equal(_isSingleUnpicked({ multiple: false, options: ['a'], picked: 'a' }), false)
+})
+

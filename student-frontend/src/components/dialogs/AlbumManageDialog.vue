@@ -63,6 +63,7 @@ import DialogShell from '../base/DialogShell.vue'
 import ConfirmDialog from '../base/ConfirmDialog.vue'
 import { useNotification } from '../../composables/useNotification.js'
 import { pushUndo } from '../../api/undo'
+import { warnUndoFailed } from '../../composables/useUndo.js'
 import { INVOKE } from '../../electronChannels.js'
 import '../../styles/dialog-transition.css'
 
@@ -129,7 +130,7 @@ async function addAlbum() {
       payload: {
         album: { id: res.data.id, name: newName.value, folder_path: newPath.value, sort_order: res.data.id, created_at: '', updated_at: '' }
       }
-    }).catch(() => {})
+    }).catch(() => warnUndoFailed('添加相册'))
     newName.value = ''
     newPath.value = ''
     await loadAlbums()
@@ -185,7 +186,7 @@ async function reorderAlbums(ids) {
         type: 'album_order',
         label: '相册排序更新',
         payload: { oldOrder, newOrder: ids }
-      }).catch(() => {})
+      }).catch(() => warnUndoFailed('相册排序更新'))
     }
     // 按新顺序重新排列本地数据
     const map = new Map(albums.value.map(a => [a.id, a]))
@@ -222,7 +223,7 @@ async function doRemove() {
         album: { id: a.id, name: a.name, folder_path: a.folder_path, sort_order: a.sort_order, created_at: a.created_at, updated_at: a.updated_at },
         photos: albumPhotos
       }
-    }).catch(() => {})
+    }).catch(() => warnUndoFailed('删除相册'))
     useNotification().success('相册已删除')
     await loadAlbums()
     nextTick(() => initSortable())

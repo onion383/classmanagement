@@ -1,6 +1,5 @@
 const express = require('express');
 const router = express.Router();
-const crypto = require('crypto');
 // jsonwebtoken 只在登录/注册/重置密码等「签发 Token」时用到，不需要在后端就绪前加载：
 // 改为首次调用时才 require，避免把它（连带 semver / side-channel 等）的冷加载成本
 // 压在启动关键路径上（行为完全不变）。
@@ -14,19 +13,11 @@ const { SECRET, auth, TOKEN_SIGN_OPTS, TOKEN_COOKIE_MAX_AGE, signMediaToken } = 
 const secureChannel = require('../services/secureChannel');
 const sessions = require('../services/sessions');
 const { pickPhrase, deriveRestoreHash, normalizePhrase, formatPhrase, safeEqualHash } = require('../services/recoveryKey');
-const dbManager = require('../dbManager/dbManager');
-
+const { normalizeUsername, usernameError } = require('../services/usernameRules');
 // 待确认注册草稿：有密码账号先生成恢复密钥，用户「抄写前 3 词」通过后才真正建库。
-// 未确认的草稿不会占用账号，且在 TTL 后自动失效。
-const PENDING_TTL_MS = 30 * 60 * 1000; // 30 分钟
-const pendingRegs = new Map();
-function newDraftId() { return crypto.randomBytes(16).toString('hex'); }
-function putDraft(draft) {
-  const id = newDraftId();
-  pendingRegs.set(id, draft);
-  setTimeout(() => { if (pendingRegs.get(id) === draft) pendingRegs.delete(id); }, PENDING_TTL_MS);
-  return id;
-}
+// 未确认的草稿不会占用账号，TTL 后自动失效；容量与淘汰策略见 services/pendingRegs.js。
+const pendingRegs = require('../services/pendingRegs');
+const dbManager = require('../dbManager/dbManager');
 
 // 签发登录态：登录 token + 媒体凭据，并把 token 绑定到本次加密信道会话。
 // 绑定后前端后续请求只需发送不含 token 的信道凭据，登录 token 不再随每次请求上线；
@@ -206,14 +197,11 @@ router.post('/register', async (req, res) => {
   // 保存方式：缺省加密（兼容现有调用）；显式 false/0/'0' 视为明文保存
   const wantEncrypted = lvl ? lvl !== 'plain' : !(encrypted === false || encrypted === 0 || encrypted === '0');
 
-  const uname = String(username || '').trim();
-  if (uname.length < 2 || uname.length > 30) {
-    console.warn('[register] 账号长度非法:', uname);
-    return res.status(400).json({ error: '账号长度需在 2-30 字符之间' });
-  }
-  if (!/^[\w\u4e00-\u9fa5@.-]+$/.test(uname)) {
-    console.warn('[register] 账号含非法字符:', uname);
-    return res.status(400).json({ error: '账号包含非法字符' });
+  const uname = normalizeUsername(username);
+  const nameErr = usernameError(uname);
+  if (nameErr) {
+    console.warn('[register] 账号名非法:', uname);
+    return res.status(400).json({ error: nameErr });
   }
 
   // 明文保存不允许设置密码（明文库没有库钥匙，无法承载密码保护）
@@ -272,7 +260,7 @@ router.post('/register', async (req, res) => {
   // 超级隐私模式：先生成恢复密钥，存草稿；抄写通过后由 /api/register/confirm 真正建库。
   const phrase = pickPhrase();
   const restoreHash = deriveRestoreHash(phrase);
-  const draftId = putDraft({ username: uname, passwordHash, role: 'teacher', restoreHash, privacy: wantPrivacy });
+  const draftId = pendingRegs.put({ username: uname, passwordHash, role: 'teacher', restoreHash, privacy: wantPrivacy });
   console.log('[register] 生成待确认草稿:', uname, 'draftId:', draftId);
   res.json({
     message: '注册进行中，请抄写前 3 个恢复词完成确认',
@@ -310,7 +298,7 @@ router.post('/register/confirm', async (req, res) => {
 
   // 确认前再次校验唯一（防止等待期间被他人注册占用）
   if (dbManager.registryFindByUsername(draft.username)) {
-    pendingRegs.delete(draftId);
+    pendingRegs.remove(draftId);
     console.warn('[register/confirm] 确认时账号已被注册:', draft.username);
     return res.status(409).json({ error: '该账号已被注册' });
   }
@@ -331,7 +319,7 @@ router.post('/register/confirm', async (req, res) => {
         throw err;
       }
     }
-    pendingRegs.delete(draftId);
+    pendingRegs.remove(draftId);
     console.log('[register/confirm] 确认注册成功:', draft.username, 'slug:', slug, 'privacy:', !!draft.privacy);
     // 签发登录态，注册成功即自动进入系统，无需再回登录页手动登录
     const userRow = resolved.conn.prepare('SELECT id, username, role FROM users WHERE username = ?').get(draft.username);
@@ -349,7 +337,7 @@ router.post('/register/confirm', async (req, res) => {
   } catch (err) {
     console.error('[register/confirm] 注册抛异常:', draft.username, err.stack || err.message);
     if (!res.headersSent) {
-      pendingRegs.delete(draftId);
+      pendingRegs.remove(draftId);
       res.status(500).json({ error: '注册失败：' + (err.message || '未知错误') });
     }
   }

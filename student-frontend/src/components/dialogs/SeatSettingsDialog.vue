@@ -84,6 +84,10 @@ export default {
   },
   methods: {
     save() {
+      if (!Number.isInteger(this.localRows) || !Number.isInteger(this.localCols)) {
+        this.notifyError('行数和列数必须是整数')
+        return
+      }
       if (this.localRows < 1 || this.localRows > 50) {
         this.notifyError('设置的行/列过大\n过大的行和列会引起显示问题和程序卡顿')
         return

@@ -408,8 +408,25 @@ router.post('/dimensions/:dimId/apply-grouping', (req, res) => {
     const dimId = Number(req.params.dimId);
     const dim = db.prepare('SELECT * FROM group_dimensions WHERE id = ?').get(dimId);
     if (!dim) return res.status(404).json({ error: '维度不存在' });
-    const input = Array.isArray(req.body.groups) ? req.body.groups : [];
+    const rawGroups = req.body?.groups;
+    if (!Array.isArray(rawGroups)) return res.status(400).json({ error: '分组数据格式不正确' });
     const groups = db.prepare('SELECT id FROM groups WHERE dimension_id = ? ORDER BY sort_order, id').all(dimId);
+    if (rawGroups.length > groups.length) {
+      return res.status(400).json({ error: `分组数量不能超过该维度的 ${groups.length} 个小组` });
+    }
+    // 与单条添加/移动保持同一上限：每组人数不得超过维度设置（且不超过硬上限）
+    const perGroupLimit = dim.members_per_group > 0
+      ? Math.min(dim.members_per_group, MAX_MEMBERS_PER_GROUP)
+      : MAX_MEMBERS_PER_GROUP;
+    for (let gi = 0; gi < rawGroups.length; gi++) {
+      const names = rawGroups[gi];
+      if (!Array.isArray(names)) return res.status(400).json({ error: `第 ${gi + 1} 组的数据需要是姓名数组` });
+      const count = names.filter((name) => String(name ?? '').trim()).length;
+      if (count > perGroupLimit) {
+        return res.status(400).json({ error: `第 ${gi + 1} 组有 ${count} 人，超过上限 ${perGroupLimit} 人` });
+      }
+    }
+    const input = rawGroups;
 
     const tx = db.transaction(() => {
       const delMembers = db.prepare('DELETE FROM group_members WHERE group_id = ?');

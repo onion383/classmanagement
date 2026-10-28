@@ -7,6 +7,9 @@ export function isPicked(q, o) {
 }
 
 // 该题是否为「单选 + 有选项 + 尚未选择」：用于把按钮显示成「跳过」
+// options 可能缺失（模型畸形输出），这里按「无选项」处理，避免 q.options.length 抛 TypeError
 export function _isSingleUnpicked(q) {
-  return !!q && !q.multiple && q.options.length > 0 && (q.picked === undefined || q.picked === null)
+  if (!q) return false
+  const opts = Array.isArray(q.options) ? q.options : []
+  return !q.multiple && opts.length > 0 && (q.picked === undefined || q.picked === null)
 }

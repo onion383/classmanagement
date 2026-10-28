@@ -37,8 +37,13 @@ export function useDutyArrangementOptions(OPTIONS) {
     onDropChild(e, node) {
       const opt = this.findOption(e)
       if (!opt) { return }
-      if (opt.type !== 'constraint' || node.children.some(c => c.key === opt.key)) {
-        if (opt.type !== 'constraint') this.rejectText = '「' + opt.label + '」是排表方式，只能拖到顶部作为一级条件'
+      if (opt.type !== 'constraint') {
+        this.rejectText = '「' + opt.label + '」是排表方式，只能拖到顶部作为一级条件'
+        this.showReject()
+        return
+      }
+      if (node.children.some(c => c.key === opt.key)) {
+        this.rejectText = '「' + opt.label + '」已存在于当前排表方式下'
         this.showReject()
         return
       }

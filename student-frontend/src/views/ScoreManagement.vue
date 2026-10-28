@@ -226,6 +226,8 @@ export default {
       exportKind: 'today',   // today 今日加分记录 / stats 加分统计
       confirm: { visible: false, message: '', ok: null },
       confirmMounted: false,
+      // 「今天」的日期串（YYYY-MM-DD）：定时器每分钟对一次，跨午夜后触发「今日加分」重算
+      todayKey: formatDate(new Date()),
       // 加分记录表（DynamicTable）：行数据 / 列顺序 / 当前编辑单元格
       scoreRows: [],
       scoreCols: [],
@@ -260,7 +262,9 @@ export default {
       ]
     },
     todayStart() {
-      return formatDate(new Date())
+      // 依赖 todayKey（由定时器推进），否则无响应式依赖的 computed 会被永久缓存，
+      // KeepAlive 缓存期间跨午夜后「今日加分」仍按昨天的日期过滤
+      return this.todayKey
     },
     timelineNodeTypes() {
       return [
@@ -375,9 +379,21 @@ export default {
   async created() {
     await this.loadAll()
   },
-  mounted() { this._applyRowFocus() },
-  activated() { this._applyRowFocus() },
+  mounted() { this._applyRowFocus(); this._startDayWatch() },
+  activated() { this._applyRowFocus(); this._startDayWatch() },
+  deactivated() { this._stopDayWatch() },
+  beforeUnmount() { this._stopDayWatch() },
   methods: {
+    // 「今日」口径的跨天刷新：每分钟对一次日期即可（不必精确卡 00:00），
+    // 组件被 KeepAlive 缓存时 deactivated 停掉定时器，回到页面再启动
+    _startDayWatch() {
+      if (this._dayTimer) return
+      this.todayKey = formatDate(new Date())
+      this._dayTimer = setInterval(() => { this.todayKey = formatDate(new Date()) }, 60000)
+    },
+    _stopDayWatch() {
+      if (this._dayTimer) { clearInterval(this._dayTimer); this._dayTimer = null }
+    },
     // 跨页定位：命中记录在个人/小组哪一份数据里，就切到对应加分对象与「加分统计」页签，
     // 再滚动到目标行并高亮闪动。数据尚未加载时返回 null，由 helper 安排重试。
     _applyRowFocus() {
@@ -408,27 +424,20 @@ export default {
         this.scores = all.filter(r => r.source !== 'group')
         this.groupScores = all.filter(r => r.source === 'group')
         this.buildScoreRows()
+        return true
       } catch (err) {
         useNotification().error('加载失败')
+        return false
       } finally {
         this.loading = false
       }
     },
     async refresh() {
-      try {
-        await this.loadAll()
-        useNotification().success('已刷新 加分管理 数据')
-      } catch (err) {
-        useNotification().error('刷新失败')
-      }
+      // 失败时 loadAll 已弹「加载失败」，这里不再重复提示，更不会误报「已刷新」
+      if (await this.loadAll()) useNotification().success('已刷新 加分管理 数据')
     },
     async refreshStats() {
-      try {
-        await this.loadAll()
-        useNotification().success('已刷新 加分统计 数据')
-      } catch (err) {
-        useNotification().error('刷新失败')
-      }
+      if (await this.loadAll()) useNotification().success('已刷新 加分统计 数据')
     },
     openAdd() {
       this.editingRecord = null
@@ -559,7 +568,9 @@ export default {
       }
     },
     askDelete(item) {
-      const name = this.isGroup ? (item.group_name || '该小组') : (item.姓名 || '该记录')
+      // 统计表行用「小组」字段，records 用 group_name：两种来源都要兼容，避免文案退化成「该小组」
+      const groupName = item.group_name || item.小组
+      const name = this.isGroup ? (groupName || '该小组') : (item.姓名 || '该记录')
       this.confirm = {
         visible: true,
         message: `确定删除「${name}」的这条${item.类型 || ''}记录吗？`,

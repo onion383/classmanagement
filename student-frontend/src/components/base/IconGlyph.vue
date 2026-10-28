@@ -104,7 +104,12 @@ const MAP = {
 }
 
 const { iconStyle } = storeToRefs(useThemeStore())
-const entry = computed(() => MAP[props.name] || MAP.students)
+const entry = computed(() => {
+  const hit = MAP[props.name]
+  // 拼错/未登记的 key 会静默回退成「学生」图标，视觉上极难发现：开发态显式告警
+  if (!hit && import.meta.env.DEV) console.warn('[IconGlyph] unknown icon:', props.name)
+  return hit || MAP.students
+})
 const isLoading = computed(() => props.name === 'loading')
 </script>
 

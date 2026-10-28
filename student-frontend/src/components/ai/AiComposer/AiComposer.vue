@@ -14,20 +14,20 @@
           title="关闭"
         >✕</button>
       </div>
-      <div v-if="pendingAsk.questions.length">
+      <div v-if="askQuestions.length">
         <!-- 多问题：分页呈现，一页一题，底部「取消 / 下一页」（末页为「完成」），不再全部堆在一页 -->
-        <template v-if="pendingAsk.questions.length > 1">
+        <template v-if="askQuestions.length > 1">
           <div class="text-xs text-text-muted mb-1">
-            第 {{ askPage + 1 }} / {{ pendingAsk.questions.length }} 题<template v-if="askCurrent && askCurrent.multiple">（可多选）</template>
+            第 {{ askPage + 1 }} / {{ askQuestions.length }} 题<template v-if="askCurrent && askCurrent.multiple">（可多选）</template>
           </div>
           <div v-if="askCurrent" class="text-base text-text mb-3 break-words">
             <span class="text-text-muted mr-1">{{ askPage + 1 }}.</span>{{ askCurrent.question }}
           </div>
-          <div v-if="askCurrent && askCurrent.options.length" class="space-y-2">
+          <div v-if="askCurrent && askOptions(askCurrent).length" class="space-y-2">
             <!-- 多选：每行前置复选框，点整行即勾选/取消 -->
             <template v-if="askCurrent.multiple">
               <label
-                v-for="(o, oi) in askCurrent.options"
+                v-for="(o, oi) in askOptions(askCurrent)"
                 :key="'m' + oi"
                 :class="[optBase, 'flex items-center gap-2', isPicked(askCurrent, o) ? optOn : optOff]"
               >
@@ -38,7 +38,7 @@
             <!-- 单选：点选项即选中 -->
             <template v-else>
               <button
-                v-for="(o, oi) in askCurrent.options"
+                v-for="(o, oi) in askOptions(askCurrent)"
                 :key="'s' + oi"
                 @click="$emit('pick', askPage, o)"
                 :class="[optBase, isPicked(askCurrent, o) ? optOn : optOff]"
@@ -76,7 +76,7 @@
               class="text-sm px-4 py-1.5 rounded-sm border border-transparent bg-primary text-text-inverse hover:bg-primary-hover transition-theme cursor-pointer"
             >跳过</button>
             <button
-              v-else-if="askPage < pendingAsk.questions.length - 1"
+              v-else-if="askPage < askQuestions.length - 1"
               @click="$emit('next')"
               :disabled="!askCanAdvance"
               class="text-sm px-4 py-1.5 rounded-sm border border-transparent bg-primary text-text-inverse hover:bg-primary-hover transition-theme cursor-pointer disabled:opacity-40 disabled:cursor-default"
@@ -92,15 +92,15 @@
 
         <!-- 单问题：单选点一下即发；多选或选了「其他」时，填好后点「完成」；单选未选择时可「跳过」 -->
         <div v-else class="space-y-4">
-          <div v-for="(q, qi) in pendingAsk.questions" :key="qi">
+          <div v-for="(q, qi) in askQuestions" :key="qi">
             <div class="text-base text-text mb-3 break-words">
               {{ q.question }}<span v-if="q.multiple" class="ml-1 text-xs text-text-muted">（可多选）</span>
             </div>
-            <div v-if="q.options.length" class="space-y-2">
+            <div v-if="askOptions(q).length" class="space-y-2">
               <!-- 多选：每行前置复选框，点整行即勾选/取消 -->
               <template v-if="q.multiple">
                 <label
-                  v-for="(o, oi) in q.options"
+                  v-for="(o, oi) in askOptions(q)"
                   :key="'m' + oi"
                   :class="[optBase, 'flex items-center gap-2', isPicked(q, o) ? optOn : optOff]"
                 >
@@ -111,7 +111,7 @@
               <!-- 单选：点选项即选中 -->
               <template v-else>
                 <button
-                  v-for="(o, oi) in q.options"
+                  v-for="(o, oi) in askOptions(q)"
                   :key="'s' + oi"
                   @click="$emit('pick', qi, o)"
                   :class="[optBase, isPicked(q, o) ? optOn : optOff]"
@@ -451,6 +451,7 @@
 import { ShieldAlert, ShieldCheck, Globe } from '@lucide/vue'
 import AiProposalTable from '../../tables/AiProposalTable.vue'
 import AppSelect from '../../base/AppSelect.vue'
+import { useNotification } from '../../../composables/useNotification.js'
 import { readFile, readAsDataURL } from '../../../composables/ai/aiFiles.js'
 import { frontProposalHint } from '../../../composables/ai/aiMessages.js'
 import { ASK_OTHER_KEY, ASK_OTHER_LABEL, AI_PERMISSION_FULL } from '../../../composables/ai/aiConstants.js'
@@ -519,15 +520,19 @@ export default {
     },
     optOn() { return 'border-primary text-primary' },
     optOff() { return 'border-border hover:border-primary hover:text-primary' },
+    // ask_user 结构兜底：缺 questions 时按「没有题目」渲染，模板里不再直接读 pendingAsk.questions.length
+    askQuestions() {
+      const a = this.pendingAsk
+      return a && Array.isArray(a.questions) ? a.questions : []
+    },
     // 分页分支需显式点「下一页 / 完成」的情况：无选项（自由作答）、多选、或已选「其他」需先填内容
     askNeedConfirm() {
       const q = this.askCurrent
-      return !!q && (!q.options.length || !!q.multiple || this.isPicked(q, ASK_OTHER_KEY))
+      return !!q && (!this.askOptions(q).length || !!q.multiple || this.isPicked(q, ASK_OTHER_KEY))
     },
     // 单题分支：多选或已选「其他」时需要「完成」按钮
     singleNeedConfirm() {
-      const a = this.pendingAsk
-      return !!a && a.questions.some((q) => !!q.multiple || this.isPicked(q, ASK_OTHER_KEY))
+      return this.askQuestions.some((q) => !!q.multiple || this.isPicked(q, ASK_OTHER_KEY))
     },
     // 分页分支当前题：单选、有选项且尚未选择 → 显示「跳过」
     askSkipMode() {
@@ -536,8 +541,8 @@ export default {
     },
     // 单题分支：该题单选、有选项且尚未选择 → 显示「跳过」
     singleSkipMode() {
-      const a = this.pendingAsk
-      return !!a && a.questions.length === 1 && this._isSingleUnpicked(a.questions[0])
+      const qs = this.askQuestions
+      return qs.length === 1 && this._isSingleUnpicked(qs[0])
     },
     // 权限菜单定位：fixed 坐标由按钮 rect 推出，底边贴在按钮上方 6px 处
     permMenuStyle() {
@@ -657,11 +662,17 @@ export default {
     // 仍挂到 methods，保证模板 isPicked(...) 与 this._isSingleUnpicked(...) 的调用点不变。
     isPicked,
     _isSingleUnpicked,
+    // 某题的选项数组（缺失/非数组时按空数组）：模板里的 v-for / v-if 统一走这里，
+    // 避免畸形 ask_user 结构让 q.options.length 直接抛 TypeError
+    askOptions(q) {
+      return q && Array.isArray(q.options) ? q.options : []
+    },
     // 「其他」输入框回车：分页分支按当前位置前进，单题分支直接提交
     onOtherEnter() {
       const a = this.pendingAsk
       if (!a) return
-      if (a.questions.length > 1 && this.askPage < a.questions.length - 1) {
+      const n = this.askQuestions.length
+      if (n > 1 && this.askPage < n - 1) {
         if (this.askCanAdvance) this.$emit('next')
       } else {
         this.$emit('submit')
@@ -704,11 +715,17 @@ export default {
       e.preventDefault()
       // 一次只携带一个附件（多文件粘贴以第一个为准）
       if ((file.type || '').startsWith('image/')) {
-        const dataUrl = await readAsDataURL(file)
-        const sizeLabel = file.size > 1048576
-          ? (file.size / 1048576).toFixed(1) + ' MB'
-          : (file.size / 1024).toFixed(0) + ' KB'
-        this.$emit('attach', { name: file.name || '粘贴图片.png', isImage: true, dataUrl, textContent: '', sizeLabel })
+        // readAsDataURL 在读盘失败时会 reject：不接住就会变成未处理的 Promise 拒绝
+        try {
+          const dataUrl = await readAsDataURL(file)
+          const sizeLabel = file.size > 1048576
+            ? (file.size / 1048576).toFixed(1) + ' MB'
+            : (file.size / 1024).toFixed(0) + ' KB'
+          this.$emit('attach', { name: file.name || '粘贴图片.png', isImage: true, dataUrl, textContent: '', sizeLabel })
+        } catch (err) {
+          console.error('[composer] 读取粘贴图片失败', err)
+          useNotification().error('读取剪贴板图片失败，请重试')
+        }
       } else {
         this.$emit('attach', await readFile(file))
       }

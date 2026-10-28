@@ -59,10 +59,30 @@ function normNumber(value, name) {
   return n;
 }
 
-// 四舍五入到指定小数位（金额等最多两位小数）
+// 整数归一：在 normNumber 之上强制整数。
+// 曾经的写法 `Number.isInteger(v) ? v : normNumber(v)` 只是「转换」，1.5 会原样落进 INTEGER 列，
+// SQLite 的类型亲和会把 REAL 值存进整数列（读出来还是 1.5），等于声明的「整数」形同虚设。
+function normInt(value, name) {
+  if (value === '' || value == null) return null;
+  const n = normNumber(value, name);
+  if (!Number.isInteger(n)) throw new Error(`字段「${name}」需要整数，收到：${value}`);
+  return n;
+}
+
+// 四舍五入到指定小数位（金额等最多两位小数）。
+// 不能用 Math.round(n * 10^d) / 10^d：二进制浮点会放大误差
+//（1.005 * 100 = 100.49999999999999 → 舍成 1.00，金额/分值出现「分」级偏差）。
+// 这里先把数字按十进制「移位」（`1.005e2` 会被解析成精确的 100.5），
+// 再用 Math.round 舍入、最后移回，得到符合十进制直觉的结果。
+// 极端值（如 1e21 的字符串形式本身带指数）解析失败时保持原值：
+// 这类数没有有意义的「分」，强行乘 10^d 再除反而丢精度。
+// 注：负数沿用 Math.round 的语义（-1.005 → -1），本项目的金额/分值均为非负。
 function roundTo(n, digits) {
-  const f = Math.pow(10, digits);
-  return Math.round(n * f) / f;
+  const d = Math.max(0, Math.min(20, Number(digits) || 0));
+  if (d === 0) return Math.round(n);
+  const shifted = Number(`${n}e${d}`);
+  if (!Number.isFinite(shifted)) return n;
+  return Number(`${Math.round(shifted)}e-${d}`);
 }
 
 // 解析日期文本（宽松）：返回 { y, m, d, time } 或 null（识别不出）
@@ -119,17 +139,18 @@ function strictDate(value, name) {
 }
 
 // 按列类型清洗单个标量值（列类型来自 table_meta，默认「文字」）
+// 整数/小数列无论入参是字符串还是数字，都走同一套归一，避免「字符串被归一、数字被放过」，
+// 也避免小数落进 INTEGER 列（SQLite 类型亲和只保证存储类，不做整数约束）。
 function cleanByType(value, type, name) {
   if (value == null) return null;
+  if (type === '整数') return normInt(value, name);
+  if (type === '小数') return normNumber(value, name);
   if (typeof value === 'string') {
-    if (type === '整数' || type === '小数') return normNumber(value, name);
     if (type === '日期') return normDate(value);
     const s = cleanText(value);
     return s === '' ? null : s;
   }
-  // 非字符串：仅对已声明为数值的列做归一；其余保持原样，不改动既有存储行为
-  if (type === '整数') return Number.isInteger(value) ? value : normNumber(value, name);
-  if (type === '小数') return normNumber(value, name);
+  // 非字符串且非数值列：保持原样，不改动既有存储行为
   return value;
 }
 
@@ -260,6 +281,10 @@ function assertSlotElements(arr, name, depth) {
 // name 为 ≤20 文本、每个元素至少有 student_id 或 name。
 // 注意：越界（超 rows/cols）与 id 是否真实存在属于依赖既有数据的校验，由 businessRules 负责。
 const SEAT_NAME_MAX = 20;
+// 座位矩阵上限：与 routes/seats.js 的 MAX_ROWS / MAX_COLS 保持一致。
+// 扁平数组若按 row/col 直接分配矩阵，必须在此处设上限，否则超大坐标可造成 OOM。
+const SEAT_MAX_ROWS = 50;
+const SEAT_MAX_COLS = 30;
 
 function assertSeatCell(cell, name, r, c) {
   if (cell == null) return;
@@ -303,6 +328,9 @@ function flatSeatsToMatrix(arr, name) {
   });
   const maxR = Math.max(...items.map((it) => it.r));
   const maxC = Math.max(...items.map((it) => it.c));
+  if (maxR > SEAT_MAX_ROWS || maxC > SEAT_MAX_COLS) {
+    throw new Error(`字段「${name}」座位坐标超出上限（最多 ${SEAT_MAX_ROWS} 行 × ${SEAT_MAX_COLS} 列），收到 row=${maxR}, col=${maxC}`);
+  }
   const matrix = Array.from({ length: maxR }, () => Array(maxC).fill(null));
   items.forEach((it) => { matrix[it.r - 1][it.c - 1] = it.val; });
   return matrix;
@@ -316,7 +344,11 @@ function cleanSeatGrid(value, name) {
   const allFlat = arr.every((el) => el && typeof el === 'object' && !Array.isArray(el));
   if (allFlat) return flatSeatsToMatrix(arr, name);
   if (allMatrix) {
-    arr.forEach((row, r) => row.forEach((cell, c) => assertSeatCell(cell, name, r, c)));
+    if (arr.length > SEAT_MAX_ROWS) throw new Error(`字段「${name}」行数超出上限（最多 ${SEAT_MAX_ROWS} 行），收到 ${arr.length} 行`);
+    arr.forEach((row, r) => {
+      if (row.length > SEAT_MAX_COLS) throw new Error(`字段「${name}」第 ${r + 1} 行列数超出上限（最多 ${SEAT_MAX_COLS} 列），收到 ${row.length} 列`);
+      row.forEach((cell, c) => assertSeatCell(cell, name, r, c));
+    });
     return arr;
   }
   const badIdx = arr.findIndex((el) => !Array.isArray(el) && !(el && typeof el === 'object'));
@@ -394,10 +426,12 @@ function cleanDesktopApps(value, name) {
   const arr = parseJsonShape(value, 'array', name);
   return arr.map((it) => {
     if (!it || typeof it !== 'object') throw new Error(`字段「${name}」的元素需要是对象`);
+    const rawPath = cleanText(it.path ?? '').slice(0, 260);
     return {
       id: cleanText(it.id ?? '').slice(0, 40),
       name: cleanText(it.name ?? '').slice(0, 30),
-      path: cleanText(it.path ?? '').slice(0, 260),
+      // 软件路径同样禁止「..」上跳并校验字符，避免写入后被 IPC 直接启动异常路径
+      path: rawPath ? cleanPath(rawPath, `${name}.path`) : '',
       icon: typeof it.icon === 'string' ? it.icon : '',
     };
   });
@@ -469,6 +503,8 @@ function sanitizeField(value, table, column, type) {
 module.exports = {
   MAX_TEXT_LEN,
   MAX_JSON_LEN,
+  SEAT_MAX_ROWS,
+  SEAT_MAX_COLS,
   COLUMN_RULES,
   cleanText,
   cleanByType,
@@ -476,8 +512,10 @@ module.exports = {
   cleanPath,
   normBool,
   normNumber,
+  normInt,
   normDate,
   strictDate,
+  roundTo,
   normalizeSeats,
   sanitizeField,
 };

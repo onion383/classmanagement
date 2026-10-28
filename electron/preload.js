@@ -56,9 +56,14 @@ contextBridge.exposeInMainWorld('electron', {
   // 接收主进程消息。返回 wrapper 供上层等值调用 off。
   on: (channel, callback) => {
     if (!validReceiveChannels.includes(channel) || typeof callback !== 'function') return null
-    const wrapper = (event, ...args) => callback(...args)
     if (!listenerMap.has(channel)) listenerMap.set(channel, new Map())
-    listenerMap.get(channel).set(callback, wrapper)
+    const m = listenerMap.get(channel)
+    // 同一 callback 重复 on() 时先摘掉旧 wrapper：否则映射被覆盖后旧监听仍挂在
+    // ipcRenderer 上，既重复触发又永远 off 不掉（典型的内存泄漏/重复回调来源）。
+    const prev = m.get(callback)
+    if (prev) ipcRenderer.removeListener(channel, prev)
+    const wrapper = (event, ...args) => callback(...args)
+    m.set(callback, wrapper)
     ipcRenderer.on(channel, wrapper)
     return wrapper
   },

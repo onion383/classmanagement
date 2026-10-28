@@ -167,6 +167,8 @@ export function useTableCRUD(apiBase, defaultFields, options = {}) {
   }
 
   // ==================== 数据加载 ====================
+  // 返回 boolean：调用方（尤其是「刷新」按钮）据此判断是否该提示成功。
+  // 原实现失败时只置 loadError，调用方拿不到结果，于是刷新失败也弹「已刷新」。
   async function fetchRows() {
     try {
       const res = await axios.get(`${apiBase}?_t=${Date.now()}`)
@@ -189,10 +191,12 @@ export function useTableCRUD(apiBase, defaultFields, options = {}) {
         fields.value = [...defaultFields]
       }
       loadError.value = false
+      return true
     } catch (err) {
       console.error(err)
       // 不再弹 alert：表格内会显示「加载失败 + 重试」，比一次性弹窗更持久、也更明确
       loadError.value = true
+      return false
     }
   }
 

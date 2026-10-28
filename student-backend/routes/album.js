@@ -685,18 +685,47 @@ router.get('/photo/:photoId/file', async (req, res) => {
     const range = req.headers.range;
 
     if (range) {
-      const m = /bytes=(\d*)-(\d*)/.exec(String(range));
-      const start = m && m[1] !== '' ? parseInt(m[1], 10) : 0;
-      const end = m && m[2] !== '' ? parseInt(m[2], 10) : total - 1;
-      const chunkSize = Math.min(end - start + 1, total - start);
+      // 解析并校验 Range：非法/越界/多段统一回 416，避免 start/end 反了读出负长度或越界
+      const m = /^bytes=(\d*)-(\d*)$/.exec(String(range).trim());
+      if (!m || (m[1] === '' && m[2] === '')) {
+        res.writeHead(416, { 'Content-Range': `bytes */${total}`, 'Accept-Ranges': 'bytes' });
+        return res.end();
+      }
+      let start;
+      let end;
+      if (m[1] === '') {
+        // 后缀范围 bytes=-N：取末尾 N 字节
+        const suffix = parseInt(m[2], 10);
+        if (!Number.isFinite(suffix) || suffix <= 0 || total === 0) {
+          res.writeHead(416, { 'Content-Range': `bytes */${total}`, 'Accept-Ranges': 'bytes' });
+          return res.end();
+        }
+        start = Math.max(0, total - suffix);
+        end = total - 1;
+      } else {
+        start = parseInt(m[1], 10);
+        end = m[2] === '' ? total - 1 : parseInt(m[2], 10);
+        if (!Number.isFinite(start) || !Number.isFinite(end) || start > end || start >= total) {
+          res.writeHead(416, { 'Content-Range': `bytes */${total}`, 'Accept-Ranges': 'bytes' });
+          return res.end();
+        }
+        end = Math.min(end, total - 1);
+      }
+      const chunkSize = end - start + 1;
       res.writeHead(206, {
-        'Content-Range': `bytes ${start}-${start + chunkSize - 1}/${total}`,
+        'Content-Range': `bytes ${start}-${end}/${total}`,
         'Accept-Ranges': 'bytes',
         'Content-Length': chunkSize,
         'Content-Type': mime,
         'Cache-Control': 'no-cache',
       });
-      fs.createReadStream(photo.file_path, { start, end: start + chunkSize - 1 }).pipe(res);
+      const stream = fs.createReadStream(photo.file_path, { start, end });
+      // 读盘失败时立刻销毁响应，避免前端拿到半截视频后一直转圈
+      stream.on('error', (e) => {
+        console.error('[album] 读取源文件失败:', e.message);
+        res.destroy(e);
+      });
+      stream.pipe(res);
     } else {
       res.writeHead(200, {
         'Content-Length': total,
@@ -704,7 +733,12 @@ router.get('/photo/:photoId/file', async (req, res) => {
         'Accept-Ranges': 'bytes',
         'Cache-Control': 'no-cache',
       });
-      fs.createReadStream(photo.file_path).pipe(res);
+      const stream = fs.createReadStream(photo.file_path);
+      stream.on('error', (e) => {
+        console.error('[album] 读取源文件失败:', e.message);
+        res.destroy(e);
+      });
+      stream.pipe(res);
     }
   } catch (err) {
     res.status(500).json({ error: err.message });

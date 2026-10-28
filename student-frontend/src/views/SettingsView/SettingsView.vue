@@ -1016,10 +1016,11 @@ export default {
       const cur = this.activeSemester
       if (!cur) return ''
       const name = cur.name || '未命名学期'
+      // ConfirmDialog 用 whitespace-pre-line 渲染纯文本：换行用 \n，不能写 <br>
       const tail = cur.is_current && this.semesters.length > 1
-        ? '<br>它是当前学期，删除后会自动切换到其它学期。'
+        ? '\n它是当前学期，删除后会自动切换到其它学期。'
         : ''
-      return `确定删除学期「<b>${name}</b>」吗？删除后不可恢复。${tail}`
+      return `确定删除学期「${name}」吗？删除后不可恢复。${tail}`
     },
     // 本学期时长（按天数折算周数，只读展示）
     semesterWeeks() {

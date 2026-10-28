@@ -1,9 +1,24 @@
 // ===== AI 工具执行：写入提案（propose_* / 批量操作）=====
 // 纯代码搬运自 ../executors.js，行为不变。门面装配见 tools.js。
-const { db } = require('../../../../db');
+const { db, getFields } = require('../../../../db');
 const { tableColumns, normColVal } = require('../../ai.helpers');
 const { WRITE_TABLES, JSON_WRITE_TABLES } = require('../../ai.constants');
 const { FRONT_SETTINGS, BATCH_ROW_TABLES, MAX_BATCH_OPS } = require('../tools.schema');
+const { sanitizeField } = require('../../../../services/sanitize');
+
+// 提案里的「新值」必须与最终落库值一致：确认页给用户看的若是 LLM 原值，
+// 而落库时又被列级规则 clamp/改写（数值越界、日期格式化等），
+// 用户就会按一个「假值」确认。这里复用与写入相同的清洗逻辑，提前归一到落库值；
+// 清洗不通过时直接报错让模型修正，而不是生成一份到执行时才失败的提案。
+function proposalColType(table, col) {
+  const meta = getFields(table) || [];
+  const f = meta.find((x) => x.name === col);
+  return f && f.type ? f.type : '文字';
+}
+function cleanProposalValue(table, col, value, type) {
+  // 整块写入（/doc）与 applyDocWrite 一样固定按「文字」兜底；行式修改则按列真实类型
+  return sanitizeField(value, table, col, type || proposalColType(table, col));
+}
 
 // propose_add_many 工具：批量新增多条数据，生成一条提案，用户确认后一次性写入
 function normalizeBatchProposal({ table, rows }) {
@@ -61,7 +76,17 @@ function normalizeJsonProposal({ table, id, values, label }) {
   if (!keys.length) return { error: '要写入的列名不在该表字段中，请先用 query 确认列名' };
   const next = {};
   const before = {};
-  for (const k of keys) { next[k] = values[k]; before[k] = row[k]; }
+  for (const k of keys) {
+    // 先清洗再比较/展示：确认页显示的就是落库值
+    let cleaned;
+    try {
+      cleaned = cleanProposalValue(table, k, values[k], '文字');
+    } catch (e) {
+      return { error: `列「${k}」取值不合法：${e.message}` };
+    }
+    next[k] = cleaned;
+    before[k] = row[k];
+  }
   // 归一化比较：全部列都与当前内容相同则无意义，直接报错让模型修正
   const changed = keys.filter((k) => normColVal(before[k]) !== normColVal(next[k]));
   if (!changed.length) return { error: '提案内容与当前数据完全相同，无需修改' };
@@ -104,9 +129,16 @@ function buildUpdateDiff(table, id, changes) {
   }
   const row = db.prepare(`SELECT * FROM "${table}" WHERE id = ?`).get(id);
   if (!row) return { error: `要修改的记录不存在（id=${id}），请先用 query 核对` };
-  const diff = Object.keys(changes)
-    .filter((k) => k !== 'id')
-    .map((k) => ({ field: k, from: row[k] == null ? '' : row[k], to: changes[k] == null ? '' : changes[k] }));
+  const diff = [];
+  for (const k of Object.keys(changes).filter((key) => key !== 'id')) {
+    let to;
+    try {
+      to = cleanProposalValue(table, k, changes[k]);
+    } catch (e) {
+      return { error: `字段「${k}」取值不合法：${e.message}` };
+    }
+    diff.push({ field: k, from: row[k] == null ? '' : row[k], to: to == null ? '' : to });
+  }
   return { ok: true, diff };
 }
 
@@ -151,7 +183,10 @@ function normalizeBatchOps({ ops, label }) {
     if (action === 'doc') {
       if (!JSON_WRITE_TABLES[table]) return { error: `${at}：该表不支持整块写入（${table || '未指定表'}）` };
       if (!op.values || typeof op.values !== 'object' || Array.isArray(op.values)) return { error: `${at}：缺少要写入的列值（values）` };
-      normalized.push({ action: 'doc', table, id: Number.isInteger(op.id) ? op.id : 1, values: op.values });
+      // id 必须是有效正整数：缺失/非法时直接报错，不能静默退化成 id=1 写到别的行上
+      const docId = Number(op.id);
+      if (!Number.isInteger(docId) || docId <= 0) return { error: `${at}：整块写入缺少有效的记录 id` };
+      normalized.push({ action: 'doc', table, id: docId, values: op.values });
       continue;
     }
     if (!['add', 'update', 'delete'].includes(action)) return { error: `${at}：action 必须是 add/update/delete/doc` };
@@ -220,9 +255,16 @@ function normalizeProposal({ operation, table, data }) {
     if (unknown.length) return { ok: false, error: `要修改的字段不存在：${unknown.join('、')}。该表可用字段：${ava}` };
     const row = db.prepare(`SELECT * FROM "${table}" WHERE id = ?`).get(id);
     if (!row) return { ok: false, error: `要修改的记录不存在（id=${id}），请先用 query 核对` };
-    diff = Object.keys(changes)
-      .filter((k) => k !== 'id')
-      .map((k) => ({ field: k, from: row[k] == null ? '' : row[k], to: changes[k] == null ? '' : changes[k] }));
+    diff = [];
+    for (const k of Object.keys(changes).filter((key) => key !== 'id')) {
+      let to;
+      try {
+        to = cleanProposalValue(table, k, changes[k]);
+      } catch (e) {
+        return { ok: false, error: `字段「${k}」取值不合法：${e.message}` };
+      }
+      diff.push({ field: k, from: row[k] == null ? '' : row[k], to: to == null ? '' : to });
+    }
   }
   return { ok: true, operation, table, data, label, diff };
 }

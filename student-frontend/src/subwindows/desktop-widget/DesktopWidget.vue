@@ -1052,7 +1052,7 @@ function onWindowDragStart(e) {
   e.preventDefault()
   // 捕获指针：鼠标被甩出窗口时仍能收到 pointermove，否则快速拖动会中途断连
   try { e.currentTarget.setPointerCapture(e.pointerId) } catch (_) {}
-  window.electron.send('desktop-widget-drag-start', { screenX: e.screenX, screenY: e.screenY })
+  window.electron.send(SEND.DESKTOP_WIDGET_DRAG_START, { screenX: e.screenX, screenY: e.screenY })
 }
 
 function onWindowDragMove(e) {
@@ -1061,14 +1061,14 @@ function onWindowDragMove(e) {
     dragMoveLogged = true
     console.info('[dw-timing] dragmove first buttons=' + e.buttons)
   }
-  window.electron.send('desktop-widget-drag-move', { screenX: e.screenX, screenY: e.screenY })
+  window.electron.send(SEND.DESKTOP_WIDGET_DRAG_MOVE, { screenX: e.screenX, screenY: e.screenY })
 }
 
 function onWindowDragEnd() {
   if (!windowDragging) return
   windowDragging = false
   if (import.meta.env.DEV) console.info('[dw-timing] dragend')
-  window.electron.send('desktop-widget-drag-end')
+  window.electron.send(SEND.DESKTOP_WIDGET_DRAG_END)
 }
 
 // ========== 生命周期 ==========

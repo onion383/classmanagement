@@ -3,6 +3,7 @@ const {
   queryAll, insertRow, updateRow, deleteRow, moveRow,
   addColumn, deleteColumn, reorderRows, moveColumn, importRows, renameColumn
 } = require('../services/tableService');
+const { clearTableColumnsCache } = require('./ai/ai.helpers');
 
 function createDynamicTableRouter(tableName, options = {}) {
   const router = express.Router();
@@ -87,6 +88,7 @@ function createDynamicTableRouter(tableName, options = {}) {
     try {
       const { columnName, dataType, after } = req.body;
       addColumn(tableName, columnName, dataType, after);
+      clearTableColumnsCache(tableName);
       res.json({ message: `字段 ${columnName} 添加成功` });
     } catch (err) {
       if (err.message.includes('duplicate column name')) {
@@ -100,6 +102,7 @@ function createDynamicTableRouter(tableName, options = {}) {
   router.delete('/columns/:columnName', (req, res) => {
     try {
       deleteColumn(tableName, req.params.columnName, { protectedColumns });
+      clearTableColumnsCache(tableName);
       res.json({ message: `字段 ${req.params.columnName} 已删除` });
     } catch (err) {
       res.status(400).json({ error: err.message });
@@ -143,6 +146,7 @@ function createDynamicTableRouter(tableName, options = {}) {
     try {
       const { oldName, newName } = req.body;
       renameColumn(tableName, oldName, newName);
+      clearTableColumnsCache(tableName);
       res.json({ message: `列名已从"${oldName}"改为"${newName}"` });
     } catch (err) {
       res.status(400).json({ error: err.message });

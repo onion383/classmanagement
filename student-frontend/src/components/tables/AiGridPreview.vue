@@ -45,10 +45,12 @@ const FAMILY = {
 // 供提案预览 / 记录块判断是否走网格展示
 export const GRID_TABLES = Object.keys(FAMILY)
 
-// 学生 id→姓名 映射：座位表里存的是学生 id，需还原成姓名展示。进程内缓存一次。
+// 学生 id→姓名 映射：座位表里存的是学生 id，需还原成姓名展示。进程内缓存（带 TTL）。
 let _studentMap = null
+let _studentMapAt = 0
+const STUDENT_MAP_TTL = 60 * 1000
 async function getStudentMap() {
-  if (_studentMap) return _studentMap
+  if (_studentMap && Date.now() - _studentMapAt < STUDENT_MAP_TTL) return _studentMap
   try {
     const r = await apiFetch('/api/students')
     const j = await r.json()
@@ -57,8 +59,18 @@ async function getStudentMap() {
       : Array.isArray(j.data) ? j.data
       : (j.data && j.data.rows) || j.rows || []
     _studentMap = new Map(list.map((s) => [s.id, s.姓名 || '']))
-  } catch (e) { _studentMap = new Map() }
+    _studentMapAt = Date.now()
+  } catch (e) {
+    // 拉取失败不能把空 Map 缓存下来（否则之后永远显示空白）；返回临时空表，下次重新请求
+    return new Map()
+  }
   return _studentMap
+}
+
+// 学生改名/增删后由外部调用，让下一次预览重新拉取
+export function invalidateStudentMap() {
+  _studentMap = null
+  _studentMapAt = 0
 }
 
 // AI 网格预览：按表名取当前行（id=1），还原成 GridView 的 colHeaders + rows 只读展示。
@@ -95,12 +107,16 @@ export default {
       this.showPeriodColumn = !!o.showPeriodColumn
     },
     async load() {
+      // 表名/覆盖值可能连续变化（watch 会连续触发 load）：
+      // 用请求序号丢弃旧响应，避免旧表的数据覆盖新表的预览（B11-06）
+      const my = this._loadSeq = (this._loadSeq || 0) + 1
       this.loading = true; this.error = ''
       const family = FAMILY[this.table]
       if (!family) { this.error = '该表暂不支持网格预览'; this.loading = false; return }
       try {
         const r = await apiFetch(`/api/ai/records/${this.table}?ids=1`)
         const j = await r.json()
+        if (my !== this._loadSeq) return
         if (!r.ok || !j.success) throw new Error(j.error || '读取失败')
         const base = (j.data && j.data.rows && j.data.rows[0]) || {}
         const row = { ...base, ...(this.override || {}) }
@@ -109,12 +125,16 @@ export default {
         else if (family === 'seatWeight') built = this.buildSeatWeight(row)
         else if (family === 'seat') built = await this.buildSeat(row)
         else if (family === 'duty') built = this.buildDuty(row)
+        // buildSeat 里还 await 了学生名映射，期间可能已切到别的表：再核对一次序号
+        if (my !== this._loadSeq) return
         if (!built) { this.error = '该数据暂无法还原成网格'; return }
         this.applyStyle(built)
       } catch (e) {
+        if (my !== this._loadSeq) return
         this.error = e.message || '读取失败'
       } finally {
-        this.loading = false
+        // 只由最新请求关闭 loading
+        if (my === this._loadSeq) this.loading = false
       }
     },
     // 座位表：与座位页同款几何（讲台行 + 走廊列），数值格把学生 id 还原成姓名

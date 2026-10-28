@@ -2,6 +2,7 @@
 // 纯代码搬运自 ScheduleView.vue 的 methods，未改写逻辑；通过展开注册到组件 methods。
 import axios from 'axios'
 import { recordGridCellUndo, recordGridSnapshotUndo } from '../../composables/useUndo.js'
+import { createSerialSaver } from '../../utils/serialSaver.js'
 
 export function useScheduleMaster({ API_BASE, DEFAULT_SECTIONS }) {
   return {
@@ -49,10 +50,25 @@ export function useScheduleMaster({ API_BASE, DEFAULT_SECTIONS }) {
       }
     },
     async saveMaster() {
-      await axios.put(`${API_BASE}/schedule/master`, {
-        cells: this.masterCells,
-        settings: this.masterSettings
-      });
+      // 与实行课表同一套串行保存：避免连续编辑时并发 PUT 互相覆盖；
+      // 失败提示一次（成功后退回复位），不再静默丢改动。
+      if (!this._masterSaver) {
+        this._masterSaver = createSerialSaver(() => axios.put(`${API_BASE}/schedule/master`, {
+          cells: this.masterCells,
+          settings: this.masterSettings
+        }))
+      }
+      const ok = await this._masterSaver.request()
+      if (!ok) {
+        if (!this._masterSaveErrorShown) {
+          this._masterSaveErrorShown = true
+          this.notifyError('课程表模板保存失败，改动可能未保存，请稍后重试')
+          console.error('[schedule] 模板保存失败', this._masterSaver.error)
+        }
+      } else {
+        this._masterSaveErrorShown = false
+      }
+      return ok
     },
     // 对比前后网格，逐格写入撤销记录（课表存 {course} 对象，只需比对 course 文本）
     recordCellsDiff(table, prev, next) {

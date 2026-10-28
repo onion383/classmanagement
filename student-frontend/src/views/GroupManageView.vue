@@ -73,6 +73,7 @@
                     draggable="true"
                     :data-index="i"
                     @dragstart="onMemberDragStart(g, m, i, $event)"
+                    @dragend="clearDrag"
                     :class="'cursor-grab ' + (i === 0 ? 'bg-info/5 border-b border-border' : 'border-b border-border/60 last:border-0')"
                   >
                     <td class="px-1 w-6 text-center text-text-secondary cursor-grab select-none">⠿</td>
@@ -133,6 +134,7 @@
                 draggable="true"
                 :data-index="i"
                 @dragstart="onMemberDragStart(g, m, i, $event)"
+                @dragend="clearDrag"
                 :class="'cursor-grab ' + (i === 0 ? 'bg-info/5 border-b border-border' : 'border-b border-border/60 last:border-0')"
               >
                 <td class="px-1 w-6 text-center text-text-secondary cursor-grab select-none">⠿</td>
@@ -595,13 +597,20 @@ const genderSections = computed(() => {
   ];
 });
 
+// 维度详情请求序号：快速连点 tab、或「刷新」与「切 tab」同时发生时，
+// 先发出的旧请求可能后到并把新维度的表格覆盖回旧维度（B06-02）。
+// selectDim 与 loadAll 的详情刷新共用同一个序号。
+let dimDetailSeq = 0;
+
 async function loadAll() {
   if (loading.value) return;
   loading.value = true;
   try {
     // 已有选中维度：只刷新当前展示的表格，不跳转到第一个 tab
     if (activeDimId.value != null) {
+      const my = ++dimDetailSeq;
       const data = await api(`/${activeDimId.value}`);
+      if (my !== dimDetailSeq) return;
       dimensions.value = data.dimensions || [];
       const dim = data.dimension;
       if (dim) {
@@ -627,12 +636,16 @@ async function loadAll() {
 
 // 保持选中并刷新维度列表与详情
 async function selectDim(id) {
+  const my = ++dimDetailSeq;
   activeDimId.value = String(id);
   try {
     const data = await api(`/${id}`);
+    // 期间用户又切了维度（或触发了刷新）：这次响应已经过期，丢弃
+    if (my !== dimDetailSeq) return;
     dimensions.value = data.dimensions || [];
     active.value = { dimension: data.dimension, groups: data.groups };
   } catch (e) {
+    if (my !== dimDetailSeq) return;
     error(e.message);
   }
 }
@@ -692,16 +705,19 @@ function openSettings() {
 async function doSaveSettings(form, names) {
   const before = buildGroupSnapshot();
   try {
-    // 记录维度纯字段编辑（组名 / 组长称呼），供撤销恢复
+    // 维度纯字段编辑（组名 / 组长称呼）的旧值：PUT 成功后才登记撤销，
+    // 否则保存失败会留下一条「撤销一个并未生效的修改」的记录（B06-04）
     const dim = active.value?.dimension;
-    if (dim) {
-      if (String(dim.name ?? '') !== String(form.name ?? '')) recordGroupUndo('group_dimensions', dim.id, 'name', dim.name ?? '', form.name ?? '');
-      if (String(dim.leader_title ?? '') !== String(form.leader_title ?? '')) recordGroupUndo('group_dimensions', dim.id, 'leader_title', dim.leader_title ?? '', form.leader_title ?? '');
-    }
+    const oldName = dim ? dim.name : null;
+    const oldLeaderTitle = dim ? dim.leader_title : null;
     await api(`/dimensions/${activeDimId.value}`, {
       method: 'PUT',
       body: JSON.stringify(form),
     });
+    if (dim) {
+      if (String(oldName ?? '') !== String(form.name ?? '')) recordGroupUndo('group_dimensions', dim.id, 'name', oldName ?? '', form.name ?? '');
+      if (String(oldLeaderTitle ?? '') !== String(form.leader_title ?? '')) recordGroupUndo('group_dimensions', dim.id, 'leader_title', oldLeaderTitle ?? '', form.leader_title ?? '');
+    }
     if (names?.length) await applyGroupNames(active.value?.groups || [], names);
     showSettings.value = false;
     await selectDim(activeDimId.value);
@@ -793,11 +809,15 @@ async function submitAddGroup() {
 async function renameGroup(g) {
   if (!g.name.trim()) return error('小组名字不能为空');
   const oldName = g._undoName !== undefined ? g._undoName : g.name;
-  if (String(oldName ?? '') !== String(g.name ?? '')) recordGroupUndo('groups', g.id, 'name', oldName ?? '', g.name ?? '');
-  g._undoName = undefined;
+  const newName = g.name;
+  if (String(oldName ?? '') === String(newName ?? '')) { g._undoName = undefined; return; }
   try {
-    await api(`/groups/${g.id}`, { method: 'PUT', body: JSON.stringify({ name: g.name }) });
+    await api(`/groups/${g.id}`, { method: 'PUT', body: JSON.stringify({ name: newName }) });
+    // 落库成功后再登记撤销；失败时不留无效撤销记录，并把界面恢复成旧名字（B06-04）
+    recordGroupUndo('groups', g.id, 'name', oldName ?? '', newName);
+    g._undoName = undefined;
   } catch (e) {
+    g.name = oldName;
     error(e.message);
   }
 }
@@ -958,16 +978,21 @@ async function commitMember(m) {
   }
   const oldName = m._undoName !== undefined ? m._undoName : m.member_name;
   const oldRemark = m._undoRemark !== undefined ? m._undoRemark : m.remark;
-  if (String(oldName ?? '') !== String(m.member_name ?? '')) recordGroupUndo('group_members', m.id, 'member_name', oldName ?? '', m.member_name ?? '');
-  if (String(oldRemark ?? '') !== String(m.remark ?? '')) recordGroupUndo('group_members', m.id, 'remark', oldRemark ?? '', m.remark ?? '');
-  m._undoName = undefined;
-  m._undoRemark = undefined;
+  const newName = m.member_name;
+  const newRemark = m.remark;
   try {
     await api(`/group-members/${m.id}`, {
       method: 'PUT',
-      body: JSON.stringify({ member_name: m.member_name, remark: m.remark }),
+      body: JSON.stringify({ member_name: newName, remark: newRemark }),
     });
+    // 保存成功后才登记撤销；失败时回滚界面到旧值，避免「撤销一个没生效的修改」（B06-04）
+    if (String(oldName ?? '') !== String(newName ?? '')) recordGroupUndo('group_members', m.id, 'member_name', oldName ?? '', newName);
+    if (String(oldRemark ?? '') !== String(newRemark ?? '')) recordGroupUndo('group_members', m.id, 'remark', oldRemark ?? '', newRemark);
+    m._undoName = undefined;
+    m._undoRemark = undefined;
   } catch (e) {
+    m.member_name = oldName;
+    m.remark = oldRemark;
     error(e.message);
   }
 }

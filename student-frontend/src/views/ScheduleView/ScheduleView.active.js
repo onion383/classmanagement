@@ -2,6 +2,7 @@
 // 纯代码搬运自 ScheduleView.vue 的 methods，未改写逻辑；通过展开注册到组件 methods。
 import axios from 'axios'
 import { recordGridSnapshotUndo } from '../../composables/useUndo.js'
+import { createSerialSaver } from '../../utils/serialSaver.js'
 
 export function useScheduleActive({ API_BASE, DEFAULT_SECTIONS }) {
   return {
@@ -57,10 +58,25 @@ export function useScheduleActive({ API_BASE, DEFAULT_SECTIONS }) {
       }
     },
     async saveActive() {
-      await axios.put(`${API_BASE}/schedule`, {
-        cells: this.activeCells,
-        settings: this.activeSettings
-      });
+      // 串行保存：连续编辑时不再并发 PUT（并发下先发后到会用旧数据覆盖新数据），
+      // 在途期间的多次修改合并为一次「读最新状态再存」；失败时提示一次，成功后复位。
+      if (!this._activeSaver) {
+        this._activeSaver = createSerialSaver(() => axios.put(`${API_BASE}/schedule`, {
+          cells: this.activeCells,
+          settings: this.activeSettings
+        }))
+      }
+      const ok = await this._activeSaver.request()
+      if (!ok) {
+        if (!this._activeSaveErrorShown) {
+          this._activeSaveErrorShown = true
+          this.notifyError('课表保存失败，改动可能未保存，请稍后重试')
+          console.error('[schedule] 保存失败', this._activeSaver.error)
+        }
+      } else {
+        this._activeSaveErrorShown = false
+      }
+      return ok
     },
     onActiveCellsUpdate(newRows) {
       const prev = this.activeCells.map(r => [...r]);

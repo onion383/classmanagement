@@ -2,6 +2,7 @@ const express = require('express');
 const router = express.Router();
 const { db } = require('../db');
 const { now, cleanUp, buildInsert, buildUpdate } = require('../utils/sql');
+const { sanitizeField, normNumber } = require('../services/sanitize');
 
 // 允许前端更新的字段白名单
 const EDITABLE = ['姓名', '学号', '类型', '项目', '分值', '原因', '加分时间', 'source', 'group_name', '成员数'];
@@ -33,7 +34,8 @@ router.post('/', (req, res) => {
       data.姓名 = null;
       data.学号 = null;
       data.group_name = body.group_name || null;
-      data.成员数 = Number(body.成员数) || 0;
+      // 成员数没有列级规则，必须自己防 NaN：`Number(x) || 0` 会把「abc」静默变成 0
+      data.成员数 = normNumber(body.成员数, '成员数') ?? 0;
     } else {
       data.source = 'personal';
       if (body.studentId) {
@@ -51,7 +53,8 @@ router.post('/', (req, res) => {
 
     data.类型 = body.类型 === '扣分' ? '扣分' : '加分';
     data.项目 = body.项目 || null;
-    data.分值 = Number(body.分值) || 0;
+    // 分值走列级规则（数字 + 范围 0~100000）；非数字直接报错，不再 `Number(x) || 0` 静默成 0 分
+    data.分值 = sanitizeField(body.分值 ?? 0, 'score_records', '分值') ?? 0;
     data.原因 = body.原因 || null;
     data.加分时间 = body.加分时间 || now();
     data.created_at = now();
@@ -67,8 +70,12 @@ router.post('/', (req, res) => {
 router.put('/:id', (req, res) => {
   try {
     const row = cleanUp(req.body || {}, EDITABLE, 'score_records');
-    if (row['分值'] !== undefined && row['分值'] !== null) row['分值'] = Number(row['分值']);
-    if (row['成员数'] !== undefined && row['成员数'] !== null) row['成员数'] = Number(row['成员数']);
+    // 「分值」已由 cleanUp 按列级规则清洗（数字 + 范围），这里不再二次 Number()。
+    // 「成员数」没有列级规则，cleanUp 可能原样留下字符串；Number('abc') = NaN，
+    // better-sqlite3 会把 NaN 落成 NULL，于是成员数「凭空消失」。这里显式校验。
+    if (row['成员数'] !== undefined && row['成员数'] !== null) {
+      row['成员数'] = normNumber(row['成员数'], '成员数');
+    }
     if (Object.keys(row).length === 0) return res.status(400).json({ error: '没有可更新的字段' });
     buildUpdate('score_records', row, req.params.id);
     res.json({ message: '修改成功' });

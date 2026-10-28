@@ -32,7 +32,7 @@
 </template>
 
 <script setup>
-import { ref, computed } from 'vue'
+import { ref, computed, watch } from 'vue'
 
 const props = defineProps({
   modelValue: { type: String, default: '#000000' },
@@ -50,6 +50,15 @@ const customColor = ref('#000000')
 const isCustomActive = computed(() => {
   return !props.presetColors.includes(props.modelValue)
 })
+
+// 外部把值改成非预设色时，取色器同步显示该颜色（否则永远停在首次的 #000000）
+watch(
+  () => props.modelValue,
+  (v) => {
+    if (v && !props.presetColors.includes(v)) customColor.value = v
+  },
+  { immediate: true }
+)
 
 function select(color) {
   emit('update:modelValue', color)

@@ -286,6 +286,8 @@ function startBackend() {
 
   // 每次 fork 前复位就绪标记：重启期间前端应重新等待新的 backend-ready
   backendReady = false
+  // 同步告知渲染层「就绪已失效」，避免前端缓存的 ready 一直为 true 而跳过等待
+  broadcast({ type: 'backend-resetting' })
   setBootStatus('正在启动本地服务…')
   armBackendFailWatchdog()
   compileBackendProcess()

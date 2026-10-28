@@ -531,14 +531,21 @@ const {
 } = useThumbBatch(() => visiblePhotoIds.value)
 
 async function loadAlbums(first = true) {
-  const res = await axios.get('/api/album', { headers: authHeaders() })
-  albums.value = res.data.data || []
-  albumStats.value = res.data.stats || { photo_count: 0, album_count: albums.value.length, total_size: 0 }
-  // 保持选中；相册被删则切到第一个
-  if (!albums.value.find(a => a.id === activeAlbumId.value)) {
-    activeAlbumId.value = albums.value.length ? albums.value[0].id : null
+  // 相册列表失败原先直接抛到调用方（多为未处理的 Promise 拒绝），界面既不提示也不刷新；
+  // 这里捕获后提示，并保留现有列表/选中相册，避免一次网络抖动把界面清空。
+  try {
+    const res = await axios.get('/api/album', { headers: authHeaders() })
+    albums.value = res.data.data || []
+    albumStats.value = res.data.stats || { photo_count: 0, album_count: albums.value.length, total_size: 0 }
+    // 保持选中；相册被删则切到第一个
+    if (!albums.value.find(a => a.id === activeAlbumId.value)) {
+      activeAlbumId.value = albums.value.length ? albums.value[0].id : null
+    }
+    if (activeAlbumId.value) await loadPhotos(first)
+  } catch (e) {
+    useNotification().error(e.response?.data?.error || '加载相册列表失败')
+    console.error(e)
   }
-  if (activeAlbumId.value) await loadPhotos(first)
 }
 
 // 标题栏体积显示：不足 1MB 用 KB，其余按 MB / GB（保留一位小数）
@@ -555,9 +562,15 @@ const sizeParts = computed(() => {
   return { value, unit }
 })
 
+// 照片列表请求序号：切换相册/刷新时先发的请求可能后到，旧相册的照片不能写进新相册（B06-07）
+let photosSeq = 0
+
 async function loadPhotos(first = true) {
+  const my = ++photosSeq
   if (!activeAlbumId.value) { groups.value = []; return }
   const res = await axios.get(`/api/album/${activeAlbumId.value}/photos`, { headers: authHeaders() })
+  // 期间已切到别的相册（或又刷新了一次）：这批照片已过期，丢弃
+  if (my !== photosSeq) return
   groups.value = res.data.data || []
   if (first) {
     // 切换相册/刷新后回到顶部并重新计量
@@ -1055,6 +1068,8 @@ onBeforeUnmount(() => {
   // 清理所有轮询定时器，避免页面切走后仍在发请求
   stopAll()
   stopScanWatch()
+  // 长按手势的定时器也要清：卸载后再触发会去操作已经不存在的组件状态
+  clearPressTimer()
 })
 </script>
 

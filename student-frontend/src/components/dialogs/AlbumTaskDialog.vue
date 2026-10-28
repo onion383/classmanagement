@@ -94,7 +94,8 @@ const queue = ref([])
 // 「全部暂停」：暂停所有在跑的任务，并且让队列也不再往后推进
 const queuePaused = ref(false)
 
-const { waitScan } = useAlbumScan()
+// waitScan 内部的轮询定时器也由本实例持有（别名避免与本文件「停止所有扫描」的 stopAll 重名）
+const { waitScan, stopAll: stopScanPolling } = useAlbumScan()
 
 let pollTimer = 0
 let pumping = false
@@ -276,7 +277,8 @@ watch(() => props.visible, async (v) => {
   }
 }, { immediate: true })
 
-onBeforeUnmount(stopPolling)
+// 卸载时连 waitScan 的轮询定时器一起停掉，避免关掉弹窗后还在发 /status 请求
+onBeforeUnmount(() => { stopPolling(); stopScanPolling() })
 </script>
 
 <style scoped>

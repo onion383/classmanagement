@@ -83,3 +83,6 @@ Write-Output "failures=$fail"
 if (Test-Path (Join-Path $env:APPDATA 'campus-assistant\desktop-widget-pos.json')) {
   Write-Output "posFile=$(Get-Content (Join-Path $env:APPDATA 'campus-assistant\desktop-widget-pos.json') -Raw)"
 }
+# 失败必须让外层脚本/CI 能判定（否则输出 failures=N 也永远算通过）
+if ($fail -gt 0) { exit 1 }
+exit 0

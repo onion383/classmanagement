@@ -1,23 +1,24 @@
 // =========================================================================
 // auth-smoke.js —— 认证链路冒烟（合并自 auth-e2e-probe.js / auth-privacy-probe.js）
 //
-// 两段用例依次跑在同一个后端上（默认 3999，PORT 可覆盖）：
+// 两段用例依次跑在同一个后端上（默认 3000，与 run-smoke.cjs 的探测端口一致；PORT 可覆盖）：
 //   1) 普通账号：注册 / 登录 / 改密码 / 改用户名（bcrypt 异步化后的整条链路）
 //   2) 隐私模式：恢复词注册 → 确认 → 密码登录 → 改名后口令包裹与恢复词仍可用
 //
 // 用法：
 //   node testjs/smoke/auth-smoke.js
-//   PORT=3000 node testjs/smoke/auth-smoke.js      # 指向正在运行的后端
+//   PORT=3999 node testjs/smoke/auth-smoke.js      # 指向其它端口
 //
 // 退出码：0 = 全部通过；1 = 有用例失败
 // =========================================================================
-const BASE = 'http://127.0.0.1:' + (process.env.PORT || 3999);
+const BASE = 'http://127.0.0.1:' + (process.env.PORT || 3000);
 
 async function post(p, body) {
   const r = await fetch(BASE + p, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(body),
+    signal: AbortSignal.timeout(15000),
   });
   const t = await r.text();
   let j = null;
@@ -30,6 +31,7 @@ async function put(p, body, token) {
     method: 'PUT',
     headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + token },
     body: JSON.stringify(body),
+    signal: AbortSignal.timeout(15000),
   });
   const t = await r.text();
   let j = null;

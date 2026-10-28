@@ -1,7 +1,7 @@
 import axios from 'axios'
 import { setupSecureAxios } from '../composables/secureAxios'
 import { applyAuthHeader, safe } from '../composables/secureChannel'
-import { waitForBackendReady, isBackendUnreachable } from './backendReady'
+import { waitForBackendReady, isBackendUnreachable, resetBackendReady } from './backendReady'
 import { storeMediaToken } from './apiUrl'
 
 // 安全通道「会话过期」不是登录态失效：加密会话 15 分钟被动过期时，后端在请求解密阶段
@@ -100,6 +100,9 @@ export function setupApiClient({
           config.__probed = true
           onUnreachable?.(error, config)
         }
+
+        // 已经不可达说明「就绪」标记过期，复位后重试才会真正等新的 backend-ready
+        resetBackendReady()
 
         // 重连期间：写请求不自动重发，把失败直接交给调用方提示用户手动重试
         if (!writeRetryGuard(config)) return Promise.reject(error)

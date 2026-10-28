@@ -45,6 +45,11 @@ const widget = _profReq('./main.widget')
 const webviewGuard = _profReq('./main.webview-guard')
 const devLoader = _profReq('./main.dev-loader')
 const migration = _profReq('./main.migration')
+const pathGuard = _profReq('./main.path-guard')
+
+// 安装目录（打包后为只读 asar 所在位置）加入保护目录：
+// 任何 IPC 都不应把文件写进/启动应用自身目录，避免被注入后替换应用资源。
+pathGuard.setProtectedRoots([app.getAppPath()])
 
 // 应用窗口/任务栏图标：与托盘同源，随 electron/**/* 一起打包，开发与生产均能直接读取。
 // Windows 任务栏优先取窗口图标，设置后不再显示 Electron 默认图标（打包版还会用 win.icon 作为 exe 图标）。
@@ -369,10 +374,12 @@ ipcMain.on('show-native-context-menu', (event, opts = {}) => {
   }
   if (opts.linkURL) {
     if (template.length) template.push({ type: 'separator' })
-    template.push(
-      { label: '在浏览器中打开', click: () => { try { shell.openExternal(opts.linkURL) } catch (_) {} } },
-      { label: '复制链接地址', click: () => clipboard.writeText(opts.linkURL) },
-    )
+    // 只有 http/https 才提供「在浏览器中打开」：file:/javascript:/ms-msdt: 等协议
+    // 交给系统会触发本地行为，不属于「链接」语义。其余情况只保留复制。
+    if (pathGuard.isHttpUrl(opts.linkURL)) {
+      template.push({ label: '在浏览器中打开', click: () => { shell.openExternal(opts.linkURL).catch(() => {}) } })
+    }
+    template.push({ label: '复制链接地址', click: () => clipboard.writeText(opts.linkURL) })
   }
   if (!template.length) return
   Menu.buildFromTemplate(template).popup({ window: win })
@@ -499,8 +506,10 @@ app.whenReady().then(() => {
 
 // 在系统默认浏览器打开外链
 ipcMain.handle('open-external', (event, url) => {
-  if (typeof url === 'string' && (url.startsWith('http://') || url.startsWith('https://'))) {
-    shell.openExternal(url)
+  // 白名单判定统一走 path-guard：URL 解析后协议必须是 http/https 且有 host，
+  // 比 startsWith('http') 更严（可挡掉 `http://` 之外的畸形串与凭据注入）。
+  if (pathGuard.isHttpUrl(url)) {
+    return shell.openExternal(url.trim()).catch(() => {})
   }
 })
 
@@ -1005,15 +1014,20 @@ ipcMain.handle('get-setup-warmup', () => setupWarmup)
 // 若引导中已建库（数据目录已存在），复用安全搬迁流程移动文件，随后重启后端让新目录生效。
 ipcMain.handle('set-initial-data-dir', async (event, payload) => {
   const p = payload || {}
+  // 引导期同样来自渲染层：沿用与设置页一致的目录校验，拒绝相对路径/盘符根/系统保护目录
+  const safeData = p.dataDir ? pathGuard.resolveSafeWriteDir(p.dataDir) : null
+  if (safeData && safeData.error) throw new Error(safeData.error)
+  const safeThumbs = p.thumbsDir ? pathGuard.resolveSafeWriteDir(p.thumbsDir) : null
+  if (safeThumbs && safeThumbs.error) throw new Error(safeThumbs.error)
   const currentData = resolveDataDir()
   let dataDir = null
-  if (p.dataDir) {
-    const t = path.resolve(String(p.dataDir))
+  if (safeData) {
+    const t = safeData.path
     if (t.toLowerCase() !== currentData.toLowerCase()) dataDir = t
   }
   let thumbsDir = null
-  if (p.thumbsDir) {
-    const t = path.resolve(String(p.thumbsDir))
+  if (safeThumbs) {
+    const t = safeThumbs.path
     if (t.toLowerCase() !== resolveThumbsDir().toLowerCase()) thumbsDir = t
   }
   if (!dataDir && !thumbsDir) {
@@ -1063,7 +1077,10 @@ ipcMain.handle('set-initial-data-dir', async (event, payload) => {
 // 配置却指向已删除旧目录」的错位状态。
 ipcMain.handle('set-data-dir', async (event, dir) => {
   if (migrationRunning) throw new Error('已有数据库迁移正在进行，请稍候')
-  const target = path.resolve(String(dir || ''))
+  // 目录来自渲染层：只接受绝对路径，拒绝盘符根与系统保护目录（Windows/System32/安装目录等）
+  const safe = pathGuard.resolveSafeWriteDir(dir)
+  if (safe.error) throw new Error(safe.error)
+  const target = safe.path
   const oldDir = resolveDataDir()
   if (!target || target.toLowerCase() === oldDir.toLowerCase()) {
     return { ok: true, dataDir: oldDir, changed: false }
@@ -1153,7 +1170,9 @@ ipcMain.handle('set-db-encryption', async (event, payload) => {
 // 变更「相册缩略图缓存目录」：缩略图是可再生的缓存，无需搬迁文件，
 // 直接更新配置并重启后端，让后端使用新缓存目录，已有小图按需重建。
 ipcMain.handle('set-thumbs-dir', async (event, dir) => {
-  const target = path.resolve(String(dir || ''))
+  const safe = pathGuard.resolveSafeWriteDir(dir)
+  if (safe.error) throw new Error(safe.error)
+  const target = safe.path
   const oldDir = resolveThumbsDir()
   if (!target || target.toLowerCase() === oldDir.toLowerCase()) {
     return { ok: true, thumbsDir: oldDir, changed: false }
@@ -1169,7 +1188,9 @@ ipcMain.handle('set-thumbs-dir', async (event, dir) => {
 // 变更「AI 技能 md 目录」：技能是文本文件，采用「复制 → 校验 → 切配置 → 删旧目录」，
 // 先复制保留旧目录，配置写失败则中止并保留旧目录，绝不产生「文件在新目录、配置却指向已删旧目录」的错位。
 ipcMain.handle('set-skills-dir', async (event, dir) => {
-  const target = path.resolve(String(dir || ''))
+  const safe = pathGuard.resolveSafeWriteDir(dir)
+  if (safe.error) throw new Error(safe.error)
+  const target = safe.path
   const oldDir = resolveSkillsDir()
   if (!target || target.toLowerCase() === oldDir.toLowerCase()) {
     return { ok: true, skillsDir: oldDir, changed: false }

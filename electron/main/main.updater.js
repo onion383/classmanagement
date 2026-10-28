@@ -15,6 +15,7 @@
 const { app, ipcMain } = require('electron')
 const path = require('path')
 const fs = require('fs')
+const { assertHttpsUrl, verifyDownloadedFile } = require('./main.update-integrity')
 
 // GitHub 仓库信息（原先在 electron-builder.json 的 publish 里，现仅保留在代码常量中）
 const UPDATE_REPO = { owner: 'onion383', repo: 'classmanagement' }
@@ -133,22 +134,32 @@ async function downloadInstaller(asset, version) {
   const controller = new AbortController()
   const timer = setTimeout(() => controller.abort(), UPDATE_DOWNLOAD_TIMEOUT)
   try {
-    const res = await fetch(asset.browser_download_url, {
+    // 下载地址必须是 HTTPS：否则 release 资产可被替换成明文/本地地址
+    const downloadUrl = String(asset.browser_download_url || '')
+    assertHttpsUrl(downloadUrl)
+    const res = await fetch(downloadUrl, {
       headers: { 'User-Agent': 'campus-assistant' },
       signal: controller.signal,
     })
     if (!res.ok) throw new Error(`下载失败（HTTP ${res.status}）`)
-    const total = Number(res.headers.get('content-length')) || Number(asset.size) || 0
+    // 重定向后的最终地址同样必须是 HTTPS（GitHub 会跳到 objects.githubusercontent.com）
+    if (res.url) assertHttpsUrl(res.url)
+    const expectedSize = Number(asset.size) || Number(res.headers.get('content-length')) || 0
     let received = 0
     // Node fetch 返回 web ReadableStream，转成 Node 流后边写边算百分比
     const nodeStream = Readable.fromWeb(res.body)
     nodeStream.on('data', (chunk) => {
       received += chunk.length
-      if (total > 0) setUpdateState({ status: 'downloading', percent: Math.round((received / total) * 100) })
+      if (expectedSize > 0) setUpdateState({ status: 'downloading', percent: Math.round((received / expectedSize) * 100) })
     })
     await pipeline(nodeStream, fs.createWriteStream(target))
-    // 服务端给了 Content-Length 时校验完整性
-    if (total > 0 && fs.statSync(target).size !== total) throw new Error('下载文件不完整')
+    // 完整性校验：大小 +（发布方提供时）SHA-256。原先只比 Content-Length，
+    // 既挡不住资产被替换，也挡不住中间劫持（B01-12）。
+    const verified = await verifyDownloadedFile({ filePath: target, expectedSize, digest: asset.digest })
+    if (!verified.ok) throw new Error(verified.error)
+    if (verified.verified === 'size-only') {
+      console.warn('[update] 发布资产未提供 digest，本次仅按大小校验：', fileName)
+    }
     downloadedInstallerPath = target
   } catch (err) {
     try { fs.rmSync(target, { force: true }) } catch (_) { /* 忽略 */ }

@@ -7,7 +7,7 @@ const { sanitizeField } = require('../../services/sanitize');
 const { validateRow } = require('../../services/businessRules');
 const dbManager = require('../../dbManager/dbManager');
 const { READ_TABLES, JSON_WRITE_TABLES } = require('./ai.constants');
-const { tableColumns, displayColumns, serializeColVal } = require('./ai.helpers');
+const { tableColumns, displayColumns, serializeColVal, clearTableColumnsCache } = require('./ai.helpers');
 // 工具相关常量/执行器惰性加载：仅在真正处理对应路由时才 require
 const tools = () => require('./ai.tools/tools');
 
@@ -132,7 +132,8 @@ function colType(table, col) {
 function applyDocWrite(table, id, values) {
   if (!JSON_WRITE_TABLES[table]) return { error: '该表暂不支持 AI 整块写入' };
   if (!values || typeof values !== 'object' || Array.isArray(values)) return { error: '缺少要写入的列值' };
-  const rid = Number.isInteger(id) ? id : 1;
+  const rid = Number(id);
+  if (!Number.isInteger(rid) || rid <= 0) return { error: `记录 id 无效（收到：${id == null ? '' : id}）` };
   const cols = tableColumns(table);
   const row = db.prepare(`SELECT * FROM "${table}" WHERE id = ?`).get(rid);
   if (!row) return { error: `表中没有 id=${rid} 的行` };
@@ -312,6 +313,9 @@ router.post('/snapshot/restore', (req, res) => {
       try { fs.rmSync(target + suffix, { force: true }); } catch (_) { /* 忽略 */ }
     }
     dbManager.withDb(slug, () => {}); // 重新打开（懒加载）该库
+    // 快照里的表结构可能和还原前不同（例如快照后又增删过列）：AI 的列名缓存必须一并失效，
+    // 否则会拿旧列集合继续校验写入/查询，把新列当「不存在」拒绝、或放行已删列。
+    clearTableColumnsCache();
     res.json({ ok: true, snapshot: name, reload: true });
   } catch (err) {
     res.status(500).json({ error: err.message });

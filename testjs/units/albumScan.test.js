@@ -115,26 +115,56 @@ test('deletePhotosNotIn：清单为空且可信 → 全删（用户确实清空�
   assert.equal(conn.count(1), 0)
 })
 
-test('回归：收集阶段被中断时，相册索引不会被清空', async () => {
-  // fullScan 的旧行为是「先 DELETE 全部、再收集」，收集返回 null 就直接 return，
-  // 结果索引全空。这里模拟新行为：收集返回 null → 直接 return，索引一行不动。
-  const conn = makeConn()
-  conn.seed(1, ['D:/p/a.jpg', 'D:/p/b.jpg'])
-  const collected = null   // 收集阶段被停止/暂停
-  if (collected === null) {
-    // fullScan 内此分支直接 return，不触碰索引
-    assert.equal(conn.count(1), 2, '收集被中断时索引必须保持原样')
-  }
-})
+// 注：原先这里有两段「恒真断言」用例（收集返回 null 时不删索引 / scanned 不足时不清理），
+// 它们只是把产品代码里的判断条件抄了一遍，从不调用被测函数，等于没有回归价值。
+// 已替换为下面真正驱动 incrementalScan 的用例：用临时目录 + 连接替身验证
+// 「未变文件也计入 scanned，磁盘已删文件的索引会被清理」。
 
-test('回归：文件循环提前 break（被停止）时不执行清理，索引保持原样', async () => {
-  // fullScan/incrementalScan 里清理的前置条件是 task.scanned >= files.length。
-  // 少扫一半就 break 时这个条件不成立，清理整段被跳过。
-  const files = [{ full: 'D:/p/a.jpg' }, { full: 'D:/p/b.jpg' }]
-  const task = newTask('full')
-  task.scanned = 1   // 只处理了第 1 个就 break
-  const shouldClean = task.scanned >= files.length
-  assert.equal(shouldClean, false, '未扫完时不得触发清理')
+test('incrementalScan：未变文件也计入遍历数，磁盘已删的照片索引会被清理', async () => {
+  // 回归 B04-11：task.scanned 原先只在「mtime 变化 / 新插入」时自增，
+  // 一次「什么都没变」的增量扫描永远满足不了 scanned >= files.length，
+  // 于是「索引有、磁盘无」的行永远不会被清理。
+  const dir = await fsp.mkdtemp(path.join(tmpDir, 'incremental-'))
+  const keep = path.join(dir, 'keep.jpg')
+  await fsp.writeFile(keep, 'x')
+  const st = await fsp.stat(keep)
+  const keptRow = {
+    id: 1, file_path: keep, file_name: 'keep.jpg', file_size: st.size,
+    mtime: st.mtime.toISOString(), thumb_path: '', thumb_v: 0, date_src: 'exif',
+  }
+  const goneRow = {
+    id: 2, file_path: path.join(dir, 'gone.jpg'), file_name: 'gone.jpg', file_size: 1,
+    mtime: '2000-01-01T00:00:00.000Z', thumb_path: '', thumb_v: 0, date_src: 'exif',
+  }
+  const rows = [keptRow, goneRow]
+
+  const conn = {
+    prepare(sql) {
+      const s = sql.trim()
+      if (/FROM album_scan_tasks/.test(s)) {
+        return { get: () => ({ state: 'running', token: 1, done_path: '', scanned: 0, total: 0 }) }
+      }
+      if (/FROM albums/.test(s)) return { get: () => ({ id: 1, kind: 'folder', folder_path: dir }) }
+      if (/FROM album_photos WHERE album_id = \?$/.test(s)) return { all: () => rows.map((r) => ({ ...r })) }
+      if (/DELETE FROM album_photos WHERE id = \?/.test(s)) {
+        return { run: (id) => {
+          const i = rows.findIndex((r) => r.id === id)
+          if (i < 0) return { changes: 0 }
+          rows.splice(i, 1)
+          return { changes: 1 }
+        } }
+      }
+      return { all: () => [], get: () => undefined, run: () => ({ changes: 0 }) }
+    },
+    // 本用例不会产生缩略图写入（mtime 未变、date_src 已是 exif），事务兜底即可
+    transaction(fn) { return fn },
+  }
+
+  await incrementalScan(conn, 1, '', 'testslug', null, 1)
+
+  assert.equal(rows.length, 1, '磁盘上已不存在的照片索引必须被清理')
+  assert.equal(rows[0].id, 1, '仍在磁盘上的照片索引必须保留')
+  await fsp.rm(dir, { recursive: true, force: true })
 })
 
 test.after(async () => {

@@ -11,6 +11,7 @@
 // db 为多库代理：本模块只读写当前请求绑定的班主任库。
 const { db } = require('../db');
 const store = require('./slotStore');
+const { countDutyRefs, removeDutyName } = require('./dutyCells');
 
 // ---------- 座位 seats 解析：兼容三种元素形态 ----------
 // 返回 { ids: [学生id...], names: [姓名...] }，便于按 id 或姓名比对。
@@ -64,15 +65,9 @@ function studentRelations(student) {
   const seat = refs.ids.filter((v) => v === id).length + refs.names.filter((v) => v === name).length;
 
   const cells = readDutyCells();
-  let duty = 0;
-  for (const item of Object.keys(cells || {})) {
-    const byDay = cells[item];
-    if (!byDay || typeof byDay !== 'object') continue;
-    for (const day of Object.keys(byDay)) {
-      const list = byDay[day];
-      if (Array.isArray(list)) duty += list.filter((v) => v === name).length;
-    }
-  }
+  // cells 可能是旧版整块，也可能是新版 {daily,big} 打包：统一交给 dutyCells 认结构，
+  // 否则打包结构会被按旧版遍历而「一条都对不上」，统计恒为 0。
+  const duty = countDutyRefs(cells, name);
   return { leave, score, seat, duty, total: leave + score + seat + duty };
 }
 
@@ -98,18 +93,8 @@ function purgeSeatRelation(student) {
 // 移除值日表里该生的姓名，返回清理数量
 function purgeDutyRelation(student) {
   const cells = readDutyCells();
-  let removed = 0;
-  for (const item of Object.keys(cells || {})) {
-    const byDay = cells[item];
-    if (!byDay || typeof byDay !== 'object') continue;
-    for (const day of Object.keys(byDay)) {
-      const list = byDay[day];
-      if (!Array.isArray(list)) continue;
-      const kept = list.filter((v) => v !== student['姓名']);
-      removed += list.length - kept.length;
-      byDay[day] = kept;
-    }
-  }
+  // 同上：daily/big 打包结构与旧版整块都要清；只在真的清掉时才回写
+  const removed = removeDutyName(cells, student['姓名']);
   if (removed) store.setDoc('duty_layout', { cells: JSON.stringify(cells) });
   return removed;
 }

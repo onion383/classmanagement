@@ -485,14 +485,28 @@ export default {
     // 打开页面后检测一次超时未销假
     this.checkOverdue()
     // 每 10 分钟低频检测一次（纯前端比较时间，成本极低）
-    this._overdueTimer = setInterval(() => this.checkOverdue(), 10 * 60 * 1000)
+    this._startOverdueTimer()
   },
-  beforeUnmount() {
-    if (this._overdueTimer) clearInterval(this._overdueTimer)
-  },
+  beforeUnmount() { this._stopOverdueTimer() },
   mounted() { this._applyRowFocus() },
-  activated() { this._applyRowFocus() },
+  // 页面被 KeepAlive 缓存：切走时走 deactivated（不会 unmount），必须停表；
+  // 切回时重新启动，避免缓存页在后台每 10 分钟白跑一次。
+  activated() {
+    this._applyRowFocus()
+    this._startOverdueTimer()
+  },
+  deactivated() { this._stopOverdueTimer() },
   methods: {
+    _startOverdueTimer() {
+      this._stopOverdueTimer()
+      this._overdueTimer = setInterval(() => this.checkOverdue(), 10 * 60 * 1000)
+    },
+    _stopOverdueTimer() {
+      if (this._overdueTimer) {
+        clearInterval(this._overdueTimer)
+        this._overdueTimer = null
+      }
+    },
     // 跨页定位：切到「请假记录」页签后滚动到目标并高亮闪动。
     // 裸 id 定位请假记录表格的整行；`tl:<节点key>` 定位请假时间轴上的那一项（如 tl:12-leave）。
     _applyRowFocus() {
@@ -545,20 +559,19 @@ export default {
         ])
         this.students = stuRes.data.data || []
         this.leaves = leavesRes.data.data || []
+        return true
       } catch (err) {
         useNotification().error('加载失败')
+        return false
       } finally {
         this.loading = false
       }
     },
     async refresh() {
-      try {
-        await this.loadAll()
-        useNotification().success(this.activeTab === 'today' ? '已刷新 今日请假 数据' : '已刷新 请假记录 数据')
-        this.checkOverdue()
-      } catch (err) {
-        useNotification().error('刷新失败')
-      }
+      // 失败时 loadAll 已提示「加载失败」，不能再走成功分支
+      if (!await this.loadAll()) return
+      useNotification().success(this.activeTab === 'today' ? '已刷新 今日请假 数据' : '已刷新 请假记录 数据')
+      this.checkOverdue()
     },
     // 当前时间字符串，格式与结束时间保持一致（YYYY-MM-DD HH:mm）
     nowStr() {

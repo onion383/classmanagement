@@ -1,5 +1,18 @@
 import { LABELS, FRONT_LABELS } from './aiConstants.js'
 
+// ask_user 提问结构归一：模型畸形输出可能缺 questions / options，
+// 而前端多处直接读 `.length` / `[0]`（浮窗模板、分页、汇总答案），
+// 一旦缺字段就是 TypeError 白屏。流式与历史恢复两条入口都先过一遍这里，
+// 之后的代码可以放心按「数组」访问。
+export function normalizeAsk(ask) {
+  if (!ask || typeof ask !== 'object') return ask
+  const questions = Array.isArray(ask.questions) ? ask.questions : []
+  return {
+    ...ask,
+    questions: questions.map((q) => ({ ...q, options: Array.isArray(q && q.options) ? q.options : [] }))
+  }
+}
+
 // 从数据库加载的消息反序列化：支持多模态 JSON 数组 + 过程块恢复
 export function parseMessage(m) {
   let parsed = null
@@ -28,7 +41,7 @@ export function parseMessage(m) {
     parsed.completionTokens = m.process.completionTokens || 0
     // 待确认写提案 / 待回答提问的交互状态随过程块落库，刷新后恢复（否则只剩过程块，像被中断）
     if (m.process.proposal) parsed.proposal = m.process.proposal
-    if (m.process.ask) parsed.ask = m.process.ask
+    if (m.process.ask) parsed.ask = normalizeAsk(m.process.ask)
   }
   // 自动反馈（回答提问 / 执行或取消提案）：标记为不渲染气泡，其内容并入相邻助手消息的思维链
   if (m.role === 'user' && m.process && m.process.auto) {

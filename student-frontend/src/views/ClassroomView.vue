@@ -295,10 +295,10 @@ useUndoShortcut('students', {
 })
 
 async function refreshStudents() {
-  try {
-    await fetchStudents()
-    notifySuccess('已刷新学生数据')
-  } catch (e) { /* 错误已在 fetchRows 内部处理 */ }
+  // fetchRows 失败时不再抛错，而是返回 false：不按返回值判断就会「刷新失败也提示成功」
+  const ok = await fetchStudents()
+  if (ok) notifySuccess('已刷新学生数据')
+  else notifyError('刷新失败，请稍后重试')
 }
 
 // 弹窗处于编辑模式时持有的那一行；null = 新增模式。

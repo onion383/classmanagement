@@ -49,7 +49,7 @@
         <div v-for="cd in topCountdowns" :key="cd.id" class="bg-surface shadow-md rounded-xl border border-border p-4 text-center" :class="{ 'opacity-70': cd.days < 0 }">
           <div class="text-sm text-text-secondary truncate">距离 {{ cd.名称 }}</div>
           <div class="text-4xl font-bold mt-1" :class="cd.days >= 0 ? 'text-info' : 'text-text-muted'">{{ Math.abs(cd.days) }}</div>
-          <div class="text-sm text-text-secondary">{{ cd.days >= 0 ? '还有 X 天' : '天（已过去）' }}</div>
+          <div class="text-sm text-text-secondary">{{ cd.days >= 0 ? '还有 ' + cd.days + ' 天' : '天（已过去）' }}</div>
           <div class="text-xs text-text-muted mt-1">截止 {{ cd.截止日 }}</div>
         </div>
       </div>
@@ -385,17 +385,20 @@ export default {
         ])
         this.activities = actRes.data.data || []
         this.countdowns = cntRes.data.data || []
+        return true
       } catch (err) {
         useNotification().error('加载失败')
+        return false
       } finally {
         this.loading = false
       }
     },
     async refreshActivities() {
-      try { await this.loadAll(); useNotification().success('已刷新 班级活动 数据') } catch (err) { useNotification().error('刷新失败') }
+      // 按返回值判断：loadAll 内部吞错时无条件提示成功，会让用户以为数据已是最新
+      if (await this.loadAll()) useNotification().success('已刷新 班级活动 数据')
     },
     async refreshCountdowns() {
-      try { await this.loadAll(); useNotification().success('已刷新 倒计时 数据') } catch (err) { useNotification().error('刷新失败') }
+      if (await this.loadAll()) useNotification().success('已刷新 倒计时 数据')
     },
     // ---------- 活动 CRUD ----------
     openAddActivity() { this.editingActivity = null; this.actDialogVisible = true },

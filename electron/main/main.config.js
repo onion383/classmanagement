@@ -94,7 +94,19 @@ function getDbMasterKey() {
       try {
         dbMasterKey = safeStorage.decryptString(blob)
         return dbMasterKey
-      } catch { /* 密文损坏/密钥变更，退回重新生成 */ }
+      } catch (err) {
+        // 解密失败可能只是瞬时故障（DPAPI 异常/文件损坏）。覆盖旧文件会让原密钥永久丢失，
+        // 因此先留一份带时间戳的备份；备份失败则宁可本次用运行期随机值也不覆盖。
+        const backupFile = `${keyFile}.bak-${Date.now()}`
+        try {
+          fs.copyFileSync(keyFile, backupFile)
+          console.error('[main] DB 主密钥解密失败，已备份旧密钥文件后重新生成:', err?.message || err, '→', backupFile)
+        } catch (backupErr) {
+          console.error('[main] DB 主密钥解密失败且备份失败，为避免覆盖原密钥，本次使用运行期随机值:', backupErr?.message || backupErr)
+          dbMasterKey = crypto.randomBytes(32).toString('hex')
+          return dbMasterKey
+        }
+      }
     }
     dbMasterKey = crypto.randomBytes(32).toString('hex')
     if (safeStorage.isEncryptionAvailable()) {

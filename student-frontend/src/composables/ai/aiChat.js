@@ -4,6 +4,7 @@ import { useNotification } from '../useNotification.js'
 import { useThemeStore } from '../../stores/theme.js'
 import { ASK_OTHER_KEY, AI_PERMISSION_FULL } from './aiConstants.js'
 import { apiFetch } from '../../utils/apiUrl.js'
+import { normalizeAsk } from './aiMessages.js'
 import { encodeStreamRequest, decodeStreamEvent, clearSession, safe } from '../secureChannel.js'
 
 // send / _streamReply / interrupt / retry / rollback / ask 相关的方法组（Options API mixin）。
@@ -67,7 +68,8 @@ export default {
     // 多问题分页：翻到下一题
     askNext() {
       const a = this.pendingAsk
-      if (a && this.askPage < a.questions.length - 1) this.askPage += 1
+      const n = a && Array.isArray(a.questions) ? a.questions.length : 0
+      if (this.askPage < n - 1) this.askPage += 1
     },
     // 汇总所有答案发送（单题只发答案本身；多题按「序号. 问题：答案」汇总）
     submitAsk() {
@@ -324,7 +326,7 @@ export default {
             } else if (evt.type === 'proposal') {
               last.proposal = evt.proposal
             } else if (evt.type === 'ask') {
-              last.ask = evt.ask
+              last.ask = normalizeAsk(evt.ask)
             } else if (evt.type === 'export_file') {
               // AI 导出的文件规格：流结束后再弹保存对话框，避免打断正在输出的正文
               last.exportFile = evt.exportFile

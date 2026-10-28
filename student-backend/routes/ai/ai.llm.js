@@ -103,11 +103,8 @@ function getMainTools(cfg, webSearchOn) {
 // 子助手（run_subagent）可用的「只读」工具白名单：
 // 只收录纯查询/统计/校验类工具，绝不含任何 propose_* / ask_user / 导出 / 记忆写入，
 // 「子助手不能改数据、不能直连用户提问」由工具白名单在机制上保证，而非仅靠提示词约束。
-const SUBAGENT_TOOL_NAMES = new Set([
-  'query', 'aggregate', 'resolve_student', 'search_all',
-  'run_checks', 'run_conflict_checks', 'score_weights',
-  'describe_table', 'teaching_week', 'get_time',
-]);
+// 名单定义在 ai.subagent-tools.js（执行侧 tools.subagent.js 复用同一份并强制校验）。
+const { SUBAGENT_TOOL_NAMES } = require('./ai.subagent-tools');
 function getSubagentTools() {
   return getTools().filter((t) => SUBAGENT_TOOL_NAMES.has(t.function.name));
 }
@@ -181,45 +178,51 @@ async function consumeStream(cfg, history, onDelta, onReasoning, clientSignal, t
   let reasoning = '';
   let usage = null;     // 末尾块返回的 token 用量（需 body 里开启 include_usage）
   const toolCalls = {}; // index -> { id, name, args }
+  // 单行解析抽成函数：正常按 \n 切分与末尾无换行的残包共用同一套逻辑
+  const handleLine = (rawLine) => {
+    const line = rawLine.trim();
+    if (!line.startsWith('data:')) return;
+    const data = line.slice(5).trim();
+    if (data === '[DONE]' || !data) return;
+    let chunk;
+    try { chunk = JSON.parse(data); } catch (_) { return; }
+    // 部分服务在末尾块单独返回用量统计（该块无 choices），需在取 delta 之前读取
+    if (chunk.usage) usage = chunk.usage;
+    const delta = chunk.choices && chunk.choices[0] && chunk.choices[0].delta;
+    if (!delta) return;
+    if (delta.content) {
+      text += delta.content;
+      if (onDelta) onDelta(delta.content);
+    }
+    // 思考模式下的思维链：累积用于回传（带 tools 时后续轮次需原样传回），并实时下发给前端展示
+    const rd = delta.reasoning_content || delta.reasoning;
+    if (rd) {
+      reasoning += rd;
+      if (onReasoning) onReasoning(rd);
+    }
+    if (delta.tool_calls) {
+      for (const tc of delta.tool_calls) {
+        const slot = toolCalls[tc.index] || (toolCalls[tc.index] = { id: '', name: '', args: '' });
+        if (tc.id) slot.id = tc.id;
+        if (tc.function) {
+          if (tc.function.name) slot.name += tc.function.name;
+          if (tc.function.arguments) slot.args += tc.function.arguments;
+        }
+      }
+    }
+  };
   while (true) {
     const { done, value } = await reader.read();
     if (done) break;
     buf += decoder.decode(value, { stream: true });
     let idx;
     while ((idx = buf.indexOf('\n')) !== -1) {
-      const line = buf.slice(0, idx).trim();
+      handleLine(buf.slice(0, idx));
       buf = buf.slice(idx + 1);
-      if (!line.startsWith('data:')) continue;
-      const data = line.slice(5).trim();
-      if (data === '[DONE]') continue;
-      let chunk;
-      try { chunk = JSON.parse(data); } catch (_) { continue; }
-      // 部分服务在末尾块单独返回用量统计（该块无 choices），需在取 delta 之前读取
-      if (chunk.usage) usage = chunk.usage;
-      const delta = chunk.choices && chunk.choices[0] && chunk.choices[0].delta;
-      if (!delta) continue;
-      if (delta.content) {
-        text += delta.content;
-        if (onDelta) onDelta(delta.content);
-      }
-      // 思考模式下的思维链：累积用于回传（带 tools 时后续轮次需原样传回），并实时下发给前端展示
-      const rd = delta.reasoning_content || delta.reasoning;
-      if (rd) {
-        reasoning += rd;
-        if (onReasoning) onReasoning(rd);
-      }
-      if (delta.tool_calls) {
-        for (const tc of delta.tool_calls) {
-          const slot = toolCalls[tc.index] || (toolCalls[tc.index] = { id: '', name: '', args: '' });
-          if (tc.id) slot.id = tc.id;
-          if (tc.function) {
-            if (tc.function.name) slot.name += tc.function.name;
-            if (tc.function.arguments) slot.args += tc.function.arguments;
-          }
-        }
-      }
     }
   }
+  // 流结束时缓冲区可能还剩最后一帧（服务端未以换行结尾）：补解析一次，避免丢失尾块
+  if (buf.trim()) handleLine(buf);
   const toolCallList = Object.values(toolCalls).map((t) => ({ id: t.id, name: t.name, arguments: t.args }));
   return { text, toolCalls: toolCallList, reasoning, usage };
 }

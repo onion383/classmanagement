@@ -580,7 +580,7 @@ export function useGridViewDrag() {
     },
     // ---------- 列拖拽 ----------
     onColHandleDown(event, colIndex) {
-      if (this.editingCell || this.editingMeta) return;
+      if (this.editingCell) return;
       if (this.colHeaders[colIndex] === '走廊') return;
       const table = this.$el.querySelector('table');
       const ths = this.colHeaderEls();

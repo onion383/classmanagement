@@ -136,9 +136,28 @@ export default {
     },
     onDocClick(e) {
       if (this.open && this.$refs.rootRef && !this.$refs.rootRef.contains(e.target)) this.open = false
+    },
+    // 滚动/resize 后按触发器新位置重排菜单；触发器滚出视口则直接收起
+    onViewportChange() {
+      if (!this.open) return
+      const rect = this.$refs.rootRef?.getBoundingClientRect()
+      if (!rect) return
+      if (rect.bottom < 0 || rect.top > window.innerHeight || rect.right < 0 || rect.left > window.innerWidth) {
+        this.open = false
+        return
+      }
+      this.menuPos = { left: rect.left, top: rect.bottom + 4, width: rect.width }
     }
   },
-  mounted() { document.addEventListener('click', this.onDocClick) },
-  beforeUnmount() { document.removeEventListener('click', this.onDocClick) }
+  mounted() {
+    document.addEventListener('click', this.onDocClick)
+    window.addEventListener('scroll', this.onViewportChange, true)
+    window.addEventListener('resize', this.onViewportChange)
+  },
+  beforeUnmount() {
+    document.removeEventListener('click', this.onDocClick)
+    window.removeEventListener('scroll', this.onViewportChange, true)
+    window.removeEventListener('resize', this.onViewportChange)
+  }
 }
 </script>

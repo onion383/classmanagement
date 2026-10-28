@@ -1,4 +1,5 @@
 import { safe, applyAuthHeader, encryptBody, decryptBody, resetAuthBinding } from '../composables/secureChannel'
+import { decodeJwtPayload } from './jwt'
 
 // 生产模式打包后以 file:// 协议运行，/api/... 会被解析到磁盘根目录导致 404（ERR_FILE_NOT_FOUND）。
 // 因此 img / CSS 背景里直接拼 API 路径的地方，需显式补上完整后端地址；开发模式走 Vite 代理，保持相对路径即可。
@@ -74,13 +75,11 @@ export function clearMediaToken() {
   try { localStorage.removeItem(MEDIA_KEY) } catch (_) {}
 }
 
-// 读 JWT 的 exp（毫秒）；解析失败返回 0，视为已过期
+// 读 JWT 的 exp（毫秒）；解析失败返回 0，视为已过期。
+// base64url 的解码细节统一在 utils/jwt.js（直接 atob 遇到 `-`/`_` 会抛错）。
 function jwtExp(token) {
-  try {
-    const part = String(token).split('.')[1].replace(/-/g, '+').replace(/_/g, '/')
-    const payload = JSON.parse(atob(part))
-    return payload && payload.exp ? payload.exp * 1000 : 0
-  } catch (_) { return 0 }
+  const payload = decodeJwtPayload(token)
+  return payload && typeof payload.exp === 'number' ? payload.exp * 1000 : 0
 }
 
 let mediaRefresh = null

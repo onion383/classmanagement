@@ -119,6 +119,7 @@
 import '../../styles/dialog-transition.css'
 import DialogShell from '../base/DialogShell.vue'
 import AppSelect from '../base/AppSelect.vue'
+import { useNotification } from '../../composables/useNotification.js'
 
 export default {
   name: 'SettingsDialog',
@@ -211,6 +212,11 @@ export default {
       this.endDay = 5;
     },
     save() {
+      // 开始日晚于结束日会生成空 days 数组，后端保存后课表直接没有可用星期
+      if (this.startDay > this.endDay) {
+        useNotification().error('开始日不能晚于结束日')
+        return
+      }
       const dayNames = ['周一','周二','周三','周四','周五','周六','周日'];
       const days = [];
       for (let i = this.startDay; i <= this.endDay; i++) days.push(dayNames[i-1]);

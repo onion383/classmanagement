@@ -146,6 +146,18 @@ function slideSession(req, res, user, source) {
   if (req.sessionId) secureChannel.bindAuth(req.sessionId, token);
 }
 
+// 「本机信息恢复」签发的 recover token 只授权「设置新密码」这一个动作。
+// 设计上它不是完整登录态：除改密换发正式 token 外，不得调用任何业务接口。
+// 白名单按「方法 + 完整路径」精确匹配；登出也放行，便于用户放弃本次恢复。
+const RECOVER_ALLOWED = new Set([
+  'PUT /api/account/password',
+  'POST /api/auth/logout',
+]);
+function isRecoverScopeAllowed(req) {
+  const fullPath = String(req.originalUrl || req.url || '').split('?')[0];
+  return RECOVER_ALLOWED.has(`${req.method} ${fullPath}`);
+}
+
 function auth(requiredRoles = []) {
   return (req, res, next) => {
     const { token, source } = resolveAuth(req);
@@ -165,8 +177,14 @@ function auth(requiredRoles = []) {
       if (requiredRoles.length > 0 && !requiredRoles.includes(user.role)) {
         return res.status(403).json({ error: '权限不足' });
       }
+      if (user.recover === true && !isRecoverScopeAllowed(req)) {
+        // 按「登录态不完整」处理：前端既有逻辑会清掉本地 token 并回登录页，
+        // 避免恢复态凭据在后台被误当成正式会话继续使用。
+        return res.status(401).json({ error: '恢复态仅允许设置新密码', code: 'RECOVER_SCOPE_ONLY' });
+      }
       req.user = user;
-      slideSession(req, res, user, source);
+      // 恢复态不参与滑动续期：它只能在改密时换发正式 token，不能被悄悄续成 30 天正式会话。
+      if (user.recover !== true) slideSession(req, res, user, source);
       const slug = user.dbSlug || 'default';
       // 绑定当前请求对应的班主任库：使 db.js 导出的 db 代理命中正确库
       return dbManager.withDb(slug, () => next());
@@ -209,5 +227,5 @@ function authStatic() {
 
 module.exports = {
   auth, authStatic, SECRET, resolveToken, resolveAuth, verifyToken,
-  signMediaToken, TOKEN_SIGN_OPTS, TOKEN_COOKIE_MAX_AGE,
+  signMediaToken, TOKEN_SIGN_OPTS, TOKEN_COOKIE_MAX_AGE, isRecoverScopeAllowed,
 };

@@ -7,6 +7,8 @@
 // =========================================================================
 import { INVOKE } from '../../../electronChannels.js'
 import { loadPdfFontBase64, collectPdfText } from '../../../utils/pdfFont.js'
+import { sanitizeFileName } from '../../../utils/fileName.js'
+import { csvCell } from '../../../utils/csvCell.js'
 import { toRaw } from 'vue'
 
 const SECTION_NAMES = { morning: '上午', noon: '中午', afternoon: '下午', evening: '傍晚', night: '晚上' };
@@ -16,10 +18,12 @@ export function useExportFormats() {
 
     // 保存文件：Electron 下弹系统保存对话框，用户确认后才写入；浏览器则直接下载
     async saveFileWithDialog(defaultName, blob) {
+      // 文件名来自用户输入，落盘前统一清洗（非法字符 / 末尾点空格 / 超长）
+      const safeName = sanitizeFileName(defaultName)
       if (window.electron && typeof window.electron.invoke === 'function') {
         const arrayBuffer = await blob.arrayBuffer()
         const result = await window.electron.invoke(INVOKE.SAVE_FILE, {
-          defaultName,
+          defaultName: safeName,
           data: arrayBuffer
         })
         if (result && !result.canceled && result.filePath) {
@@ -32,7 +36,7 @@ export function useExportFormats() {
       const url = URL.createObjectURL(blob)
       const a = document.createElement('a')
       a.href = url
-      a.download = defaultName
+      a.download = safeName
       a.click()
       URL.revokeObjectURL(url)
       return true
@@ -112,8 +116,7 @@ export function useExportFormats() {
     },
     async exportGroupCSV(idxList, filename) {
       const rows = this.groupFlatRows(idxList);
-      const esc = v => { const s = String(v == null ? '' : v); return /[",\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s; };
-      const csv = '\uFEFF' + rows.map(r => r.map(esc).join(',')).join('\r\n');
+      const csv = '\uFEFF' + rows.map(r => r.map(csvCell).join(',')).join('\r\n');
       const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
       return await this.saveFileWithDialog(`${filename}.csv`, blob);
     },
@@ -495,11 +498,7 @@ export function useExportFormats() {
         if (row.type === 'globalRest' || row.type === 'innerRest') return;
         const line = headers.map(h => {
           const v = row[h] !== undefined ? row[h] : '';
-          const str = v == null ? '' : String(v);
-          if (str.includes(',') || str.includes('"') || str.includes('\n')) {
-            return `"${str.replace(/"/g, '""')}"`;
-          }
-          return str;
+          return csvCell(v);
         }).join(',');
         csv += line + '\n';
       });

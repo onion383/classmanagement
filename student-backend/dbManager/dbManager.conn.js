@@ -9,6 +9,7 @@ const { initSchema } = require('../schema/schema');
 const {
   dataDir, als, connCache, touchConn, setCachedConn, ensureIndex,
   openFile, registryFindBySlug, unwrapKey, getUnlockedKey, clearUnlockedKey,
+  beginConnUse, endConnUse,
 } = require('./dbManager.base');
 
 // 打开（或打开后初始化）某个 slug 对应的库并缓存
@@ -69,7 +70,23 @@ function withDb(slug, fn) {
     }
   }
   const conn = getConn(slug, passphrase, encrypted);
-  return als.run({ slug, conn }, () => fn({ slug, conn }));
+  return als.run({ slug, conn }, () => {
+    // 标记「本请求正在使用该连接」：连接缓存的 LRU 驱逐会跳过在用连接，
+    // 避免并发切换库时把仍在执行查询的连接 close() 掉（B04-01）。
+    beginConnUse(slug);
+    const done = () => endConnUse(slug);
+    let out;
+    try {
+      out = fn({ slug, conn });
+    } catch (err) {
+      done();
+      throw err;
+    }
+    // 路由处理函数可能是 async：等它真正结束（含异常）后再减少计数
+    if (out && typeof out.then === 'function') return Promise.resolve(out).finally(done);
+    done();
+    return out;
+  });
 }
 
 // 锁定某库：关闭连接缓存并丢弃内存里的库钥匙（登出时调用）

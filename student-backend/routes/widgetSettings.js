@@ -1,6 +1,7 @@
 const express = require('express');
 const router = express.Router();
 const { db } = require('../db');
+const { cleanPath } = require('../services/sanitize');
 
 // 桌面小组件「常用软件」最多 8 个（4 列 × 2 行）。
 // 渲染层会隐藏多余的添加入口，这里再兜一层：即使直接调接口也写不进第 9 个。
@@ -50,6 +51,15 @@ router.get('/', (req, res) => {
 router.put('/', (req, res) => {
   try {
     const { toolboxEnabled, noteSavePath, screenshotSavePath, desktopApps } = req.body;
+    // 保存目录同样禁止「..」上跳与非法字符，避免桌面挂件把文件写到预期之外的位置
+    let notePath;
+    let shotPath;
+    try {
+      notePath = cleanPath(noteSavePath, '笔记保存路径') || '';
+      shotPath = cleanPath(screenshotSavePath, '截屏保存路径') || '';
+    } catch (err) {
+      return res.status(400).json({ error: err.message });
+    }
     // 只传了其他字段（如工具箱开关）时保持原列表不动；传了列表才按上限重写
     const normalized = normalizeApps(desktopApps);
     const appsJson = normalized
@@ -64,8 +74,8 @@ router.put('/', (req, res) => {
       WHERE id = 1
     `).run(
       toolboxEnabled ? 1 : 0,
-      noteSavePath || '',
-      screenshotSavePath || '',
+      notePath,
+      shotPath,
       appsJson
     );
     res.json({ success: true, message: '小组件设置已保存' });

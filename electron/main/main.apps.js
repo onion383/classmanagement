@@ -15,6 +15,7 @@ const { app, ipcMain, dialog, shell } = require('electron')
 const path = require('path')
 const fs = require('fs')
 const { getDialogDir, setDialogDir } = require('./main.dialogs')
+const { resolveSafeLaunchPath } = require('./main.path-guard')
 
 // 单次拖入最多解析的路径数：只是防呆上限，真正的「最多 8 个」由渲染层与后端共同限制
 const MAX_RESOLVE_PATHS = 32
@@ -96,8 +97,11 @@ function registerAppsIpc(opts = {}) {
 
   // 点击启动常用软件（.lnk/.exe/.bat/文件夹/普通文件均可走 shell.openPath）
   ipcMain.handle('apps-launch', (event, filePath) => {
-    if (typeof filePath !== 'string' || !filePath) return { error: '路径为空' }
-    shell.openPath(filePath)
+    // 列表由后端持久化，渲染层仍可能被篡改后传入任意路径；
+    // 这里只拒绝「不存在」与「系统保护目录」，保留用户自装软件（多在 Program Files）。
+    const safe = resolveSafeLaunchPath(filePath)
+    if (safe.error) return { error: safe.error }
+    shell.openPath(safe.path)
     return {}
   })
 }

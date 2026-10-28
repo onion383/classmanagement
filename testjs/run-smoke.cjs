@@ -32,8 +32,14 @@ const SMOKE_DIR = path.join(__dirname, 'smoke')
 const NODE_EXT = new Set(['.cjs', '.mjs', '.js'])
 // 必须后端在跑的脚本（文件名 → 说明）。启动方式见文件头。
 const NEEDS_BACKEND = new Set(['auth-smoke.js'])
-const BACKEND_PORT = 3000
+const BACKEND_PORT = Number(process.env.PORT) || 3000
 const BACKEND_HOST = '127.0.0.1'
+// 有产物依赖的脚本必须按顺序跑：pdf-subset-verify.mjs 先生成 subset-out*.ttf，
+// font-subset-verify.py 再读取产物校验。只按文件名字典序会反过来，干净检出必假失败。
+const ORDER_HINT = new Map([
+  ['pdf-subset-verify.mjs', 0],
+  ['font-subset-verify.py', 1],
+])
 
 // ---------- 参数 ----------
 const args = process.argv.slice(2)
@@ -67,7 +73,11 @@ function collect() {
     .filter((f) => !f.startsWith('_') && !f.startsWith('.'))
     .filter((f) => (opt.only.length ? opt.only.some((k) => f.includes(k)) : true))
     .filter((f) => (opt.skip.length ? !opt.skip.some((k) => f.includes(k)) : true))
-    .sort()
+    .sort((a, b) => {
+      const oa = ORDER_HINT.has(a) ? ORDER_HINT.get(a) : 100
+      const ob = ORDER_HINT.has(b) ? ORDER_HINT.get(b) : 100
+      return oa - ob || a.localeCompare(b)
+    })
 }
 
 // 探测后端是否在监听（连不上就算没起）
@@ -105,7 +115,11 @@ function runOne(file) {
   const argv = isPy ? [full] : [full]
   return new Promise((resolve) => {
     const t0 = Date.now()
-    const child = spawn(cmd, argv, { cwd: path.join(__dirname, '..'), stdio: 'inherit' })
+    const child = spawn(cmd, argv, {
+      cwd: path.join(__dirname, '..'),
+      stdio: 'inherit',
+      env: { ...process.env, PORT: String(BACKEND_PORT) },
+    })
     child.on('error', (e) => resolve({ file, code: -1, ms: Date.now() - t0, err: e.message }))
     child.on('exit', (code, signal) => resolve({ file, code: code ?? (signal ? -1 : 0), ms: Date.now() - t0 }))
   })

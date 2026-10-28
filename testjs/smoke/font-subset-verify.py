@@ -27,7 +27,8 @@ SUBSET = os.path.join(ROOT, 'testjs/tmp/subset-out.ttf')
 def main():
     if not os.path.exists(SUBSET):
         print('缺少子集文件，先跑 node testjs/smoke/pdf-subset-verify.mjs')
-        return 1
+        print('（缺少产物时本脚本视为环境不具备，跳过而非失败）')
+        return 3
 
     font = TTFont(SUBSET, lazy=True)
     cmap = font.getBestCmap()

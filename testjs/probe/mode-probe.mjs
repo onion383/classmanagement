@@ -361,12 +361,34 @@ async function runOnRoute(cdp, route, repeat) {
 }
 
 // ---------------------------------------------------------------- 启动
+// 本脚本可能自行拉起 Vite：保留句柄并在退出时清理，避免 dev server 残留占用端口。
+let viteChild = null
+function stopVite() {
+  if (!viteChild || viteChild.killed) return
+  const pid = viteChild.pid
+  try {
+    if (process.platform === 'win32') spawn('taskkill', ['/pid', String(pid), '/T', '/F'], { stdio: 'ignore' })
+    else process.kill(-pid, 'SIGTERM')
+  } catch (_) {
+    try { viteChild.kill() } catch (_) {}
+  }
+  viteChild = null
+}
+process.on('exit', stopVite)
+process.on('SIGINT', () => { stopVite(); process.exit(130) })
+process.on('SIGTERM', () => { stopVite(); process.exit(143) })
+
 async function ensureRunner() {
   // 已有实例（调试口已开）就直接复用，不重复启动（单实例锁 + 僵尸进程问题）
   if (await waitForMainTarget(1500)) return { launched: false }
   if (!(await probe(`${BASE}/`))) {
     console.log('[mode] Vite 未就绪，启动开发服务器…')
-    spawn('npm', ['run', 'dev'], { cwd: FRONTEND, stdio: 'inherit', shell: true })
+    viteChild = spawn('npm', ['run', 'dev'], {
+      cwd: FRONTEND,
+      stdio: 'inherit',
+      shell: true,
+      detached: process.platform !== 'win32',
+    })
     if (!(await waitForHttp(`${BASE}/`, 40000))) throw new Error('Vite 开发服务器 40s 内未就绪')
   } else console.log('[mode] Vite 已在运行')
 
@@ -426,6 +448,7 @@ async function main() {
   if (process.env.MODE_PROBE_ONESHOT) {
     cdp.close()
     if (child) child.kill()
+    stopVite()
     process.exit(0)
   }
   console.log('\n[mode] 测量结束。窗口保持打开，可自行再操作；Ctrl+C 退出脚本。')

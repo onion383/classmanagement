@@ -131,6 +131,8 @@
 </template>
 
 <script>
+import { useNotification } from '../composables/useNotification.js'
+
 export default {
   name: 'CadreTreeList',
   props: {
@@ -285,7 +287,12 @@ export default {
     confirmAdd() {
       const name = String(this.addKeyword || '').trim()
       if (!name) return
-      const student = this.allStudents.find(s => String(s.姓名 || '').trim() === name) || { id: null, 姓名: name }
+      const student = this.allStudents.find(s => String(s.姓名 || '').trim() === name)
+      // 找不到对应学生时不能发 id:null（后端/父组件会当成合法成员写入），必须先提示
+      if (!student) {
+        useNotification().error(`未找到学生「${name}」，请从候选列表中选择`)
+        return
+      }
       this.closeSuggest()
       this.addKeyword = ''
       this.$emit('add-student', { nodeId: this.node.id, student })

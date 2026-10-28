@@ -1214,8 +1214,12 @@
   z-index: 1;
 }
 /* 覆盖弹窗遮罩：.login-bg > * 的 position: relative 会覆盖 ConfirmDialog 遮罩的 .fixed，
-  使其退化为普通 flex 子项、与登录表单并排。此规则强制遮罩保持 fixed 全屏盖住。 */
-:root:is([data-theme="glass"], [data-theme="win11"]) [class*="inset-0"][class*="bg-black/"]:not([class*="bg-black/9"]) {
+  使其退化为普通 flex 子项、与登录表单并排。此规则强制遮罩保持 fixed 全屏盖住。
+  必须同时带 fixed 才匹配（与 utilities.css 对齐）：否则内容层里「绝对定位铺满某格子的
+  hover 压暗层」也会被命中，被强制 fixed 全屏并加模糊，图片整片发虚。
+  另外排除 bg-black/9、bg-black/8：深色全屏看图遮罩（相册 bg-black/90、班费票据 bg-black/80）
+  要保持深底，不能改成透明底 + 模糊。 */
+:root:is([data-theme="glass"], [data-theme="win11"]) [class*="fixed"][class*="inset-0"][class*="bg-black/"]:not([class*="bg-black/9"]):not([class*="bg-black/8"]) {
   position: fixed;
   inset: 0;
   /* 弹窗遮罩：透明底（不加纯色压暗）+ 背景模糊，磨砂虚化下层页面 */

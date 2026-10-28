@@ -270,7 +270,12 @@ async function checkUpdate() {
   try {
     const s = await window.electron?.invoke(INVOKE.UPDATE_CHECK)
     applyUpdateState(s)
-  } catch (_) { /* 忽略 */ }
+  } catch (e) {
+    // 原来静默吞掉：用户点了「检查更新」后界面毫无变化，分不清「已是最新」还是「检查失败」。
+    // updateError 会在弹窗里展示（与主进程推送的 update-state.error 同一处）。
+    updateError.value = '检查更新失败，请检查网络后重试'
+    console.error(e)
+  }
 }
 
 function installUpdate() {

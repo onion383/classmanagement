@@ -825,6 +825,8 @@ export default {
     if (this._emptyTimer) { clearTimeout(this._emptyTimer); this._emptyTimer = null; }
     // 行动画窗定时器同理
     if (this._rowsAnimTimer) { clearTimeout(this._rowsAnimTimer); this._rowsAnimTimer = null; }
+    // 取消新增行的 140ms 兜底定时器：卸载后触发会往已销毁的实例上 emit
+    if (this._cancelRowTimer) { clearTimeout(this._cancelRowTimer); this._cancelRowTimer = null; }
     document.removeEventListener('click', this.handleClickOutside);
     document.removeEventListener('keydown', this.handleGlobalEnter);
     document.removeEventListener('click', this.onFilterDocClick);
@@ -1364,6 +1366,7 @@ export default {
       const finish = () => {
         if (done) return;
         done = true;
+        if (this._cancelRowTimer) { clearTimeout(this._cancelRowTimer); this._cancelRowTimer = null; }
         this.$emit('cancelNewRow');
       };
       const onEnd = (e) => {
@@ -1375,7 +1378,7 @@ export default {
       el.classList.add('row-pop-out');
       el.addEventListener('animationend', onEnd);
       // 兜底：动画事件缺失（如被禁用）时按动画时长收尾，避免行一直留着
-      setTimeout(finish, 140);
+      this._cancelRowTimer = setTimeout(finish, 140);
     },
     focusNewRowInput() {
       // 没有新增行就不做任何事：下面的「滚到底部」兜底是给新增行准备的，

@@ -22,6 +22,16 @@ const router = require(path.join(BACKEND, 'routes', 'ai', 'ai.upload.js'))
 const TMP = path.join(__dirname, '..', 'tmp', 'pptxguard')
 const PY = process.env.PYTHON || 'python'
 
+// 样本依赖 Python 的 zipfile；没装 python 时应判「环境不具备」而不是失败
+// （run-smoke 约定退出码 3 = 跳过）。原先直接 spawnSync 会在无 python 的机器上
+// 抛 ENOENT，让冒烟结果长期带一个与代码无关的假失败。
+function pythonAvailable() {
+  try {
+    execFileSync(PY, ['--version'], { stdio: 'ignore' })
+    return true
+  } catch (_) { return false }
+}
+
 function buildSamples() {
   fs.rmSync(TMP, { recursive: true, force: true })
   fs.mkdirSync(TMP, { recursive: true })
@@ -72,6 +82,10 @@ function upload(port, file) {
 }
 
 ;(async () => {
+  if (!pythonAvailable()) {
+    console.log('SKIP：未找到 python（可用 PYTHON 环境变量指定），pptx 资源闸门回归跳过')
+    process.exit(3)
+  }
   buildSamples()
   const app = express()
   app.use('/ai', router)
@@ -96,12 +110,14 @@ function upload(port, file) {
     r = await upload(port, path.join(TMP, 'one-big.pptx'))
     check('单条目 25MB 被拒', !!(r && r.success === false && /单个文件过大/.test(r.error || '')), r)
 
-    // ③ 总解压 120MB（先看文件是否超 multer 的 20MB）
+    // ③ 总解压 120MB：必须是被「合计上限」这条守卫拦下才算通过。
+    // 只断言 success === false 时，若压缩后体积碰巧 > 20MB 会被 multer 拦下，用例照样打钩，
+    // 而真正要测的 100MB 守卫根本没被执行（假阴性）。
     const manySize = fs.statSync(path.join(TMP, 'many.pptx')).size / 1048576
     r = await upload(port, path.join(TMP, 'many.pptx'))
-    const rejected = !!(r && r.success === false)
-    check(`总解压超限被拒（压缩后 ${manySize.toFixed(1)}MB）`, rejected, r)
-    if (rejected) console.log(`    原因: ${r.error}`)
+    const hitTotalGuard = !!(r && r.success === false && /解压后体积超过/.test(r.error || ''))
+    check(`总解压超限被「合计上限」拦下（压缩后 ${manySize.toFixed(1)}MB）`, hitTotalGuard, r)
+    if (r && r.success === false) console.log(`    原因: ${r.error}`)
 
     console.log(`\n${failed === 0 ? '全部通过' : failed + ' 项失败'}`)
     server.close(() => process.exit(failed ? 1 : 0))

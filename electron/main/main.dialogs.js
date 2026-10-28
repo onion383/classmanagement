@@ -16,6 +16,13 @@ const { app, BrowserWindow, ipcMain, desktopCapturer, screen, dialog, shell } = 
 const path = require('path')
 const fs = require('fs')
 const { resolveDataDir, resolveThumbsDir, resolveSkillsDir } = require('./main.config')
+const {
+  resolveSafeFolder,
+  resolveSafeWriteDir,
+  resolveSafeOpenFile,
+  markFileWritten,
+  sanitizeSuggestedName,
+} = require('./main.path-guard')
 
 const fsp = fs.promises
 
@@ -58,8 +65,10 @@ function registerDialogsIpc(opts = {}) {
 
   // 在文件管理器中打开指定文件夹
   ipcMain.handle('open-folder', async (event, folderPath) => {
-    if (!folderPath) return { error: '路径为空' }
-    shell.openPath(folderPath)
+    // 渲染层传什么路径都不能直接交给系统：只放行已存在、非盘符根、非系统保护目录的绝对路径
+    const safe = resolveSafeFolder(folderPath)
+    if (safe.error) return { error: safe.error }
+    shell.openPath(safe.path)
     return {}
   })
 
@@ -123,15 +132,31 @@ function registerDialogsIpc(opts = {}) {
   // 写盘改成异步：背景图动辄几 MB，writeFileSync 会把主进程阻塞到写完为止。
   ipcMain.handle('save-background-image', async (event, { name, base64 }) => {
     try {
+      // 与「选择图片」路径对齐的 50MB 上限：base64 入口原先没有大小校验，
+      // 一次超大 payload 就会在主进程里解码出数倍内存（B01-09）。
+      const MAX_BG_BYTES = 50 * 1024 * 1024
+      if (typeof base64 !== 'string' || base64.length === 0) {
+        return { success: false, error: '缺少图片数据' }
+      }
+      // 先按 base64 长度粗判（约为原始字节的 4/3），避免把超大字符串解码进内存
+      if (base64.length > Math.ceil(MAX_BG_BYTES / 3) * 4) {
+        return { success: false, error: '背景图片不能超过 50MB' }
+      }
       const bgDir = path.join(app.getPath('userData'), 'data', 'uploads', 'background')
       // mkdir recursive 在目录已存在时不报错，省掉一次 existsSync 同步探测
       await fsp.mkdir(bgDir, { recursive: true })
-      // 从原始文件名获取扩展名
-      const ext = name ? path.extname(name) || '.png' : '.png'
+      // 扩展名来自渲染层传入的文件名：只接受图片扩展，其余统一按 .png 落盘，
+      // 避免把 IPC 当任意扩展名写盘入口使用
+      const ALLOWED_BG_EXT = new Set(['.png', '.jpg', '.jpeg', '.webp', '.gif', '.bmp'])
+      let ext = name ? path.extname(String(name)).toLowerCase() : ''
+      if (!ALLOWED_BG_EXT.has(ext)) ext = '.png'
       const fileName = `bg_${Date.now()}${ext}`
       const destPath = path.join(bgDir, fileName)
       // 将 base64 写入文件
       const buffer = Buffer.from(base64, 'base64')
+      if (buffer.length > MAX_BG_BYTES) {
+        return { success: false, error: '背景图片不能超过 50MB' }
+      }
       await fsp.writeFile(destPath, buffer)
       // 根据环境返回不同的 URL
       let imageUrl
@@ -147,13 +172,15 @@ function registerDialogsIpc(opts = {}) {
   })
 
   // 导出文件保存对话框：用户确认保存后才写入文件并返回
-  ipcMain.handle('save-file', async (event, { defaultName, data }) => {
+  ipcMain.handle('save-file', async (event, { defaultName, data } = {}) => {
     const mainWindow = getMainWindow()
     if (!mainWindow || mainWindow.isDestroyed()) return { canceled: true }
-    const ext = path.extname(defaultName) || ''
+    // 建议文件名来自渲染层（可能被注入成 ../x 这类串）：统一压平成纯文件名再拼进 defaultPath
+    const name = sanitizeSuggestedName(defaultName)
+    const ext = path.extname(name) || ''
     const result = await dialog.showSaveDialog(mainWindow, {
       title: '保存文件',
-      defaultPath: lastDialogDir ? path.join(lastDialogDir, defaultName) : defaultName,
+      defaultPath: lastDialogDir ? path.join(lastDialogDir, name) : name,
       filters: ext ? [{ name: '文件', extensions: [ext.replace('.', '')] }] : undefined
     })
     if (result.canceled || !result.filePath) return { canceled: true }
@@ -162,6 +189,9 @@ function registerDialogsIpc(opts = {}) {
       // 异步写：导出的 xlsx/pdf 可能几十 MB，同步写会让窗口在写盘期间完全无响应
       await fsp.writeFile(result.filePath, buffer)
       lastDialogDir = path.dirname(result.filePath)
+      // 登记「本应用写过的文件」：open-file 只允许打开这里登记过的路径，
+      // 防止渲染层被注入后把任意 exe 交给 shell.openPath。
+      markFileWritten(result.filePath)
       return { canceled: false, filePath: result.filePath }
     } catch (err) {
       return { canceled: true, error: err.message }
@@ -171,8 +201,10 @@ function registerDialogsIpc(opts = {}) {
   // 导出文件保存后：用系统默认应用打开
   ipcMain.handle('open-file', async (event, { filePath }) => {
     if (!filePath) return { success: false, error: 'no filePath' }
+    const safe = resolveSafeOpenFile(filePath)
+    if (safe.error) return { success: false, error: safe.error }
     try {
-      const error = await shell.openPath(filePath)
+      const error = await shell.openPath(safe.path)
       return { success: !error, error: error || null }
     } catch (err) {
       return { success: false, error: err.message }
@@ -205,7 +237,11 @@ function registerDialogsIpc(opts = {}) {
       const primarySource = sources.find(s => s.display_id === String(primaryDisplay.id)) || sources[0]
       const image = primarySource.thumbnail.toPNG()
 
-      const saveDir = options?.saveDir || path.join(app.getPath('pictures'), 'screenshots')
+      const defaultSaveDir = path.join(app.getPath('pictures'), 'screenshots')
+      // saveDir 来自设置页（可自定义），不能直接 mkdir/write：只接受非盘符根、非系统保护目录
+      const safeDir = resolveSafeWriteDir(options?.saveDir, defaultSaveDir)
+      if (safeDir.error) return { success: false, error: safeDir.error }
+      const saveDir = safeDir.path
       // 整屏 PNG 常有几 MB～十几 MB，写盘走异步，避免截图瞬间主进程冻结
       await fsp.mkdir(saveDir, { recursive: true })
 
@@ -327,7 +363,12 @@ function registerDialogsIpc(opts = {}) {
   // 保存注释后的截图
   ipcMain.handle('note-save', async (event, uint8Array, options) => {
     const buffer = Buffer.from(uint8Array)
-    const saveDir = options?.saveDir || path.join(app.getPath('pictures'), 'screenshots')
+    const defaultSaveDir = path.join(app.getPath('pictures'), 'screenshots')
+    // 与截图保存同一条边界：noteSavePath 由用户配置，渲染层仍可能被篡改，
+    // 不允许把任意字节写进 System32/Windows 这类目录。
+    const safeDir = resolveSafeWriteDir(options?.saveDir, defaultSaveDir)
+    if (safeDir.error) return { success: false, error: safeDir.error }
+    const saveDir = safeDir.path
     await fsp.mkdir(saveDir, { recursive: true })
     const timestamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19)
     const filePath = path.join(saveDir, `note_${timestamp}.png`)

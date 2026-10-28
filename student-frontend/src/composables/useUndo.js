@@ -1,5 +1,15 @@
 import { onMounted, onUnmounted, onActivated, onDeactivated, reactive, watch } from 'vue'
 import { pushUndo, undoStatus, applyUndo } from '../api/undo'
+import { useNotification } from './useNotification.js'
+
+// 登记撤销失败时的弱提示（B09-14/15/16）。
+// 调用处原先统一 `.catch(() => {})`：操作本身已经完成，但撤销列表里没有这一条，
+// 用户按 Ctrl+Z 才发现「撤不回去」。这里留日志并明确告知「本次无法撤销」。
+export function warnUndoFailed(label) {
+  const text = label ? `「${label}」已完成，但本次无法撤销` : '操作已完成，但本次无法撤销'
+  console.warn('[undo] 登记撤销失败：', label || '')
+  try { useNotification().warning(text) } catch (_) { /* 通知不可用时仅保留日志 */ }
+}
 
 // ==================== 记录一条单元格编辑撤销 ====================
 // 供非 useTableCRUD 页面复用。

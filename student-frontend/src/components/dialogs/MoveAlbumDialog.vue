@@ -40,6 +40,7 @@ import DialogShell from '../base/DialogShell.vue'
 import AppSelect from '../base/AppSelect.vue'
 import { useNotification } from '../../composables/useNotification.js'
 import { pushUndo } from '../../api/undo'
+import { warnUndoFailed } from '../../composables/useUndo.js'
 import '../../styles/dialog-transition.css'
 
 const props = defineProps({
@@ -93,7 +94,7 @@ async function submit() {
         target_album_name: data.target_album_name || '',
         records: data.photos || [],
       },
-    }).catch(() => {})
+    }).catch(() => warnUndoFailed('移动照片'))
     useNotification().success(data.message || '已移动')
     emit('moved', data)
   } catch (err) {

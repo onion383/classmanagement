@@ -282,11 +282,16 @@ function claimScanTask(conn, albumId, mode, token, resumeFrom) {
 //
 // 带 token 限定：只更新「属于本次扫描」的那一行。
 // 否则上一次扫描的收尾（persistScanClear）会把本次刚写的行删掉。
-let persistCounter = 0;
+// 每个扫描任务（albumId + token）各自计数，避免并发扫描互相把对方的计数清零
+const persistCounters = new Map();
 function persistScanProgress(conn, albumId, token, mode, phase, donePath, scanned, total, force) {
-  persistCounter++;
-  if (!force && persistCounter % PERSIST_EVERY !== 0) return;
-  persistCounter = 0;
+  const key = `${albumId}:${token || 0}`;
+  const count = (persistCounters.get(key) || 0) + 1;
+  if (!force && count % PERSIST_EVERY !== 0) {
+    persistCounters.set(key, count);
+    return;
+  }
+  persistCounters.delete(key);
   try {
     conn.prepare(`UPDATE album_scan_tasks SET mode = ?, phase = ?, done_path = ?, scanned = ?, total = ?, updated_at = ?
       WHERE album_id = ? AND token = ?`)
@@ -300,6 +305,7 @@ function persistScanProgress(conn, albumId, token, mode, phase, donePath, scanne
 // 不带限定的话，本次扫描收尾时会把「另一次（新一轮）扫描刚写的行」一起删掉，
 // 那边的扫描读到「行不见了」就误判成被放弃而中止。
 function persistScanClear(conn, albumId, token) {
+  persistCounters.delete(`${albumId}:${token || 0}`);
   try {
     conn.prepare('DELETE FROM album_scan_tasks WHERE album_id = ? AND token = ?').run(albumId, token || 0);
   } catch (_) {}
@@ -743,7 +749,6 @@ async function incrementalScan(conn, albumId, resumeFrom, slug, onProgress, toke
               const tp = await genThumb(old.id, full, isVideo, slug);
               if (tp) thumbWriter.add(old.id, tp);
             }
-            task.scanned++;
           }
           // mtime 相同且已核过 EXIF 则跳过
         } else {
@@ -751,7 +756,6 @@ async function incrementalScan(conn, albumId, resumeFrom, slug, onProgress, toke
           const isVideo = VIDEO_EXT.test(name);
           const when = await resolvePhotoDate(full, mtime, isVideo);
           const ri = insert.run(albumId, full, name, st.size, mtime, when.date, when.exif, when.src);
-          task.scanned++;
           // 同 fullScan：OR IGNORE 冲突时 lastInsertRowid 不可靠，回查真实 id
           let photoId = ri.lastInsertRowid;
           if (ri.changes === 0) {
@@ -762,6 +766,10 @@ async function incrementalScan(conn, albumId, resumeFrom, slug, onProgress, toke
           const tp = await genThumb(photoId, full, VIDEO_EXT.test(name), slug);
           if (tp) thumbWriter.add(photoId, tp);
         }
+        // 「已遍历」计数必须覆盖跳过的未变文件：清理阶段用 scanned >= files.length 判断
+        // 文件循环是否完整跑完。只在 mtime 变化/新插入时自增，会让一次「什么都没变」的
+        // 增量扫描永远不触发「索引有、磁盘无」清理，用户删掉的照片索引行永久残留。
+        task.scanned++;
         // 处理完这个文件才推进断点（中途崩溃时这个文件会重扫，代价很小）
         persistScanProgress(conn, albumId, task.token, 'incremental', 'process', full, task.scanned, task.total, false);
       } catch (_) {}

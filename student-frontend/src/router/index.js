@@ -1,6 +1,7 @@
 import { createRouter, createWebHistory, createWebHashHistory } from 'vue-router'
 import axios from 'axios'
 import { ensureDashboardData } from '../composables/useDashboardData'
+import { decodeJwtPayload } from '../utils/jwt'
 
 const routes = [
   { path: '/', name: 'dashboard', component: () => import('../views/DashboardView.vue') },
@@ -19,6 +20,8 @@ const routes = [
   { path: '/activities', name: 'activities', component: () => import('../views/ActivitiesView.vue'), meta: { requiresAuth: true } },
   { path: '/ai-assistant', name: 'aiAssistant', component: () => import('../views/AiAssistant.vue'), meta: { requiresAuth: true, deferPrefetch: true } },
   { path: '/about', name: 'about', component: () => import('../views/AboutView.vue') },
+  // 未知路径统一回首页：否则命中空路由，页面只渲染一个空白壳
+  { path: '/:pathMatch(.*)*', redirect: '/' },
 ]
 
 const router = createRouter({
@@ -29,13 +32,11 @@ const router = createRouter({
 
 // 校验本地 token 是否已过期：对比 JWT payload 的 exp（秒）。解码失败视为未过期，
 // 由后端 401 兜底，避免因为解析异常把仍有效的登录误判踢回登录页。
+// 解码必须走 base64url（见 utils/jwt.js）：原先直接 atob，payload 含 `-`/`_` 时会抛错，
+// 过期检查形同虚设（过期 token 被当成有效，客户端仍往里跳）。
 function isTokenExpired(token) {
-  try {
-    const payload = JSON.parse(atob(token.split('.')[1]))
-    return typeof payload.exp === 'number' && payload.exp * 1000 < Date.now()
-  } catch {
-    return false
-  }
+  const payload = decodeJwtPayload(token)
+  return !!payload && typeof payload.exp === 'number' && payload.exp * 1000 < Date.now()
 }
 
 // 路由守卫必须在 router 实例创建之后

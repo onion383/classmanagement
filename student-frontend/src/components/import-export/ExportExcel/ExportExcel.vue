@@ -65,6 +65,7 @@
 import AppSelect from '../../base/AppSelect.vue'
 import { useNotification } from '../../../composables/useNotification';
 import { useExportFormats } from './ExportExcel.exporters.js';
+import { localDateStr } from '../../../utils/dateTime.js';
 import '../../../styles/dialog-transition.css'
 
 
@@ -180,7 +181,7 @@ export default {
       // ---------- 分组导出模式 ----------
       if (this.isGroupMode) {
         if (this.selectedGroups.length === 0) { this.notifyInfo('请至少选择一个小组'); return; }
-        const dateStr = new Date().toISOString().slice(0, 10);
+        const dateStr = localDateStr();
         const finalFilename = `${this.filename}_${dateStr}`;
         try {
           let saved = true;
@@ -220,7 +221,7 @@ export default {
       const selectedFields = this.hideFieldPicker
         ? this.fields
         : this.fields.filter(f => this.selectedColumns.includes(f.name));
-      const dateStr = new Date().toISOString().slice(0, 10);
+      const dateStr = localDateStr();
       const finalFilename = `${this.filename}_${dateStr}`;
 
       try {

@@ -187,17 +187,9 @@ export default {
           }
         })
         this.modelChoices = next
-        console.log('[load] modelChoices:', JSON.stringify(next), 'providerChoices:', JSON.stringify(newChoices))
       } catch (err) {
         console.error('加载 AI 配置失败:', err)
       }
-    },
-    // 卡片下拉的可选模型（options 供 AppSelect）
-    cardChoices(id) {
-      const arr = this.modelChoices[id]
-      console.log(`[cardChoices] id=${id}`, JSON.stringify(arr))
-      if (!arr || !arr.length) return []
-      return arr.map((mId) => ({ value: mId, label: mId }))
     },
     // 卡片下拉切换模型：先由后端验证连通，通过才保存
     async onCardModelChange(id) {

@@ -1,11 +1,13 @@
 /**
  * 动态字体子集：Node 侧验证
  *
- * 验证三件事：
+ * 验证四件事：
  *   1. `utils/hbSubset.js` 的移植版（去掉 subset-font 的 Node-only wasm 加载）能产出可用子集；
  *   2. 产出的子集喂给 jsPDF 后，PDF 体积/耗时符合探针预期；
+ *      —— 这里不只是打印指标：子集必须明显小于全量字体、子集 PDF 必须小于全量 PDF，否则以失败退出；
  *   3. `utils/pdfFont.js` 的 collectPdfText 是否把「实际绘制字符」收集齐 —— 漏一个字就是 PDF 里一块空白。
- *      子集会另存到 testjs/tmp/subset-out.ttf，由 font-subset-verify.py 用 fontTools 逐字核对 cmap。
+ *      子集会另存到 testjs/tmp/subset-out.ttf，由 font-subset-verify.py 用 fontTools 逐字核对 cmap（本脚本必须跑在前）；
+ *   4. 两次调用的文本与子集文件都真实落盘，供 Python 端核对。
  *
  * 跑法：node testjs/pdf-subset-verify.mjs
  */
@@ -39,6 +41,15 @@ const makeBody = (n) => Array.from({ length: n }, (_, i) => [
 
 const ms = (t) => `${t.toFixed(1)}ms`
 const kb = (n) => `${(n / 1024).toFixed(0)}KB`
+
+// 断言收集器：本脚本原先只打印指标、永远以 0 退出，作为冒烟条目等于没有判定能力。
+// 现在把「子集真的生效」的几条硬指标变成退出码，run-smoke 才能据此报失败。
+let failed = 0
+const check = (name, ok, detail) => {
+  if (!ok) failed++
+  console.log(`${ok ? '✓' : '✗'} ${name}`)
+  if (!ok && detail !== undefined) console.log('    →', String(detail).slice(0, 220))
+}
 
 function buildPdf(body, ttfBuf) {
   const t0 = performance.now()
@@ -95,6 +106,18 @@ fs.writeFileSync(path.join(path.dirname(OUT), 'subset-out-excel.ttf'), Buffer.fr
 fs.writeFileSync(path.join(path.dirname(OUT), 'subset-text.txt'), textExportFormats, 'utf8')
 fs.writeFileSync(path.join(path.dirname(OUT), 'subset-text-excel.txt'), textExcel, 'utf8')
 
+// 产物断言：子集必须非空、且显著小于全量字体（子集化真的生效），四条落盘文件都在
+check('子集非空且体积 < 全量字体的 1/4',
+  sub.byteLength > 0 && sub.byteLength < fullTtf.byteLength / 4,
+  `${sub.byteLength}B vs 全量 ${fullTtf.byteLength}B`)
+check('两条调用路径都产出子集文件',
+  sub.byteLength > 0 && subExcel.byteLength > 0,
+  `${sub.byteLength}B / ${subExcel.byteLength}B`)
+check('供 Python 核对的文本与子集文件均已落盘',
+  ['subset-out.ttf', 'subset-out-excel.ttf', 'subset-text.txt', 'subset-text-excel.txt']
+    .every((f) => { try { return fs.statSync(path.join(path.dirname(OUT), f)).size > 0 } catch (_) { return false } }),
+  path.dirname(OUT))
+
 console.log('\n=== 导出 PDF（50 行 × 8 列）===')
 const runs = []
 for (let i = 0; i < 3; i++) runs.push(buildPdf(body, sub))
@@ -105,6 +128,11 @@ console.log(`子集方案: ${ms(med)}  PDF ${kb(runs[0].size)}`)
 const runsFull = []
 for (let i = 0; i < 2; i++) runsFull.push(buildPdf(body, fullTtf))
 console.log(`全量对照: ${ms(runsFull.map((r) => r.total).sort((a, b) => a - b)[0])}  PDF ${kb(runsFull[0].size)}`)
+
+// 子集的意义就是「PDF 更小」：这条关系被改坏（例如子集没被真正嵌入）时必须报失败
+check('子集 PDF 体积小于全量 PDF',
+  runs[0].size > 0 && runs[0].size < runsFull[0].size,
+  `子集 ${runs[0].size}B / 全量 ${runsFull[0].size}B`)
 
 console.log('\n=== 生僻字是否被子集保住 ===')
 for (const ch of ['张', '龘', '玥', '喆', '犇', '燚']) {
@@ -120,3 +148,10 @@ for (const ch of ['张', '龘', '玥', '喆', '犇', '燚']) {
 
 console.log('\n子集已写入', OUT, '（交给 font-subset-verify.py 逐字核对 cmap）')
 console.log(`wasm 线性内存: 跑完子集后 ${kb(hb.memory.buffer.byteLength)}（只增不减，属导出后的常驻成本）`)
+
+// 退出码：任何一条断言失败都让 run-smoke 记 FAIL（原先本脚本永远以 0 结束）
+if (failed) {
+  console.log(`\n${failed} 项断言失败`)
+  process.exit(1)
+}
+console.log('\n全部断言通过')

@@ -7,12 +7,22 @@
  * 跑法：node testjs/unzip-safe-test.cjs
  */
 const fs = require('node:fs')
+const os = require('node:os')
 const path = require('node:path')
 const { execFileSync } = require('node:child_process')
 const { unzipSafe } = require('../../student-backend/services/unzipSafe')
 
 const TMP = path.join(__dirname, '..', 'tmp', 'unzipsafe')
 const PY = process.env.PYTHON || 'python'
+
+// 样本依赖 Python 的 zipfile（jszip 造不出 symlink / 恶意路径）；
+// 没装 python 时按「环境不具备」跳过（退出码 3），而不是抛 ENOENT 记成失败。
+function pythonAvailable() {
+  try {
+    execFileSync(PY, ['--version'], { stdio: 'ignore' })
+    return true
+  } catch (_) { return false }
+}
 
 function buildSamples() {
   fs.rmSync(TMP, { recursive: true, force: true })
@@ -58,6 +68,10 @@ const cases = [
 ]
 
 ;(async () => {
+  if (!pythonAvailable()) {
+    console.log('SKIP：未找到 python（可用 PYTHON 环境变量指定），unzipSafe 回归跳过')
+    process.exit(3)
+  }
   buildSamples()
   let failed = 0
 
@@ -93,8 +107,14 @@ const cases = [
   if (!emptyDirOk) failed++
   console.log(`${emptyDirOk ? '✓' : '✗'} 空目录条目已创建`)
 
-  // 恶意包不应该在目标目录外产生任何东西
-  const leaked = ['evil.txt'].filter((f) => fs.existsSync(path.join(TMP, f)) || fs.existsSync(path.join(__dirname, '..', 'tmp', f)))
+  // 恶意包不应该在目标目录外产生任何东西（含绝对路径 /tmp 与系统临时目录）
+  const leakPaths = [
+    path.join(TMP, 'evil.txt'),
+    path.join(__dirname, '..', 'tmp', 'evil.txt'),
+    path.join(os.tmpdir(), 'evil.txt'),
+    path.resolve('/tmp/evil.txt'),
+  ]
+  const leaked = leakPaths.filter((p) => fs.existsSync(p))
   if (leaked.length) failed++
   console.log(`${leaked.length ? '✗' : '✓'} 目标目录外没有产生文件${leaked.length ? '（发现 ' + leaked.join(',') + '）' : ''}`)
 

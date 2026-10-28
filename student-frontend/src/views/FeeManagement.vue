@@ -341,10 +341,10 @@ useUndoShortcut('fee_records', {
 })
 
 async function refreshRecords() {
-  try {
-    await fetchRecords()
-    notifySuccess('已刷新费用数据')
-  } catch (e) { /* 错误已在 fetchRows 内部处理 */ }
+  // 同上：fetchRows 失败返回 false，不能无条件提示成功
+  const ok = await fetchRecords()
+  if (ok) notifySuccess('已刷新费用数据')
+  else notifyError('刷新失败，请稍后重试')
 }
 
 // ==================== 看板统计 ====================

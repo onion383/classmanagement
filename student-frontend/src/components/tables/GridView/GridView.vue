@@ -114,15 +114,11 @@
                     :style="rowDragLocked ? 'opacity: 0.3;' : ''"
                     :title="rowDragLocked ? '编辑中，暂不可拖动' : '按住拖动行'"
                     @mousedown.prevent.stop="onRowHandleDown($event, rowIdx)" @contextmenu.stop.prevent>⠿</span>
-                    <span @dblclick.stop="startEditMeta(rowIdx, 'label')">
-                      <input v-if="editingMeta && editingMeta.row === rowIdx && editingMeta.field === 'label'" v-model="editingMetaValue" class="w-20 border border-border p-0 text-sm text-text" @keyup.enter="saveEditMeta(rowIdx)" @blur="saveEditMeta(rowIdx)" @mousedown.stop />
-                      <span v-else>{{ row.label }}</span>
-                    </span>
+                    <span>{{ row.label }}</span>
                   </div>
                 </td>
-                <td v-if="!hideMetaColumns" class="border border-border px-2 py-1 text-center text-sm" style="width: 130px;" @dblclick.stop="startEditMeta(rowIdx, 'time')">
-                  <input v-if="editingMeta && editingMeta.row === rowIdx && editingMeta.field === 'time'" v-model="editingMetaValue" class="w-28 border p-0 text-sm" @keyup.enter="saveEditMeta(rowIdx)" @blur="saveEditMeta(rowIdx)" @mousedown.stop />
-                  <span v-else>{{ row.time || '' }}</span>
+                <td v-if="!hideMetaColumns" class="border border-border px-2 py-1 text-center text-sm" style="width: 130px;">
+                  <span>{{ row.time || '' }}</span>
                 </td>
 
                 <!-- 行号列（绿色背景；首子行跨行合并居中显示分组名，可拖拽排序） -->
@@ -300,7 +296,7 @@ export default {
       rowsAnimEnabled: false, _rowsAnimTimer: null,
       // 内容是否超出 maxHeight（超出才内部滚动 + 预留滚动条槽位，见模板内层容器说明）
       vScroll: false,
-      editingCell: null, editingCellData: { course: '' }, editingMeta: null, editingMetaValue: '',
+      editingCell: null, editingCellData: { course: '' },
       candidateHighlightIndex: 0, showCandidatePopup: false, candidatePopupX: 0, candidatePopupY: 0,
       cellRefs: {},
     };
@@ -412,7 +408,6 @@ export default {
       if (event.button !== 0) return;
       const row = this.rows[rowIdx];
       if (this.editingCell || row._isSeparator || row._mergeCells || row._isPodium) return;
-      if (this.editingMeta) { const metaRow = this.editingMeta.row; requestAnimationFrame(() => this.saveEditMeta(metaRow)); }
       this.selecting = true; this.selectionStart = { row: rowIdx, col: colIdx }; this.selectionEnd = { row: rowIdx, col: colIdx };
       this.longPressActive = false; this.clearLongPress();
       this.longPressTimer = setTimeout(() => {
@@ -542,8 +537,7 @@ export default {
       return item[field] ?? item.姓名 ?? '';
     },
     isEditing(rowIdx, colIdx) { return this.editingCell?.row === rowIdx && this.editingCell?.col === colIdx; },
-    startEditMeta(rowIdx, field) { /* 省略，保留原逻辑 */ },
-    saveEditMeta(rowIdx) { /* 省略，保留原逻辑 */ },
+    // 节次/时间元数据列目前只读（历史搬运时编辑实现未带上，已移除失效的编辑入口）
     // 单元格底色：走廊固定灰；若调用方在 cell 上给了 _bg（热力图等）则优先；否则按课程名配色
     getCellColor(cell) { if (cell._isAisle) return '#d1d5db'; if (cell._bg != null) return cell._bg; return COURSE_COLORS[cell.course] || '#FFFFFF'; },
     // 单元格文字色：调用方在 cell 上给了 _fg（深底白字）才覆盖，否则继承主题文字色

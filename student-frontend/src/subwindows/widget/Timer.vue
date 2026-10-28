@@ -158,15 +158,17 @@ function start() {
     return
   }
 
+  // 以时间戳为基准计算已走秒数：setInterval 在后台/卡顿时会漏拍，
+  // 单纯 ++/-- 会越来越慢，用 Date.now() 差值可自动追平。
+  const startedAt = Date.now()
+  const baseTotal = totalSeconds.value
   interval = setInterval(() => {
+    const elapsed = Math.floor((Date.now() - startedAt) / 1000)
     if (mode.value === 'countup') {
-      totalSeconds.value++
+      totalSeconds.value = baseTotal + elapsed
     } else {
-      totalSeconds.value--
-      if (totalSeconds.value <= 0) {
-        totalSeconds.value = 0
-        pause()
-      }
+      totalSeconds.value = Math.max(0, baseTotal - elapsed)
+      if (totalSeconds.value <= 0) pause()
     }
   }, 1000)
 }
