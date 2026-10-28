@@ -7,6 +7,8 @@
 const fs = require('fs');
 const path = require('path');
 const { dataDir, ensureDir } = require('./dbManager.base');
+// 本地日期（不能引 utils/sql.js：它会 require ../db，而 db 又 require dbManager —— 成环）
+const { todayStr } = require('../utils/date');
 
 // 与数据库同层存放，按班主任 slug 隔离：dataDir/ai-memory/<slug>.md；
 // 内容会注入 AI 系统提示，并随备份/恢复一起带走。
@@ -35,7 +37,8 @@ function appendMemory(slug, items) {
     .slice(0, 20);
   if (!list.length) return { error: '没有可记住的内容' };
   let cur = readMemory(slug).trimEnd();
-  const today = new Date().toISOString().slice(0, 10);
+  // 用本地日期：toISOString 是 UTC，东八区 00:00–08:00 之间会归到昨天的小标题下
+  const today = todayStr();
   const heading = `## ${today}`;
   if (!cur) cur = `# 用户偏好记忆\n\n${heading}`;
   else if (!cur.includes(heading)) cur += `\n\n${heading}`;

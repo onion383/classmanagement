@@ -17,8 +17,10 @@
 //   · **串行**执行。冒烟脚本会各占端口、临时目录（testjs/tmp/…），并行会互相干扰。
 //   · stdio 直接透传，脚本自己的彩色输出/断言信息原样可见，不做二次包装。
 //   · 需要后端在跑的脚本（见 NEEDS_BACKEND）在后端未就绪时判为 SKIP 而非失败——
-//     这类脚本（auth-smoke）测的是「注册/登录/隐私模式」整条链路，没有后端本来就没法跑。
+//     这类脚本测的是完整业务链路，没有后端本来就没法跑。
 //     启动后端：npm run electron:dev，或 node student-backend/app.js。
+//     注意：**安全模式的后端不能用来跑这类脚本**（只认 X-Auth-Proof，Bearer 会被判 401），
+//     所以需要后端的脚本应自己起隔离后端（参考 smoke/auth-smoke.js）。
 //   · .py 脚本用 `python` 跑；找不到 python 则 SKIP（字体校验那类依赖 fontTools）。
 //   · **退出码 3 = 脚本自己判定「环境不具备，跳过」**（如缺 fontTools），不计失败。
 // =========================================================================
@@ -30,8 +32,12 @@ const { spawn } = require('node:child_process')
 
 const SMOKE_DIR = path.join(__dirname, 'smoke')
 const NODE_EXT = new Set(['.cjs', '.mjs', '.js'])
-// 必须后端在跑的脚本（文件名 → 说明）。启动方式见文件头。
-const NEEDS_BACKEND = new Set(['auth-smoke.js'])
+// 必须「外部已有后端在跑」的脚本（文件名 → 说明）。启动方式见文件头。
+// 目前为空：auth-smoke.js 已改为**自己起一个隔离后端**（随机端口 + 临时数据目录 +
+// 不注入 SECURE_MASTER），不再依赖外部 3000 端口。
+// 原因：安全模式下后端只认 X-Auth-Proof 信道凭据，纯 HTTP 客户端带 Bearer 会被
+// 直接判 401，对着 Electron fork 的后端跑必然全红 —— 那不是产品 bug，是测试环境错配。
+const NEEDS_BACKEND = new Set()
 const BACKEND_PORT = Number(process.env.PORT) || 3000
 const BACKEND_HOST = '127.0.0.1'
 // 有产物依赖的脚本必须按顺序跑：pdf-subset-verify.mjs 先生成 subset-out*.ttf，

@@ -43,8 +43,23 @@ async function flip(id, fromDir, toDir, mode) {
   if (!ex) return { error: `不支持的记录类型: ${rec.type}` }
   const validation = ex.validate ? ex.validate(rec.payload) : null
   if (validation) return { error: validation }
-  await ex[mode](rec.payload)
-  db.prepare('UPDATE undo_history SET dir = ? WHERE id = ?').run(toDir, id)
+  // 先 CAS 抢占方向，再执行副作用：原先「执行成功后才切 dir」在 UPDATE 失败时会允许同向重放。
+  // 执行失败则把 dir 改回去，记录仍可重试；极端崩溃只会少一次可撤销，不会重复执行。
+  const claim = db.prepare('UPDATE undo_history SET dir = ? WHERE id = ? AND dir = ?').run(toDir, id, fromDir)
+  if (claim.changes !== 1) {
+    return { error: mode === 'undo' ? '该条已无可撤销' : '该条已无可重做' }
+  }
+  try {
+    await ex[mode](rec.payload)
+  } catch (err) {
+    try {
+      db.prepare('UPDATE undo_history SET dir = ? WHERE id = ? AND dir = ?').run(fromDir, id, toDir)
+    } catch (rollbackErr) {
+      // 回滚失败只可能是库不可写；保留日志，至少不要掩盖原始执行错误
+      console.error('[undo] 执行失败后回滚 dir 失败:', rollbackErr.message)
+    }
+    throw err
+  }
   // 展示文案按当前操作方向生成，而非存库的方向
   const label = ex.describe ? ex.describe(rec.payload, mode) : rec.label
   // 结构化变更结果（供前端本地增量应用）；生成失败一律兜底为全量重载，绝不影响撤销本身

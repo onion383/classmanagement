@@ -196,6 +196,8 @@ import { ref, computed, onMounted, onBeforeUnmount, onActivated, onDeactivated }
 import { useRouter } from 'vue-router'
 import axios from 'axios'
 import { ensureDashboardData } from '../composables/useDashboardData'
+import { reportError } from '../utils/reportError.js'
+import { useSeq } from '../composables/useSeq.js'
 import IconGlyph from '../components/base/IconGlyph.vue'
 import AnimatedClock from '../components/AnimatedClock.vue'
 import ClippedText from '../components/ClippedText.vue'
@@ -259,7 +261,12 @@ async function loadClassInfo() {
       // 直接赋值，不再用 `|| 默认值` 回退：删除后的空值应保留为空，配合占位提示展示
       classInfo.value = { name: d.name ?? '', motto: d.motto ?? '', mottoStyle: d.mottoStyle ?? '', xuefeng: d.xuefeng ?? '' }
     }
-  } catch (_) {}
+  } catch (e) {
+    // 原来完全静默：班名/班训会显示成空白占位，用户以为是自己没填过。
+    // 走 log 档而不是弹提示：这是首页的次要信息，且 /api/dashboard 失败时已有统一提示，
+    // 两个都弹只会变成噪音。
+    reportError(e, { action: '加载班级信息', level: 'log' })
+  }
 }
 async function saveClassInfo(data) {
   try {
@@ -432,22 +439,42 @@ function revokeAlbumPhoto() {
   albumPhoto.value = ''
 }
 
+// 换图：**先**把新 URL 赋上去，**再**释放被它替换掉的那一个。
+// 反过来（先 revoke 再赋值）在并发下会出问题：两次 loadRandomPhoto 交错时，
+// 后到的那次会把另一次刚显示的 blob 释放掉，<img> 指向已失效的 URL → 裂图。
+function replaceAlbumPhoto(blob) {
+  const prev = albumPhoto.value
+  albumPhoto.value = URL.createObjectURL(blob)
+  if (prev && String(prev).startsWith('blob:') && prev !== albumPhoto.value) {
+    try { URL.revokeObjectURL(prev) } catch (_) { /* 忽略 */ }
+  }
+}
+
+// 随机取一张班级照片当首页配图。
+// 注意：调用方可能并发触发（首屏 onMounted 与切回页面的 onActivated 都会调），
+// 所以这里用请求序号守卫，只让最新一次写状态 —— 否则「慢的那次后到」会把新图换成旧图。
+const albumPhotoSeq = useSeq()
 async function loadRandomPhoto(albums) {
-  revokeAlbumPhoto()
+  const my = albumPhotoSeq.take()
   const list = Array.isArray(albums) ? albums : []
   for (const album of list) {
     try {
       const photosRes = await axios.get(`/api/album/${album.id}/photos`)
+      if (!albumPhotoSeq.isLatest(my)) return
       const groups = (photosRes.data && photosRes.data.data) || []
       const photos = (Array.isArray(groups) ? groups : []).flatMap(g => (g.photos || []))
       if (photos.length === 0) continue
       const pick = photos[Math.floor(Math.random() * photos.length)]
       const thumbRes = await axios.get(`/api/album/photo/${pick.id}/thumb`, { responseType: 'blob' })
-      revokeAlbumPhoto()
-      albumPhoto.value = URL.createObjectURL(thumbRes.data)
+      // 过期响应：不换图、也不释放当前图（那是另一次调用的成果）
+      if (!albumPhotoSeq.isLatest(my)) return
+      replaceAlbumPhoto(thumbRes.data)
       return
     } catch (_) { /* 试下一个相册 */ }
   }
+  // 一个相册都没取到图（无照片或全部失败）：只有仍是最新一次时才清空旧图，
+  // 否则会把另一路调用刚显示出来的图清掉。
+  if (albumPhotoSeq.isLatest(my)) revokeAlbumPhoto()
 }
 function getStudentName(id) {
   const s = students.value.find(st => st.id === Number(id) || st.id === id)
@@ -477,7 +504,9 @@ async function loadData(force = false) {
     // 相册：挑一个含照片的相册，随机取一张
     loadRandomPhoto(d.album)
   } catch (err) {
-    console.error('[dashboard] 加载数据失败:', err)
+    // 后端不可达（没有 response）时，App 的「后端启动失败」遮罩会统一提示，这里不重复打扰；
+    // 后端可达但返回错误才该让用户知道 —— 否则首屏看着「全是 0」像是数据没了。
+    reportError(err, { action: '加载首页数据', level: err && err.response ? 'user' : 'log' })
   } finally {
     loading.value = false
     initialLoading.value = false

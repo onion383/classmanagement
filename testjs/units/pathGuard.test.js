@@ -72,6 +72,22 @@ test('resolveSafeFolder / resolveSafeWriteDir / resolveSafeLaunchPath：拒绝�
   g.setProtectedRoots([])
 })
 
+test('路径保护解析真实路径：指向保护目录的 junction / 符号链接被拒绝', (t) => {
+  const dir = tempDir()
+  const link = path.join(dir, 'protected-link')
+  try {
+    // Windows 的目录 junction 普通用户即可创建，不需要管理员；不能按「门槛高」忽略
+    fs.symlinkSync(SYS_ROOT, link, isWin ? 'junction' : 'dir')
+  } catch (e) {
+    t.skip(`当前环境无法创建链接：${e.message}`)
+    return
+  }
+  assert.match(g.resolveSafeFolder(link).error, /系统保护目录/)
+  // 不存在的子目录也必须沿最近的已存在祖先（link）识别出保护目录
+  assert.match(g.resolveSafeWriteDir(path.join(link, 'new-sub'), dir).error, /系统保护目录/)
+  try { fs.rmSync(dir, { recursive: true, force: true }) } catch (_) { /* best-effort: 清理临时目录 */ }
+})
+
 test('resolveSafeWriteDir：空 saveDir 回退默认目录；允许尚不存在的目录；拒绝文件', () => {
   const dir = tempDir()
   // 传入空串 → 用 fallback

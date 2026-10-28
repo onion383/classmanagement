@@ -189,6 +189,35 @@ window.addEventListener('contextmenu', (e) => {
 import { vPreload } from './utils/dialogPrefetch'
 app.directive('preload', vPreload)
 
+// ===== 全局错误兜底 =====
+// 目的：组件渲染、生命周期钩子、路由守卫里漏掉的异常，用户至少能看到一次提示，
+// 控制台留下全量现场。这是「只覆盖常见用户路径」的前提——没有这层，漏掉的路径就是静默失效：
+// 界面毫无反应，用户以为点错了，实际上后台已经报错。
+//
+// 为什么 unhandledrejection 只记日志、不弹提示：项目里有 91 处 fire-and-forget 的 `.catch(() => {})`
+// （删临时文件、POST logout、打开外部链接），那里失败是常态而不是异常。
+// 全局弹窗会变成噪音，反而把真正的错误淹没掉。
+let lastVueErrorToast = 0
+app.config.errorHandler = (err, instance, info) => {
+  console.error('[vue-error]', info, err)
+  // 渲染期错误可能在同一个 tick 内连发（同一份坏数据驱动多个组件重渲染）：
+  // 2 秒内只提示一次，避免刷屏。同文案的合并由 useNotification 自身去重兜住。
+  const now = Date.now()
+  if (now - lastVueErrorToast > 2000) {
+    lastVueErrorToast = now
+    try {
+      useNotification().error(`操作失败：${(err && err.message) || err}`)
+    } catch (_) {
+      // best-effort: 通知系统自身不可用时不能再抛，否则错误边界循环报错
+    }
+  }
+}
+
+window.addEventListener('unhandledrejection', (e) => {
+  // 只记录，不 preventDefault：保留原始的「未处理」状态，便于开发者工具里定位。
+  console.error('[unhandled-rejection]', e.reason)
+})
+
 const mountStart = performance.now()
 // 首屏占位保活：Vue 挂载会清空 #app，但此刻首次导航往往还没完成（$route.path 仍是 '/'），
 // App 会先渲染出「标题栏 + 侧边栏 + 空内容区」的外壳。这里把 index.html 的占位节点移到

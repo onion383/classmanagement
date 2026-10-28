@@ -272,8 +272,10 @@ async function checkUpdate() {
     applyUpdateState(s)
   } catch (e) {
     // 原来静默吞掉：用户点了「检查更新」后界面毫无变化，分不清「已是最新」还是「检查失败」。
-    // updateError 会在弹窗里展示（与主进程推送的 update-state.error 同一处）。
+    // ⚠️ 必须同时置 updateStatus='error'：statusText 只在 status==='error' 分支里读 updateError，
+    // 只设 updateError 而不改状态的话，那段文案永远不会显示（界面停在「等待检查」）。
     updateError.value = '检查更新失败，请检查网络后重试'
+    updateStatus.value = 'error'
     console.error(e)
   }
 }

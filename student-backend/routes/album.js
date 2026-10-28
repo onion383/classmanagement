@@ -155,12 +155,8 @@ function readAlbumStats() {
 }
 
 router.get('/', (req, res) => {
-  try {
     const data = readAlbums();
-    res.json({ data, stats: { ...readAlbumStats(), album_count: data.length } });
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
+  res.json({ data, stats: { ...readAlbumStats(), album_count: data.length } });
 });
 
 // POST /api/album 新建相册
@@ -310,28 +306,24 @@ function createVirtualAlbum(name, photoIds) {
 // POST /api/album/:id/rescan 手动重新扫描（增量/全量/虚拟相册刷新）
 // 请求体 mode: 'incremental'（默认）/ 'full' / 'virtual'
 router.post('/:id/rescan', (req, res) => {
-  try {
     const albumId = Number(req.params.id);
-    const album = db.prepare('SELECT * FROM albums WHERE id = ?').get(albumId);
-    if (!album) return res.status(404).json({ error: '相册不存在' });
-    const mode = req.body && req.body.mode === 'full' ? 'full' : 'incremental';
-    // 虚拟相册没有绑定文件夹，不能走「遍历目录」那两条路；
-    // 但它的索引同样是拷贝来的（拍摄时间、缩略图版本都会过时），
-    // 所以给它 'virtual' 模式：只按已有索引行更新字段与缩略图，不遍历磁盘、不增删行。
-    if (album.kind === 'virtual') {
-      dispatchVirtual(albumId, '');
-      return res.json({ message: '已开始更新虚拟相册的照片信息与缩略图' });
-    }
-    // 派活给扫描子进程（真正干活的在 worker.scan.js 里），主进程不等待扫完 —— 接口立刻返回。
-    if (mode === 'full') {
-      dispatchFull(albumId, '');
-    } else {
-      dispatchIncremental(albumId, '');
-    }
-    res.json({ message: '已开始' + (mode === 'full' ? '完全更新' : '增量更新') + '照片索引' });
-  } catch (err) {
-    res.status(500).json({ error: err.message });
+  const album = db.prepare('SELECT * FROM albums WHERE id = ?').get(albumId);
+  if (!album) return res.status(404).json({ error: '相册不存在' });
+  const mode = req.body && req.body.mode === 'full' ? 'full' : 'incremental';
+  // 虚拟相册没有绑定文件夹，不能走「遍历目录」那两条路；
+  // 但它的索引同样是拷贝来的（拍摄时间、缩略图版本都会过时），
+  // 所以给它 'virtual' 模式：只按已有索引行更新字段与缩略图，不遍历磁盘、不增删行。
+  if (album.kind === 'virtual') {
+    dispatchVirtual(albumId, '');
+    return res.json({ message: '已开始更新虚拟相册的照片信息与缩略图' });
   }
+  // 派活给扫描子进程（真正干活的在 worker.scan.js 里），主进程不等待扫完 —— 接口立刻返回。
+  if (mode === 'full') {
+    dispatchFull(albumId, '');
+  } else {
+    dispatchIncremental(albumId, '');
+  }
+  res.json({ message: '已开始' + (mode === 'full' ? '完全更新' : '增量更新') + '照片索引' });
 });
 
 // POST /api/album/:id/stop 停止正在进行的扫描
@@ -492,54 +484,42 @@ router.post('/tasks/resume', (req, res) => {
 
 // PATCH /api/album/:id 修改相册名称/路径
 router.patch('/:id', async (req, res) => {
-  try {
     const albumId = Number(req.params.id);
-    const album = db.prepare('SELECT * FROM albums WHERE id = ?').get(albumId);
-    if (!album) return res.status(404).json({ error: '相册不存在' });
-    const name = (req.body && req.body.name) || album.name;
-    const folder = (req.body && req.body.folder_path) || album.folder_path;
-    db.prepare('UPDATE albums SET name = ?, folder_path = ?, updated_at = ? WHERE id = ?').run(name, folder, now(), albumId);
-    res.json({ message: '相册已更新' });
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
+  const album = db.prepare('SELECT * FROM albums WHERE id = ?').get(albumId);
+  if (!album) return res.status(404).json({ error: '相册不存在' });
+  const name = (req.body && req.body.name) || album.name;
+  const folder = (req.body && req.body.folder_path) || album.folder_path;
+  db.prepare('UPDATE albums SET name = ?, folder_path = ?, updated_at = ? WHERE id = ?').run(name, folder, now(), albumId);
+  res.json({ message: '相册已更新' });
 });
 
 // PUT /api/album/reorder 批量更新相册排序
 router.put('/reorder', (req, res) => {
-  try {
     const ids = req.body && req.body.ids;
-    if (!Array.isArray(ids)) return res.status(400).json({ error: 'ids 必须为数组' });
-    const update = db.prepare('UPDATE albums SET sort_order = ? WHERE id = ?');
-    ids.forEach((id, i) => update.run(i, id));
-    res.json({ message: '排序已更新' });
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
+  if (!Array.isArray(ids)) return res.status(400).json({ error: 'ids 必须为数组' });
+  const update = db.prepare('UPDATE albums SET sort_order = ? WHERE id = ?');
+  ids.forEach((id, i) => update.run(i, id));
+  res.json({ message: '排序已更新' });
 });
 
 // DELETE /api/album/:id 删除相册（仅删除索引，不删除磁盘照片）
 router.delete('/:id', async (req, res) => {
-  try {
     const albumId = Number(req.params.id);
-    const slug = dbManager.currentSlug();
-    // 删除相册时清理其所有照片的缩略图缓存
-    // 路径按库隔离推导（{THUMB_DIR}/{slug}/{photoId}.jpg）；
-    // 库里的 thumb_path 也一并清掉，避免索引删了但文件还在。
-    const thumbs = db.prepare('SELECT id, thumb_path FROM album_photos WHERE album_id = ?').all(albumId);
-    await Promise.all(thumbs.map(r => {
-      albumThumbs.forgetPhoto(slug, r.id);
-      const p = albumThumbs.thumbPathFor(slug, r.id);
-      return Promise.all([fsp.unlink(p).catch(() => {}), r.thumb_path ? fsp.unlink(r.thumb_path).catch(() => {}) : null]);
-    }));
-    db.prepare('DELETE FROM album_photos WHERE album_id = ?').run(albumId);
-    db.prepare('DELETE FROM albums WHERE id = ?').run(albumId);
-    // 相册没了，正在跑的扫描也要停（子进程会在检查点发现相册已不存在而收工）
-    scanWorker.requestStop(slug, albumId);
-    res.json({ message: '相册已删除' });
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
+  const slug = dbManager.currentSlug();
+  // 删除相册时清理其所有照片的缩略图缓存
+  // 路径按库隔离推导（{THUMB_DIR}/{slug}/{photoId}.jpg）；
+  // 库里的 thumb_path 也一并清掉，避免索引删了但文件还在。
+  const thumbs = db.prepare('SELECT id, thumb_path FROM album_photos WHERE album_id = ?').all(albumId);
+  await Promise.all(thumbs.map(r => {
+    albumThumbs.forgetPhoto(slug, r.id);
+    const p = albumThumbs.thumbPathFor(slug, r.id);
+    return Promise.all([fsp.unlink(p).catch(() => {}), r.thumb_path ? fsp.unlink(r.thumb_path).catch(() => {}) : null]);
+  }));
+  db.prepare('DELETE FROM album_photos WHERE album_id = ?').run(albumId);
+  db.prepare('DELETE FROM albums WHERE id = ?').run(albumId);
+  // 相册没了，正在跑的扫描也要停（子进程会在检查点发现相册已不存在而收工）
+  scanWorker.requestStop(slug, albumId);
+  res.json({ message: '相册已删除' });
 });
 
 // ======================== 照片浏览 ========================
@@ -948,7 +928,15 @@ router.get('/photo/:photoId/save-as', async (req, res) => {
     res.setHeader('Content-Type', contentTypeOf(photo.file_name));
     res.setHeader('Content-Disposition', `attachment; filename*=UTF-8''${encodeURIComponent(photo.file_name)}`);
     res.setHeader('Content-Length', stat.size);
-    fs.createReadStream(photo.file_path).pipe(res);
+    // 与 /photo/:id/file 的两处流一致：stat 通过后、流真正打开前文件仍可能被删/占用，
+    // Readable 的 error 没有监听就会变成 uncaughtException —— 本项目没有进程级兜底，
+    // 那会直接崩掉后端（前端全废）。这里必须同样挂 error 并销毁响应。
+    const stream = fs.createReadStream(photo.file_path);
+    stream.on('error', (e) => {
+      console.error('[album] 另存读取源文件失败:', e.message);
+      res.destroy(e);
+    });
+    stream.pipe(res);
   } catch (err) {
     res.status(500).json({ error: err.message });
   }

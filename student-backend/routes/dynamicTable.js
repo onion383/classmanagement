@@ -1,4 +1,6 @@
 const express = require('express');
+const { db } = require('../db');
+const { renameStudentRefs } = require('../services/studentRename');
 const {
   queryAll, insertRow, updateRow, deleteRow, moveRow,
   addColumn, deleteColumn, reorderRows, moveColumn, importRows, renameColumn
@@ -16,21 +18,17 @@ function createDynamicTableRouter(tableName, options = {}) {
 
   // GET /
   router.get('/', (req, res) => {
-    try {
-      const result = queryAll(tableName);
-      if (fieldTypeOverrides && result.fields) {
-        result.fields.forEach(f => {
-          if (fieldTypeOverrides[f.name]) {
-            f.type = fieldTypeOverrides[f.name];
-          }
-        });
-      }
-      // 短时缓存：数据可能在 30 秒内不变，减少重复查询
-      res.set('Cache-Control', 'private, max-age=30');
-      res.json(result);
-    } catch (err) {
-      res.status(500).json({ error: err.message });
+        const result = queryAll(tableName);
+    if (fieldTypeOverrides && result.fields) {
+      result.fields.forEach(f => {
+        if (fieldTypeOverrides[f.name]) {
+          f.type = fieldTypeOverrides[f.name];
+        }
+      });
     }
+    // 短时缓存：数据可能在 30 秒内不变，减少重复查询
+    res.set('Cache-Control', 'private, max-age=30');
+    res.json(result);
   });
 
   // POST /
@@ -46,8 +44,20 @@ function createDynamicTableRouter(tableName, options = {}) {
   // PUT /:id
   router.put('/:id', (req, res) => {
     try {
+      // 学生改名要顺手把「只存姓名」的关联一起改掉（值日/座位/成绩/请假/小组/班干部），
+      // 否则值日指数会按旧名归集、新名字从 0 开始。其余表没有这层关联。
+      const before = tableName === 'students'
+        ? db.prepare('SELECT 姓名 FROM students WHERE id = ?').get(Number(req.params.id))
+        : null;
       updateRow(tableName, req.params.id, req.body);
-      res.json({ message: '修改成功' });
+      let renamed = null;
+      if (before && req.body && req.body['姓名'] != null) {
+        const after = db.prepare('SELECT 姓名 FROM students WHERE id = ?').get(Number(req.params.id));
+        if (after && before['姓名'] !== after['姓名']) {
+          renamed = renameStudentRefs(before['姓名'], after['姓名']);
+        }
+      }
+      res.json({ message: '修改成功', renamed });
     } catch (err) {
       res.status(400).json({ error: err.message });
     }

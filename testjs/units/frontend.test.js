@@ -404,7 +404,12 @@ test('csvCell：= + - @ 开头的值前置单引号，阻断公式注入', async
   assert.equal(csvCell('-1'), "'-1")
   assert.equal(csvCell('@cmd'), "'@cmd")
   assert.equal(csvCell('\tcmd'), "'\tcmd")
+  // 前导空白 + 公式字符：Excel/WPS 仍可能按公式求值，必须一并前置单引号
+  assert.equal(csvCell(' =SUM(A1:A9)'), "' =SUM(A1:A9)")
+  assert.equal(csvCell('\t@cmd'), "'\t@cmd")
+  assert.equal(csvCell('\r-1'), "\"'\r-1\"")
   // 非公式起始字符不动
+  assert.equal(csvCell('  hello'), '  hello')
   assert.equal(csvCell('张三'), '张三')
   assert.equal(csvCell(0), '0')
   assert.equal(csvCell(null), '')
@@ -459,8 +464,11 @@ test('parseSheet：同名表头加序号后缀，两列数据都保留', async (
     ['张三', 'A', 'B'],
   ]
   const parsed = parseSheet(data)
-  assert.deepEqual(parsed.fields, ['姓名', '备注', '备注 (2)'])
-  assert.deepEqual(parsed.rows, [{ 姓名: '张三', 备注: 'A', '备注 (2)': 'B' }])
+  // 后缀是 `_2` 而不是 ` (2)`：这些 name 会原样作为列名 POST 给后端，
+  // 而 assertValidColumn 的白名单 /^[a-zA-Z0-9_一-龥]+$/ 不接受空格与括号，
+  // 用 ` (2)` 会让含同名表头的 Excel 整体导入失败。改回括号前请先看 importSheet.js 里的注释。
+  assert.deepEqual(parsed.fields, ['姓名', '备注', '备注_2'])
+  assert.deepEqual(parsed.rows, [{ 姓名: '张三', 备注: 'A', '备注_2': 'B' }])
 })
 
 // =========================================================================
@@ -653,3 +661,125 @@ test('_isSingleUnpicked：缺 options 的题按「无选项」处理，不抛 Ty
   assert.equal(_isSingleUnpicked({ multiple: false, options: ['a'], picked: 'a' }), false)
 })
 
+
+// =========================================================================
+// useSeq：异步竞态序号守卫
+// 迁移自 5 处手写的 `let xxxSeq = 0`，这里锁住语义，防止以后被改成
+// 「共享计数器」（会导致两个组件互相作废对方请求）。
+// =========================================================================
+const loadSeq = () => import(pathToFileURL(path.join(__dirname, '../../student-frontend/src/composables/useSeq.js')).href)
+
+test('useSeq：take 递增，isLatest 只认最新号', async () => {
+  const { useSeq } = await loadSeq()
+  const seq = useSeq()
+  const a = seq.take()
+  const b = seq.take()
+  assert.equal(a, 1)
+  assert.equal(b, 2)
+  assert.equal(seq.isLatest(a), false, '旧号必须被判为过期')
+  assert.equal(seq.isLatest(b), true)
+})
+
+test('useSeq：current 读当前号但不递增（同一批请求的第二阶段沿用）', async () => {
+  const { useSeq } = await loadSeq()
+  const seq = useSeq()
+  const a = seq.take()
+  assert.equal(seq.current(), a)
+  assert.equal(seq.current(), a, 'current 不能改变序号')
+  assert.equal(seq.isLatest(a), true)
+})
+
+test('useSeq：invalidate 作废所有在途请求', async () => {
+  const { useSeq } = await loadSeq()
+  const seq = useSeq()
+  const a = seq.take()
+  seq.invalidate()
+  assert.equal(seq.isLatest(a), false, 'invalidate 后旧号必须失效')
+  const b = seq.take()
+  assert.equal(seq.isLatest(b), true)
+  assert.equal(seq.isLatest(a), false)
+})
+
+test('useSeq：两次调用互不干扰（不能是模块级共享计数器）', async () => {
+  const { useSeq } = await loadSeq()
+  const one = useSeq()
+  const two = useSeq()
+  const a = one.take()
+  const b = two.take()
+  assert.equal(a, 1)
+  assert.equal(b, 1, '两个实例各自从 1 开始')
+  one.take()
+  assert.equal(one.isLatest(a), false)
+  assert.equal(two.isLatest(b), true, '另一个实例的号不受影响')
+})
+
+// =========================================================================
+// reportError：错误上报的分级与文案口径
+// 锁住三件事：① log/silent 不打扰用户 ② 技术性后端消息不外露 ③ 动作名优先
+// =========================================================================
+const loadReportError = () => import(pathToFileURL(path.join(__dirname, '../../student-frontend/src/utils/reportError.js')).href)
+const loadNotif = () => import(pathToFileURL(path.join(__dirname, '../../student-frontend/src/composables/useNotification.js')).href)
+
+// 读通知列表并把定时器清掉：error 级默认挂 5 秒 setTimeout，不清会让测试进程空等
+async function withNotifications(fn) {
+  const { useNotification } = await loadNotif()
+  const list = useNotification().notifications
+  list.splice(0).forEach((n) => clearTimeout(n.timer))
+  try {
+    return await fn(list)
+  } finally {
+    list.splice(0).forEach((n) => clearTimeout(n.timer))
+  }
+}
+
+const httpErr = (msg) => ({ response: { data: { error: msg } } })
+
+test('reportError：user 档弹提示，无后端消息时用「动作+结果」', async () => {
+  const { reportError } = await loadReportError()
+  await withNotifications((list) => {
+    reportError(new Error('boom'), { action: '保存', hint: '改动未保存' })
+    assert.equal(list.length, 1)
+    assert.equal(list[0].message, '保存失败，改动未保存')
+  })
+})
+
+test('reportError：log / silent 档不弹给用户', async () => {
+  const { reportError } = await loadReportError()
+  await withNotifications((list) => {
+    assert.equal(reportError(new Error('x'), { level: 'log' }), false)
+    assert.equal(reportError(new Error('y'), { level: 'silent' }), false)
+    assert.equal(list.length, 0, '日志档与静默档都不该产生通知')
+  })
+})
+
+test('reportError：后端可读消息会拼进文案', async () => {
+  const { reportError } = await loadReportError()
+  await withNotifications((list) => {
+    reportError(httpErr('该用户名已被占用'), { action: '改名' })
+    assert.equal(list[0].message, '改名失败：该用户名已被占用')
+  })
+})
+
+test('reportError：技术性后端消息被过滤成通用文案', async () => {
+  const { reportError } = await loadReportError()
+  await withNotifications((list) => {
+    reportError(httpErr('SQLITE_CONSTRAINT: UNIQUE constraint failed: users.username'), { action: '写入' })
+    assert.equal(list[0].message, '写入失败，请重试', '不该把 SQL 报错摆给用户')
+    reportError(httpErr('Cannot read properties of undefined (reading "id")'), { action: '读取' })
+    assert.equal(list[1].message, '读取失败，请重试')
+  })
+})
+
+test('reportError：无 action 时退化为通用文案；脏输入不抛', async () => {
+  const { reportError } = await loadReportError()
+  await withNotifications((list) => {
+    reportError(null)
+    assert.equal(list[0].message, '操作失败，请重试')
+    // 后两次没有 action 也没有后端消息 → 文案同上，被 useNotification 按「同文案合并」归并。
+    // 这正好也锁住了合并机制：连续失败不会刷出三条一样的提示。
+    reportError('纯字符串错误')
+    reportError({})
+    assert.equal(list.length, 1, '同文案应合并成一条')
+    assert.equal(list[0].count, 3, '合并后计数应为 3')
+  })
+})

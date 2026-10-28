@@ -51,11 +51,13 @@ const isCustomActive = computed(() => {
   return !props.presetColors.includes(props.modelValue)
 })
 
-// 外部把值改成非预设色时，取色器同步显示该颜色（否则永远停在首次的 #000000）
+// 外部把值改成任何颜色时，取色器都同步显示该颜色（否则永远停在首次的 #000000）。
+// 这里**不能**只同步「非预设色」：点预设按钮选中后 customColor 会留在黑色，
+// 此时点「+」打开的取色器显示 #000000，用户不拖动直接确认就把颜色改成了黑色。
 watch(
   () => props.modelValue,
   (v) => {
-    if (v && !props.presetColors.includes(v)) customColor.value = v
+    if (v) customColor.value = v
   },
   { immediate: true }
 )

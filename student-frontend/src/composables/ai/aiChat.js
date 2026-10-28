@@ -1,3 +1,4 @@
+import { reportError } from '../../utils/reportError.js'
 import axios from 'axios'
 import { undoById } from '../../api/undo.js'
 import { useNotification } from '../useNotification.js'
@@ -131,7 +132,7 @@ export default {
     async rollbackTurn() {
       const li = this._lastAssistantIndex()
       if (li < 0 || !this.isRollbackable(li)) return
-      const { success: notify, error: notifyError } = useNotification()
+      const { success: notify } = useNotification()
       // 本轮起点：从末尾往前找最近的「真实用户提问」（排除自动续跑消息）
       let start = this.messages.length - 1
       while (start >= 0 && !(this.messages[start].role === 'user' && !this._isAutoMessage(this.messages[start]))) start--
@@ -170,7 +171,7 @@ export default {
         notify('已回退到本轮提问前')
         await this.loadConversationList()
       } catch (err) {
-        notifyError('回退失败：' + (err.response?.data?.error || err.message || '未知错误'))
+        reportError(err, { action: '回退' })
       }
     },
     // auto=true 时为「自动反馈」消息（回答提问 / 执行或取消提案）：落库标记 process.auto，界面不渲染气泡

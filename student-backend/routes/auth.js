@@ -43,11 +43,7 @@ function setAuthCookie(res, token) {
 // 账号列表：登录页「从数据库注册」加载已登记的班主任账号（无需登录）。
 // 仅返回数据库有效的账号——解不开/打不开/账号行缺失的无效库直接隐藏。
 router.get('/accounts', (req, res) => {
-  try {
     res.json({ accounts: dbManager.registryListValid() });
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
 });
 
 // 轻量登录态校验：前端在进入内部页前调用，确认本地 token 仍被后端接受。
@@ -59,11 +55,7 @@ router.get('/me', auth(), (req, res) => {
 // 刷新媒体凭据：媒体凭据过期或换号后，前端用普通 API 调用取一份新的，
 // 不必让用户重新登录（登录 token 仍有效即可）。
 router.get('/media-token', auth(), (req, res) => {
-  try {
     res.json({ mediaToken: signMediaToken(req.user) });
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
 });
 
 // ---------------------------------------------------------------------------

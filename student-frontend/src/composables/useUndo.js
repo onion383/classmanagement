@@ -73,8 +73,14 @@ function pushRow(type, key, row) {
         refreshUndoStatus(true)
         return (res && res.data && res.data.id) || null
       })
-      .catch(() => null)
-  } catch {
+      .catch((e) => {
+        // 返回 null 时调用方会退回「已删除」这类不含撤销入口的提示，用户看到的信息是对的；
+        // 但失败原因原先连控制台都没有，排查「删了之后撤不回去」时无从下手。
+        console.warn('[undo] 撤销记录登记失败（本次操作将不可撤销）', e);
+        return null;
+      })
+  } catch (e) {
+    console.warn('[undo] 撤销记录登记失败（本次操作将不可撤销）', e);
     return Promise.resolve(null)
   }
 }

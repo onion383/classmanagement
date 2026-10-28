@@ -361,9 +361,11 @@ import { ref, computed, nextTick, onMounted, onActivated, onDeactivated, onBefor
 import axios from 'axios'
 import { pushUndo } from '../api/undo'
 import { useNotification } from '../composables/useNotification.js'
+import { reportError } from '../utils/reportError.js'
 import { applyRouteRowFocus } from '../composables/useRowFocus.js'
 import { useUndoShortcut } from '../composables/useUndo.js'
 import { useAlbumScan } from '../composables/useAlbumScan.js'
+import { useSeq } from '../composables/useSeq.js'
 import { usePhotoTimeline } from '../composables/usePhotoTimeline.js'
 import { useThumbBatch } from '../composables/useThumbBatch.js'
 import VideoThumb from '../components/import-export/VideoThumb.vue'
@@ -543,7 +545,7 @@ async function loadAlbums(first = true) {
     }
     if (activeAlbumId.value) await loadPhotos(first)
   } catch (e) {
-    useNotification().error(e.response?.data?.error || '加载相册列表失败')
+    reportError(e, { action: '加载相册列表' })
     console.error(e)
   }
 }
@@ -563,22 +565,29 @@ const sizeParts = computed(() => {
 })
 
 // 照片列表请求序号：切换相册/刷新时先发的请求可能后到，旧相册的照片不能写进新相册（B06-07）
-let photosSeq = 0
+const photosSeq = useSeq()
 
 async function loadPhotos(first = true) {
-  const my = ++photosSeq
+  const my = photosSeq.take()
   if (!activeAlbumId.value) { groups.value = []; return }
-  const res = await axios.get(`/api/album/${activeAlbumId.value}/photos`, { headers: authHeaders() })
-  // 期间已切到别的相册（或又刷新了一次）：这批照片已过期，丢弃
-  if (my !== photosSeq) return
-  groups.value = res.data.data || []
-  if (first) {
-    // 切换相册/刷新后回到顶部并重新计量
-    await nextTick()
-    resetTimeline()
+  try {
+    const res = await axios.get(`/api/album/${activeAlbumId.value}/photos`, { headers: authHeaders() })
+    // 期间已切到别的相册（或又刷新了一次）：这批照片已过期，丢弃
+    if (!photosSeq.isLatest(my)) return
+    groups.value = res.data.data || []
+    if (first) {
+      // 切换相册/刷新后回到顶部并重新计量
+      await nextTick()
+      resetTimeline()
+    }
+    // 照片列表换新了 → 立即触发一次批量预取（不等滚动）
+    refreshThumbBatch()
+  } catch (e) {
+    // 照片接口的失败在这里统一处理，避免被调用方误报成「相册列表加载失败」
+    if (!photosSeq.isLatest(my)) return
+    reportError(e, { action: '加载照片' })
+    console.error(e)
   }
-  // 照片列表换新了 → 立即触发一次批量预取（不等滚动）
-  refreshThumbBatch()
 }
 
 function selectAlbum(id) {
@@ -589,6 +598,7 @@ function selectAlbum(id) {
     clearThumbBatch()
   }
   activeAlbumId.value = id
+  // loadPhotos 内部已捕获并提示，这里不需要再包一层 catch
   loadPhotos()
 }
 
@@ -700,7 +710,7 @@ async function refreshAll() {
     await loadAlbums()
     useNotification().success(isVirtual ? '虚拟相册已更新' : '照片索引已更新')
   } catch (err) {
-    useNotification().error(err.response?.data?.error || '刷新失败')
+    reportError(err, { action: '刷新' })
   } finally { busyScan.value = false }
 }
 
@@ -723,8 +733,13 @@ let scanWatchTimer = 0
 // 上一轮「当前相册是否有扫描在跑」：用于扫完瞬间补拉最后一次，
 // 否则任务从 /tasks 消失的那轮不刷新，尾巴上的照片就丢了。
 let scanWatchActiveRunning = false
+// 停表标志：stopScanWatch 里的 clearTimeout 对**已经触发、正在 await** 的那次 tick 无效。
+// 没有这个标志时，tick 从 await 回来后照样执行到末尾的 scheduleScanWatch —— 定时器复活，
+// 组件 deactivated 甚至卸载后仍每 3s 轮询 /tasks 并写已卸载组件的状态。
+let scanWatchStopped = false
 
 async function scanWatchTick() {
+  if (scanWatchStopped) return
   let running = []
   try {
     const res = await axios.get('/api/album/tasks', { headers: authHeaders() })
@@ -732,27 +747,33 @@ async function scanWatchTick() {
   } catch (_) {
     running = []
   }
+  // await 期间可能已被停表（切走页面/卸载）：此时不能再写状态、更不能重新排定
+  if (scanWatchStopped) return
   const activeRunning = running.some(t => t.albumId === activeAlbumId.value)
   // 本册在扫 → 本轮刷新；本册刚从「在扫」转「扫完」→ 补拉收尾
   if (activeRunning || (scanWatchActiveRunning && !activeRunning)) {
     await loadAlbums(false).catch(() => {})
+    if (scanWatchStopped) return // 这第二个 await 之后同样要重新判断
   }
   scanWatchActiveRunning = activeRunning
   scheduleScanWatch(running.length ? SCAN_BUSY_MS : SCAN_IDLE_MS)
 }
 
 function scheduleScanWatch(ms) {
+  if (scanWatchStopped) return
   clearTimeout(scanWatchTimer)
   scanWatchTimer = setTimeout(scanWatchTick, ms)
 }
 
 function startScanWatch() {
   if (scanWatchTimer) return
+  scanWatchStopped = false
   // 立即探一次：进页面/切回来就能接上正在跑的扫描
   scheduleScanWatch(0)
 }
 
 function stopScanWatch() {
+  scanWatchStopped = true
   clearTimeout(scanWatchTimer)
   scanWatchTimer = 0
   scanWatchActiveRunning = false
@@ -826,7 +847,7 @@ async function mergeSelectedAlbums() {
     await loadAlbums()
     useNotification().success(res.data?.message || '相册已合并')
   } catch (err) {
-    useNotification().error(err.response?.data?.error || '合并相册失败')
+    reportError(err, { action: '合并相册' })
   } finally {
     merging.value = false
   }
@@ -1018,7 +1039,7 @@ async function saveAs(p) {
     URL.revokeObjectURL(url)
     useNotification().success('已开始另存')
   } catch (err) {
-    useNotification().error(err.response?.data?.error || '另存失败')
+    reportError(err, { action: '另存' })
   }
 }
 
@@ -1034,12 +1055,16 @@ async function deletePhoto(p) {
       payload: {
         photo: { id: p.id, album_id: activeAlbum.value?.id, file_path: p.file_path, file_name: p.file_name, file_size: p.file_size, mtime: p.mtime, photo_date: p.photo_date, exif_date: p.exif_date, date_src: p.date_src }
       }
-    }).catch(() => {})
+    }).catch((e) => {
+      // 照片已经删掉了，只是撤销记录没登记上：提示仍说「已移入回收站」（没承诺可撤销），
+      // 但控制台要留下原因，否则用户回头发现撤不回去时无从排查。
+      console.warn('[undo] 删除照片的撤销记录登记失败（本次删除将不可撤销）', e)
+    })
     viewer.value = null
     useNotification().success('已移入回收站')
     loadPhotos()
   } catch (err) {
-    useNotification().error(err.response?.data?.error || '删除失败')
+    reportError(err, { action: '删除' })
   }
 }
 

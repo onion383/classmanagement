@@ -76,6 +76,7 @@
       :x="contextMenu.x"
       :y="contextMenu.y"
       :items="contextMenu.items"
+      @close="hideContextMenu"
     />
 
     <DynamicTable
@@ -155,6 +156,7 @@
 </template>
 
 <script setup>
+import { reportError } from '../utils/reportError.js'
 import { ref, computed, watch, onMounted, onActivated, getCurrentInstance, defineAsyncComponent } from 'vue'
 import axios from 'axios'
 import SearchBar from '../components/base/SearchBar.vue'
@@ -243,7 +245,7 @@ const {
   startEditCell, saveCell,
   addNewRowAtBottom, cancelNewRow, saveNewRow,
   moveRow,
-  toggleSort, openSearch, closeSearch, clearSearchKeyword, openContextMenu,
+  toggleSort, openSearch, closeSearch, clearSearchKeyword, openContextMenu, hideContextMenu,
   onUpdateNewRow, onBatchDelete,
   onMoveSelectedRows, onSwapRows, onSwapColumns,
   onSelectionChange, onImportData, onDeleteDuplicates
@@ -335,7 +337,7 @@ async function onSubmitStudent(data) {
       notifySuccess('已添加学生')
     }
   } catch (err) {
-    notifyError(err.response?.data?.error || (isEdit ? '保存失败' : '添加失败'))
+    reportError(err, { action: isEdit ? '保存' : '添加' })
   }
 }
 
@@ -394,6 +396,8 @@ async function deleteStudent(id) {
   if (rel.score) parts.push(`${rel.score} 条加减分记录`)
   if (rel.seat) parts.push(`${rel.seat} 个座位`)
   if (rel.duty) parts.push(`${rel.duty} 个值日岗位`)
+  if (rel.group) parts.push(`${rel.group} 处小组成员`)
+  if (rel.cadre) parts.push(`${rel.cadre} 个班干部职务`)
   const who = student ? `「${student['姓名']}」` : '该学生'
   const msg = `${who}还有 ${parts.join('、')}。\n\n「一并删除」会同时删除这些关联记录；\n「仅删学生」保留它们（可能成为指向不存在学生的孤儿数据）；\n「取消」不做任何操作。`
 
@@ -401,7 +405,7 @@ async function deleteStudent(id) {
     try {
       dynamicTable.value?.beginRowsAnimWindow() // 级联删除同样要行离场动画
       await axios.post(`${API_BASE}/students/${id}/delete-with-relations`, {
-        relations: { leave: true, score: true, seat: true, duty: true }
+        relations: { leave: true, score: true, seat: true, duty: true, group: true, cadre: true }
       })
       await finish()
       notifySuccess('已删除学生及关联记录')

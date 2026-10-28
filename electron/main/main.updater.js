@@ -148,9 +148,17 @@ async function downloadInstaller(asset, version) {
     let received = 0
     // Node fetch 返回 web ReadableStream，转成 Node 流后边写边算百分比
     const nodeStream = Readable.fromWeb(res.body)
+    // 只在百分比**变化**时才广播：chunk 通常 64KB，50MB 包约 800 个 chunk，
+    // 而真正改变的百分比只有 100 个。原来每个 chunk 都 setUpdateState →
+    // 每次都「拼快照 + IPC 发送 + 渲染层重渲染」，其中七分之六是无用功。
+    let lastPercent = -1
     nodeStream.on('data', (chunk) => {
       received += chunk.length
-      if (expectedSize > 0) setUpdateState({ status: 'downloading', percent: Math.round((received / expectedSize) * 100) })
+      if (expectedSize <= 0) return
+      const percent = Math.round((received / expectedSize) * 100)
+      if (percent === lastPercent) return
+      lastPercent = percent
+      setUpdateState({ status: 'downloading', percent })
     })
     await pipeline(nodeStream, fs.createWriteStream(target))
     // 完整性校验：大小 +（发布方提供时）SHA-256。原先只比 Content-Length，

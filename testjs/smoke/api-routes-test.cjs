@@ -158,9 +158,25 @@ const listen = (handler) => {
   return new Promise((resolve) => server.listen(0, '127.0.0.1', () => resolve({ server, port: server.address().port })))
 }
 
+// 收尾必须覆盖正常与异常两条路径：异常时若只 exit(1)，server 与临时目录会残留
+let server = null
+let mock = null
+async function cleanup() {
+  await Promise.all([
+    server ? new Promise((resolve) => server.close(resolve)) : Promise.resolve(),
+    mock ? new Promise((resolve) => mock.close(resolve)) : Promise.resolve(),
+  ]).catch(() => { /* best-effort: 关闭失败不阻塞退出 */ })
+  try { dbManager.evictConn(slug) } catch (_) { /* best-effort: 关闭库连接 */ }
+  try { fs.rmSync(DATA_DIR, { recursive: true, force: true }) } catch (_) { /* best-effort: 删除临时目录 */ }
+}
+
 ;(async () => {
-  const { server, port } = await listen(app)
-  const { server: mock, port: mockPort } = await listen(mockHandler)
+  const main = await listen(app)
+  server = main.server
+  const port = main.port
+  const mockServer = await listen(mockHandler)
+  mock = mockServer.server
+  const mockPort = mockServer.port
   const mockBase = `http://127.0.0.1:${mockPort}/v1`
 
   // ===== B02-07 畸形 / 越界 Range =====
@@ -327,16 +343,11 @@ const listen = (handler) => {
   check('新 token 可正常调用业务接口', r.status === 200 && !!r.json && r.json.ok === true, r.json || r.text)
 
   // ---------- 收尾 ----------
-  await Promise.all([
-    new Promise((resolve) => server.close(resolve)),
-    new Promise((resolve) => mock.close(resolve)),
-  ])
   console.log(`\n${failed ? `${failed} 项断言失败` : '全部断言通过'}`)
-  // 关闭库连接与临时目录（Windows 下句柄未关会删不掉，失败可忽略）
-  try { dbManager.evictConn(slug) } catch (_) { /* 忽略 */ }
-  try { fs.rmSync(DATA_DIR, { recursive: true, force: true }) } catch (_) { /* 忽略 */ }
+  await cleanup()
   process.exit(failed ? 1 : 0)
-})().catch((err) => {
+})().catch(async (err) => {
   console.error('冒烟异常：', err && err.stack || err)
+  await cleanup()
   process.exit(1)
 })

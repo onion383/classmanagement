@@ -11,14 +11,17 @@
 // 本模块把「认结构」这件事收敛到一处，统计与清理共用。
 // =========================================================================
 
-const DUTY_MODES = ['daily', 'big'];
+// 结构判定与 routes 侧共用同一份实现，避免「值日页」与「清理/统计」两边口径分叉
+const { MODES: DUTY_MODES, looksLikeDutyRoot } = require('./dutyMode');
 
 // 顶层键全部是 daily/big 才视为模式打包；否则按旧版整块处理。
 // 返回「根节点列表」：打包结构返回 daily/big 两个根，旧版返回 cells 自身。
 function dutyRoots(cells) {
   if (!cells || typeof cells !== 'object' || Array.isArray(cells)) return [];
   const keys = Object.keys(cells);
-  const isModeMap = keys.length > 0 && keys.every((k) => DUTY_MODES.includes(k));
+  const isModeMap = keys.length > 0
+    && keys.every((k) => DUTY_MODES.includes(k))
+    && keys.some((k) => looksLikeDutyRoot(cells[k]));
   if (!isModeMap) return [cells];
   return DUTY_MODES
     .map((m) => cells[m])
@@ -62,4 +65,25 @@ function removeDutyName(cells, name) {
   return removed;
 }
 
-module.exports = { DUTY_MODES, dutyRoots, countDutyRefs, removeDutyName };
+// 把值日表里的 oldName 改成 newName（学生改名时级联）。
+// 结构与统计/清理共用 dutyRoots，打包结构与旧版整块都能命中。
+function renameDutyName(cells, oldName, newName) {
+  if (!oldName || !newName || oldName === newName) return 0;
+  let changed = 0;
+  for (const root of dutyRoots(cells)) {
+    for (const item of Object.keys(root)) {
+      const byDay = root[item];
+      if (!byDay || typeof byDay !== 'object' || Array.isArray(byDay)) continue;
+      for (const day of Object.keys(byDay)) {
+        const list = byDay[day];
+        if (!Array.isArray(list)) continue;
+        for (let i = 0; i < list.length; i++) {
+          if (list[i] === oldName) { list[i] = newName; changed++; }
+        }
+      }
+    }
+  }
+  return changed;
+}
+
+module.exports = { DUTY_MODES, dutyRoots, countDutyRefs, removeDutyName, renameDutyName };

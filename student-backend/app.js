@@ -111,17 +111,14 @@ app.use('/api/students', auth(['teacher']), createDynamicTableRouter('students',
   extraRoutes: (router) => {
     // 删前影响预览：返回该生关联的 请假/加分/座位/值日 数量（学生本身不与它们建外键，靠 id/姓名弱关联）
     router.get('/:id/relations', (req, res) => {
-      try {
-        const id = Number(req.params.id);
-        const student = db.prepare('SELECT * FROM students WHERE id = ?').get(id);
-        if (!student) return res.status(404).json({ error: '学生不存在' });
-        res.json(studentRelations(student));
-      } catch (err) {
-        res.status(500).json({ error: err.message });
-      }
+            const id = Number(req.params.id);
+      const student = db.prepare('SELECT * FROM students WHERE id = ?').get(id);
+      if (!student) return res.status(404).json({ error: '学生不存在' });
+      res.json(studentRelations(student));
+
     });
 
-    // 一并删除学生 + 勾选的关联记录（body.relations：{ leave/score/seat/duty }）。
+    // 一并删除学生 + 勾选的关联记录（body.relations：{ leave/score/seat/duty/group/cadre }）。
     // 返回被删的请假/加分整行，便于前端登记撤销。
     router.post('/:id/delete-with-relations', (req, res) => {
       try {
@@ -133,6 +130,7 @@ app.use('/api/students', auth(['teacher']), createDynamicTableRouter('students',
         db.transaction(() => {
           removed = purgeStudentRelations(student, {
             leave: !!rel.leave, score: !!rel.score, seat: !!rel.seat, duty: !!rel.duty,
+            group: !!rel.group, cadre: !!rel.cadre,
           });
           deleteRow('students', id, { minCount: 1 });
         })();
@@ -148,6 +146,10 @@ app.use('/api/students', auth(['teacher']), createDynamicTableRouter('students',
 app.use(express.static(path.join(__dirname, '../dist')));
 
 // ===================== 启动服务器 =====================
+// 统一错误出口只装一次：startServer 在端口被占用时会递归重入，
+// 若每次都 app.use 会在栈里堆叠多个错误中间件（第一个处理完就结束，不会出错，但没必要）。
+let errorHandlerInstalled = false;
+
 // 端口冲突时自动重试（应用退出后旧进程可能未完全释放端口）
 function startServer(port) {
   // 只监听本机回环地址（127.0.0.1）：若像原先那样不指定 host，Node 会监听 0.0.0.0/::，
@@ -239,6 +241,33 @@ function startServer(port) {
     for (const loader of deferredLoaders) {
       setImmediate(loader);
     }
+
+    // 统一错误出口。**必须是最后一个注册的中间件** —— Express 按注册顺序匹配，
+    // 错误中间件只能接住「在它之后注册」的路由抛出的错误。
+    // 这里同样用 setImmediate 排进上面那个队列：FIFO 保证它在全部路由之后执行；
+    // 而 Node 事件循环里 check 阶段（setImmediate）早于 poll 阶段（网络 I/O），
+    // 所以它还赶在第一个请求到达之前装好，不存在「先来的请求没有兜底」的窗口。
+    //
+    // 有了它，路由里不再需要
+    //    ... 
+    // 这种样板：Express 5 会自动捕获 async handler 的 rejected promise，
+    // 同步 throw 本来就会被捕获，两者最终都落到这里。
+    setImmediate(() => {
+      if (errorHandlerInstalled) return;
+      errorHandlerInstalled = true;
+      app.use((err, req, res, next) => {
+        // 响应头已发出（如流式下载写到一半）：交回 Express 默认处理，
+        // 此时已无法改状态码，硬写会抛 ERR_HTTP_HEADERS_SENT 掩盖原始错误。
+        if (res.headersSent) return next(err);
+        const status = Number((err && (err.status || err.statusCode)) || 0) || 500;
+        // 全量现场只进本地日志：这是用户自己机器上的单用户工具，控制台是唯一的诊断入口。
+        console.error('[express-error]', req.method, req.originalUrl, '->', status, err);
+        // 响应体形状必须保持 { error: string }：前端大量代码读 err.response.data.error。
+        // 暂仍回传原始 message（本地工具，用户截图反馈时信息更全）；
+        // 若将来要避免 SQL 语句 / 文件路径外露，只需改这一行。
+        res.status(status).json({ error: (err && err.message) || '服务器内部错误' });
+      });
+    });
   });
 
   server.on('error', (err) => {

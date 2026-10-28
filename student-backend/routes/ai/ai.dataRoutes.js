@@ -8,6 +8,8 @@ const { validateRow } = require('../../services/businessRules');
 const dbManager = require('../../dbManager/dbManager');
 const { READ_TABLES, JSON_WRITE_TABLES } = require('./ai.constants');
 const { tableColumns, displayColumns, serializeColVal, clearTableColumnsCache } = require('./ai.helpers');
+const { safeJson } = require('../../utils/json');
+const { toModeMap } = require('../../services/dutyMode');
 // 工具相关常量/执行器惰性加载：仅在真正处理对应路由时才 require
 const tools = () => require('./ai.tools/tools');
 
@@ -39,24 +41,8 @@ router.get('/records/:table', (req, res) => {
 //   schedule   → 按周快照
 //   duty_layout→ 按天 + 模式（daily/big）各存一条
 //   seat_layout→ 按天快照
-function parseJsonText(text, fallback) {
-  try {
-    const v = JSON.parse(text);
-    return v == null ? fallback : v;
-  } catch (_) { return fallback; }
-}
-
-// 按 daily/big 拆分「按模式打包」的字段（与 routes/duty.js 的 fieldToModeMap 口径一致）：
-// 顶层键全是 daily/big 视为新模式结构，否则视为旧版整块、整体归入 daily。
-function splitModeMap(field) {
-  let obj = {};
-  try { obj = (typeof field === 'object' && field !== null) ? field : JSON.parse(field || '{}'); } catch (_) { obj = {}; }
-  if (!obj || typeof obj !== 'object') return { daily: {}, big: {} };
-  const keys = Object.keys(obj);
-  const isModeMap = keys.length > 0 && keys.every((k) => k === 'daily' || k === 'big');
-  if (isModeMap) return { daily: obj.daily || {}, big: obj.big || {} };
-  return { daily: obj, big: {} };
-}
+// 解析统一用 utils/json 的 safeJson；模式拆包用 services/dutyMode 的 toModeMap。
+// 这两个函数此前在本文件各写了一份，与 duty.js / search.js / AI 执行器逐字重复。
 
 // 取某天所在周的周一（YYYY-MM-DD），与各页历史快照的周口径一致
 function mondayOf(date) {
@@ -80,8 +66,8 @@ function snapshotBeforeWrite(table, row) {
     store.histUpsert('schedule', {
       weekStart: week,
       payload: {
-        cells: parseJsonText(row.cells, []),
-        settings: parseJsonText(row.settings, {}),
+        cells: safeJson(row.cells, []),
+        settings: safeJson(row.settings, {}),
       },
     });
     return;
@@ -89,8 +75,8 @@ function snapshotBeforeWrite(table, row) {
   const snapDate = localDateStr(today);
   if (table === 'duty_layout') {
     // 值日快照：按 daily/big 拆开各存一条
-    const cellsMap = splitModeMap(row.cells);
-    const settingsMap = splitModeMap(row.settings);
+    const cellsMap = toModeMap(row.cells);
+    const settingsMap = toModeMap(row.settings);
     ['daily', 'big'].forEach((m) => {
       store.histUpsert('duty', {
         weekStart: week,
@@ -111,10 +97,10 @@ function snapshotBeforeWrite(table, row) {
       mode,
       rows: row.rows,
       cols: row.cols,
-      seats: parseJsonText(row.seats, []),
+      seats: safeJson(row.seats, []),
       aisleCols: [],
       groupsConfig: [],
-      settings: parseJsonText(row.settings, {}),
+      settings: safeJson(row.settings, {}),
     },
   });
 }
@@ -180,14 +166,10 @@ function applyDocWrite(table, id, values) {
 //   （JSON 形状 / 枚举 / 数值范围 / 严格日期 / 路径），不合法直接 400 拒绝、不落库；
 //   写入前对课表/座位先把旧值快照进历史表。返回写入前后的列值（before/after），供前端登记「整块撤销」。
 router.post('/doc', (req, res) => {
-  try {
     const { table, id, values } = req.body || {};
-    const r = applyDocWrite(table, id, values);
-    if (r.error) return res.status(400).json({ error: r.error });
-    res.json({ ok: true, table: r.table, id: r.id, before: r.before, after: r.after });
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
+  const r = applyDocWrite(table, id, values);
+  if (r.error) return res.status(400).json({ error: r.error });
+  res.json({ ok: true, table: r.table, id: r.id, before: r.before, after: r.after });
 });
 
 // 当前请求所属班主任库的 slug（取自鉴权中间件写入 token 的 dbSlug，与 AI 工具 ctx.slug 口径一致）
@@ -276,24 +258,16 @@ router.post('/apply-batch', (req, res) => {
 
 // POST /api/ai/snapshot —— 立即创建一份整库快照（加密 .db 副本），自动保留最近 20 份
 router.post('/snapshot', async (req, res) => {
-  try {
     const r = await tools().runSnapshotCreate({ slug: currentSlug(req) });
-    if (r.error) return res.status(400).json({ error: r.error });
-    res.json({ ok: true, snapshot: r.snapshot, count: r.count });
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
+  if (r.error) return res.status(400).json({ error: r.error });
+  res.json({ ok: true, snapshot: r.snapshot, count: r.count });
 });
 
 // GET /api/ai/snapshots —— 列出已有快照（最新在前）
 router.get('/snapshots', (req, res) => {
-  try {
     const r = tools().runSnapshotList({ slug: currentSlug(req) });
-    if (r.error) return res.status(400).json({ error: r.error });
-    res.json({ ok: true, count: r.count, snapshots: r.snapshots });
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
+  if (r.error) return res.status(400).json({ error: r.error });
+  res.json({ ok: true, count: r.count, snapshots: r.snapshots });
 });
 
 // POST /api/ai/snapshot/restore —— 还原到指定快照（覆盖整库，须老师在界面二次确认后才调用）

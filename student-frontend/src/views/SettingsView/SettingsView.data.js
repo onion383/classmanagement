@@ -1,8 +1,10 @@
 // ===== 设置页：学期设置、撤销记录、弹窗/消息、账号与数据库导出 =====
 // 纯代码搬运自 SettingsView.vue 的 methods，未改写逻辑；通过展开注册到组件 methods。
+import { reportError } from '../../utils/reportError.js'
 import axios from 'axios'
 import { listUndo, undoById, redoById, clearUndo } from '../../api/undo'
 import { pad2 } from '../../utils/dateTime.js'
+import { invalidateSemesterStart } from '../../utils/semesterStart.js'
 import { clearMediaToken } from '../../utils/apiUrl'
 
 export function useSettingsData() {
@@ -31,8 +33,10 @@ export function useSettingsData() {
       this.semesterDateErrorText = ''
       try {
         await axios.put('/api/schedule/semesters/current', { id })
+        // 换学期 = 换开学日：值日/座位那边缓存的 semester_start 必须失效
+        invalidateSemesterStart()
       } catch (err) {
-        this.notifyError(err.response?.data?.error || '切换学期失败')
+        reportError(err, { action: '切换学期' })
       }
     },
     // 增加学期：先弹小窗输入学期名（必填），起止日期留空由后端按当前月份推算默认值
@@ -50,11 +54,13 @@ export function useSettingsData() {
       this.busySemester = true
       try {
         const res = await axios.post('/api/schedule/semesters', { name })
+        // 新增学期会被后端标为「当前学期」，即 semester_start 变了 → 缓存必须失效
+        invalidateSemesterStart()
         this.showAddSemester = false
         await this.loadSemesterSettings()
         this.notifySuccess(`已增加学期：${res.data.name}`)
       } catch (err) {
-        this.notifyError(err.response?.data?.error || '增加学期失败')
+        reportError(err, { action: '增加学期' })
       } finally {
         this.busySemester = false
       }
@@ -71,11 +77,12 @@ export function useSettingsData() {
       if (!id || !name) return
       try {
         await axios.put(`/api/schedule/semesters/${id}`, { name })
+        invalidateSemesterStart()
         this.showRenameSemester = false
         await this.loadSemesterSettings()
         this.notifySuccess('学期名已修改')
       } catch (err) {
-        this.notifyError(err.response?.data?.error || '修改学期名失败')
+        reportError(err, { action: '修改学期名' })
       }
     },
     // 学期起止日期：改完点「保存」才写入。
@@ -99,6 +106,7 @@ export function useSettingsData() {
           start_date: this.semesterStart,
           end_date: this.semesterEnd,
         })
+        invalidateSemesterStart()
         // 同步本地列表里的这一条：否则 semesterDatesDirty 仍会认为「有未保存的改动」，
         // 保存按钮一直可点，用户会以为没存上而反复点。
         const row = this.semesters.find(s => s.id === this.semesterId)
@@ -126,10 +134,11 @@ export function useSettingsData() {
       this.busySemester = true
       try {
         await axios.delete(`/api/schedule/semesters/${id}`)
+        invalidateSemesterStart()
         await this.loadSemesterSettings()
         this.notifySuccess('学期已删除')
       } catch (err) {
-        this.notifyError(err.response?.data?.error || '删除学期失败')
+        reportError(err, { action: '删除学期' })
       } finally {
         this.busySemester = false
       }

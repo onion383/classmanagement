@@ -269,6 +269,9 @@
 <script setup>
 import { ref, computed, watch, onMounted, onActivated, getCurrentInstance, defineAsyncComponent } from 'vue'
 import axios from 'axios'
+import { shiftDateStr } from '../utils/dateTime.js'
+import { getSemesterStart } from '../utils/semesterStart.js'
+import { createSerialSaver } from '../utils/serialSaver.js'
 import Tabs from '../components/base/Tabs.vue'
 import ViewSwitch from '../components/base/ViewSwitch.vue'
 import EmptySnapshot from '../components/base/EmptySnapshot.vue'
@@ -600,13 +603,34 @@ useUndoShortcut('值日表', {
   onAfterRedo: async (label) => { await loadActive(); await loadMaster(); notifySuccess(label ? `已重做：${label}` : '已重做') }
 })
 
-async function persistActive() {
-  try { await axios.put(`${API_BASE}/duty`, { cells: activeCells.value, mode: dutyMode.value }) }
-  catch (e) { notifyError('保存失败'); console.error(e) }
+// 保存器：连续编辑时保证「同一时刻只有一个 PUT 在途」，在途期间的改动合并成一轮、
+// 用**最新状态**再存一次。不能只靠请求序号——保存是写操作，两个 PUT 都会落库，
+// 先发后到就会把新数据覆盖成旧的（序号只能丢弃响应，拦不住写）。
+const activeSaver = createSerialSaver(() => axios.put(`${API_BASE}/duty`, {
+  cells: activeCells.value, mode: dutyMode.value,
+}))
+const masterSaver = createSerialSaver(() => axios.put(`${API_BASE}/duty/template`, {
+  cells: masterCells.value, mode: dutyMode.value,
+}))
+const weightSaver = createSerialSaver(() => axios.put(`${API_BASE}/duty/weight`, {
+  weights: dutyWeights.value, mode: dutyMode.value,
+}))
+
+// 保存当前值日表。
+// 失败时界面已就地改过、库里没改 —— 必须重新拉取把界面拉回真实状态，
+// 否则用户以为保存成功，刷新后改动「凭空消失」（与 persistSettingsSafe 同一口径）。
+// 已知取舍：撤销记录不会跟着撤掉（useUndo 没有删除入口），用户点撤销会发现「没变化」。
+async function persistActive(action = '保存') {
+  const ok = await activeSaver.request()
+  if (ok) return true
+  console.error('[duty] 保存失败', activeSaver.error)
+  notifyError(`${action}失败，改动未保存`)
+  try { await loadActive() } catch (_) { /* 回滚也失败时保持提示，不叠加错误 */ }
+  return false
 }
 
 // 智能排表确认：按目标写回当前值日表或值日模板（当前模式）
-function onArrangeConfirm({ cells }) {
+async function onArrangeConfirm({ cells }) {
   if (!cells || !Object.keys(cells).length) { notifyError('请先点击「开始排表」生成结果'); return }
   const toMaster = arrangeTarget.value === 'master'
   const target = toMaster ? masterCells : activeCells
@@ -615,13 +639,20 @@ function onArrangeConfirm({ cells }) {
   const next = JSON.parse(JSON.stringify(cells))
   target.value = next
   recordGridSnapshotUndo('值日表', table, before, next, '智能排表')
-  if (toMaster) persistMaster(); else persistActive()
+  // 先等保存结果再报成功：原来先弹「已应用」再静默失败，用户以为排表生效了
+  const ok = toMaster ? await persistMaster('应用排表结果') : await persistActive('应用排表结果')
   arrangeVisible.value = false
-  notifySuccess('已应用智能排表')
+  if (ok) notifySuccess('已应用智能排表')
 }
-async function persistMaster() {
-  try { await axios.put(`${API_BASE}/duty/template`, { cells: masterCells.value, mode: dutyMode.value }) }
-  catch (e) { notifyError('保存失败'); console.error(e) }
+
+// 保存值日模板（口径同 persistActive）
+async function persistMaster(action = '保存') {
+  const ok = await masterSaver.request()
+  if (ok) return true
+  console.error('[duty] 模板保存失败', masterSaver.error)
+  notifyError(`${action}失败，改动未保存`)
+  try { await loadMaster() } catch (_) { /* 回滚也失败时保持提示，不叠加错误 */ }
+  return false
 }
 
 // ==================== 行/列拖拽 & 删除（作用于设置） ====================
@@ -634,6 +665,13 @@ function persistSettings(extra) {
   return axios.put(`${API_BASE}/duty/save`, payload)
 }
 
+// 失败后把界面整体拉回库里的真实状态（设置 + 实行/模板 + 权重）。
+// 设置类改动往往「就地改过界面」（改表头、删项目、pruneCells 删格子），
+// 只提示不回滚的话，用户继续编辑就会把没保存成功的中间状态一起写进库里。
+async function reloadAllFromServer() {
+  await Promise.all([fetchSettings(), loadActive(), loadMaster(), loadWeight()])
+}
+
 // 拖拽排序后的即时保存：原来是 fire-and-forget，请求失败时界面已改、库里没改，
 // 用户以为成功，刷新后改动「凭空消失」。这里统一 await + 失败提示 + 重新拉取回滚界面。
 async function persistSettingsSafe(extra, action) {
@@ -642,9 +680,7 @@ async function persistSettingsSafe(extra, action) {
   } catch (e) {
     notifyError(`${action}失败，改动未保存`)
     console.error(e)
-    try {
-      await Promise.all([fetchSettings(), loadActive(), loadMaster(), loadWeight()])
-    } catch (_) { /* 回滚也失败时保持提示，不再叠加错误 */ }
+    try { await reloadAllFromServer() } catch (_) { /* 回滚也失败时保持提示，不再叠加错误 */ }
   }
 }
 
@@ -690,13 +726,19 @@ function swapDays(oldIndex, newIndex) {
 async function saveSettings({ days, items }) {
   settingsDays.value = days
   settingsItems.value = items
+  // 注意：下面这步会就地删掉「不在 items / days 里」的格子数据。
+  // 因此保存失败时必须整体回滚，否则这些删除会留在界面里，用户继续编辑就把丢数据的状态存进库了。
   pruneCells(activeCells.value)
   pruneCells(masterCells.value)
   try {
     await persistSettings({ active: true, master: true })
     settingsVisible.value = false
     notifySuccess('设置已保存')
-  } catch (e) { notifyError('保存失败'); console.error(e) }
+  } catch (e) {
+    notifyError('保存失败，改动未保存')
+    console.error(e)
+    try { await reloadAllFromServer() } catch (_) { /* 回滚也失败时保持提示，不叠加错误 */ }
+  }
 }
 
 function pruneCells(cells) {
@@ -748,8 +790,11 @@ async function doApplyActiveToMaster() {
     const before = JSON.parse(JSON.stringify(masterCells.value))
     const next = JSON.parse(JSON.stringify(activeCells.value))
     masterCells.value = next
+    const ok = await persistMaster('导入到模板')
+    // persistMaster 内部已提示失败并把界面拉回真实状态：
+    // 这里不能再报成功，也不该登记一条根本没生效的撤销
+    if (!ok) return
     recordGridSnapshotUndo('值日表', 'duty_template', before, next, '从实行导入')
-    await persistMaster()
     notifySuccess('已从当前值日表导入')
   } catch (e) { notifyError('导入失败'); console.error(e) }
 }
@@ -837,10 +882,16 @@ async function loadWeight() {
 async function refreshWeight() {
   try { await loadWeight(); notifySuccess('已刷新值日项目权重表') } catch (_) { /* 已在 load 内处理 */ }
 }
+// 保存权重表。
+// 原来失败只 console.error：用户既看不到提示、界面也保持已改的样子，刷新后才发现丢了。
+// 现在与 persistActive 同口径：串行保存 + 失败提示 + 重新拉取回滚。
 async function saveWeight() {
-  try {
-    await axios.put(`${API_BASE}/duty/weight`, { weights: dutyWeights.value, mode: dutyMode.value })
-  } catch (e) { console.error(e) }
+  const ok = await weightSaver.request()
+  if (ok) return true
+  console.error('[duty] 权重保存失败', weightSaver.error)
+  notifyError('权重保存失败，改动未保存')
+  try { await loadWeight() } catch (_) { /* 回滚也失败时保持提示，不叠加错误 */ }
+  return false
 }
 // 表内最大值：热力图按「当前表内最大值」做相对映射（表内最高值最深蓝）
 const weightMax = computed(() => {
@@ -921,13 +972,17 @@ function onWeightSwapRows(oldIndex, newIndex) {
   const [moved] = arr.splice(oldIndex, 1)
   arr.splice(newIndex, 0, moved)
   settingsItems.value = arr
-  // 同时重排权重表中的项目顺序（用项目名映射，保持原有权重值）
+  // 同步重排权重表的项目顺序（用项目名映射，保持原有权重**值**不变）。
+  // 注意：行顺序实际由 settingsItems 决定（见 weightDisplayRows），这里重排键只是为了
+  // 让库里的 weights 与 items 同序、便于人工查看，不影响渲染。
   const prev = JSON.parse(JSON.stringify(dutyWeights.value))
   const next = {}
   arr.forEach(it => { next[it.name] = prev[it.name] || {} })
   dutyWeights.value = next
+  // 只保存设置，不再调 saveWeight()：
+  // 权重值没变，那次 PUT 是多余的；而且它会和 persistSettingsSafe 失败时的
+  // reloadAll 抢时序 —— 一边在回滚拉旧数据、一边在写新顺序，最终库里与界面对不上。
   persistSettingsSafe({ active: true, master: true }, '调整权重表顺序')
-  saveWeight()
 }
 function onWeightSwapColumns(oldIndex, newIndex) {
   if (oldIndex === newIndex) return
@@ -979,8 +1034,7 @@ const dutyIndexDaily = ref([])
 async function loadDutyIndex() {
   if (!historyCurrentWeek.value) return
   try {
-    const s = await axios.get(`${API_BASE}/schedule/settings`)
-    const from = (s.data && s.data.semester_start) || ''
+    const from = await getSemesterStart()
     const to = historySnapDate.value || ''
     const params = { mode: dutyMode.value }
     if (from) params.from = from
@@ -1049,8 +1103,7 @@ async function loadDutyLedger() {
     const to = `${y.getFullYear()}-${pad(y.getMonth() + 1)}-${pad(y.getDate())}`
     let from = ''
     try {
-      const s = await axios.get(`${API_BASE}/schedule/settings`)
-      from = s.data.semester_start || ''
+      from = await getSemesterStart()
     } catch (_) { /* 后端未就绪时忽略 */ }
     const params = { mode: dutyMode.value, to }
     if (from) params.from = from
@@ -1147,10 +1200,9 @@ const canDeleteHistorySnapshot = computed(() =>
 const deleteSnapshotMessage = computed(() => {
   const w = historyCurrentWeek.value
   if (!w) return ''
-  const start = new Date(w)
-  const end = new Date(start)
-  end.setDate(end.getDate() + 6)
-  return `确定删除 ${start.toISOString().slice(0, 10)} ~ ${end.toISOString().slice(0, 10)} 的历史快照吗？删除后不可恢复。`
+  // 日期区间用字符串级偏移：week_start 本身已是 YYYY-MM-DD。
+  // 不要绕 new Date + toISOString —— 那是 UTC 口径，UTC 以西的时区会差一天。
+  return `确定删除 ${String(w).slice(0, 10)} ~ ${shiftDateStr(w, 6)} 的历史快照吗？删除后不可恢复。`
 })
 function requestDeleteHistorySnapshot() {
   if (!canDeleteHistorySnapshot.value) return

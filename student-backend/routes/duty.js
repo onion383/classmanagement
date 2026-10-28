@@ -3,6 +3,7 @@ const router = express.Router();
 const { db } = require('../db');
 const store = require('../services/slotStore');
 const { validateRow } = require('../services/businessRules');
+const { readDocJson, safeJson } = require('../utils/json');
 const { isDateStr } = require('../utils/sql');
 
 // cells 结构：{ 劳动项目名: { 星期几: [学生姓名,...] } }
@@ -11,54 +12,32 @@ const { isDateStr } = require('../utils/sql');
 // ======================== 模式（日常值日 / 大扫除） ========================
 // cells/settings/items 字段既可存旧版「整块即日常」，也可存「按模式分键」的新结构，
 // 这样两种模式数据彼此独立，且旧数据自动归入「日常」模式。
-function fieldToModeMap(field) {
-  let obj = {};
-  try { obj = (typeof field === 'object' && field !== null) ? field : JSON.parse(field || '{}'); }
-  catch (e) { obj = {}; }
-  if (!obj || typeof obj !== 'object') return { daily: {}, big: {} };
-  const keys = Object.keys(obj);
-  // 顶层键全部是指定模式名 → 新模式结构；否则视为旧版整块，归为日常
-  const isModeMap = keys.length > 0 && keys.every(k => k === 'daily' || k === 'big');
-  if (isModeMap) return { daily: obj.daily || {}, big: obj.big || {} };
-  return { daily: obj, big: {} };
-}
-const unpackMode = (field, mode) => fieldToModeMap(field)[mode] || {};
-const packMode = (field, mode, data) => {
-  const map = fieldToModeMap(field);
-  map[mode] = data;
-  return map;
-};
-const normalizeMode = (m) => (m === 'big' ? 'big' : 'daily');
+// 拆包/打包的唯一实现在 services/dutyMode.js —— search.js / ai.dataRoutes.js / AI 工具
+// 执行器读的是同一批字段，此前四份实现逐字重复，口径不一致会让同一份数据被解释成不同结构。
+const { unpackMode, packMode, normalizeMode } = require('../services/dutyMode');
 
 // ======================== 全局设置（时间 + 劳动项目） ========================
 router.get('/settings', (req, res) => {
-  try {
     const mode = normalizeMode(req.query.mode);
-    const row = db.prepare('SELECT days, items FROM duty_settings WHERE id = 1').get();
-    if (!row) return res.json({ days: ['周一','周二','周三','周四','周五'], items: [] });
-    res.json({
-      days: JSON.parse(row.days),
-      items: unpackMode(row.items, mode)
-    });
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
+  const row = db.prepare('SELECT days, items FROM duty_settings WHERE id = 1').get();
+  if (!row) return res.json({ days: ['周一','周二','周三','周四','周五'], items: [] });
+  const doc = readDocJson(row, { days: [] });
+  res.json({
+    days: doc.days,
+    items: unpackMode(row.items, mode)
+  });
 });
 
 router.put('/settings', (req, res) => {
-  try {
     const { days, items } = req.body;
-    const mode = normalizeMode(req.body.mode || req.query.mode);
-    if (!Array.isArray(days) || !Array.isArray(items)) {
-      return res.status(400).json({ error: '参数格式错误' });
-    }
-    const row = db.prepare('SELECT items FROM duty_settings WHERE id = 1').get();
-    const mergedItems = packMode(row ? row.items : null, mode, items);
-    store.setDoc('duty_settings', { days: JSON.stringify(days), items: JSON.stringify(mergedItems) });
-    res.json({ message: '设置已保存' });
-  } catch (err) {
-    res.status(500).json({ error: err.message });
+  const mode = normalizeMode(req.body.mode || req.query.mode);
+  if (!Array.isArray(days) || !Array.isArray(items)) {
+    return res.status(400).json({ error: '参数格式错误' });
   }
+  const row = db.prepare('SELECT items FROM duty_settings WHERE id = 1').get();
+  const mergedItems = packMode(row ? row.items : null, mode, items);
+  store.setDoc('duty_settings', { days: JSON.stringify(days), items: JSON.stringify(mergedItems) });
+  res.json({ message: '设置已保存' });
 });
 
 // ======================== 当前值日表 ========================
@@ -96,70 +75,54 @@ function readDuty(modeRaw) {
 }
 
 router.get('/', (req, res) => {
-  try {
     res.json(readDuty(req.query.mode));
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
 });
 
 router.put('/', (req, res) => {
-  try {
     const { cells, settings } = req.body;
-    const mode = normalizeMode(req.body.mode || req.query.mode);
-    if (!cells || typeof cells !== 'object') {
-      return res.status(400).json({ error: '参数格式错误' });
-    }
-    // 依赖既有数据的一致性校验：项目/星期须已配置、名单里的姓名须是班级学生
-    validateRow('duty_layout', { cells });
-    const row = db.prepare('SELECT cells, settings FROM duty_layout WHERE id = 1').get();
-    const mergedCells = packMode(row ? row.cells : null, mode, cells);
-    const mergedSettings = packMode(row ? row.settings : null, mode, settings || {});
-    store.setDoc('duty_layout', {
-      cells: JSON.stringify(mergedCells),
-      settings: JSON.stringify(mergedSettings),
-    });
-    res.json({ message: '保存成功' });
-  } catch (err) {
-    res.status(500).json({ error: err.message });
+  const mode = normalizeMode(req.body.mode || req.query.mode);
+  if (!cells || typeof cells !== 'object') {
+    return res.status(400).json({ error: '参数格式错误' });
   }
+  // 依赖既有数据的一致性校验：项目/星期须已配置、名单里的姓名须是班级学生
+  validateRow('duty_layout', { cells });
+  const row = db.prepare('SELECT cells, settings FROM duty_layout WHERE id = 1').get();
+  const mergedCells = packMode(row ? row.cells : null, mode, cells);
+  const mergedSettings = packMode(row ? row.settings : null, mode, settings || {});
+  store.setDoc('duty_layout', {
+    cells: JSON.stringify(mergedCells),
+    settings: JSON.stringify(mergedSettings),
+  });
+  res.json({ message: '保存成功' });
 });
 
 // ======================== 值日模板 ========================
 router.get('/template', (req, res) => {
-  try {
     const mode = normalizeMode(req.query.mode);
-    const row = db.prepare('SELECT cells, settings FROM duty_template WHERE id = 1').get();
-    if (!row) return res.json({ cells: {}, settings: {} });
-    res.json({
-      cells: unpackMode(row.cells, mode),
-      settings: unpackMode(row.settings, mode)
-    });
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
+  const row = db.prepare('SELECT cells, settings FROM duty_template WHERE id = 1').get();
+  if (!row) return res.json({ cells: {}, settings: {} });
+  res.json({
+    cells: unpackMode(row.cells, mode),
+    settings: unpackMode(row.settings, mode)
+  });
 });
 
 router.put('/template', (req, res) => {
-  try {
     const { cells, settings } = req.body;
-    const mode = normalizeMode(req.body.mode || req.query.mode);
-    if (!cells || typeof cells !== 'object') {
-      return res.status(400).json({ error: '参数格式错误' });
-    }
-    // 依赖既有数据的一致性校验
-    validateRow('duty_template', { cells });
-    const row = db.prepare('SELECT cells, settings FROM duty_template WHERE id = 1').get();
-    const mergedCells = packMode(row ? row.cells : null, mode, cells);
-    const mergedSettings = packMode(row ? row.settings : null, mode, settings || {});
-    store.setDoc('duty_template', {
-      cells: JSON.stringify(mergedCells),
-      settings: JSON.stringify(mergedSettings),
-    });
-    res.json({ message: '模板保存成功' });
-  } catch (err) {
-    res.status(500).json({ error: err.message });
+  const mode = normalizeMode(req.body.mode || req.query.mode);
+  if (!cells || typeof cells !== 'object') {
+    return res.status(400).json({ error: '参数格式错误' });
   }
+  // 依赖既有数据的一致性校验
+  validateRow('duty_template', { cells });
+  const row = db.prepare('SELECT cells, settings FROM duty_template WHERE id = 1').get();
+  const mergedCells = packMode(row ? row.cells : null, mode, cells);
+  const mergedSettings = packMode(row ? row.settings : null, mode, settings || {});
+  store.setDoc('duty_template', {
+    cells: JSON.stringify(mergedCells),
+    settings: JSON.stringify(mergedSettings),
+  });
+  res.json({ message: '模板保存成功' });
 });
 
 // ======================== 一次性保存（设置 + 当前表 + 模板） ========================
@@ -168,161 +131,133 @@ router.put('/template', (req, res) => {
 // 且三处要么一起成功、要么一起回滚，不会出现「设置存了但表没存」的错位状态。
 // active / master 为可选：只有显式传入（对象，哪怕空对象 {}）时才写对应的表。
 router.put('/save', (req, res) => {
-  try {
     const { days, items, active, master } = req.body;
-    const mode = normalizeMode(req.body.mode || req.query.mode);
-    if (!Array.isArray(days) || !Array.isArray(items)) {
-      return res.status(400).json({ error: '参数格式错误' });
-    }
-    if (active !== undefined && (!active || typeof active !== 'object')) {
-      return res.status(400).json({ error: '参数格式错误' });
-    }
-    if (master !== undefined && (!master || typeof master !== 'object')) {
-      return res.status(400).json({ error: '参数格式错误' });
-    }
-    // 依赖既有数据的一致性校验（当前表 / 模板各自校验）
-    if (active !== undefined) validateRow('duty_layout', { cells: active });
-    if (master !== undefined) validateRow('duty_template', { cells: master });
-
-    db.transaction(() => {
-      // ① 全局设置（时间 + 劳动项目）
-      const s = db.prepare('SELECT items FROM duty_settings WHERE id = 1').get();
-      const mergedItems = packMode(s ? s.items : null, mode, items);
-      store.setDoc('duty_settings', { days: JSON.stringify(days), items: JSON.stringify(mergedItems) });
-
-      // ② 当前值日表（仅当显式传入 active 时）
-      if (active !== undefined) {
-        const row = db.prepare('SELECT cells, settings FROM duty_layout WHERE id = 1').get();
-        const mergedCells = packMode(row ? row.cells : null, mode, active);
-        const mergedSettings = packMode(row ? row.settings : null, mode, {});
-        store.setDoc('duty_layout', {
-          cells: JSON.stringify(mergedCells),
-          settings: JSON.stringify(mergedSettings),
-        });
-      }
-
-      // ③ 值日模板（仅当显式传入 master 时）
-      if (master !== undefined) {
-        const row = db.prepare('SELECT cells, settings FROM duty_template WHERE id = 1').get();
-        const mergedCells = packMode(row ? row.cells : null, mode, master);
-        const mergedSettings = packMode(row ? row.settings : null, mode, {});
-        store.setDoc('duty_template', {
-          cells: JSON.stringify(mergedCells),
-          settings: JSON.stringify(mergedSettings),
-        });
-      }
-    })();
-
-    res.json({ message: '保存成功' });
-  } catch (err) {
-    res.status(500).json({ error: err.message });
+  const mode = normalizeMode(req.body.mode || req.query.mode);
+  if (!Array.isArray(days) || !Array.isArray(items)) {
+    return res.status(400).json({ error: '参数格式错误' });
   }
+  if (active !== undefined && (!active || typeof active !== 'object')) {
+    return res.status(400).json({ error: '参数格式错误' });
+  }
+  if (master !== undefined && (!master || typeof master !== 'object')) {
+    return res.status(400).json({ error: '参数格式错误' });
+  }
+  // 依赖既有数据的一致性校验（当前表 / 模板各自校验）
+  if (active !== undefined) validateRow('duty_layout', { cells: active });
+  if (master !== undefined) validateRow('duty_template', { cells: master });
+
+  db.transaction(() => {
+    // ① 全局设置（时间 + 劳动项目）
+    const s = db.prepare('SELECT items FROM duty_settings WHERE id = 1').get();
+    const mergedItems = packMode(s ? s.items : null, mode, items);
+    store.setDoc('duty_settings', { days: JSON.stringify(days), items: JSON.stringify(mergedItems) });
+
+    // ② 当前值日表（仅当显式传入 active 时）
+    if (active !== undefined) {
+      const row = db.prepare('SELECT cells, settings FROM duty_layout WHERE id = 1').get();
+      const mergedCells = packMode(row ? row.cells : null, mode, active);
+      const mergedSettings = packMode(row ? row.settings : null, mode, {});
+      store.setDoc('duty_layout', {
+        cells: JSON.stringify(mergedCells),
+        settings: JSON.stringify(mergedSettings),
+      });
+    }
+
+    // ③ 值日模板（仅当显式传入 master 时）
+    if (master !== undefined) {
+      const row = db.prepare('SELECT cells, settings FROM duty_template WHERE id = 1').get();
+      const mergedCells = packMode(row ? row.cells : null, mode, master);
+      const mergedSettings = packMode(row ? row.settings : null, mode, {});
+      store.setDoc('duty_template', {
+        cells: JSON.stringify(mergedCells),
+        settings: JSON.stringify(mergedSettings),
+      });
+    }
+  })();
+
+  res.json({ message: '保存成功' });
 });
 
 // ======================== 从模板应用到当前值日表 ========================
 router.post('/apply-master', (req, res) => {
-  try {
     const mode = normalizeMode(req.query.mode);
-    const template = db.prepare('SELECT cells, settings FROM duty_template WHERE id=1').get();
-    if (!template) return res.status(400).json({ error: '模板为空' });
-    const row = db.prepare('SELECT cells, settings FROM duty_layout WHERE id = 1').get();
-    const mergedCells = packMode(row ? row.cells : null, mode, unpackMode(template.cells, mode));
-    const mergedSettings = packMode(row ? row.settings : null, mode, unpackMode(template.settings, mode));
-    store.setDoc('duty_layout', {
-      cells: JSON.stringify(mergedCells),
-      settings: JSON.stringify(mergedSettings),
-    });
-    res.json({ message: '已应用模板' });
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
+  const template = db.prepare('SELECT cells, settings FROM duty_template WHERE id=1').get();
+  if (!template) return res.status(400).json({ error: '模板为空' });
+  const row = db.prepare('SELECT cells, settings FROM duty_layout WHERE id = 1').get();
+  const mergedCells = packMode(row ? row.cells : null, mode, unpackMode(template.cells, mode));
+  const mergedSettings = packMode(row ? row.settings : null, mode, unpackMode(template.settings, mode));
+  store.setDoc('duty_layout', {
+    cells: JSON.stringify(mergedCells),
+    settings: JSON.stringify(mergedSettings),
+  });
+  res.json({ message: '已应用模板' });
 });
 
 // ======================== 值日项目权重表 ========================
 // 权重挂在「劳动项目 × 星期」上，与值日表同构；按 daily/big 分模式打包存储。
 // 从未保存过时返回 {}，由前端用 items[].difficulty 铺满作为默认值。
 router.get('/weight', (req, res) => {
-  try {
     const mode = normalizeMode(req.query.mode);
-    const row = db.prepare('SELECT weights FROM duty_weight WHERE id = 1').get();
-    res.json({ weights: row ? unpackMode(row.weights, mode) : {} });
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
+  const row = db.prepare('SELECT weights FROM duty_weight WHERE id = 1').get();
+  res.json({ weights: row ? unpackMode(row.weights, mode) : {} });
 });
 
 router.put('/weight', (req, res) => {
-  try {
     const { weights } = req.body;
-    const mode = normalizeMode(req.body.mode || req.query.mode);
-    if (!weights || typeof weights !== 'object' || Array.isArray(weights)) {
-      return res.status(400).json({ error: '参数格式错误' });
-    }
-    const row = db.prepare('SELECT weights FROM duty_weight WHERE id = 1').get();
-    const merged = packMode(row ? row.weights : null, mode, weights);
-    store.setDoc('duty_weight', { weights: JSON.stringify(merged) });
-    res.json({ message: '权重保存成功' });
-  } catch (err) {
-    res.status(500).json({ error: err.message });
+  const mode = normalizeMode(req.body.mode || req.query.mode);
+  if (!weights || typeof weights !== 'object' || Array.isArray(weights)) {
+    return res.status(400).json({ error: '参数格式错误' });
   }
+  const row = db.prepare('SELECT weights FROM duty_weight WHERE id = 1').get();
+  const merged = packMode(row ? row.weights : null, mode, weights);
+  store.setDoc('duty_weight', { weights: JSON.stringify(merged) });
+  res.json({ message: '权重保存成功' });
 });
 
 // ======================== 智能排表草稿 ========================
 // 草稿只在「智能排表」弹窗里恢复：保存本次排表的预览结果与条件。
 // saved_at 为空串即视为没有草稿（不额外存标记位，避免多一个状态字段）。
 router.get('/draft', (req, res) => {
-  try {
     const mode = normalizeMode(req.query.mode);
-    const row = db.prepare('SELECT cells, settings, conditions, saved_at FROM duty_draft WHERE id = 1').get();
-    if (!row || !row.saved_at) return res.json({ exists: false });
-    res.json({
-      exists: true,
-      cells: unpackMode(row.cells, mode),
-      settings: unpackMode(row.settings, mode),
-      conditions: JSON.parse(row.conditions || '[]'),
-      savedAt: row.saved_at
-    });
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
+  const row = db.prepare('SELECT cells, settings, conditions, saved_at FROM duty_draft WHERE id = 1').get();
+  if (!row || !row.saved_at) return res.json({ exists: false });
+  res.json({
+    exists: true,
+    cells: unpackMode(row.cells, mode),
+    settings: unpackMode(row.settings, mode),
+    conditions: safeJson(row.conditions, []),
+    savedAt: row.saved_at
+  });
 });
 
 router.put('/draft', (req, res) => {
-  try {
     const { cells, settings, conditions } = req.body;
-    const mode = normalizeMode(req.body.mode || req.query.mode);
-    if (!cells || typeof cells !== 'object') {
-      return res.status(400).json({ error: '参数格式错误' });
-    }
-    // 全空的草稿视为没有内容，直接拒绝，避免启动时弹一个空草稿提示
-    const hasName = Object.values(cells).some(days => days && typeof days === 'object'
-      && Object.values(days).some(list => Array.isArray(list) && list.some(n => n)));
-    if (!hasName) return res.status(400).json({ error: '草稿内容为空' });
-
-    const row = db.prepare('SELECT cells, settings FROM duty_draft WHERE id = 1').get();
-    const mergedCells = packMode(row ? row.cells : null, mode, cells);
-    const mergedSettings = packMode(row ? row.settings : null, mode, settings || {});
-    const savedAt = new Date().toISOString();
-    store.setDoc('duty_draft', {
-      cells: JSON.stringify(mergedCells),
-      settings: JSON.stringify(mergedSettings),
-      conditions: JSON.stringify(conditions || []),
-      saved_at: savedAt,
-    });
-    res.json({ message: '草稿已保存', savedAt });
-  } catch (err) {
-    res.status(500).json({ error: err.message });
+  const mode = normalizeMode(req.body.mode || req.query.mode);
+  if (!cells || typeof cells !== 'object') {
+    return res.status(400).json({ error: '参数格式错误' });
   }
+  // 全空的草稿视为没有内容，直接拒绝，避免启动时弹一个空草稿提示
+  const hasName = Object.values(cells).some(days => days && typeof days === 'object'
+    && Object.values(days).some(list => Array.isArray(list) && list.some(n => n)));
+  if (!hasName) return res.status(400).json({ error: '草稿内容为空' });
+
+  const row = db.prepare('SELECT cells, settings FROM duty_draft WHERE id = 1').get();
+  const mergedCells = packMode(row ? row.cells : null, mode, cells);
+  const mergedSettings = packMode(row ? row.settings : null, mode, settings || {});
+  const savedAt = new Date().toISOString();
+  store.setDoc('duty_draft', {
+    cells: JSON.stringify(mergedCells),
+    settings: JSON.stringify(mergedSettings),
+    conditions: JSON.stringify(conditions || []),
+    saved_at: savedAt,
+  });
+  res.json({ message: '草稿已保存', savedAt });
 });
 
 // 清除草稿：清空内容与 saved_at，下次启动不再提示
 router.delete('/draft', (req, res) => {
-  try {
     store.setDoc('duty_draft', { cells: '{}', settings: '{}', conditions: '[]', saved_at: '' });
-    res.json({ message: '草稿已清除' });
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
+  res.json({ message: '草稿已清除' });
 });
 
 // ======================== 历史快照（按天） ========================
@@ -364,56 +299,40 @@ function snapshotRow(rec) {
 
 // 历史列表：按周聚合（代表日期 = 该周最后一天），供下拉框使用
 router.get('/history', (req, res) => {
-  try {
     const mode = normalizeMode(req.query.mode);
-    res.json(store.histWeeks('duty', mode));
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
+  res.json(store.histWeeks('duty', mode));
 });
 
 // 单周快照：返回该周最后一天（最新一天）的值日表
 router.get('/history/:weekStart', (req, res) => {
-  try {
     const mode = normalizeMode(req.query.mode);
-    const rec = store.histLatest('duty', req.params.weekStart, mode);
-    res.json(rec ? snapshotRow(rec) : null);
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
+  const rec = store.histLatest('duty', req.params.weekStart, mode);
+  res.json(rec ? snapshotRow(rec) : null);
 });
 
 // 按天取快照区间（值日指数结算用）：返回区间内每日快照，按天升序；from/to 可只给其一
 router.get('/daily', (req, res) => {
-  try {
     const { from, to } = req.query;
-    const mode = normalizeMode(req.query.mode);
-    res.json(store.histDaily('duty', { from, to, mode }).map(snapshotRow));
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
+  const mode = normalizeMode(req.query.mode);
+  res.json(store.histDaily('duty', { from, to, mode }).map(snapshotRow));
 });
 
 // 保存某一天的值日表快照（手动保存 / 补存都会走到这里）：按 snap_date + mode 幂等 upsert
 router.post('/snapshot', (req, res) => {
-  try {
     const body = req.body || {};
-    // 过渡期兼容：旧前端仍传 week_start，没有 snap_date 时以其作为快照日期
-    const snapDate = body.snap_date || body.week_start;
-    if (!snapDate) return res.status(400).json({ error: '缺少快照日期' });
-    // 快照日期直接落库并据此推导周一：非法串会生成 NaN 周键，历史列表出现幽灵周
-    if (!isDateStr(snapDate)) return res.status(400).json({ error: '快照日期格式不正确（应为 YYYY-MM-DD）' });
-    const mode = normalizeMode(body.mode);
-    store.histUpsert('duty', {
-      weekStart: mondayOf(snapDate),
-      snapDate,
-      mode,
-      payload: { cells: body.cells || {}, settings: body.settings || {} },
-    });
-    res.json({ message: '快照已保存' });
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
+  // 过渡期兼容：旧前端仍传 week_start，没有 snap_date 时以其作为快照日期
+  const snapDate = body.snap_date || body.week_start;
+  if (!snapDate) return res.status(400).json({ error: '缺少快照日期' });
+  // 快照日期直接落库并据此推导周一：非法串会生成 NaN 周键，历史列表出现幽灵周
+  if (!isDateStr(snapDate)) return res.status(400).json({ error: '快照日期格式不正确（应为 YYYY-MM-DD）' });
+  const mode = normalizeMode(body.mode);
+  store.histUpsert('duty', {
+    weekStart: mondayOf(snapDate),
+    snapDate,
+    mode,
+    payload: { cells: body.cells || {}, settings: body.settings || {} },
+  });
+  res.json({ message: '快照已保存' });
 });
 
 // 补存历史快照：仅学期范围内。过去日期缺失才补（沿用最近一天该模式的值日表），
@@ -464,14 +383,10 @@ router.post('/snapshot/backfill', (req, res) => {
 
 // 删除某一周的历史快照（该周下该模式的全部天）
 router.delete('/history/:weekStart', (req, res) => {
-  try {
     const mode = normalizeMode(req.query.mode);
-    const changes = store.histDeleteWeek('duty', req.params.weekStart, mode);
-    if (!changes) return res.status(404).json({ error: '该周快照不存在' });
-    res.json({ message: '快照已删除' });
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
+  const changes = store.histDeleteWeek('duty', req.params.weekStart, mode);
+  if (!changes) return res.status(404).json({ error: '该周快照不存在' });
+  res.json({ message: '快照已删除' });
 });
 
 // 补录/生成一整周记录（周一起 7 天）：已存在的日期跳过，缺失的日期沿用最近一天该模式的值日表
@@ -479,7 +394,9 @@ router.delete('/history/:weekStart', (req, res) => {
 router.post('/history/week', (req, res) => {
   try {
     const raw = (req.body && req.body.week_start) || '';
-    if (!/^\d{4}-\d{2}-\d{2}$/.test(String(raw))) return res.status(400).json({ error: '缺少周起始日期' });
+    // 用 isDateStr 而不是只看格式：'2026-02-30' 格式对但日期不存在，
+    // mondayOf 会把它解析成 NaN，补录出一批 NaN-NaN-NaN 的幽灵记录。
+    if (!isDateStr(raw)) return res.status(400).json({ error: '周起始日期格式不正确' });
     const mode = normalizeMode(req.body && req.body.mode);
     const weekStart = mondayOf(raw);
     const layout = store.getDoc('duty_layout');

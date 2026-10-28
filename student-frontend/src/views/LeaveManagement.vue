@@ -250,6 +250,7 @@
 </template>
 
 <script>
+import { reportError } from '../utils/reportError.js'
 import axios from 'axios'
 import { defineAsyncComponent, getCurrentInstance } from 'vue'
 import Tabs from '../components/base/Tabs.vue'
@@ -605,7 +606,7 @@ export default {
         this.removeOverdue(rec.id)
         await this.loadAll()
       } catch (err) {
-        useNotification().error(err.response?.data?.error || '销假失败')
+        reportError(err, { action: '销假' })
       }
     },
     removeOverdue(id) {
@@ -619,7 +620,7 @@ export default {
         useNotification().success('已添加请假')
         await this.loadAll()
       } catch (err) {
-        useNotification().error(err.response?.data?.error || '添加失败')
+        reportError(err, { action: '添加' })
       }
     },
     openAddLeave() {
@@ -638,7 +639,7 @@ export default {
         useNotification().success('已保存')
         await this.loadAll()
       } catch (err) {
-        useNotification().error(err.response?.data?.error || '保存失败')
+        reportError(err, { action: '保存' })
       }
     },
     unreturnLeave(item) {
@@ -794,7 +795,7 @@ export default {
         useNotification().success('已添加请假记录')
         await this.loadAll()
       } catch (err) {
-        useNotification().error(err.response?.data?.error || '添加失败')
+        reportError(err, { action: '添加' })
       }
     },
     deleteLeave(id) {
@@ -832,13 +833,12 @@ export default {
       return Math.max(4, Math.round(row.合计 / this.maxLeaveStat * 100))
     },
     // 刷新请假统计：与表格共用同一份请假数据
+    // loadAll 失败时内部已提示「加载失败」并 return false（不抛），所以不能用 try/catch 判断——
+    // 原来那个 catch 是死代码，失败时会同时弹「加载失败」和「已刷新 请假统计 数据」。
+    // 与同文件 refresh() 的写法保持一致。
     async refreshStats() {
-      try {
-        await this.loadAll()
-        useNotification().success('已刷新 请假统计 数据')
-      } catch (err) {
-        useNotification().error('刷新失败')
-      }
+      if (!await this.loadAll()) return
+      useNotification().success('已刷新 请假统计 数据')
     },
     // 导出请假统计：无数据时直接提示
     openStatsExport() {

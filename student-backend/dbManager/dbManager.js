@@ -55,6 +55,8 @@ module.exports = {
   current: conn.current,
   currentSlug: conn.currentSlug,
   withDb: conn.withDb,
+  // 异步路由：next() 立即返回，用响应结束事件兜住「在用」计数（B04-v3-1）
+  holdConnUntilResponse: conn.holdConnUntilResponse,
   exportBundle: backup.exportBundle,
   restoreBundle: backup.restoreBundle,
   convertDbEncryption: backup.convertDbEncryption,

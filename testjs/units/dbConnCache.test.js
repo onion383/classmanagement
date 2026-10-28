@@ -10,6 +10,10 @@ process.env.DATA_DIR = process.env.DATA_DIR || path.join(os.tmpdir(), 'db-conn-c
 
 const base = require('../../student-backend/dbManager/dbManager.base')
 
+// 连接缓存是进程级单例：每个用例前后显式归零，未来并发/多文件执行也不会互相污染（B14-N2）
+test.beforeEach(() => base._resetConnCacheForTest())
+test.afterEach(() => base._resetConnCacheForTest())
+
 function makeConn(slug, closed) {
   return { slug, close: () => closed.push(slug) }
 }
@@ -71,6 +75,27 @@ test('LRU 驱逐：全部在用时可临时超限且不 close，释放后随写�
   assert.ok(base.connCache.size <= max, `释放后缓存应回落至上限以内，实际 ${base.connCache.size}`)
 
   // 清理
+  for (const c of base.connCache.values()) { try { c.close() } catch (_) { /* 已关闭 */ } }
+  base.connCache.clear()
+})
+
+test('LRU 硬顶：全部在用且达到硬顶时拒绝新连接，不无限增长', () => {
+  base.connCache.clear()
+  const closed = []
+  for (let i = 0; i < base.CONN_CACHE_HARD_MAX; i++) {
+    const slug = `hard${i}`
+    base.setCachedConn(slug, makeConn(slug, closed))
+    base.beginConnUse(slug)
+  }
+  assert.equal(base.connCache.size, base.CONN_CACHE_HARD_MAX)
+  assert.throws(
+    () => base.setCachedConn('hard_extra', makeConn('hard_extra', closed)),
+    /连接过多/
+  )
+  assert.equal(base.connCache.has('hard_extra'), false, '被拒绝的新连接不能留在缓存里')
+  assert.equal(base.connCache.size, base.CONN_CACHE_HARD_MAX)
+  assert.deepEqual(closed, [], '硬顶拒绝不能用 close 在途连接来腾位置')
+
   for (const c of base.connCache.values()) { try { c.close() } catch (_) { /* 已关闭 */ } }
   base.connCache.clear()
 })

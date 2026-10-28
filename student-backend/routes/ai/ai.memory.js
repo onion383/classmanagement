@@ -103,17 +103,13 @@ function loadConversationContext(conversationId) {
 
 // GET /api/ai/memory —— 读取当前班主任的长期记忆（md 原文）
 router.get('/memory', (req, res) => {
-  try {
     res.json({ success: true, data: { content: dbManager.readMemory(req.user && req.user.dbSlug) } });
-  } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
 // PUT /api/ai/memory —— 覆盖写入长期记忆，body: { content }
 router.put('/memory', (req, res) => {
-  try {
     dbManager.writeMemory(req.user && req.user.dbSlug, req.body && req.body.content);
-    res.json({ success: true, message: '已保存' });
-  } catch (err) { res.status(500).json({ error: err.message }); }
+  res.json({ success: true, message: '已保存' });
 });
 
 

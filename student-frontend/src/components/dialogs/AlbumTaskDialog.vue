@@ -73,6 +73,7 @@
 </template>
 
 <script setup>
+import { reportError } from '../../utils/reportError.js'
 import { ref, computed, watch, onBeforeUnmount } from 'vue'
 import axios from 'axios'
 import DialogShell from '../base/DialogShell.vue'
@@ -190,7 +191,7 @@ async function pump() {
         await waitScan(item.albumId)
       } catch (err) {
         // 单个相册失败不影响后续排队
-        useNotification().error(err.response?.data?.error || '更新相册照片失败')
+        reportError(err, { action: '更新相册照片' })
       }
       // 按「对象」而不是按下标移除：等待期间用户可能把这行停了、或又排了别的相册
       const idx = queue.value.indexOf(item)
@@ -230,18 +231,37 @@ async function togglePause(albumId) {
     await axios.post(`/api/album/${albumId}/pause`, { paused: !t.paused }, { headers: authHeaders() })
     fetchTasks()
   } catch (err) {
-    useNotification().error(err.response?.data?.error || '暂停失败')
+    reportError(err, { action: '暂停' })
   }
+}
+
+// 批量下发暂停/停止。
+// 原来每个请求都 `.catch(() => {})` 吞错，循环后**无条件**弹「已暂停所有扫描任务」——
+// 部分失败时用户看到的是「全部已暂停」，实际只停了一半，按钮态与后端脱节。
+// 这里把失败收集起来：有失败就不报成功，明确告诉用户几个没成功。
+async function postBatch(list, buildUrl, body, action) {
+  if (!list.length) return true
+  const results = await Promise.allSettled(
+    list.map((a) => axios.post(buildUrl(a), body, { headers: authHeaders() }))
+  )
+  const failed = results.filter((r) => r.status === 'rejected')
+  if (!failed.length) return true
+  failed.forEach((r) => console.error(`[album-task] ${action}失败:`, r.reason && r.reason.message))
+  useNotification().error(`${action}失败（${failed.length}/${list.length}），请重试`)
+  return false
 }
 
 // 汇总行暂停/继续：在跑的任务统一下发，同时把队列也冻住
 async function togglePauseAll() {
   const next = !allPaused.value
   queuePaused.value = next
-  for (const a of albums.value) {
-    await axios.post(`/api/album/${a.id}/pause`, { paused: next }, { headers: authHeaders() }).catch(() => {})
-  }
-  useNotification().info(next ? '已暂停所有扫描任务' : '已继续所有扫描任务')
+  const ok = await postBatch(
+    albums.value,
+    (a) => `/api/album/${a.id}/pause`,
+    { paused: next },
+    next ? '暂停全部扫描' : '继续全部扫描'
+  )
+  if (ok) useNotification().info(next ? '已暂停所有扫描任务' : '已继续所有扫描任务')
   fetchTasks()
 }
 
@@ -250,7 +270,8 @@ async function stopRow(albumId) {
   const idx = queue.value.findIndex(it => it.albumId === albumId)
   if (idx !== -1) queue.value.splice(idx, 1)
   if (taskOf(albumId)) {
-    await axios.post(`/api/album/${albumId}/stop`, {}, { headers: authHeaders() }).catch(() => {})
+    // 失败时 fetchTasks 会把后端真实状态拉回来，界面自愈；但不能静默，得让用户知道没停成
+    await postBatch([{ id: albumId }], (a) => `/api/album/${a.id}/stop`, {}, '停止扫描')
   }
   fetchTasks()
 }
@@ -259,10 +280,8 @@ async function stopRow(albumId) {
 async function stopAll() {
   queue.value = []
   queuePaused.value = false
-  for (const a of albums.value) {
-    await axios.post(`/api/album/${a.id}/stop`, {}, { headers: authHeaders() }).catch(() => {})
-  }
-  useNotification().info('已请求停止所有扫描')
+  const ok = await postBatch(albums.value, (a) => `/api/album/${a.id}/stop`, {}, '停止全部扫描')
+  if (ok) useNotification().info('已请求停止所有扫描')
   fetchTasks()
 }
 

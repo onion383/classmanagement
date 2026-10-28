@@ -154,7 +154,10 @@ const RECOVER_ALLOWED = new Set([
   'POST /api/auth/logout',
 ]);
 function isRecoverScopeAllowed(req) {
-  const fullPath = String(req.originalUrl || req.url || '').split('?')[0];
+  const raw = String(req.originalUrl || req.url || '').split('?')[0];
+  // 尾斜杠归一：Express 默认非严格路由，`PUT /api/account/password/` 同样会进到改密路由，
+  // 但白名单是「方法 + 完整路径」精确匹配，不归一就会被判成越权 → recover 流程永久 401。
+  const fullPath = raw.length > 1 ? raw.replace(/\/+$/, '') : raw;
   return RECOVER_ALLOWED.has(`${req.method} ${fullPath}`);
 }
 
@@ -186,8 +189,14 @@ function auth(requiredRoles = []) {
       // 恢复态不参与滑动续期：它只能在改密时换发正式 token，不能被悄悄续成 30 天正式会话。
       if (user.recover !== true) slideSession(req, res, user, source);
       const slug = user.dbSlug || 'default';
-      // 绑定当前请求对应的班主任库：使 db.js 导出的 db 代理命中正确库
-      return dbManager.withDb(slug, () => next());
+      // 绑定当前请求对应的班主任库：使 db.js 导出的 db 代理命中正确库。
+      // withDb 的计数只覆盖到 next() 返回为止（Express 的 next 同步返回 void），
+      // async handler 在 await 间隙计数已归零、连接可能被 LRU 驱逐 ——
+      // 这里用响应结束事件把「在用」延长到请求真正结束。
+      return dbManager.withDb(slug, () => {
+        dbManager.holdConnUntilResponse(slug, res);
+        return next();
+      });
     } catch (err) {
       // 超级隐私模式：进程内的库钥匙已不在（如登出后旧 token 仍在），要求重新登录解锁
       if (err && err.code === 'DB_LOCKED') {

@@ -34,6 +34,7 @@
 </template>
 
 <script setup>
+import { reportError } from '../../utils/reportError.js'
 import { ref, computed, watch } from 'vue'
 import axios from 'axios'
 import DialogShell from '../base/DialogShell.vue'
@@ -98,7 +99,7 @@ async function submit() {
     useNotification().success(data.message || '已移动')
     emit('moved', data)
   } catch (err) {
-    useNotification().error(err.response?.data?.error || '移动失败')
+    reportError(err, { action: '移动' })
   } finally {
     busy.value = false
   }

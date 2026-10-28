@@ -68,11 +68,11 @@
 </template>
 
 <script setup>
+import { reportError } from '../../utils/reportError.js'
 import { ref, computed, nextTick, watch } from 'vue'
 import axios from 'axios'
 import DialogShell from '../base/DialogShell.vue'
 import VideoThumb from '../import-export/VideoThumb.vue'
-import { useNotification } from '../../composables/useNotification.js'
 import { usePhotoTimeline } from '../../composables/usePhotoTimeline.js'
 import { useThumbBatch } from '../../composables/useThumbBatch.js'
 import { albumThumbUrl } from '../../utils/albumMedia'
@@ -172,7 +172,7 @@ async function load() {
     refreshThumbBatch()
   } catch (err) {
     groups.value = []
-    useNotification().error(err.response?.data?.error || '读取照片失败')
+    reportError(err, { action: '读取照片' })
   } finally {
     loading.value = false
   }

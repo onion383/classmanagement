@@ -170,6 +170,7 @@
 import axios from 'axios';
 import { defineAsyncComponent } from 'vue';
 import { useNotification } from '../composables/useNotification.js';
+import { reportError } from '../utils/reportError.js';
 import AppSelect from '../components/base/AppSelect.vue';
 import '../styles/dialog-transition.css';
 import { INVOKE } from '../electronChannels.js';
@@ -311,7 +312,7 @@ export default {
         this.username = res.data.username;
         useNotification().success('已选择数据库，账号 ' + res.data.username + '，请输入密码登录');
       }).catch(err => {
-        useNotification().error(err.response?.data?.error || '无法打开该数据库');
+        reportError(err, { action: '打开数据库' });
       }).finally(() => { this.busy = false; });
     },
     login() {
@@ -352,7 +353,7 @@ export default {
           this.$router.push('/');
         }
       }).catch(err => {
-        useNotification().error(err.response?.data?.error || '注册失败');
+        reportError(err, { action: '注册' });
       }).finally(() => { this.busy = false; });
     },
     async copyRecovery() {
@@ -366,15 +367,8 @@ export default {
     async downloadTxt() {
       const content = `班集 - 恢复密钥\n账号：${this.restoredUsername}\n\n请妥善保存以下 12 个恢复词，忘记密码时可用来找回：\n\n${this.recoveryPhrase}\n`;
       const fileName = `恢复密钥-${this.restoredUsername || 'account'}.txt`;
-      try {
-        // 走 Electron 原生保存对话框，写盘成功才返回成功；用户取消则保持锁定
-        const res = await window.electron?.invoke(INVOKE.SAVE_FILE, { defaultName: fileName, data: content });
-        if (res && !res.canceled) {
-          this.recoveryDownloaded = true;   // 文件已真正保存，解锁「确认并完成注册」
-          useNotification().success('恢复密钥文本已保存到本地');
-        }
-      } catch (_) {
-        // 非 Electron（纯浏览器）降级为普通下载；无法校验保存结果，故不自动解锁
+      // 浏览器兜底下载：拿不到保存结果，所以不置 recoveryDownloaded（仍要求用户自己确认已保存）
+      const saveViaBrowser = (note) => {
         const blob = new Blob([content], { type: 'text/plain;charset=utf-8' });
         const url = URL.createObjectURL(blob);
         const a = document.createElement('a');
@@ -383,7 +377,33 @@ export default {
         document.body.appendChild(a);
         a.click();
         a.remove();
-        URL.revokeObjectURL(url);
+        // 立即 revoke 会让部分浏览器还没取到内容就失效，延后一拍再释放
+        setTimeout(() => URL.revokeObjectURL(url), 1000);
+        useNotification().info(note);
+      };
+
+      const bridge = window.electron;
+      if (!bridge || typeof bridge.invoke !== 'function') {
+        // 纯浏览器（开发时直接开 vite 页面）：没有原生保存对话框。
+        // 原来这里走 `window.electron?.invoke(...)` —— 可选链返回 undefined 而不是抛错，
+        // 于是既不保存也不提示，catch 里的兜底成了死代码，用户点「下载文本」完全没反应。
+        saveViaBrowser('已下载恢复密钥文本，请确认文件已保存');
+        return;
+      }
+      try {
+        // 走 Electron 原生保存对话框，写盘成功才返回成功；用户取消则保持锁定
+        const res = await bridge.invoke(INVOKE.SAVE_FILE, { defaultName: fileName, data: content });
+        if (res && res.canceled) return;
+        if (res && res.error) {
+          reportError(new Error(res.error), { action: '保存恢复密钥' });
+          return;
+        }
+        this.recoveryDownloaded = true;   // 文件已真正保存，解锁「确认并完成注册」
+        useNotification().success('恢复密钥文本已保存到本地');
+      } catch (e) {
+        // 不是「没有 Electron」而是「原生保存真的失败了」：告诉用户原因，同时尝试浏览器下载
+        console.error(e);
+        saveViaBrowser('保存对话框不可用，已改用浏览器下载，请确认文件已保存');
       }
     },
     finishRecovery() {
@@ -509,7 +529,7 @@ export default {
         useNotification().success('已覆盖恢复！账号 ' + (res.data.username || (b ? b.username : '')) + ' 已还原，请用其密码登录。');
         this.afterRestore(b, res.data.username);
       } catch (err) {
-        useNotification().error(err.response?.data?.error || '覆盖恢复失败');
+        reportError(err, { action: '覆盖恢复' });
       } finally { this.busy = false; }
     },
     onConfirmAction() {
@@ -550,7 +570,7 @@ export default {
         const list = (res.data && res.data.accounts) || [];
         this.recoverAccounts = list.filter(a => !a.protect);
       }).catch(err => {
-        useNotification().error(err.response?.data?.error || '读取本机账号失败');
+        reportError(err, { action: '读取本机账号' });
       }).finally(() => { this.recoverLoading = false; });
     },
     onRecoverSubmit() {
@@ -577,7 +597,7 @@ export default {
         this.confirm = '';
         this.switchMode('login');
       }).catch(err => {
-        useNotification().error(err.response?.data?.error || '重置失败');
+        reportError(err, { action: '重置' });
       }).finally(() => { this.busy = false; });
     },
     // 本机信息恢复：选中的本机库即凭证，签发带 recover 标记的临时登录态，随后强制设新密码
@@ -595,7 +615,7 @@ export default {
         this.recoverStep = 'setpass';
         useNotification().info('已验证本机数据库，请设置新密码');
       }).catch(err => {
-        useNotification().error(err.response?.data?.error || '无法用该数据库文件恢复');
+        reportError(err, { action: '恢复' });
       }).finally(() => { this.busy = false; });
     },
     saveRecoveredPassword() {
@@ -612,7 +632,7 @@ export default {
         useNotification().success('新密码已设置');
         this.$router.push('/');
       }).catch(err => {
-        useNotification().error(err.response?.data?.error || '设置新密码失败');
+        reportError(err, { action: '设置新密码' });
       }).finally(() => { this.busy = false; });
     },
   },

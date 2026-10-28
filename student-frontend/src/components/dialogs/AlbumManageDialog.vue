@@ -57,6 +57,7 @@
 </template>
 
 <script setup>
+import { reportError } from '../../utils/reportError.js'
 import { ref, nextTick, watch, onBeforeUnmount } from 'vue'
 import axios from 'axios'
 import DialogShell from '../base/DialogShell.vue'
@@ -137,7 +138,7 @@ async function addAlbum() {
     nextTick(() => initSortable())
     emit('changed')
   } catch (err) {
-    useNotification().error(err.response?.data?.error || '添加失败')
+    reportError(err, { action: '添加' })
   } finally { busyAdd.value = false }
 }
 
@@ -193,7 +194,7 @@ async function reorderAlbums(ids) {
     albums.value = ids.map(id => map.get(id)).filter(Boolean)
     emit('changed')
   } catch (err) {
-    useNotification().error(err.response?.data?.error || '排序更新失败')
+    reportError(err, { action: '排序更新' })
     loadAlbums()
   }
 }
@@ -229,7 +230,7 @@ async function doRemove() {
     nextTick(() => initSortable())
     emit('changed')
   } catch (err) {
-    useNotification().error(err.response?.data?.error || '删除失败')
+    reportError(err, { action: '删除' })
   }
 }
 

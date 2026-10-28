@@ -585,7 +585,13 @@ async function addApp() {
       icon: typeof result.icon === 'string' ? result.icon : '',
     })
     saveApps()
-  } catch (_) {}
+  } catch (err) {
+    // 走到这里通常是 APPS_SELECT_FILE 的 IPC 通道失败 —— 用户点了「添加」却完全没反应。
+    // 桌面组件是独立窗口、没有 NotificationToast 渲染器，所以用本窗口的 hint。
+    // （保存失败不用在这里管：saveApps 自己会重试并在最终失败时 showHint。）
+    console.error('[widget] 添加软件失败', err)
+    showHint('添加软件失败，请重试')
+  }
 }
 
 function removeApp(idx) {

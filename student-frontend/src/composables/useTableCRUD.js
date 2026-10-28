@@ -1,3 +1,4 @@
+import { reportError } from '../utils/reportError.js'
 import { ref, computed, watch, onMounted, onBeforeUnmount } from 'vue'
 import axios from 'axios'
 import { pushUndo } from '../api/undo'
@@ -215,9 +216,14 @@ export function useTableCRUD(apiBase, defaultFields, options = {}) {
       return true
     }
     if (change.type === 'row_upsert') {
+      // 渲染列表的行必须带 _rowKey/_isNew（DynamicTable 用它做 key 与选择态）；
+      // 撤销/重做返回的是后端原始行，这里统一补齐，snap 仍保持原始快照。
+      const row = { ...change.row }
+      if (row._rowKey === undefined) row._rowKey = row.id
+      if (row._isNew === undefined) row._isNew = false
       const idx = list.findIndex(r => r.id === change.row.id)
-      if (idx === -1) list.push({ ...change.row })
-      else list[idx] = { ...change.row }
+      if (idx === -1) list.push(row)
+      else list[idx] = row
       const sidx = snap.findIndex(r => r.id === change.row.id)
       if (sidx === -1) snap.push({ ...change.row })
       else snap[sidx] = { ...change.row }
@@ -341,7 +347,7 @@ export function useTableCRUD(apiBase, defaultFields, options = {}) {
       await axios.post(`${apiBase}/move-row`, { id: row.id, direction })
       await fetchRows()
     } catch (err) {
-      notifyError(err.response?.data?.error || '移动失败')
+      reportError(err, { action: '移动' })
     }
   }
 
@@ -608,7 +614,7 @@ export function useTableCRUD(apiBase, defaultFields, options = {}) {
       notifySuccess(res.data.message)
       await fetchRows()
     } catch (err) {
-      notifyError(err.response?.data?.error || '导入失败')
+      reportError(err, { action: '导入' })
     }
   }
 
@@ -730,7 +736,7 @@ export function useTableCRUD(apiBase, defaultFields, options = {}) {
     addNewRowAtBottom, insertRowAbove, insertRowBelow, createNewRow, cancelNewRow, saveNewRow,
     moveRow, deleteColumn, startAddColumn, confirmAddColumn,
     startRenameColumn, confirmRenameColumn,
-    toggleSort, openSearch, closeSearch, clearSearchKeyword, openContextMenu,
+    toggleSort, openSearch, closeSearch, clearSearchKeyword, openContextMenu, hideContextMenu,
     onUpdateNewRow, cutRows, cutSelectedRows, deleteRows, onBatchDelete,
     pasteRows, onMoveSelectedRows, onSwapRows, onSwapColumns,
     onSelectionChange, onImportData, onDeleteDuplicates,

@@ -14,47 +14,31 @@ const { isDateStr } = require('../utils/sql');
 function registerHistoryRoutes(router, { domain, toSnapshot, buildPayload, listRow }) {
   // 已保存快照的周列表
   router.get('/history', (req, res) => {
-    try {
-      const rows = store.histWeeks(domain);
-      res.json(listRow ? rows.map(listRow) : rows);
-    } catch (err) {
-      res.status(500).json({ error: err.message });
-    }
+        const rows = store.histWeeks(domain);
+    res.json(listRow ? rows.map(listRow) : rows);
   });
 
   // 特定周的快照
   router.get('/history/:weekStart', (req, res) => {
-    try {
-      const rec = store.histLatest(domain, req.params.weekStart, null);
-      res.json(rec ? toSnapshot(rec) : null);
-    } catch (err) {
-      res.status(500).json({ error: err.message });
-    }
+        const rec = store.histLatest(domain, req.params.weekStart, null);
+    res.json(rec ? toSnapshot(rec) : null);
   });
 
   // 保存当前周快照（自动或手动）：按 week_start 幂等 upsert
   router.post('/snapshot', (req, res) => {
-    try {
-      const body = req.body || {};
-      if (!body.week_start) return res.status(400).json({ error: '缺少周开始日期' });
-      // 只校验「非空」时任意串都能入库，非法日期会被解析成 NaN 周，历史列表出现幽灵周
-      if (!isDateStr(body.week_start)) return res.status(400).json({ error: '周开始日期格式不正确（应为 YYYY-MM-DD）' });
-      store.histUpsert(domain, { weekStart: body.week_start, payload: buildPayload(body) });
-      res.json({ message: '快照已保存' });
-    } catch (err) {
-      res.status(500).json({ error: err.message });
-    }
+        const body = req.body || {};
+    if (!body.week_start) return res.status(400).json({ error: '缺少周开始日期' });
+    // 只校验「非空」时任意串都能入库，非法日期会被解析成 NaN 周，历史列表出现幽灵周
+    if (!isDateStr(body.week_start)) return res.status(400).json({ error: '周开始日期格式不正确（应为 YYYY-MM-DD）' });
+    store.histUpsert(domain, { weekStart: body.week_start, payload: buildPayload(body) });
+    res.json({ message: '快照已保存' });
   });
 
   // 删除某一周的快照
   router.delete('/history/:weekStart', (req, res) => {
-    try {
-      const changes = store.histDeleteWeek(domain, req.params.weekStart, null);
-      if (!changes) return res.status(404).json({ error: '该周快照不存在' });
-      res.json({ message: '快照已删除' });
-    } catch (err) {
-      res.status(500).json({ error: err.message });
-    }
+        const changes = store.histDeleteWeek(domain, req.params.weekStart, null);
+    if (!changes) return res.status(404).json({ error: '该周快照不存在' });
+    res.json({ message: '快照已删除' });
   });
 }
 

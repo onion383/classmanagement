@@ -7,12 +7,11 @@
 // =========================================================================
 
 const { app } = require('electron')
+const { isHttpUrl } = require('./main.path-guard')
 
 // 右侧网页抽屉用 <webview> 内嵌外部网页的安全护栏（外部内容视为不可信）：
 // 只有 http/https 视为合法地址，其余协议（file:、data:、javascript: 等）一律拒绝。
-function isHttpUrl(url) {
-  return typeof url === 'string' && (url.startsWith('http://') || url.startsWith('https://'))
-}
+// 协议判定复用 main.path-guard，避免两处实现漂移（新增协议时只改一处）。
 
 // 注册 app.on('web-contents-created') 护栏（原 main.js 内嵌逻辑整体迁出）
 function registerWebviewGuard({ getMainWindow, isDev }) {

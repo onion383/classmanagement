@@ -210,6 +210,7 @@ import EmptySnapshot from '../../components/base/EmptySnapshot.vue';
 import GridView from '../../components/tables/GridView/GridView.vue';
 import Tabs from '../../components/base/Tabs.vue';
 import WeekSwitcher from '../../components/base/WeekSwitcher.vue';
+import { shiftDateStr } from '../../utils/dateTime.js';
 import { useNotification } from '../../composables/useNotification.js';
 import { useUndoShortcut } from '../../composables/useUndo.js';
 import { createRowReuseCache } from '../../utils/rowReuse.js';
@@ -470,10 +471,9 @@ export default {
     deleteSnapshotMessage() {
       const w = this.historyCurrentWeek;
       if (!w) return '';
-      const start = new Date(w);
-      const end = new Date(start);
-      end.setDate(end.getDate() + 6);
-      return `确定删除 ${start.toISOString().slice(0, 10)} ~ ${end.toISOString().slice(0, 10)} 的历史快照吗？删除后不可恢复。`;
+      // 日期区间用字符串级偏移：week_start 本身已是 YYYY-MM-DD。
+      // 不要绕 new Date + toISOString —— 那是 UTC 口径，UTC 以西的时区会差一天。
+      return `确定删除 ${String(w).slice(0, 10)} ~ ${shiftDateStr(w, 6)} 的历史快照吗？删除后不可恢复。`;
     },
   },
   methods: {

@@ -28,6 +28,13 @@ const fsp = fs.promises
 
 const isDev = !app.isPackaged
 
+// 渲染层 → 主进程 → 写盘通道的统一体积上限：避免超大 payload 在主进程再复制一份。
+const MAX_WRITE_BYTES = 50 * 1024 * 1024
+// save-file 只服务导出类文件；扩展名由用户可在对话框里改，因此最终路径还要再校验一次。
+const ALLOWED_SAVE_EXTS = new Set([
+  '.html', '.htm', '.xlsx', '.csv', '.md', '.txt', '.json', '.png', '.pdf',
+])
+
 // 上次访问的目录（跨各对话框共享）
 let lastDialogDir = null
 function getDialogDir() { return lastDialogDir }
@@ -36,10 +43,14 @@ function setDialogDir(dir) { lastDialogDir = dir }
 // 窗口引用出口：由 registerDialogsIpc 注入
 let getMainWindow = () => null
 let getWidgetWindow = () => null
+// widget 的「点击穿透」态只能记在 widget 模块里（Electron 无 getter），这里注入读取器：
+// 截屏会把 widget 临时隐藏，结束后必须还原成进入前的状态，而不是一律恢复成可点击。
+let isWidgetIgnoreMouse = () => false
 
 function registerDialogsIpc(opts = {}) {
   if (typeof opts.getMainWindow === 'function') getMainWindow = opts.getMainWindow
   if (typeof opts.getWidgetWindow === 'function') getWidgetWindow = opts.getWidgetWindow
+  if (typeof opts.isWidgetIgnoreMouse === 'function') isWidgetIgnoreMouse = opts.isWidgetIgnoreMouse
 
   // 选择文件夹对话框
   ipcMain.handle('select-folder', async (event) => {
@@ -134,12 +145,12 @@ function registerDialogsIpc(opts = {}) {
     try {
       // 与「选择图片」路径对齐的 50MB 上限：base64 入口原先没有大小校验，
       // 一次超大 payload 就会在主进程里解码出数倍内存（B01-09）。
-      const MAX_BG_BYTES = 50 * 1024 * 1024
+      // 与 note-save/save-file 共用同一个 50MB 上限，避免三处各写一份常量
       if (typeof base64 !== 'string' || base64.length === 0) {
         return { success: false, error: '缺少图片数据' }
       }
       // 先按 base64 长度粗判（约为原始字节的 4/3），避免把超大字符串解码进内存
-      if (base64.length > Math.ceil(MAX_BG_BYTES / 3) * 4) {
+      if (base64.length > Math.ceil(MAX_WRITE_BYTES / 3) * 4) {
         return { success: false, error: '背景图片不能超过 50MB' }
       }
       const bgDir = path.join(app.getPath('userData'), 'data', 'uploads', 'background')
@@ -154,7 +165,7 @@ function registerDialogsIpc(opts = {}) {
       const destPath = path.join(bgDir, fileName)
       // 将 base64 写入文件
       const buffer = Buffer.from(base64, 'base64')
-      if (buffer.length > MAX_BG_BYTES) {
+      if (buffer.length > MAX_WRITE_BYTES) {
         return { success: false, error: '背景图片不能超过 50MB' }
       }
       await fsp.writeFile(destPath, buffer)
@@ -175,15 +186,30 @@ function registerDialogsIpc(opts = {}) {
   ipcMain.handle('save-file', async (event, { defaultName, data } = {}) => {
     const mainWindow = getMainWindow()
     if (!mainWindow || mainWindow.isDestroyed()) return { canceled: true }
+    // 数据体积先判：字符串按 UTF-8 字节数，ArrayBuffer/TypedArray 按 byteLength。
+    // Buffer.from 会在主进程再持有一份等量内存，不设上限等于把 IPC 当内存放大器。
+    const dataBytes = typeof data === 'string'
+      ? Buffer.byteLength(data, 'utf8')
+      : (data && typeof data.byteLength === 'number' ? data.byteLength : -1)
+    if (dataBytes < 0) return { canceled: true, error: '文件数据格式无效' }
+    if (dataBytes > MAX_WRITE_BYTES) return { canceled: true, error: '导出文件不能超过 50MB' }
     // 建议文件名来自渲染层（可能被注入成 ../x 这类串）：统一压平成纯文件名再拼进 defaultPath
     const name = sanitizeSuggestedName(defaultName)
-    const ext = path.extname(name) || ''
+    const ext = path.extname(name).toLowerCase()
+    if (ext && !ALLOWED_SAVE_EXTS.has(ext)) {
+      return { canceled: true, error: '不支持保存为该文件类型' }
+    }
     const result = await dialog.showSaveDialog(mainWindow, {
       title: '保存文件',
       defaultPath: lastDialogDir ? path.join(lastDialogDir, name) : name,
       filters: ext ? [{ name: '文件', extensions: [ext.replace('.', '')] }] : undefined
     })
     if (result.canceled || !result.filePath) return { canceled: true }
+    // 用户可在保存对话框里改扩展名：落盘前按最终路径再校验一次，防止把 save-file 当任意写盘入口
+    const targetExt = path.extname(result.filePath).toLowerCase()
+    if (!ALLOWED_SAVE_EXTS.has(targetExt)) {
+      return { canceled: true, error: '不支持保存为该文件类型' }
+    }
     try {
       const buffer = Buffer.from(data)
       // 异步写：导出的 xlsx/pdf 可能几十 MB，同步写会让窗口在写盘期间完全无响应
@@ -217,8 +243,11 @@ function registerDialogsIpc(opts = {}) {
     const widgetWindow = getWidgetWindow()
     const hideWidget = options?.hideWidget !== false
     let wasVisible = false
+    // 进入前的穿透态：截屏结束后要原样还回去
+    let wasIgnoreMouse = false
     if (hideWidget && widgetWindow && !widgetWindow.isDestroyed()) {
       wasVisible = widgetWindow.isVisible()
+      wasIgnoreMouse = isWidgetIgnoreMouse()
       if (wasVisible) widgetWindow.setOpacity(0)
       // 等待一帧确保窗口已隐藏
       await new Promise(resolve => setTimeout(resolve, 150))
@@ -245,7 +274,8 @@ function registerDialogsIpc(opts = {}) {
       // 整屏 PNG 常有几 MB～十几 MB，写盘走异步，避免截图瞬间主进程冻结
       await fsp.mkdir(saveDir, { recursive: true })
 
-      const timestamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19)
+      // 精度必须到毫秒：只到秒时 1 秒内连存两次会生成同名文件，writeFile 直接把上一次的覆盖掉（静默丢数据）
+      const timestamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 23)
       const filePath = path.join(saveDir, `screenshot_${timestamp}.png`)
       await fsp.writeFile(filePath, image)
 
@@ -258,9 +288,11 @@ function registerDialogsIpc(opts = {}) {
       // 恢复 widget 窗口透明度
       if (wasVisible && widgetWindow && !widgetWindow.isDestroyed()) {
         widgetWindow.setOpacity(1)
-        // 显式恢复鼠标事件和焦点，避免 setOpacity 后透明窗口丢失交互
-        widgetWindow.setIgnoreMouseEvents(false)
-        widgetWindow.focus()
+        // 恢复鼠标事件：必须还原成进入前的穿透态，不能一律 setIgnoreMouseEvents(false)。
+        // 原来无条件取消穿透，会让设计成「点击穿透桌面」的浮窗截屏后开始吞掉桌面点击。
+        widgetWindow.setIgnoreMouseEvents(wasIgnoreMouse, { forward: true })
+        // 穿透态下不该抢焦点（否则又把焦点从用户正在用的窗口拿走）
+        if (!wasIgnoreMouse) widgetWindow.focus()
       }
     }
   })
@@ -362,6 +394,12 @@ function registerDialogsIpc(opts = {}) {
 
   // 保存注释后的截图
   ipcMain.handle('note-save', async (event, uint8Array, options) => {
+    if (!uint8Array || typeof uint8Array.byteLength !== 'number') {
+      return { success: false, error: '缺少截图数据' }
+    }
+    if (uint8Array.byteLength > MAX_WRITE_BYTES) {
+      return { success: false, error: '截图不能超过 50MB' }
+    }
     const buffer = Buffer.from(uint8Array)
     const defaultSaveDir = path.join(app.getPath('pictures'), 'screenshots')
     // 与截图保存同一条边界：noteSavePath 由用户配置，渲染层仍可能被篡改，
@@ -370,7 +408,8 @@ function registerDialogsIpc(opts = {}) {
     if (safeDir.error) return { success: false, error: safeDir.error }
     const saveDir = safeDir.path
     await fsp.mkdir(saveDir, { recursive: true })
-    const timestamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19)
+    // 精度必须到毫秒：只到秒时 1 秒内连存两次会生成同名文件，writeFile 直接把上一次的覆盖掉（静默丢数据）
+      const timestamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 23)
     const filePath = path.join(saveDir, `note_${timestamp}.png`)
     await fsp.writeFile(filePath, buffer)
     return { success: true, filePath }

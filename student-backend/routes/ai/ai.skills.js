@@ -13,18 +13,14 @@ const slugOf = (req) => req.user && req.user.dbSlug;
 
 // GET /api/ai/skills —— 技能列表
 router.get('/skills', (req, res) => {
-  try {
     res.json({ success: true, data: dbManager.listSkills(slugOf(req)) });
-  } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
 // GET /api/ai/skills/:name —— 读取某技能内容
 router.get('/skills/:name', (req, res) => {
-  try {
     const name = req.params.name;
-    if (!dbManager.skillExists(slugOf(req), name)) return res.status(404).json({ error: '技能不存在' });
-    res.json({ success: true, data: { name, content: dbManager.readSkill(slugOf(req), name) } });
-  } catch (err) { res.status(500).json({ error: err.message }); }
+  if (!dbManager.skillExists(slugOf(req), name)) return res.status(404).json({ error: '技能不存在' });
+  res.json({ success: true, data: { name, content: dbManager.readSkill(slugOf(req), name) } });
 });
 
 // POST /api/ai/skills —— 新建技能，body: { name, content }
@@ -56,10 +52,8 @@ router.put('/skills/:name', (req, res) => {
 
 // DELETE /api/ai/skills/:name —— 删除技能
 router.delete('/skills/:name', (req, res) => {
-  try {
     dbManager.deleteSkill(slugOf(req), req.params.name);
-    res.json({ success: true, data: dbManager.listSkills(slugOf(req)) });
-  } catch (err) { res.status(500).json({ error: err.message }); }
+  res.json({ success: true, data: dbManager.listSkills(slugOf(req)) });
 });
 
 module.exports = router;

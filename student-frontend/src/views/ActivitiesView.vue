@@ -153,6 +153,7 @@ import { defineAsyncComponent, getCurrentInstance } from 'vue'
 import Tabs from '../components/base/Tabs.vue'
 import LeaveTimeline from '../components/base/LeaveTimeline.vue'
 import { useNotification } from '../composables/useNotification.js'
+import { reportError } from '../utils/reportError.js'
 import { recordRowInsert, recordRowUpdate, recordRowDelete, useUndoShortcut } from '../composables/useUndo.js'
 import { applyRouteRowFocus } from '../composables/useRowFocus.js'
 
@@ -379,15 +380,22 @@ export default {
     async loadAll() {
       this.loading = true
       try {
-        const [actRes, cntRes] = await Promise.all([
+        // 两个接口互不依赖：用 allSettled，避免「倒计时失败」把已经拿到的
+        // 「活动列表」一起丢掉（原来 Promise.all 一处 reject 整批作废）。
+        const [actRes, cntRes] = await Promise.allSettled([
           axios.get(`${API}/activities`),
           axios.get(`${API}/countdowns`)
         ])
-        this.activities = actRes.data.data || []
-        this.countdowns = cntRes.data.data || []
-        return true
-      } catch (err) {
-        useNotification().error('加载失败')
+        if (actRes.status === 'fulfilled') this.activities = actRes.value.data.data || []
+        if (cntRes.status === 'fulfilled') this.countdowns = cntRes.value.data.data || []
+
+        const failed = []
+        if (actRes.status === 'rejected') failed.push('活动')
+        if (cntRes.status === 'rejected') failed.push('倒计时')
+        if (!failed.length) return true
+        // 两处都失败只弹一条，文案带上失败范围，避免刷两条提示
+        const reason = (actRes.status === 'rejected' ? actRes : cntRes).reason
+        reportError(reason, { action: `加载${failed.join('与')}` })
         return false
       } finally {
         this.loading = false
@@ -411,7 +419,7 @@ export default {
         this.actDialogVisible = false
         useNotification().success('已新增活动')
         await this.loadAll()
-      } catch (err) { useNotification().error(err.response?.data?.error || '保存失败') }
+      } catch (err) { reportError(err, { action: '保存' }) }
     },
     async updateActivity(payload) {
       const { id, ...fields } = payload
@@ -422,7 +430,7 @@ export default {
         this.actDialogVisible = false
         useNotification().success('已保存')
         await this.loadAll()
-      } catch (err) { useNotification().error(err.response?.data?.error || '保存失败') }
+      } catch (err) { reportError(err, { action: '保存' }) }
     },
     askDeleteActivity(a) {
       this.confirm = {
@@ -439,7 +447,7 @@ export default {
         this.confirm.visible = false
         useNotification().success('已删除')
         await this.loadAll()
-      } catch (err) { useNotification().error(err.response?.data?.error || '删除失败') }
+      } catch (err) { reportError(err, { action: '删除' }) }
     },
     // ---------- 倒计时 CRUD ----------
     openAddCountdown() { this.editingCountdown = null; this.cntDialogVisible = true },
@@ -452,7 +460,7 @@ export default {
         this.cntDialogVisible = false
         useNotification().success('已添加倒计时')
         await this.loadAll()
-      } catch (err) { useNotification().error(err.response?.data?.error || '保存失败') }
+      } catch (err) { reportError(err, { action: '保存' }) }
     },
     async updateCountdown(payload) {
       const { id, ...fields } = payload
@@ -463,7 +471,7 @@ export default {
         this.cntDialogVisible = false
         useNotification().success('已保存')
         await this.loadAll()
-      } catch (err) { useNotification().error(err.response?.data?.error || '保存失败') }
+      } catch (err) { reportError(err, { action: '保存' }) }
     },
     askDeleteCountdown(c) {
       this.confirm = {
@@ -480,7 +488,7 @@ export default {
         this.confirm.visible = false
         useNotification().success('已删除')
         await this.loadAll()
-      } catch (err) { useNotification().error(err.response?.data?.error || '删除失败') }
+      } catch (err) { reportError(err, { action: '删除' }) }
     },
     // ---------- 导出 ----------
     // 导出活动/倒计时：无数据时直接提示，不弹导出选项弹窗

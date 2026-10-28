@@ -325,10 +325,18 @@ test('isRecoverScopeAllowed：只放行改密与登出，其余路径一律拒�
   assert.equal(isRecoverScopeAllowed(req('POST', '/api/auth/logout')), true)
   assert.equal(isRecoverScopeAllowed(req('GET', '/api/students')), false)
   assert.equal(isRecoverScopeAllowed(req('POST', '/api/account/export')), false)
-  // 路径穿越/尾斜杠都不能借白名单前缀绕过
+  // 尾斜杠要归一后再比：Express 默认非严格路由，`PUT /api/account/password/` 会命中**同一个**
+  // 改密 handler（已实测 200），白名单却按精确串匹配 → 请求进得来但被判越权，
+  // recover 流程永久 401、用户彻底卡死。归一只是多放行这一个字符串，不是前缀匹配。
+  assert.equal(isRecoverScopeAllowed(req('PUT', '/api/account/password/')), true)
+  assert.equal(isRecoverScopeAllowed(req('PUT', '/api/account/password//')), true)
+  // 路径穿越/编码/方法混淆都不能借白名单前缀绕过（归一化不做路径解析）
   assert.equal(isRecoverScopeAllowed(req('PUT', '/api/account/password/../export')), false)
-  assert.equal(isRecoverScopeAllowed(req('PUT', '/api/account/password/')), false)
+  assert.equal(isRecoverScopeAllowed(req('PUT', '/api/account/password/../export/')), false)
+  assert.equal(isRecoverScopeAllowed(req('PUT', '/api/account/password/../../admin')), false)
+  assert.equal(isRecoverScopeAllowed(req('PUT', '/api/account/password%2F')), false)
   assert.equal(isRecoverScopeAllowed(req('DELETE', '/api/account/password')), false)
+  assert.equal(isRecoverScopeAllowed(req('DELETE', '/api/account/password/')), false)
 })
 
 // =========================================================================
@@ -532,6 +540,34 @@ test('dutyCells：空/数组/畸形输入不抛错，混合键不误判为模式
   // 顶层混有非 daily/big 键 → 按旧版整块处理（项目名恰好不叫 daily 的情况）
   const legacyLike = { 扫地: { 周一: ['张三'] }, daily: {} }
   assert.equal(countDutyRefs(legacyLike, '张三'), 1)
+})
+
+test('dutyMode/dutyCells：旧版整块里项目名恰为 daily/big 不得误判为模式打包', () => {
+  const { toModeMap, looksLikeDutyRoot } = require('../../student-backend/services/dutyMode')
+  const { countDutyRefs, removeDutyName, dutyRoots } = require('../../student-backend/services/dutyCells')
+
+  // 旧版结构（没有模式概念），项目名恰好叫 daily：下一层是「星期 → 姓名数组」
+  const legacy = { daily: { 周一: ['张三'] } }
+  assert.equal(looksLikeDutyRoot(legacy.daily), false, '星期映射不是模式根')
+  // 必须整块归入日常，而不是把 legacy.daily 当成「日常模式的内容」
+  assert.deepEqual(toModeMap(legacy), { daily: legacy, big: {} })
+  assert.deepEqual(dutyRoots(legacy), [legacy])
+  assert.equal(countDutyRefs(legacy, '张三'), 1, '误判会导致统计恒为 0、删人名删不掉')
+  assert.equal(removeDutyName(legacy, '张三'), 1)
+
+  // 真正的模式打包结构不受影响（下一层是「项目 → 对象」）
+  const packed = { daily: { 扫地: { 周一: ['李四'] } }, big: {} }
+  assert.equal(looksLikeDutyRoot(packed.daily), true)
+  assert.deepEqual(toModeMap(packed), { daily: { 扫地: { 周一: ['李四'] } }, big: {} })
+  assert.equal(countDutyRefs(packed, '李四'), 1)
+
+  // 另一个模式为 null / 畸形时仍按模式打包解包（保持原有宽容度）
+  const halfBroken = { daily: { 扫地: { 周一: ['王五'] } }, big: null }
+  assert.deepEqual(toModeMap(halfBroken).daily, { 扫地: { 周一: ['王五'] } })
+  assert.equal(countDutyRefs(halfBroken, '王五'), 1)
+
+  // 空对象算「像模式根」：刚切到该模式还没填内容
+  assert.equal(looksLikeDutyRoot({}), true)
 })
 
 test.after(() => { try { fs.rmSync(tmpDir, { recursive: true, force: true }) } catch (_) {} })

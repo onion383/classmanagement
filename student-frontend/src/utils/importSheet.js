@@ -30,8 +30,11 @@ export function headerColumns(row) {
     if (!name) return
     let unique = name
     let n = 2
-    // 同名表头：第二个起加「(2)」「(3)」，避免对象键互相覆盖丢数据
-    while (used.has(unique)) unique = `${name} (${n++})`
+    // 同名表头：第二个起加「_2」「_3」避免对象键互相覆盖丢数据。
+    // 后缀**不能用「 (2)」**（空格+括号）：这个 name 会原样作为列名 POST 给后端，
+    // 而 assertValidColumn 的白名单是 /^[a-zA-Z0-9_\u4e00-\u9fa5]+$/，
+    // 空格与括号都不在字符集里 → 含同名表头的 Excel 会整体导入失败（硬失败，不是跳过）。
+    while (used.has(unique)) unique = `${name}_${n++}`
     used.add(unique)
     columns.push({ name: unique, index })
   })

@@ -13,49 +13,33 @@ function readAll() {
 
 // GET /api/activities 全量列表
 router.get('/', (req, res) => {
-  try {
     res.json({ data: readAll() });
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
 });
 
 // POST /api/activities 新增
 router.post('/', (req, res) => {
-  try {
     const body = req.body || {};
-    const data = cleanUp(body, EDITABLE, 'activities');
-    data.created_at = now();
-    data.position = maxPosition('activities') + 1;
-    const result = buildInsert('activities', data);
-    renumber('activities');
-    res.json({ id: result.lastInsertRowid, message: '添加活动成功' });
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
+  const data = cleanUp(body, EDITABLE, 'activities');
+  data.created_at = now();
+  data.position = maxPosition('activities') + 1;
+  const result = buildInsert('activities', data);
+  renumber('activities');
+  res.json({ id: result.lastInsertRowid, message: '添加活动成功' });
 });
 
 // PUT /api/activities/:id 编辑
 router.put('/:id', (req, res) => {
-  try {
     const row = cleanUp(req.body || {}, EDITABLE, 'activities');
-    if (Object.keys(row).length === 0) return res.status(400).json({ error: '没有可更新的字段' });
-    buildUpdate('activities', row, req.params.id);
-    res.json({ message: '修改成功' });
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
+  if (Object.keys(row).length === 0) return res.status(400).json({ error: '没有可更新的字段' });
+  buildUpdate('activities', row, req.params.id);
+  res.json({ message: '修改成功' });
 });
 
 // DELETE /api/activities/:id 删除
 router.delete('/:id', (req, res) => {
-  try {
     db.prepare('DELETE FROM activities WHERE id = ?').run(Number(req.params.id));
-    renumber('activities');
-    res.json({ message: '删除成功' });
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
+  renumber('activities');
+  res.json({ message: '删除成功' });
 });
 
 module.exports = router;

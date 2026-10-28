@@ -21,20 +21,16 @@ function aiParseDate(s) {
   if (!m) return '';
   return `${m[1]}-${aiPad2(Number(m[2]))}-${aiPad2(Number(m[3]))}`;
 }
-function aiParseJson(str, fallback) {
-  try { const v = JSON.parse(str); return v == null ? fallback : v; } catch (_) { return fallback; }
-}
+// JSON 解析与值日模式拆包都复用单源实现：utils/json、services/dutyMode。
+// 保留 aiParseJson / unpackDutyModeCol 这两个旧名字 —— checks / image / query 三个执行器
+// 按名字 import，改名会连带改动它们（收益只是好看一点，不值得）。
+const { safeJson } = require('../../../../utils/json');
+const { unpackMode } = require('../../../../services/dutyMode');
+const aiParseJson = safeJson;
 const DUTY_MODE_LABELS = { daily: '日常值日', big: '大扫除' };
 function dutyModeLabel(m) { return DUTY_MODE_LABELS[m] || m; }
-// 解包「按模式分键」的值日数据（与 duty.js fieldToModeMap 同构）：旧版整块归入日常
-function unpackDutyModeCol(field, mode) {
-  let obj = (typeof field === 'object' && field !== null) ? field : aiParseJson(field, {});
-  if (!obj || typeof obj !== 'object') return {};
-  const keys = Object.keys(obj);
-  const isModeMap = keys.length > 0 && keys.every((k) => k === 'daily' || k === 'big');
-  if (isModeMap) return obj[mode] || {};
-  return mode === 'daily' ? obj : {};
-}
+// 解包「按模式分键」的值日数据：旧版整块归入日常（判定规则见 services/dutyMode.js）
+function unpackDutyModeCol(field, mode) { return unpackMode(field, mode); }
 function studentIdNameMap() {
   const map = {};
   for (const s of db.prepare('SELECT id, 姓名 FROM students').all()) map[Number(s.id)] = String(s['姓名'] || '');

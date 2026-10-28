@@ -1,6 +1,8 @@
 import { ref, computed } from 'vue'
 import axios from 'axios'
 import { recordGridCellUndo, recordGridSnapshotUndo } from './useUndo.js'
+import { useNotification } from './useNotification.js'
+import { createSerialSaver } from '../utils/serialSaver.js'
 import { createRowReuseCache } from '../utils/rowReuse.js'
 
 // ==================== 座位网格几何辅助（纯函数，座位表与权重表共用） ====================
@@ -154,14 +156,23 @@ export function useSeatGrid(apiBase, options = {}) {
     } catch (e) { console.error(e); loadError.value = true }
   }
 
+  // 串行保存器：每次编辑都 PUT 整块座位，连续操作会并发发出多个 PUT —— 后端按到达顺序写库，
+  // 先发的可能后到，库里最后留下的是**更旧**的状态。串行器保证同一时刻只有一个在途，
+  // 在途期间的改动合并成一轮、用最新 seats 再存一次。
+  const saver = createSerialSaver(() => axios.put(apiBase, {
+    rows: rows.value, cols: cols.value, seats: seats.value,
+    mode: mode.value, settings: { showAisle: showAisle.value },
+  }))
+
   async function save() {
-    try {
-      await axios.put(apiBase, { rows: rows.value, cols: cols.value, seats: seats.value, mode: mode.value, settings: { showAisle: showAisle.value } })
-      return true
-    } catch (e) {
-      console.error(e)
-      return false
+    const ok = await saver.request()
+    if (!ok) {
+      console.error('[seat] 保存失败', saver.error)
+      // 原来只 console.error：用户看不到任何反馈，以为已经存上了。
+      // 文案固定，靠 useNotification 的同文案合并避免连续编辑时刷屏。
+      useNotification().error('座位保存失败，改动未保存')
     }
+    return ok
   }
 
   // 单格更新：有 cellBase（单格接口）则只提单格，否则回退到整块 save
@@ -170,7 +181,10 @@ export function useSeatGrid(apiBase, options = {}) {
       try {
         await axios.patch(cellBase, { row, col, value })
         return true
-      } catch (e) { console.error(e) }
+      } catch (e) {
+        console.error(e)
+        useNotification().error('座位保存失败，改动未保存')
+      }
       return false
     }
     await save()
@@ -219,7 +233,7 @@ export function useSeatGrid(apiBase, options = {}) {
     }
   }
 
-  function onSwapRows(fromIdx, toIdx) {
+  async function onSwapRows(fromIdx, toIdx) {
     if (fromIdx === 0 || toIdx === 0) return
     if (fromIdx === toIdx) return
     const seatFrom = fromIdx - 1, seatTo = toIdx - 1
@@ -230,11 +244,13 @@ export function useSeatGrid(apiBase, options = {}) {
     const [moved] = s.splice(seatFrom, 1)
     s.splice(seatTo, 0, moved)
     seats.value = s
+    // 与 onCellsUpdate 统一：保存成功后才登记撤销；失败以库中数据回滚。
+    const ok = await save()
+    if (!ok) { await load(); return }
     if (undo) recordGridSnapshotUndo(undo.key, undo.table, prev, s)
-    save()
   }
 
-  function onSwapColumns(fromDisplayIdx, toDisplayIdx) {
+  async function onSwapColumns(fromDisplayIdx, toDisplayIdx) {
     const map = []
     let real = 0
     const total = getDisplayColCount(cols.value, mode.value, showAisle.value)
@@ -253,8 +269,10 @@ export function useSeatGrid(apiBase, options = {}) {
       return nr
     })
     seats.value = newSeats
+    // 与 onCellsUpdate 统一：保存成功后才登记撤销；失败以库中数据回滚。
+    const ok = await save()
+    if (!ok) { await load(); return }
     if (undo) recordGridSnapshotUndo(undo.key, undo.table, prev, newSeats)
-    save()
   }
 
   function onCellDblClick({ rowIdx, colIdx: displayColIdx }) {
@@ -293,9 +311,16 @@ export function useSeatGrid(apiBase, options = {}) {
     await save()
   }
 
+  // 整块替换座位并保存。
+  // 失败时本地已经是新数据、库里还是旧的 —— 重新 load 一次把界面拉回真实状态，
+  // 并把 ok 返回给调用方：否则调用方会无条件弹「导入成功」，用户以为存上了。
   async function saveSeats(newSeats) {
     seats.value = newSeats
-    await save()
+    const ok = await save()
+    if (!ok) {
+      try { await load() } catch (_) { /* 回滚也失败时保留 save 已给出的失败提示 */ }
+    }
+    return ok
   }
 
   return {

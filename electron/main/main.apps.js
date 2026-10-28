@@ -23,20 +23,21 @@ const MAX_RESOLVE_PATHS = 32
 // 窗口引用出口：由 registerAppsIpc 注入
 let getMainWindow = () => null
 
-// 解析 .lnk 快捷方式的目标可执行程序路径（仅接受 .exe 目标，供取图标用）
-async function resolveLnkTarget(lnkPath) {
-  const { execFile } = require('child_process')
-  return new Promise((resolve) => {
-    const ps = [
-      '-NoProfile', '-NonInteractive', '-Command',
-      `$s=(New-Object -ComObject WScript.Shell).CreateShortcut('${lnkPath.replace(/'/g, "''")}'); if($s.TargetPath){$s.TargetPath}`,
-    ]
-    execFile('powershell.exe', ps, { timeout: 8000 }, (err, stdout) => {
-      if (err) return resolve('')
-      const target = (stdout || '').trim()
-      resolve(path.extname(target).toLowerCase() === '.exe' ? target : '')
-    })
-  })
+// 解析 .lnk 快捷方式的目标可执行程序路径（仅接受 .exe 目标，供取图标用）。
+//
+// 用 Electron 自带的 shell.readShortcutLink：Windows 原生、同步、直接读 .lnk 文件结构。
+// 原实现对每个 .lnk 都起一个外部命令行子进程（单次启动 200～500ms，且在循环里串行
+// await），拖入 30 个快捷方式要等十几秒才出图标。这里换成原生解析，耗时降到微秒级，
+// 也顺带不再依赖系统里存在那个 shell。
+// 读不出来（快捷方式损坏 / 指向 UWP 应用）时返回空串，调用方退回按 .lnk 本身取图标。
+function resolveLnkTarget(lnkPath) {
+  try {
+    const detail = shell.readShortcutLink(lnkPath)
+    const target = (detail && detail.target) || ''
+    return path.extname(target).toLowerCase() === '.exe' ? target : ''
+  } catch (_) {
+    return ''
+  }
 }
 
 // 把「文件 / 文件夹 / 快捷方式」路径解析成常用项：显示名 + 系统图标（dataURL）。
@@ -48,8 +49,8 @@ async function resolveAppEntry(filePath) {
   const name = (base || '未命名').slice(0, 30)
   let icon = ''
   try {
-    // 快捷方式(.lnk)本身取不到目标程序图标，先解析出目标 exe 再取其图标
-    const iconTarget = ext === '.lnk' ? await resolveLnkTarget(filePath) : ''
+    // 快捷方式(.lnk)本身取不到目标程序图标，先解析出目标 exe 再取其图标（同步，无子进程）
+    const iconTarget = ext === '.lnk' ? resolveLnkTarget(filePath) : ''
     const img = await app.getFileIcon(iconTarget || filePath, { size: 'large' })
     icon = img.toDataURL()
   } catch (_) { /* 图标提取失败则留空 */ }

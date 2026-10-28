@@ -2,6 +2,8 @@
 // 纯代码搬运自 ../executors.js，行为不变。
 const { db } = require('../../../../db');
 const { READ_TABLES } = require('../../ai.constants');
+// JSON 列解析复用单源实现（此前本文件自抄了一份 parseJsonOr，与 executors.common.js 的 aiParseJson 逐字相同）
+const { safeJson } = require('../../../../utils/json');
 
 // ===== delete_impact 工具：删除前的引用影响预估（只读）=====
 // 在删掉某行前，先看看它在各处被引用了多少（分组/班干部/加减分/请假/座位表/值日表），避免删完才发现数据不一致。
@@ -28,9 +30,6 @@ function countInJson(value, match) {
   walk(value);
   return n;
 }
-function parseJsonOr(str, fallback) {
-  try { const v = JSON.parse(str); return v == null ? fallback : v; } catch (_) { return fallback; }
-}
 // 一行记录的展示名：姓名 / 小组成员 / 学生名 / 小组名 / 主题 / 名称，回退 #id
 function rowDisplayName(row, id) {
   return row ? (row.姓名 || row.member_name || row.student_name || row.group_name || row.主题 || row.名称 || row.name || `#${id}`) : `#${id}`;
@@ -52,12 +51,12 @@ function impactOfRow(table, id) {
   // 座位表 / 值日表：学生以 id（座位）或姓名（值日）散落在整块 JSON 里
   if (table === 'students') {
     const seatRow = db.prepare('SELECT seats FROM seat_layout WHERE id = 1').get();
-    const seatHits = countInJson(parseJsonOr(seatRow && seatRow.seats, []), (v) => v === id);
+    const seatHits = countInJson(safeJson(seatRow && seatRow.seats, []), (v) => v === id);
     if (seatHits) refs.push({ label: '当前座位表', table: 'seat_layout', count: seatHits, samples: [] });
     const name = String(row['姓名'] || '');
     if (name) {
       const dutyRow = db.prepare('SELECT cells FROM duty_layout WHERE id = 1').get();
-      const dutyHits = countInJson(parseJsonOr(dutyRow && dutyRow.cells, {}), (v) => v === name);
+      const dutyHits = countInJson(safeJson(dutyRow && dutyRow.cells, {}), (v) => v === name);
       if (dutyHits) refs.push({ label: '当前值日表', table: 'duty_layout', count: dutyHits, samples: [] });
     }
   }

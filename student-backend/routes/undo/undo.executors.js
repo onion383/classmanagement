@@ -8,6 +8,7 @@ const { db } = require('../../db')
 const dbManager = require('../../dbManager/dbManager')
 const { moveToTrash, restoreToOriginal, deleteThumb } = require('../../albumOps')
 const { SEAT_MAX_ROWS, SEAT_MAX_COLS } = require('../../services/sanitize')
+const { renameStudentRefs } = require('../../services/studentRename')
 const {
   readGridArray, writeGridArray, cellText,
   insertRow, deleteRowById, updateRowById, writeDocCols, rowName,
@@ -16,6 +17,18 @@ const {
 
 // 允许记录的动态表名（防注入）。含 cadre_members：跨表批量写入（propose_batch）可能写入职务成员，需可撤销。
 const ALLOWED_TABLES = ['students', 'fee_records', 'leave_records', 'score_records', 'group_members', 'groups', 'group_dimensions', 'activities', 'countdowns', 'cadres', 'cadre_members']
+
+// 学生改名在写入时会把值日/座位/成绩/请假/小组/班干部里的旧姓名一起改掉
+// （见 services/studentRename.js）。撤销/重做必须同步反向改名，否则「撤销改名」会让
+// students 回到旧名、关联却停在新名上 —— 关联与人对不上，比不同步还乱。
+// 参数顺序：fromRow 是「当前关联里的姓名」，toRow 是「要改回/改成」的姓名。
+function renameRefsIfStudent(table, fromRow, toRow) {
+  if (table !== 'students' || !fromRow || !toRow) return
+  const a = fromRow['姓名']
+  const b = toRow['姓名']
+  if (a == null || b == null || a === b) return
+  renameStudentRefs(a, b)
+}
 
 // 「整块 JSON 列」表：数据以整块 JSON 存于单列（座位 seats / 权重 weights / 课表 cells…），
 // 撤销时按「整块列值」整体还原。表名固定，杜绝注入。
@@ -88,8 +101,14 @@ const executors = {
       if (!ALLOWED_TABLES.includes(table) || !Number.isInteger(rowId)) return '参数不完整'
       return null
     },
-    undo({ table, rowId, oldRow }) { updateRowById(table, rowId, oldRow) },
-    redo({ table, rowId, newRow }) { updateRowById(table, rowId, newRow) },
+    undo({ table, rowId, oldRow, newRow }) {
+      updateRowById(table, rowId, oldRow)
+      renameRefsIfStudent(table, newRow, oldRow)
+    },
+    redo({ table, rowId, oldRow, newRow }) {
+      updateRowById(table, rowId, newRow)
+      renameRefsIfStudent(table, oldRow, newRow)
+    },
     describe(p, mode) {
       const name = rowName(p.newRow || p.oldRow, p.rowId)
       return mode === 'undo' ? `撤销编辑：${name}` : `重新编辑：${name}`

@@ -2,12 +2,14 @@ import { createApp } from 'vue'
 import { createPinia } from 'pinia'
 import WidgetApp from './WidgetApp.vue'
 import '../../styles/index.css'
-import { setupApiClient } from '../../utils/httpClient'
+import { setupApiClient, backendBaseUrl } from '../../utils/httpClient'
 import { loadThemeStyles } from '../../styles/themeLoader'
 import { useThemeStore } from '../../stores/theme'
 
-// 配置 API 基础地址（生产模式下 widget 使用 file:// 协议，必须使用完整地址）
-setupApiClient({ baseURL: 'http://localhost:3000' })
+// 配置 API 基础地址：与 setup / desktop-widget 两个窗口共用 backendBaseUrl()（
+// 生产模式返回完整地址，开发模式返回空串走 Vite 代理）。原来这里写死 'http://localhost:3000'，
+// 后端端口一变（PORT 环境变量）本窗口就连不上，而其余窗口仍正常——跨窗口失配且难排查。
+setupApiClient({ baseURL: backendBaseUrl() })
 
 const app = createApp(WidgetApp)
 const pinia = createPinia()

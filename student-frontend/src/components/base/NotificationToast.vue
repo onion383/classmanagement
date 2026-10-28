@@ -48,6 +48,7 @@
 
 <script setup>
 import { useNotification } from '../../composables/useNotification'
+import { reportError } from '../../utils/reportError.js'
 
 const { notifications, remove } = useNotification()
 
@@ -85,11 +86,14 @@ function onAction(item) {
   const action = item.action
   remove(item.id)
   if (!action || typeof action.onClick !== 'function') return
+  // 失败必须说出来：提示条已经被收掉，若静默失败用户会以为「撤销成功了」。
+  // 用按钮自己的文案当动作名（「撤销」→「撤销失败」）。
+  const label = action.label || '操作'
   try {
     const ret = action.onClick()
-    if (ret && typeof ret.catch === 'function') ret.catch(err => console.error('[通知动作]', err))
+    if (ret && typeof ret.catch === 'function') ret.catch((err) => reportError(err, { action: label }))
   } catch (err) {
-    console.error('[通知动作]', err)
+    reportError(err, { action: label })
   }
 }
 </script>

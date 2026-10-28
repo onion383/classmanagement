@@ -82,6 +82,7 @@
       :x="contextMenu.x"
       :y="contextMenu.y"
       :items="contextMenu.items"
+      @close="hideContextMenu"
     />
 
     <!-- 收据管理弹窗 -->
@@ -213,6 +214,7 @@
 </template>
 
 <script setup>
+import { reportError } from '../utils/reportError.js'
 import { ref, computed, watch, onMounted, onActivated, getCurrentInstance, defineAsyncComponent } from 'vue'
 import axios from 'axios'
 import SearchBar from '../components/base/SearchBar.vue'
@@ -297,7 +299,7 @@ const {
   startEditCell, saveCell,
   addNewRowAtBottom, cancelNewRow, saveNewRow,
   moveRow,
-  toggleSort, openSearch, closeSearch, clearSearchKeyword, openContextMenu,
+  toggleSort, openSearch, closeSearch, clearSearchKeyword, openContextMenu, hideContextMenu,
   onUpdateNewRow, onBatchDelete,
   onMoveSelectedRows, onSwapRows, onSwapColumns,
   onSelectionChange, onImportData, onDeleteDuplicates
@@ -401,7 +403,7 @@ async function onSubmitRecord(data) {
       notifySuccess('已添加记录')
     }
   } catch (err) {
-    notifyError(err.response?.data?.error || (isEdit ? '保存失败' : '添加失败'))
+    reportError(err, { action: isEdit ? '保存' : '添加' })
   }
 }
 

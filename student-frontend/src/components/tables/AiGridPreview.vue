@@ -25,6 +25,7 @@
 import GridView from './GridView/GridView.vue'
 import { generateColHeaders, buildSeatLikeRows } from '../../composables/useSeatGrid.js'
 import { apiFetch } from '../../utils/apiUrl.js'
+import { useSeq } from '../../composables/useSeq.js'
 
 // 日期表头兜底（课表/值日缺省时）
 const DEFAULT_DAYS = ['周一', '周二', '周三', '周四', '周五']
@@ -90,7 +91,11 @@ export default {
     }
   },
   watch: { table: 'load', override: 'load' },
-  created() { this.load() },
+  created() {
+    // 请求序号挂实例上：Options API 没有 setup 作用域；序号不参与渲染，不必进 data
+    this.seq = useSeq()
+    this.load()
+  },
   methods: {
     // 列值可能是 JSON 文本（取数接口原样返回），也可能已是对象（提案里的新值）
     parse(v, fallback) {
@@ -109,14 +114,14 @@ export default {
     async load() {
       // 表名/覆盖值可能连续变化（watch 会连续触发 load）：
       // 用请求序号丢弃旧响应，避免旧表的数据覆盖新表的预览（B11-06）
-      const my = this._loadSeq = (this._loadSeq || 0) + 1
+      const my = this.seq.take()
       this.loading = true; this.error = ''
       const family = FAMILY[this.table]
       if (!family) { this.error = '该表暂不支持网格预览'; this.loading = false; return }
       try {
         const r = await apiFetch(`/api/ai/records/${this.table}?ids=1`)
         const j = await r.json()
-        if (my !== this._loadSeq) return
+        if (!this.seq.isLatest(my)) return
         if (!r.ok || !j.success) throw new Error(j.error || '读取失败')
         const base = (j.data && j.data.rows && j.data.rows[0]) || {}
         const row = { ...base, ...(this.override || {}) }
@@ -126,15 +131,15 @@ export default {
         else if (family === 'seat') built = await this.buildSeat(row)
         else if (family === 'duty') built = this.buildDuty(row)
         // buildSeat 里还 await 了学生名映射，期间可能已切到别的表：再核对一次序号
-        if (my !== this._loadSeq) return
+        if (!this.seq.isLatest(my)) return
         if (!built) { this.error = '该数据暂无法还原成网格'; return }
         this.applyStyle(built)
       } catch (e) {
-        if (my !== this._loadSeq) return
+        if (!this.seq.isLatest(my)) return
         this.error = e.message || '读取失败'
       } finally {
         // 只由最新请求关闭 loading
-        if (my === this._loadSeq) this.loading = false
+        if (this.seq.isLatest(my)) this.loading = false
       }
     },
     // 座位表：与座位页同款几何（讲台行 + 走廊列），数值格把学生 id 还原成姓名

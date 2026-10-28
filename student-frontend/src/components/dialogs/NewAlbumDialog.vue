@@ -69,6 +69,7 @@
 </template>
 
 <script setup>
+import { reportError } from '../../utils/reportError.js'
 import { ref, computed, watch } from 'vue'
 import axios from 'axios'
 import DialogShell from '../base/DialogShell.vue'
@@ -177,7 +178,7 @@ async function submit() {
       emit('created', res.data.id)
       emit('close')
     } catch (err) {
-      useNotification().error(err.response?.data?.error || '创建失败')
+      reportError(err, { action: '创建' })
     } finally { busy.value = false }
     return
   }
@@ -196,7 +197,7 @@ async function submit() {
     emit('created', res.data.id)
     emit('close')
   } catch (err) {
-    useNotification().error(err.response?.data?.error || '创建失败')
+    reportError(err, { action: '创建' })
   } finally { busy.value = false }
 }
 </script>

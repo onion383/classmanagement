@@ -30,11 +30,14 @@
       </div>
       <div v-if="parseError" class="text-danger text-sm mb-2">{{ parseError }}</div>
       <div v-if="filteredCount > 0" class="text-text-secondary text-sm mb-2">由于缺少受保护字段，已过滤 {{ filteredCount }} 条数据。</div>
+      <div v-if="previewRows.length > previewLimit" class="text-text-secondary text-sm mb-2">
+        表格仅显示前 {{ previewLimit }} 行（共 {{ previewRows.length }} 行）；导入会写入全部行。
+      </div>
       <!-- 预览表格 -->
       <div class="flex-1 overflow-auto border border-border rounded" v-if="previewFields.length && previewRows.length">
         <DynamicTable
           :fields="previewFields"
-          :rows="previewRows"
+          :rows="visibleRows"
           emptyActionText=""
           hideEditButton
           :editingCell="editingCell"
@@ -49,7 +52,7 @@
       <div v-else class="text-center py-6 text-text-secondary">请选择一个文件进行解析</div>
       <!-- 底部按钮 -->
       <div class="flex justify-between items-center mt-4">
-        <span class="text-sm text-text-secondary">共 {{ previewRows.length }} 行</span>
+        <span class="text-sm text-text-secondary">共 {{ previewRows.length }} 行{{ previewRows.length > previewLimit ? '（预览前 ' + previewLimit + ' 行）' : '' }}</span>
         <div class="flex gap-2">
           <button @click="cancel" class="bg-surface-hover px-4 py-1.5 rounded text-text">取消</button>
           <button @click="confirmImport" :disabled="previewRows.length === 0" class="bg-primary text-text-inverse px-4 py-1.5 rounded">导入并合并保存</button>
@@ -64,6 +67,7 @@
 <script>
 import DynamicTable from '../tables/DynamicTable/DynamicTable.vue';
 import { parseSheet } from '../../utils/importSheet.js';
+import { useSeq } from '../../composables/useSeq.js';
 import '../../styles/dialog-transition.css';
 
 export default {
@@ -75,8 +79,24 @@ export default {
     requiredFields: { type: Array, default: () => ['收支编码'] }
   },
   emits: ['import-data', 'cancel'],
+  created() {
+    // 请求序号挂实例上：Options API 没有 setup 作用域；序号不参与渲染，不必进 data
+    this.seq = useSeq()
+  },
+  computed: {
+    // 只把前 N 行交给表格渲染：10MB 表格可能有几万行，全量铺进 DOM（即使有虚拟滚动，
+    // 也要为每行建 vnode / 计算列宽）会明显卡顿。**数据本身仍保留全部**，
+    // confirmImport 用的还是完整 previewRows —— 截断只影响预览，不影响导入内容。
+    visibleRows() {
+      return this.previewRows.length > this.previewLimit
+        ? this.previewRows.slice(0, this.previewLimit)
+        : this.previewRows
+    },
+  },
   data() {
     return {
+      // 预览最多渲染多少行（进 data 是为了模板里也能读到，用于显示截断提示）
+      previewLimit: 3000,
       fileData: null,
       fileName: '',
       parseError: '',
@@ -99,6 +119,8 @@ export default {
       this.handleFile({ target: { files: [file] } });
     },
     resetFile() {
+      // 取消/关闭弹窗也要让在途读取与解析失效，避免关闭后仍写入预览状态
+      this.seq.invalidate();
       this.fileName = '';
       this.fileData = null;
       this.parseError = '';
@@ -114,6 +136,8 @@ export default {
     handleFile(e) {
       const file = e.target.files[0];
       if (!file) return;
+      // 每次选文件都让上一轮读取/解析失效，包括随后因体积被拒绝的分支
+      const my = this.seq.take();
       // 大小上限：超大文件会让 xlsx 解析长时间卡死甚至内存暴涨，超过 10MB 直接拒绝
       if (file.size > 10 * 1024 * 1024) {
         this.resetFile();
@@ -124,6 +148,7 @@ export default {
       this.fileName = file.name;
       const reader = new FileReader();
       reader.onload = async (ev) => {
+        if (!this.seq.isLatest(my)) return;
         this.fileData = new Uint8Array(ev.target.result);
         // 选中文件后自动解析预览，无需再点击「解析预览」
         await this.parseFile();
@@ -131,6 +156,7 @@ export default {
       // 读盘失败（文件被移动/权限不足/设备断开）时必须给出提示，
       // 否则界面停在「请选择一个文件进行解析」，用户以为是自己没选中文件
       reader.onerror = () => {
+        if (!this.seq.isLatest(my)) return;
         this.fileData = null;
         this.parseError = '文件读取失败，请重新选择文件';
       };
@@ -138,29 +164,38 @@ export default {
     },
     async parseFile() {
       if (!this.fileData) return;
+      const my = this.seq.current();
       this.parseError = '';
       this.filteredCount = 0;
       // 大依赖 xlsx（SheetJS）延迟到真正导入文件时才加载，避免随表格页一打开就拖进几 MB 代码
       const XLSX = await import('xlsx');
+      if (!this.seq.isLatest(my)) return;
       try {
         const workbook = XLSX.read(this.fileData, { type: 'array' });
         const sheetName = workbook.SheetNames[0];
         const sheet = workbook.Sheets[sheetName];
         const data = XLSX.utils.sheet_to_json(sheet, { header: 1, defval: '', raw: false });
+        if (!this.seq.isLatest(my)) return;
         if (!data || data.length === 0) { this.parseError = '文件无有效数据'; return; }
         // 表头识别与行映射抽到 utils/importSheet.js：
         // 表头保留原始列下标，空表头只跳过自己，不会让它右边的列整体左移（串列）
         const parsed = parseSheet(data, this.requiredFields);
+        if (!this.seq.isLatest(my)) return;
         if (parsed.fields.length === 0) { this.parseError = '未识别到列标题'; return; }
         this.previewFields = parsed.fields.map(h => ({ name: h, type: '文字' }));
         this.filteredCount = parsed.skipped;
-        this.previewRows = parsed.rows.map((row, idx) => ({
-          ...row,
-          _rowKey: `import_${this.rowKeyCounter++}`,
-          _isNew: false,
-          _displayIndex: idx + 1
-        }));
-      } catch (e) { this.parseError = '文件解析失败：' + e.message; }
+        // 就地在 parseSheet 新建的对象上加内部字段，不再展开拷贝：
+        // 大表（几万行）展开一份等于把所有单元格字符串再引用一遍、行对象翻倍。
+        parsed.rows.forEach((row, idx) => {
+          row._rowKey = `import_${this.rowKeyCounter++}`;
+          row._isNew = false;
+          row._displayIndex = idx + 1;
+        });
+        this.previewRows = parsed.rows;
+      } catch (e) {
+        if (!this.seq.isLatest(my)) return;
+        this.parseError = '文件解析失败：' + e.message;
+      }
     },
     startEditCell(row, field) { this.editingCell = { rowKey: row._rowKey, field: field.name }; },
     saveCell(row, field) { this.editingCell = null; },

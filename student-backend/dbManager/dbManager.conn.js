@@ -19,8 +19,14 @@ function getConn(slug, passphrase, encrypted = true) {
     return connCache.get(slug);
   }
   const conn = openFile(path.join(dataDir, `${slug}.db`), passphrase, encrypted);
-  initSchema(conn);
-  setCachedConn(slug, conn);
+  try {
+    initSchema(conn);
+    setCachedConn(slug, conn);
+  } catch (err) {
+    // 硬顶拒绝或 initSchema 失败：新建的连接不能留在内存里
+    try { conn.close(); } catch (_) { /* best-effort: 关闭失败不再掩盖原始错误 */ }
+    throw err;
+  }
   return conn;
 }
 
@@ -89,6 +95,25 @@ function withDb(slug, fn) {
   });
 }
 
+// 把「本次请求正在用这个库」的标记延长到响应真正结束。
+//
+// withDb 只能看它包住的函数的返回值：在 auth 中间件里那是 `next()`，而 Express 的
+// next() 同步返回 undefined —— 于是计数在**路由处理函数还在 await 的时候**就归零了，
+// setCachedConn 的 LRU 驱逐也就可能把正在用的连接 close 掉（查询报 database is closed）。
+// 这里额外持有一份计数，响应 finish/close 时释放；两个事件都会触发，用 once 释放一次。
+function holdConnUntilResponse(slug, res) {
+  if (!slug || !res || typeof res.once !== 'function') return;
+  beginConnUse(slug);
+  let released = false;
+  const release = () => {
+    if (released) return;
+    released = true;
+    endConnUse(slug);
+  };
+  res.once('finish', release);
+  res.once('close', release);
+}
+
 // 锁定某库：关闭连接缓存并丢弃内存里的库钥匙（登出时调用）
 function lockDb(slug) {
   if (!slug) return;
@@ -105,4 +130,4 @@ function warmup() {
   } catch (_) { /* 暖机失败不影响正常懒加载路径 */ }
 }
 
-module.exports = { getConn, evictConn, current, currentSlug, withDb, lockDb, warmup };
+module.exports = { getConn, evictConn, current, currentSlug, withDb, holdConnUntilResponse, lockDb, warmup };

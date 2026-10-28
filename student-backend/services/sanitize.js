@@ -281,7 +281,8 @@ function assertSlotElements(arr, name, depth) {
 // name 为 ≤20 文本、每个元素至少有 student_id 或 name。
 // 注意：越界（超 rows/cols）与 id 是否真实存在属于依赖既有数据的校验，由 businessRules 负责。
 const SEAT_NAME_MAX = 20;
-// 座位矩阵上限：与 routes/seats.js 的 MAX_ROWS / MAX_COLS 保持一致。
+// 座位矩阵上限：本模块是这两个常量的**唯一来源**，routes/seats.js 与
+// routes/undo/undo.executors.js 都从这里导入，不要再在别处写死 50/30。
 // 扁平数组若按 row/col 直接分配矩阵，必须在此处设上限，否则超大坐标可造成 OOM。
 const SEAT_MAX_ROWS = 50;
 const SEAT_MAX_COLS = 30;
@@ -432,7 +433,9 @@ function cleanDesktopApps(value, name) {
       name: cleanText(it.name ?? '').slice(0, 30),
       // 软件路径同样禁止「..」上跳并校验字符，避免写入后被 IPC 直接启动异常路径
       path: rawPath ? cleanPath(rawPath, `${name}.path`) : '',
-      icon: typeof it.icon === 'string' ? it.icon : '',
+      // icon 可能来自前端/粘贴内容：与其他文本字段一样去控制字符、截断；
+      // 若以后允许 data URL，应在这里单独校验前缀与长度，而不是放开 string 就放行。
+      icon: cleanText(it.icon ?? '').slice(0, 200),
     };
   });
 }
@@ -517,5 +520,6 @@ module.exports = {
   strictDate,
   roundTo,
   normalizeSeats,
+  assertSeatCell,
   sanitizeField,
 };

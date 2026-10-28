@@ -214,6 +214,9 @@ const als = new AsyncLocalStorage();
 const connCache = new Map();
 // 缓存连接数量上限（LRU 驱逐策略：超过上限时关闭并移出最久未使用的连接）
 const CONN_CACHE_MAX = 10;
+// 硬顶：全部连接都在用时允许临时超限，但不能无限增长（N 个账号并发会把 RSS 按连接数放大）。
+// 达到硬顶且没有可驱逐的空闲连接时，拒绝新库连接，由调用方提示「稍后重试」。
+const CONN_CACHE_HARD_MAX = CONN_CACHE_MAX * 3;
 // 每个库当前「正在被请求使用」的计数（见 withDb）：
 // 驱逐时跳过计数 > 0 的连接，否则会把仍在执行查询的连接 close() 掉（B04-01）。
 const connUseCount = new Map();
@@ -239,7 +242,7 @@ function endConnUse(slug) {
 
 // 写入缓存，超限时按 LRU 驱逐最久未使用的连接。
 // 正在被请求使用的连接不驱逐：直接 close() 会让在途查询抛「database is closed」。
-// 若候选全都在用，允许暂时超出上限，等请求结束后下一次写入再收缩。
+// 若候选全都在用，允许在上限与硬顶之间暂时超出，超过硬顶则拒绝新连接。
 function setCachedConn(slug, conn) {
   connCache.set(slug, conn);
   let guard = 0;
@@ -259,6 +262,20 @@ function setCachedConn(slug, conn) {
     connCache.delete(oldestKey);
     try { evicted.close(); } catch (_) { /* 关闭失败可忽略 */ }
   }
+  // 全部在用、没有空闲可驱逐时，硬顶兜底：拒绝本次新连接，避免连接数无限增长。
+  if (connCache.size > CONN_CACHE_HARD_MAX) {
+    if (connCache.get(slug) === conn) connCache.delete(slug);
+    throw new Error('同时打开的数据库连接过多，请稍后重试');
+  }
+}
+
+// 仅测试使用：连接缓存是进程级单例，用例之间必须显式归零，避免互相污染。
+function _resetConnCacheForTest() {
+  for (const conn of connCache.values()) {
+    try { conn.close(); } catch (_) { /* best-effort: 测试清理 */ }
+  }
+  connCache.clear();
+  connUseCount.clear();
 }
 
 // ---------- 打开/创建 单个班主任库 ----------
@@ -449,10 +466,12 @@ module.exports = {
   als,
   connCache,
   CONN_CACHE_MAX,
+  CONN_CACHE_HARD_MAX,
   beginConnUse,
   endConnUse,
   touchConn,
   setCachedConn,
+  _resetConnCacheForTest,
   applyPerfPragmas,
   openFile,
   ensureIndex,

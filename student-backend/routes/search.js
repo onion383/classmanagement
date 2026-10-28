@@ -1,6 +1,8 @@
 const express = require('express')
 const router = express.Router()
 const { db } = require('../db')
+// 值日数据「按模式拆分」的唯一实现（此前本文件自己抄了一份 toModeMap）
+const { unpackMode } = require('../services/dutyMode')
 
 // 标题栏「全局搜索」的服务端数据源：对若干业务表的文本列做 LIKE 匹配，分组返回。
 // 表名/列名全部来自本文件的白名单常量（不接受请求参数拼接），杜绝注入。
@@ -137,18 +139,8 @@ const DUTY_TABLES = [
   { table: 'duty_template', group: '值日 · 值日模板', anchor: 'dutyt' },
 ]
 
-// 模式解包：与 routes/duty.js 的 fieldToModeMap 保持一致（顶层键全是 daily/big 视为新模式结构，
-// 否则整块归入日常）。
-function toModeMap(field) {
-  let obj = {}
-  try { obj = (typeof field === 'object' && field !== null) ? field : JSON.parse(field || '{}') } catch (_) { obj = {} }
-  if (!obj || typeof obj !== 'object') return { daily: {}, big: {} }
-  const keys = Object.keys(obj)
-  const isModeMap = keys.length > 0 && keys.every(k => k === 'daily' || k === 'big')
-  if (isModeMap) return { daily: obj.daily || {}, big: obj.big || {} }
-  return { daily: obj, big: {} }
-}
-const unpackMode = (field, mode) => toModeMap(field)[mode] || {}
+// 模式解包复用 services/dutyMode（见文件顶部 import）：顶层键全是 daily/big 视为新模式结构，
+// 否则整块归入日常。这段判断与 duty.js / ai.dataRoutes.js / AI 工具执行器必须完全一致。
 
 // LIKE 元字符转义：把用户输入里的 % _ \ 当作普通字符，避免被当成通配符。
 function likePattern(q) {

@@ -276,6 +276,8 @@
 <script setup>
 import { ref, computed, watch, onMounted, onActivated, getCurrentInstance, defineAsyncComponent } from 'vue'
 import axios from 'axios'
+import { shiftDateStr } from '../utils/dateTime.js'
+import { getSemesterStart } from '../utils/semesterStart.js'
 import GridView from '../components/tables/GridView/GridView.vue'
 import EmptySnapshot from '../components/base/EmptySnapshot.vue'
 import Tabs from '../components/base/Tabs.vue'
@@ -623,7 +625,10 @@ async function doApplyActiveToMaster() {
     masterGrid.cols.value = activeGrid.cols.value
     masterGrid.mode.value = activeGrid.mode.value
     masterGrid.showAisle.value = activeGrid.showAisle.value
-    await masterGrid.saveSeats(src)
+    const ok = await masterGrid.saveSeats(src)
+    // saveSeats 内部已提示失败并重新 load 回滚界面：
+    // 这里不能再报成功，也不该登记一条根本没生效的撤销
+    if (!ok) return
     recordGridSnapshotUndo('座位表', 'seat_template', before, src, '从实行导入')
     notifySuccess('已从当前座位导入')
   } catch (e) { notifyError('导入失败'); console.error(e) }
@@ -934,8 +939,7 @@ async function loadSeatIndex() {
     // 结算区间：从学期开始日到所选周代表日期（尊重「从开学日算起」的口径）
     let from = ''
     try {
-      const s = await axios.get(`${API_BASE}/schedule/settings`)
-      from = s.data.semester_start || ''
+      from = await getSemesterStart()
     } catch (_) { /* 后端未就绪时忽略 */ }
     const params = {}
     if (from) params.from = from
@@ -953,8 +957,7 @@ async function loadSeatLedger() {
     const to = `${y.getFullYear()}-${pad(y.getMonth() + 1)}-${pad(y.getDate())}`
     let from = ''
     try {
-      const s = await axios.get(`${API_BASE}/schedule/settings`)
-      from = s.data.semester_start || ''
+      from = await getSemesterStart()
     } catch (_) { /* 后端未就绪时忽略 */ }
     const params = { to }
     if (from) params.from = from
@@ -1035,10 +1038,9 @@ const canDeleteHistorySnapshot = computed(() =>
 const deleteSnapshotMessage = computed(() => {
   const w = historyCurrentWeek.value
   if (!w) return ''
-  const start = new Date(w)
-  const end = new Date(start)
-  end.setDate(end.getDate() + 6)
-  return `确定删除 ${start.toISOString().slice(0, 10)} ~ ${end.toISOString().slice(0, 10)} 的历史快照吗？删除后不可恢复。`
+  // 日期区间用字符串级偏移：week_start 本身已是 YYYY-MM-DD。
+  // 不要绕 new Date + toISOString —— 那是 UTC 口径，UTC 以西的时区会差一天。
+  return `确定删除 ${String(w).slice(0, 10)} ~ ${shiftDateStr(w, 6)} 的历史快照吗？删除后不可恢复。`
 })
 function requestDeleteHistorySnapshot() {
   if (!canDeleteHistorySnapshot.value) return

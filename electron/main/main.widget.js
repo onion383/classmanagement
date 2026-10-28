@@ -45,6 +45,10 @@ let loadUrlWithRetry = () => {}
 let widgetWindow = null
 let desktopWidgetWindow = null
 
+// widget 窗口当前是否处于「点击穿透」态。Electron 只能 set 不能 get，
+// 所以凡是改动它的地方都要同步这个变量，否则临时流程（截屏）恢复不了原状态。
+let widgetIgnoreMouse = false
+
 // ===== 工具箱浮窗状态 =====
 // 上次浮窗位置：销毁前记下，重建时恢复，避免「关掉再打开」跳回屏幕左侧中间
 let lastWidgetBounds = null
@@ -631,7 +635,8 @@ function registerWidgetIpc(opts = {}) {
   // 设置窗口是否忽略鼠标事件（true=透明区域穿透，false=正常接收）
   ipcMain.on('widget-set-ignore-mouse', (event, ignore) => {
     if (fromWidgetWindow(event)) {
-      widgetWindow.setIgnoreMouseEvents(ignore, { forward: true })
+      widgetIgnoreMouse = !!ignore
+      widgetWindow.setIgnoreMouseEvents(widgetIgnoreMouse, { forward: true })
     }
   })
 
@@ -640,10 +645,12 @@ function registerWidgetIpc(opts = {}) {
     if (fromWidgetWindow(event)) {
       if (visible) {
         widgetWindow.setOpacity(1)
+        widgetIgnoreMouse = false
         widgetWindow.setIgnoreMouseEvents(false)
         widgetWindow.focus()
       } else {
         widgetWindow.setOpacity(0)
+        widgetIgnoreMouse = true
         widgetWindow.setIgnoreMouseEvents(true, { forward: true })
       }
     }
@@ -751,5 +758,7 @@ module.exports = {
     if (!w) desktopLayerOn = false
   },
   isDesktopEnabled: () => desktopEnabled,
+  // Electron 没有读取穿透态的 API，只能自己记：截屏等临时改状态的流程靠它恢复原样
+  isWidgetIgnoreMouse: () => widgetIgnoreMouse,
   isDesktopWidgetRunning: () => !!(desktopWidgetWindow && !desktopWidgetWindow.isDestroyed()),
 }

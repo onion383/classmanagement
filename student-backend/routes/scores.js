@@ -14,11 +14,7 @@ function readAll() {
 
 // GET /api/scores 全量列表（按加分时间倒序）
 router.get('/', (req, res) => {
-  try {
     res.json({ data: readAll() });
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
 });
 
 // POST /api/scores 添加加分（选学生自动带姓名学号；小组加分独立成一条 source='group' 记录）
@@ -68,30 +64,22 @@ router.post('/', (req, res) => {
 
 // PUT /api/scores/:id 编辑
 router.put('/:id', (req, res) => {
-  try {
     const row = cleanUp(req.body || {}, EDITABLE, 'score_records');
-    // 「分值」已由 cleanUp 按列级规则清洗（数字 + 范围），这里不再二次 Number()。
-    // 「成员数」没有列级规则，cleanUp 可能原样留下字符串；Number('abc') = NaN，
-    // better-sqlite3 会把 NaN 落成 NULL，于是成员数「凭空消失」。这里显式校验。
-    if (row['成员数'] !== undefined && row['成员数'] !== null) {
-      row['成员数'] = normNumber(row['成员数'], '成员数');
-    }
-    if (Object.keys(row).length === 0) return res.status(400).json({ error: '没有可更新的字段' });
-    buildUpdate('score_records', row, req.params.id);
-    res.json({ message: '修改成功' });
-  } catch (err) {
-    res.status(500).json({ error: err.message });
+  // 「分值」已由 cleanUp 按列级规则清洗（数字 + 范围），这里不再二次 Number()。
+  // 「成员数」没有列级规则，cleanUp 可能原样留下字符串；Number('abc') = NaN，
+  // better-sqlite3 会把 NaN 落成 NULL，于是成员数「凭空消失」。这里显式校验。
+  if (row['成员数'] !== undefined && row['成员数'] !== null) {
+    row['成员数'] = normNumber(row['成员数'], '成员数');
   }
+  if (Object.keys(row).length === 0) return res.status(400).json({ error: '没有可更新的字段' });
+  buildUpdate('score_records', row, req.params.id);
+  res.json({ message: '修改成功' });
 });
 
 // DELETE /api/scores/:id 删除
 router.delete('/:id', (req, res) => {
-  try {
     db.prepare('DELETE FROM score_records WHERE id = ?').run(Number(req.params.id));
-    res.json({ message: '删除成功' });
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
+  res.json({ message: '删除成功' });
 });
 
 module.exports = router;

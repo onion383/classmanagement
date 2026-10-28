@@ -33,7 +33,10 @@ export function useScheduleMaster({ API_BASE, DEFAULT_SECTIONS }) {
             days: this.masterColHeaders
           };
           this.masterColHeaders = this.masterSettings.days;
-          await this.saveMaster();
+          // 口径同 loadActive：失败要说出来，否则每次进页面都像首跑
+          if (!await this.saveMaster()) {
+            this.notifyError('默认课表设置保存失败，本次修改可能无法保留');
+          }
         }
         this.masterCells = this.adjustCells(this.masterCells, this.masterSettings);
         this._masterLoadOk = true;
@@ -107,7 +110,7 @@ export function useScheduleMaster({ API_BASE, DEFAULT_SECTIONS }) {
       this.recordCellsDiff('master_schedule', prev, this.masterCells);
       this.saveMaster();
     },
-    onMasterSwapRows(fromIdx, toIdx) {
+    async onMasterSwapRows(fromIdx, toIdx) {
       const rows = this.masterDisplayRows.filter(r => !r._isSeparator && !r._mergeCells);
       const fromRow = rows[fromIdx], toRow = rows[toIdx];
       if (!fromRow || !toRow || fromRow._isReadonly || toRow._isReadonly) return;
@@ -119,10 +122,15 @@ export function useScheduleMaster({ API_BASE, DEFAULT_SECTIONS }) {
       const [movedRow] = newCells.splice(fromLessonIdx, 1);
       newCells.splice(toLessonIdx, 0, movedRow);
       this.masterCells = newCells;
+      // 先存后登记（口径同实行课表）：失败时不登记撤销，并把界面还原成交换前
+      const ok = await this.saveMaster();
+      if (!ok) {
+        if (this.masterCells === newCells) this.masterCells = prev;
+        return;
+      }
       recordGridSnapshotUndo('课程表', 'master_schedule', prev, JSON.parse(JSON.stringify(newCells)), `交换行：${fromRow.label} ↔ ${toRow.label}`);
-      this.saveMaster();
     },
-    onMasterSwapColumns(fromIdx, toIdx) {
+    async onMasterSwapColumns(fromIdx, toIdx) {
       if (fromIdx === toIdx) return;
       const fromHeader = this.masterColHeaders[fromIdx] ?? `列${fromIdx + 1}`, toHeader = this.masterColHeaders[toIdx] ?? `列${toIdx + 1}`;
       const prev = JSON.parse(JSON.stringify(this.masterCells));
@@ -134,8 +142,13 @@ export function useScheduleMaster({ API_BASE, DEFAULT_SECTIONS }) {
         return r;
       });
       this.masterCells = newCells;
+      // 口径同交换行
+      const ok = await this.saveMaster();
+      if (!ok) {
+        if (this.masterCells === newCells) this.masterCells = prev;
+        return;
+      }
       recordGridSnapshotUndo('课程表', 'master_schedule', prev, JSON.parse(JSON.stringify(newCells)), `交换列：${fromHeader} ↔ ${toHeader}`);
-      this.saveMaster();
     },
     onMasterRowMeta({ rowIdx, field, value }) {
       const sections = JSON.parse(JSON.stringify(this.masterSettings.sections));
@@ -188,7 +201,11 @@ export function useScheduleMaster({ API_BASE, DEFAULT_SECTIONS }) {
         this.masterSettings = JSON.parse(JSON.stringify(this.activeSettings));
         this.masterColHeaders = [...this.activeColHeaders];
         this.applyActiveVisible = false;
-        await this.saveMaster();
+        // saveMaster 返回 ok 且内部已提示失败：这里不能忽略结果，
+        // 否则会同时出现「模板保存失败」和「已从实行课表导入」两条矛盾提示，
+        // 还会登记一条根本没生效的撤销。
+        const ok = await this.saveMaster();
+        if (!ok) return;
         recordGridSnapshotUndo('课程表', 'master_schedule', before, JSON.parse(JSON.stringify(this.masterCells)), '从实行导入');
         this.notifySuccess('已从实行课表导入');
       } catch (e) {

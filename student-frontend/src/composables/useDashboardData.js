@@ -28,11 +28,15 @@ function normalize(d) {
 }
 
 function fetchAll() {
-  pending = axios.get('/api/dashboard')
-    .then((res) => normalize(res && res.data))
-    .catch(() => normalize(null))
-  pending.finally(() => { pending = null })
-  return pending
+  // 失败**不能**伪装成「空数据」：早先这里写的是 `.catch(() => normalize(null))`，
+  // 于是后端一旦不可达，首页就显示「全班 0 人、0 条记录」，老师第一反应是数据丢了。
+  // 现在让失败如实冒泡（dataCache 不会被写入，下次进首页会重新拉），由调用方显示错误态。
+  const req = axios.get('/api/dashboard').then((res) => normalize(res && res.data))
+  pending = req
+  // 成功/失败都要清掉 pending；用 then 的双回调而不是 .finally()，
+  // 否则 finally 返回的新 Promise 在失败时没人接，会变成 unhandledrejection。
+  req.then(() => { pending = null }, () => { pending = null })
+  return req
 }
 
 // 取数据：force=true 时丢弃本地缓存重新拉取一次

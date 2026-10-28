@@ -2,22 +2,25 @@ const express = require('express');
 const router = express.Router();
 const { db } = require('../db');
 const store = require('../services/slotStore');
+const { readDocJson } = require('../utils/json');
 const { registerHistoryRoutes } = require('./historyRoutes');
+const { isDateStr } = require('../utils/sql');
 
 // ======================== 实行课表（临时表） ========================
 // 读取当前课表（含「空则回退主课表」「对象键规范化为数组」两步），共用于 GET / 与 /api/dashboard。
+// JSON 列统一走 readDocJson：cells/settings 任一列畸形时降级为空值，
+// 不因为一条坏数据让整个首页（dashboard 也调这里）500。
 function readSchedule() {
   const row = db.prepare('SELECT cells, settings FROM schedule WHERE id = 1').get();
-  let cells = row ? JSON.parse(row.cells) : [];
-  let settings = row ? JSON.parse(row.settings) : {};
+  let { cells, settings } = readDocJson(row, { cells: [], settings: {} });
   // 活动课表为空时，回退到主课表，保证首页/桌面小组件也能显示已排课程
   if (!Array.isArray(cells) || cells.length === 0) {
     const master = db.prepare('SELECT cells, settings FROM master_schedule WHERE id = 1').get();
     if (master) {
-      const mCells = JSON.parse(master.cells);
-      if (Array.isArray(mCells) && mCells.length > 0) {
-        cells = mCells;
-        settings = JSON.parse(master.settings) || settings;
+      const m = readDocJson(master, { cells: [], settings: {} });
+      if (Array.isArray(m.cells) && m.cells.length > 0) {
+        cells = m.cells;
+        settings = m.settings || settings;
       }
     }
   }
@@ -31,63 +34,41 @@ function readSchedule() {
 }
 
 router.get('/', (req, res) => {
-  try {
     res.json(readSchedule());
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
 });
 
 router.put('/', (req, res) => {
-  try {
     const { cells, settings } = req.body;
-    if (cells && !Array.isArray(cells)) return res.status(400).json({ error: '数据格式错误' });
-    store.setDoc('schedule', {
-      cells: JSON.stringify(cells || []),
-      settings: JSON.stringify(settings || {}),
-    });
-    res.json({ message: '保存成功' });
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
+  if (cells && !Array.isArray(cells)) return res.status(400).json({ error: '数据格式错误' });
+  store.setDoc('schedule', {
+    cells: JSON.stringify(cells || []),
+    settings: JSON.stringify(settings || {}),
+  });
+  res.json({ message: '保存成功' });
 });
 
 // ======================== 一般课表（模板） ========================
 router.get('/master', (req, res) => {
-  try {
     const row = db.prepare('SELECT cells, settings FROM master_schedule WHERE id = 1').get();
-    const cells = row ? JSON.parse(row.cells) : [];
-    const settings = row ? JSON.parse(row.settings) : {};
-    res.json({ cells, settings });
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
+  res.json(readDocJson(row, { cells: [], settings: {} }));
 });
 
 router.put('/master', (req, res) => {
-  try {
     const { cells, settings } = req.body;
-    if (cells && !Array.isArray(cells)) return res.status(400).json({ error: '数据格式错误' });
-    store.setDoc('master_schedule', {
-      cells: JSON.stringify(cells || []),
-      settings: JSON.stringify(settings || {}),
-    });
-    res.json({ message: '一般课表保存成功' });
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
+  if (cells && !Array.isArray(cells)) return res.status(400).json({ error: '数据格式错误' });
+  store.setDoc('master_schedule', {
+    cells: JSON.stringify(cells || []),
+    settings: JSON.stringify(settings || {}),
+  });
+  res.json({ message: '一般课表保存成功' });
 });
 
 // ======================== 从一般课表应用到实行课表 ========================
 router.post('/apply-master', (req, res) => {
-  try {
     const master = store.getDoc('master_schedule');
-    if (!master) return res.status(400).json({ error: '一般课表为空' });
-    store.setDoc('schedule', { cells: master.cells, settings: master.settings });
-    res.json({ message: '已将一般课表应用为实行课表' });
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
+  if (!master) return res.status(400).json({ error: '一般课表为空' });
+  store.setDoc('schedule', { cells: master.cells, settings: master.settings });
+  res.json({ message: '已将一般课表应用为实行课表' });
 });
 
 // ======================== 学期（多学期列表 + 当前学期） ========================
@@ -115,6 +96,11 @@ function currentSemester() {
 function validateSemesterRange(start_date, end_date) {
   const s = String(start_date || '').trim();
   const e = String(end_date || '').trim();
+  // 格式错比顺序错更隐蔽：'2026-2-3'、'2026/02/03' 都能通过下面的字符串比较，
+  // 但 semesterRange() 解析出 NaN 后，值日/座位的快照补存会整段静默跳过，
+  // 表现为「历史记录一直是空的」，而设置页看不出任何异常。
+  if (s && !isDateStr(s)) return '学期开始日期格式不正确（应为 YYYY-MM-DD）';
+  if (e && !isDateStr(e)) return '学期结束日期格式不正确（应为 YYYY-MM-DD）';
   if (!s || !e) return null;
   // YYYY-MM-DD 字典序即时间序，直接比字符串即可
   if (e < s) return '学期结束日期不能早于开始日期';
@@ -136,116 +122,92 @@ router.get('/semesters', (req, res) => {
 
 // 增加学期：未给名字/起止日期时按当前月份推算默认值；新增加的学期即成为当前学期
 router.post('/semesters', (req, res) => {
-  try {
     const body = req.body || {};
-    const def = autoSemester();
-    const name = String(body.name || '').trim() || def.name;
-    const start_date = body.start_date || def.start_date;
-    const end_date = body.end_date || def.end_date;
-    const rangeErr = validateSemesterRange(start_date, end_date);
-    if (rangeErr) return res.status(400).json({ error: rangeErr });
-    const info = db.transaction(() => {
-      db.prepare('UPDATE semesters SET is_current = 0').run();
-      return db.prepare('INSERT INTO semesters (name, start_date, end_date, is_current) VALUES (?,?,?,1)')
-        .run(name, start_date, end_date);
-    })();
-    res.json({ message: '学期已增加', id: info.lastInsertRowid, name, start_date, end_date });
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
+  const def = autoSemester();
+  const name = String(body.name || '').trim() || def.name;
+  const start_date = body.start_date || def.start_date;
+  const end_date = body.end_date || def.end_date;
+  const rangeErr = validateSemesterRange(start_date, end_date);
+  if (rangeErr) return res.status(400).json({ error: rangeErr });
+  const info = db.transaction(() => {
+    db.prepare('UPDATE semesters SET is_current = 0').run();
+    return db.prepare('INSERT INTO semesters (name, start_date, end_date, is_current) VALUES (?,?,?,1)')
+      .run(name, start_date, end_date);
+  })();
+  res.json({ message: '学期已增加', id: info.lastInsertRowid, name, start_date, end_date });
 });
 
 // 切换当前学期（设置页「选择学期」即切换；注意声明在 /semesters/:id 之前，避免被参数路由截走）
 router.put('/semesters/current', (req, res) => {
-  try {
     const id = Number((req.body || {}).id);
-    if (!id) return res.status(400).json({ error: '缺少学期' });
-    const exists = db.prepare('SELECT id FROM semesters WHERE id = ?').get(id);
-    if (!exists) return res.status(404).json({ error: '学期不存在' });
-    db.transaction(() => {
-      db.prepare('UPDATE semesters SET is_current = 0').run();
-      db.prepare('UPDATE semesters SET is_current = 1 WHERE id = ?').run(id);
-    })();
-    res.json({ message: '已切换当前学期' });
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
+  if (!id) return res.status(400).json({ error: '缺少学期' });
+  const exists = db.prepare('SELECT id FROM semesters WHERE id = ?').get(id);
+  if (!exists) return res.status(404).json({ error: '学期不存在' });
+  db.transaction(() => {
+    db.prepare('UPDATE semesters SET is_current = 0').run();
+    db.prepare('UPDATE semesters SET is_current = 1 WHERE id = ?').run(id);
+  })();
+  res.json({ message: '已切换当前学期' });
 });
 
 // 修改学期：只传需要改的字段（学期名 / 开始日期 / 结束日期）
 router.put('/semesters/:id', (req, res) => {
-  try {
     const id = Number(req.params.id);
-    const row = db.prepare('SELECT id, name, start_date, end_date, is_current FROM semesters WHERE id = ?').get(id);
-    if (!row) return res.status(404).json({ error: '学期不存在' });
-    const body = req.body || {};
-    const name = body.name != null ? (String(body.name).trim() || row.name) : row.name;
-    const start_date = body.start_date != null ? body.start_date : row.start_date;
-    const end_date = body.end_date != null ? body.end_date : row.end_date;
-    const rangeErr = validateSemesterRange(start_date, end_date);
-    if (rangeErr) return res.status(400).json({ error: rangeErr });
-    db.prepare('UPDATE semesters SET name = ?, start_date = ?, end_date = ? WHERE id = ?')
-      .run(name, start_date, end_date, id);
-    res.json({ message: '学期已保存' });
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
+  const row = db.prepare('SELECT id, name, start_date, end_date, is_current FROM semesters WHERE id = ?').get(id);
+  if (!row) return res.status(404).json({ error: '学期不存在' });
+  const body = req.body || {};
+  const name = body.name != null ? (String(body.name).trim() || row.name) : row.name;
+  const start_date = body.start_date != null ? body.start_date : row.start_date;
+  const end_date = body.end_date != null ? body.end_date : row.end_date;
+  const rangeErr = validateSemesterRange(start_date, end_date);
+  if (rangeErr) return res.status(400).json({ error: rangeErr });
+  db.prepare('UPDATE semesters SET name = ?, start_date = ?, end_date = ? WHERE id = ?')
+    .run(name, start_date, end_date, id);
+  res.json({ message: '学期已保存' });
 });
 
 // 删除学期：删的若是当前学期，自动把剩下的最新一条设为当前；一条不剩则清空镜像
 router.delete('/semesters/:id', (req, res) => {
-  try {
     const id = Number(req.params.id);
-    const row = db.prepare('SELECT id, is_current FROM semesters WHERE id = ?').get(id);
-    if (!row) return res.status(404).json({ error: '学期不存在' });
-    db.transaction(() => {
-      db.prepare('DELETE FROM semesters WHERE id = ?').run(id);
-      if (row.is_current) {
-        const next = db.prepare('SELECT id FROM semesters ORDER BY start_date DESC, id DESC LIMIT 1').get();
-        if (next) db.prepare('UPDATE semesters SET is_current = 1 WHERE id = ?').run(next.id);
-      }
-    })();
-    res.json({ message: '学期已删除' });
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
+  const row = db.prepare('SELECT id, is_current FROM semesters WHERE id = ?').get(id);
+  if (!row) return res.status(404).json({ error: '学期不存在' });
+  db.transaction(() => {
+    db.prepare('DELETE FROM semesters WHERE id = ?').run(id);
+    if (row.is_current) {
+      const next = db.prepare('SELECT id FROM semesters ORDER BY start_date DESC, id DESC LIMIT 1').get();
+      if (next) db.prepare('UPDATE semesters SET is_current = 1 WHERE id = ?').run(next.id);
+    }
+  })();
+  res.json({ message: '学期已删除' });
 });
 
 // ======================== 全局设置（当前学期的开始/结束日期） ========================
 router.get('/settings', (req, res) => {
-  try {
     const cur = currentSemester();
-    res.json({ semester_start: (cur && cur.start_date) || '', semester_end: (cur && cur.end_date) || '' });
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
+  res.json({ semester_start: (cur && cur.start_date) || '', semester_end: (cur && cur.end_date) || '' });
 });
 
 router.put('/settings', (req, res) => {
-  try {
     const body = req.body || {};
-    const cur = currentSemester();
-    // 只更新请求里**真正带了的**字段。
-    // 之前是无条件写两个字段：课表页保存课表设置时只传 semester_start，
-    // 于是 end_date 被写成 ''，用户在设置页配好的结束日期被悄悄清空 ——
-    // 而结束日期正是值日/座位快照补存的范围上界。
-    const start_date = body.semester_start != null ? body.semester_start : (cur ? cur.start_date : '');
-    const end_date = body.semester_end != null ? body.semester_end : (cur ? cur.end_date : '');
-    const rangeErr = validateSemesterRange(start_date, end_date);
-    if (rangeErr) return res.status(400).json({ error: rangeErr });
-    if (cur) {
-      db.prepare('UPDATE semesters SET start_date = ?, end_date = ? WHERE id = ?')
-        .run(start_date, end_date, cur.id);
-    } else {
-      // 没有任何学期时直接建一条当前学期，避免设置无处可存
-      const def = autoSemester();
-      db.prepare('INSERT INTO semesters (name, start_date, end_date, is_current) VALUES (?,?,?,1)')
-        .run(def.name, start_date, end_date);
-    }
-    res.json({ message: '设置已保存' });
-  } catch (err) {
-    res.status(500).json({ error: err.message });
+  const cur = currentSemester();
+  // 只更新请求里**真正带了的**字段。
+  // 之前是无条件写两个字段：课表页保存课表设置时只传 semester_start，
+  // 于是 end_date 被写成 ''，用户在设置页配好的结束日期被悄悄清空 ——
+  // 而结束日期正是值日/座位快照补存的范围上界。
+  const start_date = body.semester_start != null ? body.semester_start : (cur ? cur.start_date : '');
+  const end_date = body.semester_end != null ? body.semester_end : (cur ? cur.end_date : '');
+  const rangeErr = validateSemesterRange(start_date, end_date);
+  if (rangeErr) return res.status(400).json({ error: rangeErr });
+  if (cur) {
+    db.prepare('UPDATE semesters SET start_date = ?, end_date = ? WHERE id = ?')
+      .run(start_date, end_date, cur.id);
+  } else {
+    // 没有任何学期时直接建一条当前学期，避免设置无处可存
+    const def = autoSemester();
+    db.prepare('INSERT INTO semesters (name, start_date, end_date, is_current) VALUES (?,?,?,1)')
+      .run(def.name, start_date, end_date);
   }
+  res.json({ message: '设置已保存' });
 });
 
 // ======================== 历史快照 ========================

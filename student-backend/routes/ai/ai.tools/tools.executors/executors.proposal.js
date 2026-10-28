@@ -20,6 +20,20 @@ function cleanProposalValue(table, col, value, type) {
   return sanitizeField(value, table, col, type || proposalColType(table, col));
 }
 
+// 按表的真实列清洗一行「待新增」数据。
+// 落库侧（ai.dataRoutes 的 apply）会用同一套 sanitizeField 再洗一次，所以这里必须用**同一函数**，
+// 否则确认页给用户看的是一份值、真正写进去的是另一份（数值被 clamp、日期被改写等）。
+// 未知列原样保留，交给落库侧的「字段不存在」报错 —— 不在这里悄悄丢掉模型传错的列。
+function cleanAddRow(table, row) {
+  const cols = tableColumns(table);
+  const out = {};
+  for (const k of Object.keys(row)) {
+    if (k === 'id') continue;
+    out[k] = cols.includes(k) ? cleanProposalValue(table, k, row[k]) : row[k];
+  }
+  return out;
+}
+
 // propose_add_many 工具：批量新增多条数据，生成一条提案，用户确认后一次性写入
 function normalizeBatchProposal({ table, rows }) {
   if (!WRITE_TABLES[table]) return { error: '该表暂不支持 AI 修改' };
@@ -32,7 +46,16 @@ function normalizeBatchProposal({ table, rows }) {
     const bad = list.findIndex((r) => !String(r[need] || '').trim());
     if (bad !== -1) return { error: `第 ${bad + 1} 行缺少「${need}」` };
   }
-  return { ok: true, table, rows: list, count: list.length, label: `批量新增${WRITE_TABLES[table]}（${list.length} 条）` };
+  // 逐行清洗：确认页展示的必须是最终落库值，否则用户会按一份「假值」点确认
+  const cleaned = [];
+  for (let i = 0; i < list.length; i++) {
+    try {
+      cleaned.push(cleanAddRow(table, list[i]));
+    } catch (e) {
+      return { error: `第 ${i + 1} 行字段取值不合法：${e.message}` };
+    }
+  }
+  return { ok: true, table, rows: cleaned, count: cleaned.length, label: `批量新增${WRITE_TABLES[table]}（${cleaned.length} 条）` };
 }
 
 // propose_delete_many 工具：批量删除多条数据，生成一条提案，用户确认后一次性删除
@@ -67,7 +90,14 @@ function normalizeJsonProposal({ table, id, values, label }) {
   if (!values || typeof values !== 'object' || Array.isArray(values)) {
     return { error: '缺少要写入的列值（values 须为「列名→该列完整新值」的对象）' };
   }
-  const rid = Number.isInteger(id) ? id : 1;
+  // 整块写入默认只作用于单行配置表。多行表必须显式给 id：
+  // 不能再把缺失/非法 id 静默兜底成 1，否则模型少传一个字段就会覆盖第一行。
+  let rid = Number.isInteger(id) && id > 0 ? id : null;
+  if (rid == null) {
+    const rows = db.prepare(`SELECT id FROM "${table}" ORDER BY id LIMIT 2`).all();
+    if (rows.length !== 1) return { error: '缺少有效的记录 id，请先 query 确认要写入哪一行' };
+    rid = rows[0].id;
+  }
   const cols = tableColumns(table);
   const row = db.prepare(`SELECT * FROM "${table}" WHERE id = ?`).get(rid);
   if (!row) return { error: `表中没有 id=${rid} 的行，请先用 query 读取现有数据` };
@@ -211,7 +241,18 @@ function normalizeBatchOps({ ops, label }) {
       if (unknown.length) return { error: `${at}：要修改的字段不存在：${unknown.join('、')}` };
       const row = db.prepare(`SELECT * FROM "${table}" WHERE id = ?`).get(id);
       if (!row) return { error: `${at}：要修改的记录不存在（${table} id=${id}）` };
-      normalized.push({ action: 'update', table, id, changes });
+      // 单条修改（normalizeProposal）已经清洗过，批量这里原来漏了：
+      // 不清洗会让确认页展示 LLM 原值、落库时再被改写，两边不一致。
+      const cleanChanges = {};
+      for (const k of Object.keys(changes)) {
+        if (k === 'id') { cleanChanges[k] = changes[k]; continue; }
+        try {
+          cleanChanges[k] = cleanProposalValue(table, k, changes[k]);
+        } catch (e) {
+          return { error: `${at}：字段「${k}」取值不合法：${e.message}` };
+        }
+      }
+      normalized.push({ action: 'update', table, id, changes: cleanChanges });
       continue;
     }
     // add：以库真实列为准，剔除未知字段与 id（id 由数据库自增，避免与既有记录冲突）
@@ -221,7 +262,13 @@ function normalizeBatchOps({ ops, label }) {
     if (!Object.keys(row).length) return { error: `${at}：新增缺少字段数据` };
     const need = { students: '姓名', activities: '主题', countdowns: '名称' }[table];
     if (need && !String(row[need] || '').trim()) return { error: `${at}：新增${BATCH_ROW_TABLES[table]}缺少「${need}」` };
-    normalized.push({ action: 'add', table, data: row });
+    let cleanedRow;
+    try {
+      cleanedRow = cleanAddRow(table, row);
+    } catch (e) {
+      return { error: `${at}：字段取值不合法：${e.message}` };
+    }
+    normalized.push({ action: 'add', table, data: cleanedRow });
   }
   const lbl = String(label || '').trim().slice(0, 60) || `跨表批量操作（${normalized.length} 项）`;
   return { ok: true, ops: normalized, count: normalized.length, label: lbl };
@@ -241,6 +288,17 @@ function normalizeProposal({ operation, table, data }) {
     if (table === 'leave_records' && !data['姓名']) return { ok: false, error: '新增请假记录必须提供姓名' };
     if (table === 'score_records' && !data['姓名'] && !data.group_name) return { ok: false, error: '新增加分记录必须提供姓名（小组加分则提供 group_name）' };
     if (table === 'cadres' && !data.name) return { ok: false, error: '新增班干部职务必须提供职务名（name）' };
+  }
+  // 新增也要清洗：原来直接把 LLM 原值放进 data，确认页展示一份、落库时又按列规则改写一份。
+  // 清洗失败直接报错，让模型先修正，而不是生成一份到执行时才失败的提案。
+  let addData = data;
+  if (operation === 'add') {
+    addData = data;
+    try {
+      addData = cleanAddRow(table, data);
+    } catch (e) {
+      return { ok: false, error: `字段取值不合法：${e.message}` };
+    }
   }
   // update 顺带做「写入前校验」并生成「旧值 → 新值」对照（供用户确认时判断）
   let diff = null;
@@ -266,7 +324,7 @@ function normalizeProposal({ operation, table, data }) {
       diff.push({ field: k, from: row[k] == null ? '' : row[k], to: to == null ? '' : to });
     }
   }
-  return { ok: true, operation, table, data, label, diff };
+  return { ok: true, operation, table, data: addData, label, diff };
 }
 
 module.exports = {

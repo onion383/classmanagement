@@ -87,27 +87,19 @@ function syncGenderGroups(dimId, maleCount, femaleCount) {
 
 // GET /api/group-manage/bootstrap —— 维度列表 + 第一个维度详情（供前端初始加载）
 router.get('/bootstrap', (req, res) => {
-  try {
     const dimensions = listDimensions();
-    let active = null;
-    if (dimensions.length > 0) {
-      active = loadDimension(dimensions[0].id);
-    }
-    res.json({ dimensions, active });
-  } catch (err) {
-    res.status(500).json({ error: err.message });
+  let active = null;
+  if (dimensions.length > 0) {
+    active = loadDimension(dimensions[0].id);
   }
+  res.json({ dimensions, active });
 });
 
 // GET /api/group-manage/:dimId —— 读取指定维度详情
 router.get('/:dimId', (req, res) => {
-  try {
     const data = loadDimension(Number(req.params.dimId));
-    if (!data) return res.status(404).json({ error: '维度不存在' });
-    res.json({ dimensions: listDimensions(), ...data });
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
+  if (!data) return res.status(404).json({ error: '维度不存在' });
+  res.json({ dimensions: listDimensions(), ...data });
 });
 
 // POST /api/group-manage/dimensions —— 新增维度（按组数自动初始化小组）
@@ -188,44 +180,36 @@ router.put('/dimensions/:id', (req, res) => {
 
 // DELETE /api/group-manage/dimensions/:id —— 删除维度（级联删除组与成员；内置宿舍组不可删除）
 router.delete('/dimensions/:id', (req, res) => {
-  try {
     const id = Number(req.params.id);
-    const dim = db.prepare('SELECT * FROM group_dimensions WHERE id = ?').get(id);
-    if (!dim) return res.status(404).json({ error: '维度不存在' });
-    if (dim.is_default) return res.status(400).json({ error: '内置宿舍组不可删除' });
-    const groups = db.prepare('SELECT id FROM groups WHERE dimension_id = ?').all(id);
-    const delMembers = db.prepare('DELETE FROM group_members WHERE group_id = ?');
-    const tx = db.transaction(() => {
-      for (const g of groups) delMembers.run(g.id);
-      db.prepare('DELETE FROM groups WHERE dimension_id = ?').run(id);
-      db.prepare('DELETE FROM group_dimensions WHERE id = ?').run(id);
-      // 维度内部排序重排
-      const rest = db.prepare('SELECT id FROM group_dimensions ORDER BY sort_order, id').all();
-      const upd = db.prepare('UPDATE group_dimensions SET sort_order = ? WHERE id = ?');
-      rest.forEach((r, i) => upd.run(i + 1, r.id));
-    });
-    tx();
-    res.json({ message: '删除成功' });
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
+  const dim = db.prepare('SELECT * FROM group_dimensions WHERE id = ?').get(id);
+  if (!dim) return res.status(404).json({ error: '维度不存在' });
+  if (dim.is_default) return res.status(400).json({ error: '内置宿舍组不可删除' });
+  const groups = db.prepare('SELECT id FROM groups WHERE dimension_id = ?').all(id);
+  const delMembers = db.prepare('DELETE FROM group_members WHERE group_id = ?');
+  const tx = db.transaction(() => {
+    for (const g of groups) delMembers.run(g.id);
+    db.prepare('DELETE FROM groups WHERE dimension_id = ?').run(id);
+    db.prepare('DELETE FROM group_dimensions WHERE id = ?').run(id);
+    // 维度内部排序重排
+    const rest = db.prepare('SELECT id FROM group_dimensions ORDER BY sort_order, id').all();
+    const upd = db.prepare('UPDATE group_dimensions SET sort_order = ? WHERE id = ?');
+    rest.forEach((r, i) => upd.run(i + 1, r.id));
+  });
+  tx();
+  res.json({ message: '删除成功' });
 });
 
 // 移动维度
 router.post('/dimensions/move', (req, res) => {
-  try {
     const { id, direction } = req.body;
-    const dims = listDimensions();
-    const idx = dims.findIndex(d => d.id === id);
-    const target = direction === 'up' ? idx - 1 : idx + 1;
-    if (idx < 0 || target < 0 || target >= dims.length) return res.status(400).json({ error: '已到边界' });
-    const tmp = dims[idx]; dims[idx] = dims[target]; dims[target] = tmp;
-    const upd = db.prepare('UPDATE group_dimensions SET sort_order = ? WHERE id = ?');
-    dims.forEach((d, i) => upd.run(i + 1, d.id));
-    res.json({ message: '排序已更新' });
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
+  const dims = listDimensions();
+  const idx = dims.findIndex(d => d.id === id);
+  const target = direction === 'up' ? idx - 1 : idx + 1;
+  if (idx < 0 || target < 0 || target >= dims.length) return res.status(400).json({ error: '已到边界' });
+  const tmp = dims[idx]; dims[idx] = dims[target]; dims[target] = tmp;
+  const upd = db.prepare('UPDATE group_dimensions SET sort_order = ? WHERE id = ?');
+  dims.forEach((d, i) => upd.run(i + 1, d.id));
+  res.json({ message: '排序已更新' });
 });
 
 // ============ 组 ============
@@ -252,37 +236,29 @@ router.post('/dimensions/:dimId/groups', (req, res) => {
 
 // PUT /api/group-manage/groups/:id —— 修改小组名字
 router.put('/groups/:id', (req, res) => {
-  try {
     const id = Number(req.params.id);
-    const { name } = req.body;
-    if (!name || !String(name).trim()) return res.status(400).json({ error: '请输入小组名字' });
-    const g = db.prepare('SELECT * FROM groups WHERE id = ?').get(id);
-    if (!g) return res.status(404).json({ error: '小组不存在' });
-    db.prepare('UPDATE groups SET name = ? WHERE id = ?').run(String(name).trim(), id);
-    res.json({ message: '保存成功' });
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
+  const { name } = req.body;
+  if (!name || !String(name).trim()) return res.status(400).json({ error: '请输入小组名字' });
+  const g = db.prepare('SELECT * FROM groups WHERE id = ?').get(id);
+  if (!g) return res.status(404).json({ error: '小组不存在' });
+  db.prepare('UPDATE groups SET name = ? WHERE id = ?').run(String(name).trim(), id);
+  res.json({ message: '保存成功' });
 });
 
 // DELETE /api/group-manage/groups/:id —— 删除组（级联删除成员）
 router.delete('/groups/:id', (req, res) => {
-  try {
     const id = Number(req.params.id);
-    const g = db.prepare('SELECT * FROM groups WHERE id = ?').get(id);
-    if (!g) return res.status(404).json({ error: '小组不存在' });
-    const tx = db.transaction(() => {
-      db.prepare('DELETE FROM group_members WHERE group_id = ?').run(id);
-      db.prepare('DELETE FROM groups WHERE id = ?').run(id);
-      const rest = db.prepare('SELECT id FROM groups WHERE dimension_id = ? ORDER BY sort_order, id').all(g.dimension_id);
-      const upd = db.prepare('UPDATE groups SET sort_order = ? WHERE id = ?');
-      rest.forEach((r, i) => upd.run(i + 1, r.id));
-    });
-    tx();
-    res.json({ message: '删除成功' });
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
+  const g = db.prepare('SELECT * FROM groups WHERE id = ?').get(id);
+  if (!g) return res.status(404).json({ error: '小组不存在' });
+  const tx = db.transaction(() => {
+    db.prepare('DELETE FROM group_members WHERE group_id = ?').run(id);
+    db.prepare('DELETE FROM groups WHERE id = ?').run(id);
+    const rest = db.prepare('SELECT id FROM groups WHERE dimension_id = ? ORDER BY sort_order, id').all(g.dimension_id);
+    const upd = db.prepare('UPDATE groups SET sort_order = ? WHERE id = ?');
+    rest.forEach((r, i) => upd.run(i + 1, r.id));
+  });
+  tx();
+  res.json({ message: '删除成功' });
 });
 
 // ============ 组成员 ============
@@ -311,39 +287,31 @@ router.post('/groups/:groupId/members', (req, res) => {
 
 // PUT /api/group-manage/group-members/:id —— 修改成员
 router.put('/group-members/:id', (req, res) => {
-  try {
     const id = Number(req.params.id);
-    const { member_name, remark } = req.body;
-    const m = db.prepare('SELECT * FROM group_members WHERE id = ?').get(id);
-    if (!m) return res.status(404).json({ error: '成员不存在' });
-    db.prepare('UPDATE group_members SET member_name = ?, remark = ? WHERE id = ?').run(
-      member_name !== undefined ? String(member_name).trim() : m.member_name,
-      remark !== undefined ? String(remark).trim() : m.remark,
-      id
-    );
-    res.json({ message: '保存成功' });
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
+  const { member_name, remark } = req.body;
+  const m = db.prepare('SELECT * FROM group_members WHERE id = ?').get(id);
+  if (!m) return res.status(404).json({ error: '成员不存在' });
+  db.prepare('UPDATE group_members SET member_name = ?, remark = ? WHERE id = ?').run(
+    member_name !== undefined ? String(member_name).trim() : m.member_name,
+    remark !== undefined ? String(remark).trim() : m.remark,
+    id
+  );
+  res.json({ message: '保存成功' });
 });
 
 // DELETE /api/group-manage/group-members/:id —— 删除成员
 router.delete('/group-members/:id', (req, res) => {
-  try {
     const id = Number(req.params.id);
-    const m = db.prepare('SELECT * FROM group_members WHERE id = ?').get(id);
-    if (!m) return res.status(404).json({ error: '成员不存在' });
-    const tx = db.transaction(() => {
-      db.prepare('DELETE FROM group_members WHERE id = ?').run(id);
-      const rest = db.prepare('SELECT id FROM group_members WHERE group_id = ? ORDER BY sort_order, id').all(m.group_id);
-      const upd = db.prepare('UPDATE group_members SET sort_order = ? WHERE id = ?');
-      rest.forEach((r, i) => upd.run(i + 1, r.id));
-    });
-    tx();
-    res.json({ message: '删除成功' });
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
+  const m = db.prepare('SELECT * FROM group_members WHERE id = ?').get(id);
+  if (!m) return res.status(404).json({ error: '成员不存在' });
+  const tx = db.transaction(() => {
+    db.prepare('DELETE FROM group_members WHERE id = ?').run(id);
+    const rest = db.prepare('SELECT id FROM group_members WHERE group_id = ? ORDER BY sort_order, id').all(m.group_id);
+    const upd = db.prepare('UPDATE group_members SET sort_order = ? WHERE id = ?');
+    rest.forEach((r, i) => upd.run(i + 1, r.id));
+  });
+  tx();
+  res.json({ message: '删除成功' });
 });
 
 // POST /api/group-manage/group-members/move —— 移动成员（同组排序 / 跨组移动）

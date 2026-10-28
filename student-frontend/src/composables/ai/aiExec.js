@@ -1,3 +1,4 @@
+import { reportError } from '../../utils/reportError.js'
 import axios from 'axios'
 import { pushUndo, undoById } from '../../api/undo.js'
 import { useNotification } from '../useNotification.js'
@@ -48,6 +49,7 @@ export default {
     },
     async executeProposal(m) {
       if (m.proposal.executing || m.proposal.executed) return
+      // 这里仍需要 notifyError：失败分支要把原因同时告诉用户和 AI
       const { success: notify, error: notifyError } = useNotification()
       m.proposal.executing = true
       m.proposal.executed = false
@@ -244,7 +246,7 @@ export default {
     async undoChange(m) {
       if (!this.canUndoChange(m) || this.busy) return
       const p = m.proposal
-      const { success: notify, error: notifyError } = useNotification()
+      const { success: notify } = useNotification()
       p.reverting = true
       try {
         if (p.kind === 'front' && p.frontUndo) {
@@ -268,7 +270,7 @@ export default {
         // 回写「已撤回」状态：避免刷新后按钮又还原成可撤回，导致对同一笔更改二次撤回
         if (m._id != null) this.updateMessage(m._id, m.content || '', this._buildProc(m))
       } catch (err) {
-        notifyError('撤回失败：' + (err.response?.data?.error || err.message || '未知错误'))
+        reportError(err, { action: '撤回' })
       } finally {
         p.reverting = false
       }

@@ -1,17 +1,37 @@
 // =========================================================================
 // auth-smoke.js —— 认证链路冒烟（合并自 auth-e2e-probe.js / auth-privacy-probe.js）
 //
-// 两段用例依次跑在同一个后端上（默认 3000，与 run-smoke.cjs 的探测端口一致；PORT 可覆盖）：
+// 两段用例依次跑在**自己起的**临时后端上：
 //   1) 普通账号：注册 / 登录 / 改密码 / 改用户名（bcrypt 异步化后的整条链路）
 //   2) 隐私模式：恢复词注册 → 确认 → 密码登录 → 改名后口令包裹与恢复词仍可用
 //
+// 为什么必须自己起后端（而不是连现成的）：
+//   安全模式（注入 SECURE_MASTER）下，middleware/auth.js 的 resolveAuth 在
+//   `secureChannel.hasMaster()` 为真时**直接返回 token: null**，根本不读
+//   Authorization: Bearer —— 只有 X-Auth-Proof 信道凭据才认。本脚本是纯 HTTP 客户端，
+//   不带信道凭据，所以对着安全模式后端跑必然从「改密码」这一步开始全红（401 未登录），
+//   后面十几个用例全是它的连锁假失败。
+//   而 Electron 主进程 fork 的后端**一定**注入 SECURE_MASTER，所以旧写法在真实环境
+//   等于这条链路零覆盖。这里改为自起一个 PORT / DATA_DIR 隔离、**不注入 SECURE_MASTER**
+//   的后端，结果才只反映认证逻辑本身。启动/清理的实现在 _isolated-backend.cjs，
+//   后续需要真后端的冒烟脚本直接复用那个 helper，不要各自再写一套。
+//
 // 用法：
-//   node testjs/smoke/auth-smoke.js
-//   PORT=3999 node testjs/smoke/auth-smoke.js      # 指向其它端口
+//   node testjs/smoke/auth-smoke.js                      自起后端（推荐）
+//   AUTH_SMOKE_EXTERNAL=1 PORT=3999 node testjs/smoke/auth-smoke.js
+//                                                        连一个手工起的「明文模式」后端
+//   注意：AUTH_SMOKE_EXTERNAL 是独立开关，不能只看 PORT ——
+//   run-smoke.cjs 会给所有子脚本传 PORT，若据此判断就会又连回安全模式后端。
 //
 // 退出码：0 = 全部通过；1 = 有用例失败
 // =========================================================================
-const BASE = 'http://127.0.0.1:' + (process.env.PORT || 3000);
+// 隔离后端启动器（详见 _isolated-backend.cjs 头部：为什么不能连现成后端）。
+// 注意必须带 .cjs：Node 的 require 只自动补 .js/.json/.node，不会补 .cjs。
+const { startIsolatedBackend } = require('./_isolated-backend.cjs')
+
+const EXTERNAL = process.env.AUTH_SMOKE_EXTERNAL === '1'
+let BASE = 'http://127.0.0.1:' + (Number(process.env.PORT) || 3000)
+let backend = null
 
 async function post(p, body) {
   const r = await fetch(BASE + p, {
@@ -188,6 +208,14 @@ async function runPrivacy() {
 }
 
 ;(async () => {
+  if (EXTERNAL) {
+    console.log('（连外部后端：' + BASE + '，须为明文模式）\n')
+  } else {
+    backend = await startIsolatedBackend({ prefix: 'auth-smoke' })
+    BASE = backend.base
+    console.log('（自起隔离后端：' + BASE + '，明文模式，数据目录 ' + backend.dataDir + '）\n')
+  }
+
   let pass = 0, fail = 0;
 
   console.log('########## 普通账号认证链路 ##########');
@@ -199,8 +227,11 @@ async function runPrivacy() {
   pass += privacy.pass; fail += privacy.fail;
 
   console.log('\n=== 结果：通过 ' + pass + ' / 失败 ' + fail + ' ===');
+  // 必须先等后端退出再删数据目录，否则临时目录删不掉（Windows 句柄延迟）
+  if (backend) await backend.stop();
   process.exit(fail ? 1 : 0);
-})().catch((e) => {
-  console.error('执行异常:', e);
+})().catch(async (e) => {
+  console.error('执行异常:', e.message || e);
+  if (backend) await backend.stop().catch(() => {});
   process.exit(1);
 });

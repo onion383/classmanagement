@@ -102,13 +102,9 @@ router.post('/chat', async (req, res) => {
 
 // POST /api/ai/conversations —— 新建会话，body: { title? }
 router.post('/conversations', (req, res) => {
-  try {
     const title = (req.body && req.body.title) || '新对话';
-    const info = db.prepare('INSERT INTO ai_conversations (title) VALUES (?)').run(title);
-    res.json({ success: true, id: info.lastInsertRowid, title });
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
+  const info = db.prepare('INSERT INTO ai_conversations (title) VALUES (?)').run(title);
+  res.json({ success: true, id: info.lastInsertRowid, title });
 });
 
 // GET /api/ai/conversations —— 会话列表（按最近更新排序）
@@ -128,14 +124,10 @@ router.get('/conversations', (req, res) => {
 
 // DELETE /api/ai/conversations/:id —— 删除会话（含其消息）
 router.delete('/conversations/:id', (req, res) => {
-  try {
     if (!conversationExists(req.params.id)) return res.status(404).json({ error: '会话不存在' });
-    db.prepare('DELETE FROM ai_messages WHERE conversation_id = ?').run(req.params.id);
-    db.prepare('DELETE FROM ai_conversations WHERE id = ?').run(req.params.id);
-    res.json({ success: true });
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
+  db.prepare('DELETE FROM ai_messages WHERE conversation_id = ?').run(req.params.id);
+  db.prepare('DELETE FROM ai_conversations WHERE id = ?').run(req.params.id);
+  res.json({ success: true });
 });
 
 // 消息行反序列化：过程块 / 附件按 JSON 字符串落库，返回前解析成对象
@@ -234,13 +226,9 @@ router.put('/conversations/:id/messages/:mid', (req, res) => {
 
 // DELETE /api/ai/conversations/:id/messages/last-assistant —— 重试前移除最近一条助手回复
 router.delete('/conversations/:id/messages/last-assistant', (req, res) => {
-  try {
     const row = db.prepare("SELECT id FROM ai_messages WHERE conversation_id = ? AND role = 'assistant' ORDER BY id DESC LIMIT 1").get(req.params.id);
-    if (row) db.prepare('DELETE FROM ai_messages WHERE id = ?').run(row.id);
-    res.json({ success: true, removed: !!row });
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
+  if (row) db.prepare('DELETE FROM ai_messages WHERE id = ?').run(row.id);
+  res.json({ success: true, removed: !!row });
 });
 
 // POST /api/ai/conversations/:id/messages/delete —— 回退本轮时按消息 id 精确删除（body: { ids }）

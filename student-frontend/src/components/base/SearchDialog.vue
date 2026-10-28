@@ -75,6 +75,7 @@ import axios from 'axios'
 import {
   PAGES, SETTINGS_SECTIONS, SETTINGS_ITEMS, matchKeywords, REMOTE_SOURCE, buildRemoteResults,
 } from '../../config/searchData.js'
+import { useSeq } from '../../composables/useSeq.js'
 
 const props = defineProps({ visible: { type: Boolean, default: false } })
 const emit = defineEmits(['close'])
@@ -152,25 +153,38 @@ function ensurePinyin() {
 
 // 远程数据搜索：输入 debounce（约 250ms）后拉取 /api/search，回填 remoteResults。
 // 关键字为空立即清空，不留上一轮结果。
+//
+// 竞态守卫用请求序号而不是「比较关键字」：后者在「输入 a → 删空 → 再输 a」时会失效
+// —— 两次 q 相同，旧响应照样能通过检查，把过期的结果盖上来。
+const remoteSeq = useSeq()
+
 function scheduleRemoteSearch() {
   clearTimeout(remoteTimer)
   const q = keyword.value.trim()
-  if (!q) { remoteResults.value = []; remoteSearching.value = false; return }
+  if (!q) {
+    remoteResults.value = []
+    remoteSearching.value = false
+    // 清空时作废在途请求，否则它回来后会把结果又填回空列表
+    remoteSeq.invalidate()
+    return
+  }
   remoteSearching.value = true
   remoteTimer = setTimeout(() => fetchRemoteSearch(q), 250)
 }
 
 async function fetchRemoteSearch(q) {
+  const my = remoteSeq.take()
   try {
     const { data } = await axios.get(REMOTE_SOURCE.endpoint, { params: { q } })
-    // 竞态保护：响应回来时关键字已变则丢弃（快速输入时后发的请求可能先到）
-    if (keyword.value.trim() !== q) return
+    // 响应回来时已不是最新一次检索：丢弃（快速输入时后发的请求可能先到）
+    if (!remoteSeq.isLatest(my)) return
     remoteResults.value = buildRemoteResults(data && data.groups)
   } catch (_) {
     // 后端未就绪/未登录：静默，仅清空远程结果，不影响本地搜索
-    if (keyword.value.trim() === q) remoteResults.value = []
+    if (!remoteSeq.isLatest(my)) return
+    remoteResults.value = []
   } finally {
-    if (keyword.value.trim() === q) remoteSearching.value = false
+    if (remoteSeq.isLatest(my)) remoteSearching.value = false
   }
 }
 

@@ -120,6 +120,8 @@ updater.registerUpdateIpc((payload) => {
 dialogs.registerDialogsIpc({
   getMainWindow: () => mainWindow,
   getWidgetWindow: () => widget.getWidgetWindow(),
+  // 截屏临时隐藏 widget 后要还原穿透态：Electron 没有 getter，由 widget 模块自己记
+  isWidgetIgnoreMouse: () => widget.isWidgetIgnoreMouse(),
 })
 
 // 常用软件（选择文件 + 启动）IPC

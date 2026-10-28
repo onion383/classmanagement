@@ -164,6 +164,7 @@
 </template>
 
 <script>
+import { reportError } from '../utils/reportError.js'
 import axios from 'axios'
 import { defineAsyncComponent, getCurrentInstance } from 'vue'
 import AppSelect from '../components/base/AppSelect.vue'
@@ -501,21 +502,24 @@ export default {
         原因: row.加分原因,
         ...(group ? { group_name: row.小组, 成员数: Number(row.成员数) || 0 } : { 姓名: row.姓名, 学号: row.学号 })
       }
-      // 逐个字段记录撤销（旧值来源：activeData 原始记录）
-      if (orig) {
-        for (const f of Object.keys(payload)) {
-          const ov = orig[f], nv = payload[f]
-          if (String(ov ?? '') !== String(nv ?? '')) recordCellUndo('score_records', row.id, f, ov, nv)
-        }
-      }
+      // 撤销记录等 PUT 成功后再登记（见下方 try 内）：
+      // 提前登记时，一旦保存失败、界面被 buildScoreRows 回滚，撤销栈里就留下一条
+      // 「点了撤销也看不出变化」的孤儿记录。
       try {
         await axios.put(`${API}/scores/${row.id}`, payload)
-        if (orig) Object.assign(orig, payload)
+        if (orig) {
+          // 旧值来源仍是 activeData 的原始记录（必须在 Object.assign 之前取）
+          for (const f of Object.keys(payload)) {
+            const ov = orig[f], nv = payload[f]
+            if (String(ov ?? '') !== String(nv ?? '')) recordCellUndo('score_records', row.id, f, ov, nv)
+          }
+          Object.assign(orig, payload)
+        }
         this.editingCell = null
         useNotification().success('已保存')
         this.buildScoreRows()
       } catch (err) {
-        useNotification().error(err.response?.data?.error || '保存失败')
+        reportError(err, { action: '保存' })
         this.buildScoreRows() // 失败回滚
       }
     },
@@ -550,7 +554,7 @@ export default {
         const added = this.activeData.find(s => s.id === res.data.id)
         if (added) recordRowInsert('score_records', added)
       } catch (err) {
-        useNotification().error(err.response?.data?.error || '保存失败')
+        reportError(err, { action: '保存' })
       }
     },
     async updateScore(payload) {
@@ -564,7 +568,7 @@ export default {
         const newRow = this.activeData.find(s => s.id === id)
         if (oldRow && newRow) recordRowUpdate('score_records', oldRow, newRow)
       } catch (err) {
-        useNotification().error(err.response?.data?.error || '保存失败')
+        reportError(err, { action: '保存' })
       }
     },
     askDelete(item) {
@@ -587,7 +591,7 @@ export default {
         // 记录撤销：删除前保存完整记录，撤销即恢复该行
         if (row) recordRowDelete('score_records', row)
       } catch (err) {
-        useNotification().error(err.response?.data?.error || '删除失败')
+        reportError(err, { action: '删除' })
       }
     },
     barWidth(row) {

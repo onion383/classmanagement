@@ -63,10 +63,30 @@ function isWithin(child, root) {
   return rel === '' || (!rel.startsWith('..') && !path.isAbsolute(rel))
 }
 
+// 解析真实路径：用于阻断「junction / 符号链接指向保护目录」的绕过。
+// 目标可能尚不存在（如新建保存目录），因此向上找到最近的已存在祖先再 realpath；
+// 只要这个祖先落在保护根内，整条路径就不可用。
+function realPathForCheck(p) {
+  let cur = p
+  for (let i = 0; i < 40; i++) {
+    try {
+      return fs.realpathSync(cur)
+    } catch (_) {
+      const parent = path.dirname(cur)
+      if (parent === cur) break
+      cur = parent
+    }
+  }
+  return p
+}
+
 // 返回命中的保护根目录（未命中返回 null）
 function matchProtectedRoot(p) {
+  const real = realPathForCheck(p)
   for (const root of systemProtectedRoots().concat(extraProtectedRoots)) {
-    if (root && isWithin(p, root)) return root
+    if (!root) continue
+    const realRoot = realPathForCheck(root)
+    if (isWithin(p, root) || isWithin(real, root) || isWithin(real, realRoot)) return root
   }
   return null
 }
@@ -142,7 +162,9 @@ function resolveSafeLaunchPath(input) {
 // 只允许打开「本进程通过 save-file 写过」的文件：
 // 渲染层即使被注入，也无法把任意 .exe 交给 shell.openPath。
 const writtenFiles = new Map()
-const MAX_WRITTEN = 64
+// 连续导出场景下 64 太小：同一会话导出超过 64 个文件后，最早的文件会被误判为「未写过」。
+// 这里只做内存登记，200 个路径的开销可忽略。
+const MAX_WRITTEN = 200
 
 function markFileWritten(filePath) {
   const p = normalizeAbsolute(filePath)

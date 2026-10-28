@@ -661,6 +661,9 @@ async function fullScan(conn, albumId, resumeFrom, slug, onProgress, token) {
     // 跑完了：清掉持久化记录（下次不需要续扫）
     persistScanClear(conn, albumId, task.token);
   } finally {
+    // 扫描中途抛错时走不到 persistScanClear，节流计数会留在 Map 里。
+    // 每次失败积一条、key 里带 token 不复用 —— 只清计数不影响续扫所需的库记录。
+    persistCounters.delete(`${albumId}:${task.token || 0}`);
     if (onProgress) onProgress(task);
   }
 }
@@ -807,6 +810,9 @@ async function incrementalScan(conn, albumId, resumeFrom, slug, onProgress, toke
     // 跑完了：清掉持久化记录（下次不需要续扫）
     persistScanClear(conn, albumId, task.token);
   } finally {
+    // 扫描中途抛错时走不到 persistScanClear，节流计数会留在 Map 里。
+    // 每次失败积一条、key 里带 token 不复用 —— 只清计数不影响续扫所需的库记录。
+    persistCounters.delete(`${albumId}:${task.token || 0}`);
     if (onProgress) onProgress(task);
   }
 }
@@ -896,6 +902,9 @@ async function refreshVirtual(conn, albumId, resumeFrom, slug, onProgress, token
     conn.prepare('UPDATE albums SET updated_at = ? WHERE id = ?').run(now(), albumId);
     persistScanClear(conn, albumId, task.token);
   } finally {
+    // 扫描中途抛错时走不到 persistScanClear，节流计数会留在 Map 里。
+    // 每次失败积一条、key 里带 token 不复用 —— 只清计数不影响续扫所需的库记录。
+    persistCounters.delete(`${albumId}:${task.token || 0}`);
     if (onProgress) onProgress(task);
   }
 }

@@ -7,6 +7,9 @@
         </div>
 
         <div class="flex-1 overflow-y-auto overflow-x-hidden min-h-0">
+          <div v-if="loadError" class="mb-4 border border-border rounded-lg px-3 py-2 text-sm text-danger">
+            {{ loadError }}
+          </div>
           <!-- 启用开关 -->
           <div class="flex items-center justify-between mb-6">
             <span class="text-sm font-medium text-text">启用 AI</span>
@@ -98,6 +101,8 @@ import AppSelect from '../base/AppSelect.vue'
 import AppSwitch from '../base/AppSwitch.vue'
 import AddModelDialog from './AddModelDialog.vue'
 import ConfirmDialog from '../base/ConfirmDialog.vue'
+import { reportError } from '../../utils/reportError.js'
+import { useSeq } from '../../composables/useSeq.js'
 import '../../styles/dialog-transition.css'
 import DialogShell from '../base/DialogShell.vue'
 
@@ -112,6 +117,7 @@ export default {
     return {
       enabled: false,
       models: [],
+      loadError: '',      // 配置/可用模型加载失败的提示；空串表示正常
       modelDialog: false, // 是否打开「添加模型」二次弹窗
       editDialog: false,  // 是否打开「编辑模型」二次弹窗
       editTarget: null,   // 正在编辑的模型对象
@@ -153,6 +159,11 @@ export default {
       if (val) this.load()
     },
   },
+  created() {
+    // 请求序号挂实例上（Options API 没有 setup 作用域）：load 会被 watch(show)、
+    // 保存后回调、删除确认等多路并发触发，慢的那次回来不能覆盖新状态。
+    this.seq = useSeq()
+  },
   methods: {
     close() {
       this.$emit('close')
@@ -160,35 +171,81 @@ export default {
     providerName(p) {
       return this.providerLabels[p] || p || '未知'
     },
-    async load() {
+    // 把已缓存的 providerChoices 映射到各卡片（纯本地计算，不联网）
+    remapChoices() {
+      const next = {}
+      this.models.forEach((m) => {
+        const arr = this.providerChoices[m.provider]
+        if (arr && arr.length) next[m.id] = arr
+      })
+      this.modelChoices = next
+    },
+    // 轻量刷新：只拉开关与模型列表（都是本地接口，两个请求并行）。
+    // 用于卡片上的即时操作（切换模型 / 设为当前 / 删除模型）—— 这些操作**不需要**
+    // 重新 discover。discover 是真实外网请求（后端 20s 超时），每次操作都对每个
+    // 服务商发一遍，就是「切个模型要等几秒」的根因。
+    async refreshModelsOnly() {
+      const my = this.seq.take()
+      this.loadError = ''
       try {
-        const cfg = await axios.get('/api/ai/config')
+        const [cfg, list] = await Promise.all([
+          axios.get('/api/ai/config'),
+          axios.get('/api/ai/models'),
+        ])
+        if (!this.seq.isLatest(my)) return
         this.enabled = cfg.data.success && cfg.data.data.enabled
-        const list = await axios.get('/api/ai/models')
+        this.models = list.data.success ? list.data.data : []
+        this.remapChoices()
+      } catch (err) {
+        if (!this.seq.isLatest(my)) return
+        console.error('刷新模型列表失败:', err)
+        this.loadError = '刷新模型列表失败：' + (err.response?.data?.error || err.message || '未知错误')
+      }
+    },
+    // 全量加载：本地两项 + 为每个服务商 discover 可用模型。
+    // 只在**打开设置弹窗**与**新增模型**时调用（新增可能引入新服务商，必须发现一次）。
+    async load() {
+      const my = this.seq.take()
+      this.loadError = ''
+      try {
+        const [cfg, list] = await Promise.all([
+          axios.get('/api/ai/config'),
+          axios.get('/api/ai/models'),
+        ])
+        if (!this.seq.isLatest(my)) return
+        this.enabled = cfg.data.success && cfg.data.data.enabled
         this.models = list.data.success ? list.data.data : []
         // 先拉取所有服务商可用模型列表，再一次性更新 modelChoices（避免中间态闪烁）
         const providers = [...new Set(this.models.map((m) => m.provider))]
         const newChoices = {}
+        let discoverFailed = false
         await Promise.all(providers.map(async (p) => {
           try {
-            const res = await axios.post('/api/ai/models/discover', { provider: p })
+            // custom 服务商的 base_url 没有预设值，必须带上已存模型的自定义地址；
+            // 否则后端会退回到空 base_url，discover 直接失败（B09-4）。
+            const saved = this.models.find((m) => m.provider === p)
+            const res = await axios.post('/api/ai/models/discover', {
+              provider: p,
+              base_url: saved?.base_url || ''
+            })
             newChoices[p] = res.data.success ? res.data.models : []
           } catch (err) {
             console.error('加载模型列表失败:', p, err)
             newChoices[p] = []
+            discoverFailed = true
           }
         }))
+        // discover 是逐个服务商串行的，最容易出现「旧的先发、后到」
+        if (!this.seq.isLatest(my)) return
         this.providerChoices = newChoices
         // 将服务商结果映射到各卡片（保留旧 choices 直到新数据就位）
-        const next = {}
-        this.models.forEach((m) => {
-          if (newChoices[m.provider] && newChoices[m.provider].length) {
-            next[m.id] = newChoices[m.provider]
-          }
-        })
-        this.modelChoices = next
+        this.remapChoices()
+        if (discoverFailed) this.loadError = '部分服务商的可用模型加载失败，模型下拉可能不完整'
       } catch (err) {
+        // 过期请求的失败不要盖掉新请求的结果
+        if (!this.seq.isLatest(my)) return
         console.error('加载 AI 配置失败:', err)
+        this.loadError = '加载 AI 配置失败：' + (err.response?.data?.error || err.message || '未知错误')
       }
     },
     // 卡片下拉切换模型：先由后端验证连通，通过才保存
@@ -198,18 +255,23 @@ export default {
       try {
         await axios.put(`/api/ai/models/${id}`, { model: item.model })
       } catch (err) {
-        alert((err.response && err.response.data && err.response.data.error) || '切换失败')
+        // 原生 alert 会阻塞渲染进程且样式与项目通知体系脱节（v1 B07-6 已统一过 history.js 同类问题）
+        reportError(err, { action: '切换模型' })
       }
-      await this.load()
+      await this.refreshModelsOnly()
       this.$emit('saved')
     },
     async toggleEnabled(value) {
+      const prev = this.enabled
       this.enabled = !!value
       try {
         await axios.put('/api/ai/config', { enabled: this.enabled })
         this.$emit('saved')
       } catch (err) {
-        console.error('切换失败:', err)
+        // 失败要把开关拨回去（对照同文件 toggleReasoning 的写法）：
+        // 不回滚的话界面显示「已启用」、后端仍是关闭，用户接着点「保存」会一路撞墙。
+        this.enabled = prev
+        reportError(err, { action: '切换 AI 开关' })
       }
     },
     // 切换该模型的推理开关（即时保存，无需确定按钮）
@@ -221,7 +283,7 @@ export default {
         this.$emit('saved')
       } catch (err) {
         e.target.checked = !on
-        alert((err.response && err.response.data && err.response.data.error) || '切换失败')
+        reportError(err, { action: '切换推理开关' })
       }
     },
     // 添加模型成功后的回调：刷新列表
@@ -232,7 +294,7 @@ export default {
     async selectModel(id) {
       try {
         await axios.put(`/api/ai/models/${id}/active`)
-        await this.load()
+        await this.refreshModelsOnly()
         this.$emit('saved')
       } catch (err) {
         console.error('选中失败:', err)
@@ -268,7 +330,7 @@ export default {
       this.confirmShow = false
       try {
         await axios.delete(`/api/ai/models/${m.id}`)
-        await this.load()
+        await this.refreshModelsOnly()
         this.$emit('saved')
       } catch (err) {
         console.error('删除失败:', err)

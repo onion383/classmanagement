@@ -33,6 +33,7 @@
 
 <script>
 import AppSelect from './AppSelect.vue'
+import { shiftDateStr } from '../../utils/dateTime.js'
 
 export default {
   name: 'WeekSwitcher',
@@ -68,10 +69,10 @@ export default {
     },
     formatWeek(weekStart) {
       if (!weekStart) return '';
-      const date = new Date(weekStart);
-      const end = new Date(date);
-      end.setDate(end.getDate() + 6);
-      return `${date.toISOString().slice(0, 10)} ~ ${end.toISOString().slice(0, 10)}`;
+      // week_start 本身就是 YYYY-MM-DD：直接做字符串级日期偏移。
+      // 不要绕 new Date + toISOString —— 那是 UTC 口径，在 UTC 以西的时区会差一天，
+      // 而且这种写法被复制到「new Date() 取今天」的场景就会变成真 bug。
+      return `${String(weekStart).slice(0, 10)} ~ ${shiftDateStr(weekStart, 6)}`;
     }
   }
 };

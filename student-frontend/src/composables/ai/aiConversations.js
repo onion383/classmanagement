@@ -1,6 +1,7 @@
 import axios from 'axios'
 import { ensureMarkdown, isMarkdownReady } from './aiMarkdown.js'
 import { AI_PERMISSION_FULL } from './aiConstants.js'
+import { reportError } from '../../utils/reportError.js'
 
 // 恢复 / 切换会话时默认只取最近若干条；更早的消息在滚动到顶部时按需补载
 const INITIAL_MSG_LIMIT = 10
@@ -127,7 +128,7 @@ export default {
         await axios.put(`/api/ai/models/${id}/active`)
         await this.loadModels()
       } catch (err) {
-        alert((err.response && err.response.data && err.response.data.error) || '切换失败')
+        reportError(err, { action: '切换模型' })
       }
     },
     // 应用一批「最近消息」响应：写入消息列表，并记录分页游标与「是否还有更早」

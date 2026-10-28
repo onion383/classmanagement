@@ -59,7 +59,9 @@ router.beforeEach(async (to, from) => {
   }
 
   // 已登录进入首页：提前并发拉取 Dashboard 数据，让数据与组件下载/挂载并行，减少首屏等待
-  if (to.path === '/') ensureDashboardData()
+  // 首屏预取：失败无所谓（Dashboard 挂载后会重新请求并提示用户），
+  // 但必须接住 reject —— 否则每次后端不可达都会冒一条 unhandledrejection。
+  if (to.path === '/') ensureDashboardData().catch(() => {})
   return to.path === '/login' ? '/' : true
 })
 

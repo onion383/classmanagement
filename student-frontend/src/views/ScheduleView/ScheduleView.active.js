@@ -1,8 +1,10 @@
 // ===== 课程表：实行课表加载/保存、行列与单元格交互、设置 =====
 // 纯代码搬运自 ScheduleView.vue 的 methods，未改写逻辑；通过展开注册到组件 methods。
+import { reportError } from '../../utils/reportError.js'
 import axios from 'axios'
 import { recordGridSnapshotUndo } from '../../composables/useUndo.js'
 import { createSerialSaver } from '../../utils/serialSaver.js'
+import { getSemesterStart, invalidateSemesterStart } from '../../utils/semesterStart.js'
 
 export function useScheduleActive({ API_BASE, DEFAULT_SECTIONS }) {
   return {
@@ -33,14 +35,17 @@ export function useScheduleActive({ API_BASE, DEFAULT_SECTIONS }) {
             days: this.activeColHeaders
           };
           this.activeColHeaders = this.activeSettings.days;
-          await this.saveActive();
+          // 首跑写入默认设置。saveActive 走串行器，失败只返回 false 不抛，
+          // 不接这个返回值的话：库里仍然没有设置，下次进来又当首跑，用户只会觉得「设置没保存」。
+          if (!await this.saveActive()) {
+            this.notifyError('默认课表设置保存失败，本次修改可能无法保留');
+          }
         }
         this.activeCells = this.adjustCells(this.activeCells, this.activeSettings);
 
         // 加载学期开始日期（单独兜底：失败不影响课表本身的加载判定）
         try {
-          const setRes = await axios.get(`${API_BASE}/schedule/settings`);
-          this.semesterStart = setRes.data?.semester_start || '';
+          this.semesterStart = await getSemesterStart();
         } catch (e) { console.error(e); }
 
         this._activeLoadOk = true;
@@ -99,7 +104,7 @@ export function useScheduleActive({ API_BASE, DEFAULT_SECTIONS }) {
       this.recordCellsDiff('schedule', prev, this.activeCells);
       this.saveActive();
     },
-    onActiveSwapRows(fromIdx, toIdx) {
+    async onActiveSwapRows(fromIdx, toIdx) {
       const rows = this.activeDisplayRows.filter(r => !r._isSeparator && !r._mergeCells);
       const fromRow = rows[fromIdx], toRow = rows[toIdx];
       if (!fromRow || !toRow || fromRow._isReadonly || toRow._isReadonly) return;
@@ -111,10 +116,18 @@ export function useScheduleActive({ API_BASE, DEFAULT_SECTIONS }) {
       const [movedRow] = newCells.splice(fromLessonIdx, 1);
       newCells.splice(toLessonIdx, 0, movedRow);
       this.activeCells = newCells;
+      // 先存后登记：串行保存器失败只返回 false 不抛，忽略返回值就会变成
+      // 「界面换了、库里没换」，撤销栈里还多一条 new 值从未落库的记录。
+      const ok = await this.saveActive();
+      if (!ok) {
+        // 只回滚自己这次的结果：若期间用户又改过（activeCells 已被换成新数组），
+        // 不能把后面的编辑一起冲掉。
+        if (this.activeCells === newCells) this.activeCells = prev;
+        return;
+      }
       recordGridSnapshotUndo('课程表', 'schedule', prev, JSON.parse(JSON.stringify(newCells)), `交换行：${fromRow.label} ↔ ${toRow.label}`);
-      this.saveActive();
     },
-    onActiveSwapColumns(fromIdx, toIdx) {
+    async onActiveSwapColumns(fromIdx, toIdx) {
       if (fromIdx === toIdx) return;
       const fromHeader = this.activeColHeaders[fromIdx] ?? `列${fromIdx + 1}`, toHeader = this.activeColHeaders[toIdx] ?? `列${toIdx + 1}`;
       const prev = JSON.parse(JSON.stringify(this.activeCells));
@@ -126,8 +139,13 @@ export function useScheduleActive({ API_BASE, DEFAULT_SECTIONS }) {
         return r;
       });
       this.activeCells = newCells;
+      // 口径同交换行：保存成功才算这次交换成立
+      const ok = await this.saveActive();
+      if (!ok) {
+        if (this.activeCells === newCells) this.activeCells = prev;
+        return;
+      }
       recordGridSnapshotUndo('课程表', 'schedule', prev, JSON.parse(JSON.stringify(newCells)), `交换列：${fromHeader} ↔ ${toHeader}`);
-      this.saveActive();
     },
     onActiveRowMeta({ rowIdx, field, value }) {
       const sections = JSON.parse(JSON.stringify(this.activeSettings.sections));
@@ -150,6 +168,13 @@ export function useScheduleActive({ API_BASE, DEFAULT_SECTIONS }) {
       }
     },
     async saveActiveSettings(settings) {
+      const prev = {
+        settings: this.activeSettings,
+        headers: this.activeColHeaders,
+        // adjustCells 可能原地改写行/列，回滚必须用快照而不是引用
+        cells: JSON.parse(JSON.stringify(this.activeCells)),
+        semesterStart: this.semesterStart
+      };
       this.activeSettings = {
         sections: settings.sections,
         periods: settings.periods,
@@ -159,11 +184,23 @@ export function useScheduleActive({ API_BASE, DEFAULT_SECTIONS }) {
       this.activeSettingsVisible = false;
       this.activeCells = this.adjustCells(this.activeCells, this.activeSettings);
 
-      // 保存学期开始日期
-      await axios.put(`${API_BASE}/schedule/settings`, {
-        semester_start: this.semesterStart
-      });
-      await this.saveActive();
+      // 保存学期开始日期。设置已在上面写到本地，失败时必须回滚，
+      // 否则界面显示「已保存」但刷新后又变回旧值。
+      try {
+        await axios.put(`${API_BASE}/schedule/settings`, {
+          semester_start: this.semesterStart
+        });
+        // 学期改了：值日/座位那边缓存的开学日必须失效，否则它们的指数还会按旧开学日算
+        invalidateSemesterStart();
+        await this.saveActive();
+      } catch (err) {
+        this.activeSettings = prev.settings;
+        this.activeColHeaders = prev.headers;
+        this.activeCells = prev.cells;
+        this.semesterStart = prev.semesterStart;
+        reportError(err, { action: '学期设置保存' });
+        console.error('[schedule] 保存学期设置失败', err);
+      }
     }
   }
 }
