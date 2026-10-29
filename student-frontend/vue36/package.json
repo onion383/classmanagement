@@ -1,0 +1,13 @@
+{
+  "name": "campus-assistant-vue36-preview",
+  "private": true,
+  "version": "0.0.0",
+  "description": "Vue 3.6 预发布版预览通道的依赖隔离目录：只装 vue 一个包，主线 node_modules 里的 vue 保持 3.5 不受影响。由 npm run setup:vue36 安装，npm run dev:new / electron:buildnew 使用。",
+  "engines": {
+    "node": ">=22.12.0"
+  },
+  "dependencies": {
+    "campus-assistant": "file:../..",
+    "vue": "3.6.0-rc.13"
+  }
+}

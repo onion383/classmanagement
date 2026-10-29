@@ -186,9 +186,8 @@ window.addEventListener('contextmenu', (e) => {
   })
 })
 
-// 弹窗懒加载预取指令（v-preload）：悬停触发按钮时提前加载对应弹窗 chunk
-import { vPreload } from './utils/dialogPrefetch'
-app.directive('preload', vPreload)
+// 弹窗懒加载预取：已从 v-preload 指令全量迁到模板 @mouseenter="prefetch(loader)"，
+// 不再需要全局注册（见 utils/dialogPrefetch.js 顶部说明）。
 
 // ===== 全局错误兜底 =====
 // 目的：组件渲染、生命周期钩子、路由守卫里漏掉的异常，用户至少能看到一次提示，

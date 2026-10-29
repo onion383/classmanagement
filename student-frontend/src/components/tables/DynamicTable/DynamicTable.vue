@@ -108,7 +108,7 @@
               <button
                 type="button"
                 class="dt-filter-btn"
-                v-preload="preloadFilterPanel"
+                @mouseenter="prefetch(preloadFilterPanel)"
                 :class="{ 'is-on': isColumnFiltered(field.name) || sortField === field.name }"
                 :title="filterButtonTitle(field.name)"
                 @click.stop="openFilter(field, $event)"
@@ -329,17 +329,17 @@
 </template>
 
 <script setup>
+import { prefetch } from '../../../utils/dialogPrefetch.js'
 import { ref, computed, watch, onMounted, onActivated, onBeforeUnmount, nextTick, defineAsyncComponent, TransitionGroup, toRef } from 'vue'
 import AppSelect from '../../base/AppSelect.vue'
 import ConfirmDialog from '../../base/ConfirmDialog.vue'
 import { Search, Filter } from '@lucide/vue'
 import { useDynamicTableDrag } from './DynamicTable.drag.js'
-import { vPreload } from '../../../utils/dialogPrefetch.js'
 import { zhCollator } from '../../../utils/collator.js'
 
 // 表头筛选面板：独立组件 + 懒加载。
 // 用 defineAsyncComponent 把面板拆成单独 chunk，只有第一次点开表头放大镜/漏斗时才下载；
-// 按钮上再挂 v-preload，鼠标悬停就提前预取，点开时基本感觉不到加载。
+// 按钮上再挂 @mouseenter 触发 prefetch，鼠标悬停就提前预取，点开时基本感觉不到加载。
 const loadColumnFilter = () => import('./DynamicTable.filter.vue')
 const ColumnFilter = defineAsyncComponent(loadColumnFilter)
 
@@ -910,7 +910,7 @@ function initVirtual() {
     }
 
     // ==================== 列筛选（表头放大镜/漏斗） ====================
-    // 供 v-preload 使用：把懒加载 loader 包成实例方法，模板里才能引用到
+    // 供 @mouseenter 预取使用：把懒加载 loader 包成函数，模板里才能引用到
 function preloadFilterPanel() { return loadColumnFilter(); }
 function isColumnFiltered(name) { return !!ctx.columnFilters.value[name]; }
 function filterButtonTitle(name) {

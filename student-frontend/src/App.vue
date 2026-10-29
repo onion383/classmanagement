@@ -11,13 +11,13 @@
         <button class="tb-btn" :disabled="!undoState.canRedo || undoState.busy" :title="redoTitle" @mouseenter="onUndoHover" @click="onRedo">
           <Redo2 :size="15" stroke-width="1.8" />
         </button>
-        <button class="tb-btn" title="搜索（页面 / 设置）" v-preload="preloadSearchDialog" @click="searchOpen = true">
+        <button class="tb-btn" title="搜索（页面 / 设置）" @mouseenter="preloadSearchDialog" @click="searchOpen = true">
           <Search :size="15" stroke-width="2" />
         </button>
-        <button class="tb-btn" title="切换主题" v-preload="preloadThemePickerDialog" @click="themeOpen = true">
+        <button class="tb-btn" title="切换主题" @mouseenter="preloadThemePickerDialog" @click="themeOpen = true">
           <Palette :size="15" stroke-width="1.8" />
         </button>
-        <button class="tb-btn" title="账户" v-preload="preloadAccountDialog" @click="accountOpen = true">
+        <button class="tb-btn" title="账户" @mouseenter="preloadAccountDialog" @click="accountOpen = true">
           <User :size="15" stroke-width="1.8" />
         </button>
         <button class="tb-btn" title="系统设置" @click="goToSettings">
@@ -124,7 +124,7 @@
         ref="aiIcon"
         @mousedown="startUnitDrag"
         @contextmenu.prevent="onAiContextMenu"
-        v-preload="preloadAiAssistant"
+        @mouseenter="preloadAiAssistant"
         @click="onIconClick"
         class="fixed z-[20000] w-12 h-12 rounded-full bg-primary hover:bg-primary-hover text-text-inverse text-xl shadow-lg flex items-center justify-center cursor-move select-none transition-theme"
         :style="iconStyle"
@@ -186,6 +186,7 @@ import { useAlbumTaskResume } from './composables/useAlbumTaskResume'
 import { ref, computed, watch, onMounted, onBeforeUnmount, defineAsyncComponent, h } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { prefetchRoutes } from './router'
+import { prefetch } from './utils/dialogPrefetch'
 import { prefetchThemeStyles, warmNightMode, isNightWarmEnabled } from './styles/themeLoader'
 import { Minus, Square, X, Undo2, Redo2, Search, Palette, User, Settings, Info } from '@lucide/vue'
 import axios from 'axios'
@@ -193,7 +194,7 @@ import { undoState as undo, performUndo, refreshUndoStatus } from './composables
 import './styles/dialog-transition.css'
 import { SEND, INVOKE, RECEIVE } from './electronChannels.js'
 
-// AI 助手懒加载：loader 抽成命名函数，既给 defineAsyncComponent 用，也供悬浮图标 hover 预取（v-preload）
+// AI 助手懒加载：loader 抽成命名函数，既给 defineAsyncComponent 用，也供悬浮图标 hover 预取（@mouseenter → prefetch）
 const loadAiAssistant = () => import('./views/AiAssistant.vue')
 // 异步组件：加载中/失败展示占位文案，避免浮窗点开就消失却毫无反馈
 const AiAssistant = defineAsyncComponent({
@@ -207,7 +208,7 @@ const AiAssistant = defineAsyncComponent({
   onError(retry, fail, attempts) { if (attempts < 3) retry() },
 })
 
-// 标题栏功能窗口懒加载：loader 抽成命名函数，既给 defineAsyncComponent 用，也供按钮 hover 预取（v-preload）
+// 标题栏功能窗口懒加载：loader 抽成命名函数，既给 defineAsyncComponent 用，也供按钮 hover 预取（@mouseenter → prefetch）
 const loadSearchDialog = () => import('./components/base/SearchDialog.vue')
 const loadThemePickerDialog = () => import('./components/base/ThemePickerDialog.vue')
 const loadAccountDialog = () => import('./components/base/AccountDialog.vue')
@@ -487,11 +488,13 @@ function winClose() {
   window.electron?.send(SEND.WIN_CLOSE)
 }
 
-// 模板只能访问实例成员，故把懒加载 loader 包成方法供 v-preload 预取
-function preloadSearchDialog() { return loadSearchDialog() }
-function preloadThemePickerDialog() { return loadThemePickerDialog() }
-function preloadAccountDialog() { return loadAccountDialog() }
-function preloadAiAssistant() { return loadAiAssistant() }
+// 懒加载 loader 的悬停预取入口：模板 @mouseenter 直接调这些方法，
+// 内部统一走 prefetch（32ms 防抖 + 同 loader 去重）。
+// 不用自定义指令的原因见 utils/dialogPrefetch.js 顶部说明。
+function preloadSearchDialog() { prefetch(loadSearchDialog) }
+function preloadThemePickerDialog() { prefetch(loadThemePickerDialog) }
+function preloadAccountDialog() { prefetch(loadAccountDialog) }
+function preloadAiAssistant() { prefetch(loadAiAssistant) }
 
 // ---- 标题栏：跳转系统设置（跳转后给一条 info 提示） ----
 function goToSettings() {

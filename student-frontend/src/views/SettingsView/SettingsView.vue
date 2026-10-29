@@ -1110,7 +1110,7 @@ Object.assign(ctx, useSettingsSearch(ctx), useSettingsData(ctx), useSettingsAppe
 
 // ===== 模板顶层绑定：由逻辑模块提供、模板用到的方法 =====
 const {
-  changeDataDir, changePassword, changeSkillsDir, changeThumbsDir, changeUsername,
+  barPct, changeDataDir, changePassword, changeSkillsDir, changeThumbsDir, changeUsername,
   clearBgImage, clearPrivacyPhrase, clearUndo, closeModal, closeSecurityDialog,
   confirmAddSemester, confirmDeleteSemester, confirmLogout, confirmSearchActive, confirmSecurityLevel,
   copyPrivacyPhrase, exportDb, fmtMem, fmtTs, goToSettingsSection, groupLabel, moveSearchActive,

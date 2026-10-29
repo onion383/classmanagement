@@ -14,11 +14,16 @@
     <span class="app-switch-track" aria-hidden="true">
       <span class="app-switch-knob"></span>
     </span>
-    <span v-if="$slots.default" class="app-switch-label"><slot /></span>
+    <!-- 用 slots.default 判断是否传了标签，而不是模板里的 $slots：
+         $slots 依赖组件实例代理，Vapor 模式下实例代理不提供这些属性；
+         slots 是 setup 顶层绑定，两种渲染模式下都可用（且只是判断存在性，不调用） -->
+    <span v-if="slots.default" class="app-switch-label"><slot /></span>
   </label>
 </template>
 
 <script setup>
+import { useSlots } from 'vue'
+
 defineProps({
   modelValue: { type: Boolean, default: false },
   disabled: { type: Boolean, default: false },
@@ -26,6 +31,7 @@ defineProps({
   ariaLabel: { type: String, default: '' },
 })
 const emit = defineEmits(['update:modelValue', 'change'])
+const slots = useSlots()
 
 function onChange(e) {
   const value = e.target.checked

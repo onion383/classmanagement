@@ -44,9 +44,9 @@
 
       <!-- 工具栏 -->
       <div class="mb-4 flex items-center gap-3 opbar">
-        <button v-preload="loadAddScoreDialog" @click="openAdd" class="bg-primary hover:bg-primary-hover text-text-inverse px-5 py-2 rounded transition-theme">＋ 添加{{ isGroup ? '小组' : '个人' }}加分</button>
+        <button @mouseenter="prefetch(loadAddScoreDialog)" @click="openAdd" class="bg-primary hover:bg-primary-hover text-text-inverse px-5 py-2 rounded transition-theme">＋ 添加{{ isGroup ? '小组' : '个人' }}加分</button>
         <button @click="refresh" class="bg-text-muted hover:bg-text-secondary text-text-inverse px-4 py-2 rounded flex items-center gap-1 btn-refresh transition-theme"><IconGlyph name="refresh" :size="14" tint="current" /> 刷新</button>
-        <button v-preload="loadExportExcel" @click="openExport" class="bg-warning hover:bg-warning-hover text-text-inverse px-4 py-2 rounded flex items-center gap-1 transition-theme">📥 导出{{ isGroup ? '小组' : '个人' }}加分</button>
+        <button @mouseenter="prefetch(loadExportExcel)" @click="openExport" class="bg-warning hover:bg-warning-hover text-text-inverse px-4 py-2 rounded flex items-center gap-1 transition-theme">📥 导出{{ isGroup ? '小组' : '个人' }}加分</button>
       </div>
 
       <!-- 今日时间轴 -->
@@ -164,6 +164,7 @@
 </template>
 
 <script setup>
+import { prefetch } from '../utils/dialogPrefetch.js'
 import { ref, computed, watch, onMounted, onActivated, onDeactivated, onBeforeUnmount, defineAsyncComponent } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { reportError } from '../utils/reportError.js'

@@ -3,7 +3,7 @@
   "productName": "班集",
   "electronLanguages": ["zh-CN", "en-US"],
   "directories": {
-    "output": "release4"
+    "output": "release"
   },
   "files": [
     "electron/**/*",

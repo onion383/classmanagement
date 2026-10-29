@@ -1,30 +1,38 @@
 <template>
-  <!-- 统一图标：跟随「图标样式」设置（color=彩色 lucide / emoji=表情）。
-       tint="color" 时用语义配色（页面/小节标题），tint="current" 时继承文字色（按钮等）。 -->
-  <component
+  <!-- 统一图标：跟随「图标样式」设置（color=彩色图形 / emoji=表情）。
+       tint="color" 时用语义配色（页面/小节标题），tint="current" 时继承文字色（按钮等）。
+       图形数据内联渲染（见 IconGlyph.shapes.js）：不再实例化 @lucide/vue 组件，
+       每个图标从「一个组件实例 + 一棵 VNode」变成「一个 svg + 若干形状元素」。 -->
+  <svg
     v-if="iconStyle === 'color'"
-    :is="entry.comp"
-    :size="size"
+    xmlns="http://www.w3.org/2000/svg"
+    :width="size"
+    :height="size"
+    viewBox="0 0 24 24"
+    fill="none"
+    stroke="currentColor"
     :stroke-width="strokeWidth"
+    stroke-linecap="round"
+    stroke-linejoin="round"
+    aria-hidden="true"
     :class="{ 'icon-loading': isLoading, 'icon-color': tint !== 'current' }"
     :style="tint === 'current' ? { color: 'currentColor', flexShrink: 0 } : { color: entry.color, flexShrink: 0 }"
-  />
+  >
+    <path v-for="(a, i) in entry.shapes.paths" :key="'p' + i" v-bind="a" />
+    <circle v-for="(a, i) in entry.shapes.circles" :key="'c' + i" v-bind="a" />
+    <rect v-for="(a, i) in entry.shapes.rects" :key="'r' + i" v-bind="a" />
+    <line v-for="(a, i) in entry.shapes.lines" :key="'l' + i" v-bind="a" />
+    <polyline v-for="(a, i) in entry.shapes.polylines" :key="'pl' + i" v-bind="a" />
+    <polygon v-for="(a, i) in entry.shapes.polygons" :key="'pg' + i" v-bind="a" />
+    <ellipse v-for="(a, i) in entry.shapes.ellipses" :key="'e' + i" v-bind="a" />
+  </svg>
   <span v-else class="icon-emoji" :class="{ 'icon-loading': isLoading }" :style="{ fontSize: size + 'px', lineHeight: 1 }">{{ entry.emoji }}</span>
 </template>
 
 <script setup>
 import { computed } from 'vue'
 import { storeToRefs } from 'pinia'
-import {
-  Users, Network, CalendarDays, Coins, Armchair, Broom, BedDouble, Medal,
-  Images, PartyPopper, Bot, Settings, Info,
-  RefreshCw, Download, Upload, Trash2, Search, ClipboardList, Folder, FolderOpen,
-  Undo2, Image as ImageIcon, SlidersHorizontal, Check, Wrench, Paperclip,
-  Clock, BarChart3, Loader2, Toolbox, User, Palette, Brain,
-  Home, Zap, Camera, RotateCcw, Eye, EyeOff,
-  Timer, Dices, NotebookPen, PenLine, Pen, PenTool, Highlighter, Eraser,
-  Save, X, XCircle, Construction,
-} from '@lucide/vue'
+import { ICON_SHAPES } from './IconGlyph.shapes.js'
 import { useThemeStore } from '../../stores/theme'
 
 const props = defineProps({
@@ -41,66 +49,66 @@ const props = defineProps({
 // 页面/小节标题语义配色（与侧边栏导航一一对应）+ 通用图标
 const MAP = {
   // ---- 页面主标题 ----
-  students: { comp: Users, emoji: '📚', color: '#60a5fa' },
-  group:    { comp: Network, emoji: '👥', color: '#818cf8' },
-  schedule: { comp: CalendarDays, emoji: '📅', color: '#22d3ee' },
-  fee:      { comp: Coins, emoji: '💰', color: '#fbbf24' },
-  seat:     { comp: Armchair, emoji: '🪑', color: '#fb923c' },
-  duty:     { comp: Broom, emoji: '🧹', color: '#34d399' },
-  leave:    { comp: BedDouble, emoji: '🛌', color: '#a78bfa' },
-  score:    { comp: Medal, emoji: '🏅', color: '#f87171' },
-  album:    { comp: Images, emoji: '📷', color: '#f472b6' },
-  activity: { comp: PartyPopper, emoji: '🎉', color: '#fb7185' },
-  ai:       { comp: Bot, emoji: '🤖', color: '#38bdf8' },
-  settings: { comp: Settings, emoji: '⚙️', color: '#94a3b8' },
-  about:    { comp: Info, emoji: 'ℹ️', color: '#94a3b8' },
+  students: { lucide: 'Users', emoji: '📚', color: '#60a5fa' },
+  group: { lucide: 'Network', emoji: '👥', color: '#818cf8' },
+  schedule: { lucide: 'CalendarDays', emoji: '📅', color: '#22d3ee' },
+  fee: { lucide: 'Coins', emoji: '💰', color: '#fbbf24' },
+  seat: { lucide: 'Armchair', emoji: '🪑', color: '#fb923c' },
+  duty: { lucide: 'Broom', emoji: '🧹', color: '#34d399' },
+  leave: { lucide: 'BedDouble', emoji: '🛌', color: '#a78bfa' },
+  score: { lucide: 'Medal', emoji: '🏅', color: '#f87171' },
+  album: { lucide: 'Images', emoji: '📷', color: '#f472b6' },
+  activity: { lucide: 'PartyPopper', emoji: '🎉', color: '#fb7185' },
+  ai: { lucide: 'Bot', emoji: '🤖', color: '#38bdf8' },
+  settings: { lucide: 'Settings', emoji: '⚙️', color: '#94a3b8' },
+  about: { lucide: 'Info', emoji: 'ℹ️', color: '#94a3b8' },
 
   // ---- 通用（按钮多为 tint=current 继承文字色）----
-  refresh:  { comp: RefreshCw, emoji: '🔄', color: '#64748b' },
-  download: { comp: Download, emoji: '📥', color: '#f97316' },
-  upload:   { comp: Upload, emoji: '📥', color: '#f97316' },
-  trash:    { comp: Trash2, emoji: '🗑️', color: '#ef4444' },
-  search:   { comp: Search, emoji: '🔍', color: '#38bdf8' },
-  clipboard:{ comp: ClipboardList, emoji: '📋', color: '#6366f1' },
-  folder:   { comp: Folder, emoji: '📁', color: '#f59e0b' },
-  box:      { comp: FolderOpen, emoji: '🗂️', color: '#f59e0b' },
-  undo:     { comp: Undo2, emoji: '↩️', color: '#94a3b8' },
-  image:    { comp: ImageIcon, emoji: '🖼️', color: '#a78bfa' },
-  sliders:  { comp: SlidersHorizontal, emoji: '🎚️', color: '#94a3b8' },
-  check:    { comp: Check, emoji: '✅', color: '#22c55e' },
-  wrench:   { comp: Wrench, emoji: '🛠️', color: '#64748b' },
-  paperclip:{ comp: Paperclip, emoji: '📎', color: '#64748b' },
-  clock:    { comp: Clock, emoji: '⏳', color: '#0ea5e9' },
-  calendar: { comp: CalendarDays, emoji: '🗓️', color: '#0ea5e9' },
-  chart:    { comp: BarChart3, emoji: '📊', color: '#6366f1' },
-  users:    { comp: Users, emoji: '👥', color: '#60a5fa' },
-  toolbox:  { comp: Toolbox, emoji: '🧰', color: '#64748b' },
-  user:     { comp: User, emoji: '👤', color: '#60a5fa' },
-  palette:  { comp: Palette, emoji: '🎨', color: '#ec4899' },
-  brain:    { comp: Brain, emoji: '🧠', color: '#a78bfa' },
-  loading:  { comp: Loader2, emoji: '🔄', color: '#64748b' },
-  home:     { comp: Home, emoji: '🏠', color: '#10b981' },
-  zap:      { comp: Zap, emoji: '⚡', color: '#f59e0b' },
-  camera:   { comp: Camera, emoji: '📸', color: '#64748b' },
-  rollback: { comp: RotateCcw, emoji: '↺', color: '#f59e0b' },
+  refresh: { lucide: 'RefreshCw', emoji: '🔄', color: '#64748b' },
+  download: { lucide: 'Download', emoji: '📥', color: '#f97316' },
+  upload: { lucide: 'Upload', emoji: '📥', color: '#f97316' },
+  trash: { lucide: 'Trash2', emoji: '🗑️', color: '#ef4444' },
+  search: { lucide: 'Search', emoji: '🔍', color: '#38bdf8' },
+  clipboard: { lucide: 'ClipboardList', emoji: '📋', color: '#6366f1' },
+  folder: { lucide: 'Folder', emoji: '📁', color: '#f59e0b' },
+  box: { lucide: 'FolderOpen', emoji: '🗂️', color: '#f59e0b' },
+  undo: { lucide: 'Undo2', emoji: '↩️', color: '#94a3b8' },
+  image: { lucide: 'Image', emoji: '🖼️', color: '#a78bfa' },
+  sliders: { lucide: 'SlidersHorizontal', emoji: '🎚️', color: '#94a3b8' },
+  check: { lucide: 'Check', emoji: '✅', color: '#22c55e' },
+  wrench: { lucide: 'Wrench', emoji: '🛠️', color: '#64748b' },
+  paperclip: { lucide: 'Paperclip', emoji: '📎', color: '#64748b' },
+  clock: { lucide: 'Clock', emoji: '⏳', color: '#0ea5e9' },
+  calendar: { lucide: 'CalendarDays', emoji: '🗓️', color: '#0ea5e9' },
+  chart: { lucide: 'BarChart3', emoji: '📊', color: '#6366f1' },
+  users: { lucide: 'Users', emoji: '👥', color: '#60a5fa' },
+  toolbox: { lucide: 'Toolbox', emoji: '🧰', color: '#64748b' },
+  user: { lucide: 'User', emoji: '👤', color: '#60a5fa' },
+  palette: { lucide: 'Palette', emoji: '🎨', color: '#ec4899' },
+  brain: { lucide: 'Brain', emoji: '🧠', color: '#a78bfa' },
+  loading: { lucide: 'Loader2', emoji: '🔄', color: '#64748b' },
+  home: { lucide: 'Home', emoji: '🏠', color: '#10b981' },
+  zap: { lucide: 'Zap', emoji: '⚡', color: '#f59e0b' },
+  camera: { lucide: 'Camera', emoji: '📸', color: '#64748b' },
+  rollback: { lucide: 'RotateCcw', emoji: '↺', color: '#f59e0b' },
   // 金额显示/隐藏切换：eye=显示（睁眼）｜eyeOff=隐藏（捂脸）
-  eye:      { comp: Eye,    emoji: '👁️', color: '#64748b' },
-  eyeOff:   { comp: EyeOff, emoji: '🙈', color: '#64748b' },
+  eye: { lucide: 'Eye', emoji: '👁️', color: '#64748b' },
+  eyeOff: { lucide: 'EyeOff', emoji: '🙈', color: '#64748b' },
 
   // ---- 工具箱（浮窗图标 / 工具菜单 / 四个小工具）----
-  timer:       { comp: Timer,       emoji: '⏱️', color: '#0ea5e9' },
-  rollcall:    { comp: Dices,       emoji: '🎲', color: '#818cf8' },
-  screenshot:  { comp: Camera,      emoji: '📷', color: '#64748b' },
-  note:        { comp: NotebookPen, emoji: '📝', color: '#f59e0b' },
-  brush:       { comp: PenLine,     emoji: '🖊️', color: '#3b82f6' },
-  eraser:      { comp: Eraser,      emoji: '🧹', color: '#64748b' },
-  save:        { comp: Save,        emoji: '💾', color: '#3b82f6' },
-  close:       { comp: X,           emoji: '✕',  color: '#64748b' },
-  ballpoint:   { comp: Pen,         emoji: '🖊️', color: '#3b82f6' },
-  pen:         { comp: PenTool,     emoji: '✒️', color: '#1e293b' },
-  highlighter: { comp: Highlighter, emoji: '🖍️', color: '#f59e0b' },
-  error:       { comp: XCircle,     emoji: '❌', color: '#ef4444' },
-  developing:  { comp: Construction,emoji: '🚧', color: '#f59e0b' },
+  timer: { lucide: 'Timer', emoji: '⏱️', color: '#0ea5e9' },
+  rollcall: { lucide: 'Dices', emoji: '🎲', color: '#818cf8' },
+  screenshot: { lucide: 'Camera', emoji: '📷', color: '#64748b' },
+  note: { lucide: 'NotebookPen', emoji: '📝', color: '#f59e0b' },
+  brush: { lucide: 'PenLine', emoji: '🖊️', color: '#3b82f6' },
+  eraser: { lucide: 'Eraser', emoji: '🧹', color: '#64748b' },
+  save: { lucide: 'Save', emoji: '💾', color: '#3b82f6' },
+  close: { lucide: 'X', emoji: '✕',  color: '#64748b' },
+  ballpoint: { lucide: 'Pen', emoji: '🖊️', color: '#3b82f6' },
+  pen: { lucide: 'PenTool', emoji: '✒️', color: '#1e293b' },
+  highlighter: { lucide: 'Highlighter', emoji: '🖍️', color: '#f59e0b' },
+  error: { lucide: 'XCircle', emoji: '❌', color: '#ef4444' },
+  developing: { lucide: 'Construction', emoji: '🚧', color: '#f59e0b' },
 }
 
 const { iconStyle } = storeToRefs(useThemeStore())
@@ -108,7 +116,9 @@ const entry = computed(() => {
   const hit = MAP[props.name]
   // 拼错/未登记的 key 会静默回退成「学生」图标，视觉上极难发现：开发态显式告警
   if (!hit && import.meta.env.DEV) console.warn('[IconGlyph] unknown icon:', props.name)
-  return hit || MAP.students
+  const key = hit ? props.name : 'students'
+  // shapes 与 emoji/color 同源：都按同一个 key 取，未登记的一并回退
+  return { ...(hit || MAP.students), shapes: ICON_SHAPES[key] || ICON_SHAPES.students }
 })
 const isLoading = computed(() => props.name === 'loading')
 </script>

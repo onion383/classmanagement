@@ -15,7 +15,8 @@ const path = require('node:path')
 const ROOT = path.join(__dirname, '..', '..')
 const TARGETS = ['electron', 'student-backend', path.join('student-frontend', 'src')]
 const EXTS = new Set(['.js', '.cjs', '.mjs', '.vue'])
-const SKIP_DIRS = new Set(['node_modules', 'release4', 'dist', '.vite', '.git'])
+// release4 为旧产物目录名，保留跳过避免历史目录被误扫
+const SKIP_DIRS = new Set(['node_modules', 'release', 'release36', 'release4', 'dist', '.vite', '.git'])
 
 const args = new Set(process.argv.slice(2))
 const strict = args.has('--strict')

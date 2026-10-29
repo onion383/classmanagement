@@ -20,8 +20,8 @@
             <!-- 工具栏：随切换段变化。「设置」是天数/劳动项目的全局设置，两段都保留；
                  智能排表/导入 两段均可用，顺序与当前值日一致 -->
             <div class="mb-4 flex flex-wrap items-center gap-3 opbar">
-              <button @click="settingsVisible = true" v-preload="loadSettingsDialog" class="bg-primary text-text-inverse px-4 py-2 rounded flex items-center gap-1.5"><IconGlyph name="settings" :size="14" tint="current" /> 设置</button>
-              <button @click="openArrange(dutyView)" v-preload="loadArrangementDialog" class="bg-primary text-text-inverse px-4 py-2 rounded">🧠 智能排表</button>
+              <button @click="settingsVisible = true" @mouseenter="prefetch(loadSettingsDialog)" class="bg-primary text-text-inverse px-4 py-2 rounded flex items-center gap-1.5"><IconGlyph name="settings" :size="14" tint="current" /> 设置</button>
+              <button @click="openArrange(dutyView)" @mouseenter="prefetch(loadArrangementDialog)" class="bg-primary text-text-inverse px-4 py-2 rounded">🧠 智能排表</button>
               <button @click="dutyView === 'active' ? refreshActive() : refreshMaster()" class="bg-text-muted text-text-inverse px-4 py-2 rounded flex items-center gap-1.5 btn-refresh"><IconGlyph name="refresh" :size="14" tint="current" /> 刷新</button>
               <button @click="openImport(dutyView)" class="bg-primary text-text-inverse px-4 py-2 rounded flex items-center gap-1.5"><IconGlyph name="download" :size="14" tint="current" /> {{ dutyView === 'active' ? '从模板导入' : '从实行导入' }}</button>
               <button @click="dutyView === 'active' ? openActiveExport() : openMasterExport()" class="bg-warning text-text-inverse px-4 py-2 rounded flex items-center gap-1.5"><IconGlyph name="download" :size="14" tint="current" /> 导出值日表</button>
@@ -89,7 +89,7 @@
               <h2 class="text-xl font-semibold text-text flex items-center gap-2 min-h-7"><IconGlyph name="chart" :size="20" /> 值日项目权重表</h2>
             </div>
             <div class="mb-4 flex flex-wrap items-center gap-3 opbar">
-              <button @click="openWeightAlgo" v-preload="loadWeightAlgoDialog" class="bg-primary text-text-inverse px-4 py-2 rounded flex items-center gap-1.5"><IconGlyph name="settings" :size="14" tint="current" /> 设置</button>
+              <button @click="openWeightAlgo" @mouseenter="prefetch(loadWeightAlgoDialog)" class="bg-primary text-text-inverse px-4 py-2 rounded flex items-center gap-1.5"><IconGlyph name="settings" :size="14" tint="current" /> 设置</button>
               <button @click="refreshWeight()" class="bg-text-muted text-text-inverse px-4 py-2 rounded flex items-center gap-1.5 btn-refresh"><IconGlyph name="refresh" :size="14" tint="current" /> 刷新</button>
               <button @click="openWeightExport()" class="bg-warning text-text-inverse px-4 py-2 rounded flex items-center gap-1.5"><IconGlyph name="download" :size="14" tint="current" /> 导出 Excel</button>
             </div>
@@ -136,10 +136,10 @@
           <!-- 值日记录：标题 + 菜单栏（设置 / 刷新 / 导出 Excel / 补录记录） -->
           <h2 class="text-xl font-semibold text-text flex items-center gap-2 min-h-7 mb-3"><IconGlyph name="calendar" :size="20" /> 值日记录</h2>
           <div class="mb-4 flex flex-wrap items-center gap-3 opbar">
-            <button @click="openHistorySettings()" v-preload="loadDutyRecordSettingsDialog" class="bg-primary text-text-inverse px-4 py-2 rounded flex items-center gap-1.5"><IconGlyph name="settings" :size="14" tint="current" /> 设置</button>
+            <button @click="openHistorySettings()" @mouseenter="prefetch(loadDutyRecordSettingsDialog)" class="bg-primary text-text-inverse px-4 py-2 rounded flex items-center gap-1.5"><IconGlyph name="settings" :size="14" tint="current" /> 设置</button>
             <button @click="refreshHistory()" class="bg-text-muted text-text-inverse px-4 py-2 rounded flex items-center gap-1.5 btn-refresh"><IconGlyph name="refresh" :size="14" tint="current" /> 刷新</button>
             <button @click="openHistoryExport()" class="bg-warning text-text-inverse px-4 py-2 rounded flex items-center gap-1.5"><IconGlyph name="download" :size="14" tint="current" /> 导出 Excel</button>
-            <button @click="openBackfill()" v-preload="loadDutyBackfillDialog" class="bg-primary text-text-inverse px-4 py-2 rounded flex items-center gap-1.5"><IconGlyph name="clock" :size="14" tint="current" /> 补录记录</button>
+            <button @click="openBackfill()" @mouseenter="prefetch(loadDutyBackfillDialog)" class="bg-primary text-text-inverse px-4 py-2 rounded flex items-center gap-1.5"><IconGlyph name="clock" :size="14" tint="current" /> 补录记录</button>
           </div>
 
           <!-- 表格过渡容器：用 grid 把新旧表叠放同一格 → 容器高度取两者较大值，
@@ -267,6 +267,7 @@
 </template>
 
 <script setup>
+import { prefetch } from '../utils/dialogPrefetch.js'
 import { ref, computed, watch, onMounted, onActivated, defineAsyncComponent } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import axios from 'axios'
@@ -288,7 +289,7 @@ import { applyRouteRowFocus } from '../composables/useRowFocus.js'
 import { weightHeatRgb, weightHeatFg } from '../utils/heatColor.js'
 
 // 弹窗类组件懒加载：打开时才加载对应 chunk。loader 抽出为命名函数，
-// 可用 v-preload="loadXxx" 在悬停按钮时预取，点击时即时弹出。
+// 可用 @mouseenter="prefetch(loadXxx)" 在悬停按钮时预取，点击时即时弹出。
 const loadSettingsDialog = () => import('../components/dialogs/DutySettingsDialog.vue')
 const DutySettingsDialog = defineAsyncComponent(loadSettingsDialog)
 const loadArrangementDialog = () => import('../components/dialogs/DutyArrangementDialog/DutyArrangementDialog.vue')

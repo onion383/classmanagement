@@ -16,8 +16,8 @@
 
             <!-- 工具栏：随切换段变化。两段均可「智能排表」「导入」，顺序与当前座位一致 -->
             <div class="mb-4 flex flex-wrap items-center gap-3 opbar">
-              <button @click="openSettings(seatView)" v-preload="loadSettingsDialog" class="bg-primary text-text-inverse px-4 py-2 rounded flex items-center gap-1.5"><IconGlyph name="settings" :size="14" tint="current" /> 设置</button>
-              <button @click="openArrangement(seatView)" v-preload="loadArrangementDialog" class="bg-primary text-text-inverse px-4 py-2 rounded">🧠 智能排表</button>
+              <button @click="openSettings(seatView)" @mouseenter="prefetch(loadSettingsDialog)" class="bg-primary text-text-inverse px-4 py-2 rounded flex items-center gap-1.5"><IconGlyph name="settings" :size="14" tint="current" /> 设置</button>
+              <button @click="openArrangement(seatView)" @mouseenter="prefetch(loadArrangementDialog)" class="bg-primary text-text-inverse px-4 py-2 rounded">🧠 智能排表</button>
               <button @click="seatView === 'active' ? refreshActive() : refreshMaster()" class="bg-text-muted text-text-inverse px-4 py-2 rounded flex items-center gap-1.5 btn-refresh"><IconGlyph name="refresh" :size="14" tint="current" /> 刷新</button>
               <button @click="openImport(seatView)" class="bg-primary text-text-inverse px-4 py-2 rounded flex items-center gap-1.5"><IconGlyph name="upload" :size="14" tint="current" /> {{ seatView === 'active' ? '从模板导入' : '从实行导入' }}</button>
               <button @click="seatView === 'active' ? openActiveExport() : openMasterExport()" class="bg-warning text-text-inverse px-4 py-2 rounded flex items-center gap-1.5"><IconGlyph name="download" :size="14" tint="current" /> 导出 Excel</button>
@@ -85,7 +85,7 @@
 
             <!-- 工具栏：权重表设置 / 刷新 / 导出 -->
             <div class="mb-4 flex flex-wrap items-center gap-3 opbar">
-              <button @click="openWeightSettings()" v-preload="loadWeightAlgorithmDialog" class="bg-primary text-text-inverse px-4 py-2 rounded flex items-center gap-1.5"><IconGlyph name="settings" :size="14" tint="current" /> 设置</button>
+              <button @click="openWeightSettings()" @mouseenter="prefetch(loadWeightAlgorithmDialog)" class="bg-primary text-text-inverse px-4 py-2 rounded flex items-center gap-1.5"><IconGlyph name="settings" :size="14" tint="current" /> 设置</button>
               <button @click="refreshWeight()" class="bg-text-muted text-text-inverse px-4 py-2 rounded flex items-center gap-1.5 btn-refresh"><IconGlyph name="refresh" :size="14" tint="current" /> 刷新</button>
               <button @click="openWeightExport()" class="bg-warning text-text-inverse px-4 py-2 rounded flex items-center gap-1.5"><IconGlyph name="download" :size="14" tint="current" /> 导出 Excel</button>
             </div>
@@ -126,10 +126,10 @@
           <!-- 座位记录：标题 + 菜单栏（设置 / 刷新 / 导出 Excel / 补录记录） -->
           <h2 class="text-xl font-semibold text-text flex items-center gap-2 min-h-7 mb-3"><IconGlyph name="calendar" :size="20" /> 座位记录</h2>
           <div class="mb-4 flex flex-wrap items-center gap-3 opbar">
-            <button @click="openHistorySettings()" v-preload="loadSeatRecordSettingsDialog" class="bg-primary text-text-inverse px-4 py-2 rounded flex items-center gap-1.5"><IconGlyph name="settings" :size="14" tint="current" /> 设置</button>
+            <button @click="openHistorySettings()" @mouseenter="prefetch(loadSeatRecordSettingsDialog)" class="bg-primary text-text-inverse px-4 py-2 rounded flex items-center gap-1.5"><IconGlyph name="settings" :size="14" tint="current" /> 设置</button>
             <button @click="refreshHistory()" class="bg-text-muted text-text-inverse px-4 py-2 rounded flex items-center gap-1.5 btn-refresh"><IconGlyph name="refresh" :size="14" tint="current" /> 刷新</button>
             <button @click="openHistoryExport()" class="bg-warning text-text-inverse px-4 py-2 rounded flex items-center gap-1.5"><IconGlyph name="download" :size="14" tint="current" /> 导出 Excel</button>
-            <button @click="openBackfill()" v-preload="loadSeatBackfillDialog" class="bg-primary text-text-inverse px-4 py-2 rounded flex items-center gap-1.5"><IconGlyph name="clock" :size="14" tint="current" /> 补录记录</button>
+            <button @click="openBackfill()" @mouseenter="prefetch(loadSeatBackfillDialog)" class="bg-primary text-text-inverse px-4 py-2 rounded flex items-center gap-1.5"><IconGlyph name="clock" :size="14" tint="current" /> 补录记录</button>
           </div>
 
           <div class="history-swap">
@@ -274,6 +274,7 @@
 </template>
 
 <script setup>
+import { prefetch } from '../utils/dialogPrefetch.js'
 import { ref, computed, watch, onMounted, onActivated, defineAsyncComponent } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import axios from 'axios'
@@ -295,7 +296,7 @@ import { applyRouteRowFocus } from '../composables/useRowFocus.js'
 import { weightHeatRgb, weightHeatFg } from '../utils/heatColor.js'
 
 // 弹窗类组件懒加载：打开时才加载对应 chunk。loader 抽出为命名函数，
-// 可用 v-preload="loadXxx" 在悬停按钮时预取，点击时即时弹出。
+// 可用 @mouseenter="prefetch(loadXxx)" 在悬停按钮时预取，点击时即时弹出。
 const ExportExcel = defineAsyncComponent(() => import('../components/import-export/ExportExcel/ExportExcel.vue'))
 const loadSettingsDialog = () => import('../components/dialogs/SeatSettingsDialog.vue')
 const SeatSettingsDialog = defineAsyncComponent(loadSettingsDialog)

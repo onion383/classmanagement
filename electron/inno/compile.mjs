@@ -11,6 +11,16 @@ import path from 'node:path'
 const here = path.dirname(fileURLToPath(import.meta.url))
 const issFile = path.join(here, 'setup.iss')
 
+// 打包输出目录名：正式版 release，Vue 3.6 预览通道 release36。
+// 由调用方以第一个参数传入（npm run build:win:inno -- release36），
+// 再以 ISCC 的 /DAppDir 宏交给 setup.iss；不传时用 setup.iss 里的默认值 release。
+// 校验只放行目录名，避免拼出奇怪的路径。
+const appDir = String(process.argv[2] ?? '').trim()
+if (appDir && !/^[A-Za-z0-9._-]+$/.test(appDir)) {
+  console.error(`[inno] 输出目录名不合法：${appDir}（只允许字母、数字、点、下划线、连字符）`)
+  process.exit(1)
+}
+
 // 在 PATH 中查找 iscc（Windows 用 where，其它平台回退 command -v）
 function findOnPath() {
   const cmd = process.platform === 'win32' ? 'where' : 'which'
@@ -106,5 +116,6 @@ if (!iscc) {
 
 console.log(`[inno] 使用编译器：${iscc}`)
 console.log(`[inno] 编译脚本：${issFile}`)
-const result = spawnSync(iscc, [issFile], { stdio: 'inherit' })
+console.log(`[inno] 打包目录：${appDir || 'release'}${appDir ? '' : '（setup.iss 默认值）'}`)
+const result = spawnSync(iscc, appDir ? [`/DAppDir=${appDir}`, issFile] : [issFile], { stdio: 'inherit' })
 process.exit(result.status == null ? 1 : result.status)

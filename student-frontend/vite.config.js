@@ -4,6 +4,7 @@ import tailwindcss from '@tailwindcss/vite'
 
 import fs from 'fs'
 import path from 'path'
+import { pathToFileURL } from 'url'
 
 // 渲染阻塞 CSS 改非阻塞：首屏占位（index.html / setup.html 里内联的 splash）只用内联样式，
 // 不需要等 tailwind 全量 CSS（约 120KB）下载 + 解析才开始画。给构建产物里的
@@ -50,8 +51,91 @@ function injectSplash() {
   }
 }
 
+// ───────────────────────────────────────────────────────────────────────────
+// Vue 3.6 预览通道（不新建 git 分支，只换依赖来源）
+//
+// 目的：想试 3.6 的性能，但不想动主线依赖，也不想开一条要长期 rebase 的分支。
+// 做法：3.6 预发布版单独装在 ./vue36（见 vue36/package.json），主线 node_modules
+// 里的 vue 仍是 3.5.x，两份互不覆盖；靠环境变量 VUE_CHANNEL=36 在运行时切过去。
+//
+// 开关只从环境变量进来，vite.config 本身不猜：dev-vite.js 加 --vue36 时注入它，
+// 所以 `npm run dev` / `npm run electron:build` 的行为与改动前完全一致。
+//
+// 两处都必须换，缺一个就会「编译用 3.5、运行用 3.6」版本错配：
+//   1. resolveId 把裸 'vue' 指到 3.6 的运行时（3.5 与 3.6 的响应式实现不同，
+//      混用会出现两个 Vue 实例，provide/inject、ref 判等都失效）；
+//   2. @vitejs/plugin-vue 的 compiler 显式传入 3.6 的 compiler-sfc
+//      （不传就会从 config.root 解析到主线 3.5 的编译器，模板产物与运行时不匹配）。
+// 插件用 enforce: 'pre'，先于内置 vite:resolve 与 plugin-vue 注入的 resolve.dedupe
+// 生效，避免 dedupe 又把 'vue' 拉回主线。
+// ───────────────────────────────────────────────────────────────────────────
+const VUE36_DIR = path.resolve(import.meta.dirname, 'vue36')
+
+async function loadVue36() {
+  const pkgFile = path.join(VUE36_DIR, 'node_modules', 'vue', 'package.json')
+  if (!fs.existsSync(pkgFile)) {
+    throw new Error(
+      '[vue36] 未找到 Vue 3.6 预览依赖，请先执行：npm run setup:vue36'
+    )
+  }
+  const pkg = JSON.parse(fs.readFileSync(pkgFile, 'utf8'))
+  const runtime = path.join(path.dirname(pkgFile), pkg.module || 'dist/vue.runtime.esm-bundler.js')
+  const compilerEntry = path.join(VUE36_DIR, 'node_modules', 'vue', 'compiler-sfc', 'index.mjs')
+  const compiler = await import(pathToFileURL(compilerEntry).href)
+  if (typeof compiler.parse !== 'function' || typeof compiler.compileScript !== 'function') {
+    throw new Error(`[vue36] ${compilerEntry} 不是可用的 compiler-sfc 入口`)
+  }
+  const plugin = {
+    name: 'vue36-channel',
+    enforce: 'pre',
+    resolveId(id) {
+      // 只接管裸 'vue'；子路径（如果以后用到）保持默认解析，行为与主线一致
+      if (id === 'vue') return runtime
+    },
+    configResolved(config) {
+      // dev / build 都打印，避免「以为在跑 3.6，实际还是 3.5」
+      config.logger.info(
+        `\x1b[35m[vue36]\x1b[0m ${config.command} 使用 vue@${pkg.version}（主线 node_modules 未改动）`
+      )
+    },
+  }
+  return { version: pkg.version, runtime, compiler, plugin }
+}
+
+// 顶层 await 可用：本文件是 ESM（student-frontend/package.json 是 "type": "module"），
+// Vite 以 import() 加载配置，天然支持。未开通道时这里是 null，配置与改动前完全一致。
+const vue36 = process.env.VUE_CHANNEL === '36' ? await loadVue36() : null
+
 export default defineConfig({
-  plugins: [vue(), tailwindcss(), injectSplash(), nonBlockingCss()],
+  plugins: [
+    // 顺序无实质影响（该插件是 enforce:'pre'），放最前只为读起来直观
+    vue36?.plugin,
+    vue({
+      compiler: vue36?.compiler,
+      template: {
+        compilerOptions: {
+          // Electron 的 <webview> 是内置自定义元素。不声明的话，Vue 会把它当成
+          // 「未注册的组件」解析：模板里不渲染真实元素、控制台还会告警。
+          // 声明后按原生元素处理，可以像普通标签一样写在模板里（见 AiLinkPanel.vue）。
+          isCustomElement: (tag) => tag === 'webview',
+        },
+      },
+    }),
+    tailwindcss(),
+    injectSplash(),
+    nonBlockingCss(),
+  ].filter(Boolean),
+  // 预构建缓存按通道隔离：3.5 与 3.6 共用 node_modules/.vite 会互相污染，
+  // 切换通道后必须重新预构建（否则会拿到上一版 vue 的 deps 产物）。
+  //
+  // optimizeDeps.exclude: ['vue'] 是必须的，不是调优：resolveId 把 'vue' 指成绝对源文件后，
+  // 主入口拿到的是源文件版，而 pinia / vue-router 的预构建产物里内联了另一份 Vue ——
+  // 实测就是「两份 Vue 并存」，响应式、provide/inject、instanceof 判断全部跨实例失效。
+  // 排除后所有 import 'vue' 都收敛到同一份源文件；代价仅是 dev 下 vue 按模块逐个请求
+  // （比打成一个 2.5MB chunk 略慢一点加载），换来的是只有一个 Vue 运行时。
+  ...(vue36
+    ? { cacheDir: path.join(VUE36_DIR, '.vite-cache'), optimizeDeps: { exclude: ['vue'] } }
+    : {}),
   server: {
     // 允许 dev server 读取仓库根：electron/ipc-channels.json 位于 vite root 之外，
     // 由 src/electronChannels.js 直接 import（构建时会被内联，dev 下经 fs 白名单放行）。

@@ -12,6 +12,11 @@ dist
 dist-ssr
 *.local
 
+# Vue 3.6 预览通道（npm run dev:new）：依赖装在 vue36/ 里，与主线 node_modules 互不影响。
+# 版本由 vue36/package.json 精确锁定，安装产物、预构建缓存与锁文件都不入库。
+vue36/.vite-cache
+vue36/package-lock.json
+
 # Editor directories and files
 .vscode/*
 !.vscode/extensions.json

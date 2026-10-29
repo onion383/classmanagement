@@ -14,7 +14,7 @@
     <template v-else>
     <!-- 工具栏按钮 -->
     <div class="mb-4 flex flex-wrap items-center gap-3 opbar">
-      <button @click="openAddDialog" v-preload="loadAddStudentDialog" class="bg-primary hover:bg-primary-hover text-text-inverse px-5 py-2 rounded transition-theme">
+      <button @click="openAddDialog" @mouseenter="prefetch(loadAddStudentDialog)" class="bg-primary hover:bg-primary-hover text-text-inverse px-5 py-2 rounded transition-theme">
         ＋ 添加学生
       </button>
       <button @click="searchPanelOpen = !searchPanelOpen" class="btn-search px-4 py-2 rounded flex items-center gap-1.5" title="搜索">
@@ -30,17 +30,17 @@
       >
         <IconGlyph name="trash" :size="14" tint="current" /> 批量删除 ({{ selectedCount }})
       </button>
-      <button @click="importDialogVisible = true" v-preload="loadImportExcel" class="bg-warning hover:bg-warning-hover text-text-inverse px-4 py-2 rounded flex items-center gap-1.5 transition-theme">
+      <button @click="importDialogVisible = true" @mouseenter="prefetch(loadImportExcel)" class="bg-warning hover:bg-warning-hover text-text-inverse px-4 py-2 rounded flex items-center gap-1.5 transition-theme">
         <IconGlyph name="download" :size="14" tint="current" /> 从 Excel 导入
       </button>
       <button
         @click="openExport"
-        v-preload="loadExportExcel"
+        @mouseenter="prefetch(loadExportExcel)"
         class="bg-warning hover:bg-warning-hover text-text-inverse px-4 py-2 rounded flex items-center gap-1.5 transition-theme"
       >
         <IconGlyph name="download" :size="14" tint="current" /> 导出 Excel
       </button>
-      <button @click="dedupeDialogVisible = true" v-preload="loadDeduplicateDialog" class="bg-danger hover:bg-danger-hover text-text-inverse px-4 py-2 rounded flex items-center gap-1.5 transition-theme">
+      <button @click="dedupeDialogVisible = true" @mouseenter="prefetch(loadDeduplicateDialog)" class="bg-danger hover:bg-danger-hover text-text-inverse px-4 py-2 rounded flex items-center gap-1.5 transition-theme">
         <IconGlyph name="search" :size="14" tint="current" /> 去除重复数据
       </button>
     </div>
@@ -156,6 +156,7 @@
 </template>
 
 <script setup>
+import { prefetch } from '../utils/dialogPrefetch.js'
 import { reportError } from '../utils/reportError.js'
 import { ref, computed, watch, onMounted, onActivated, defineAsyncComponent } from 'vue'
 import { useRoute, useRouter } from 'vue-router'

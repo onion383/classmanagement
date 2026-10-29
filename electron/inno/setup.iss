@@ -1,7 +1,7 @@
 ; =============================================================================
 ; 「班集」Windows 安装器脚本（Inno Setup 6 / 7）
 ; -----------------------------------------------------------------------------
-; 用途：把 electron-builder 产出的“未打包目录”（release4\win-unpacked）压成
+; 用途：把 electron-builder 产出的“未打包目录”（{#AppDir}\win-unpacked）压成
 ;       单个安装包 exe，并使用完全自定义的安装界面。
 ;
 ; 编译方式（需先安装 Inno Setup 6 或 7）：
@@ -36,6 +36,16 @@
 #define MyAppVersion "0.8.0"
 #define MyAppExeName "班集.exe"
 
+; ---- 打包输出目录名 --------------------------------------------------------
+; 两条通道各用各的目录，安装包不会互相覆盖：
+;   正式版（npm run electron:build）       → release
+;   Vue 3.6 预览（npm run electron:buildnew）→ release36
+; 由 electron/inno/compile.mjs 用 ISCC 的 /DAppDir=xxx 覆盖；
+; 直接双击/手跑 ISCC.exe 时走下面的默认值 release。
+#ifndef AppDir
+  #define AppDir "release"
+#endif
+
 [Setup]
 ; AppId 写死为固定 GUID，切勿更改——它决定“同一应用的升级/卸载识别”，
 ; 每次变化会导致生成新的独立安装项、旧版不被覆盖。
@@ -59,7 +69,7 @@ PrivilegesRequired=admin
 ArchitecturesInstallIn64BitMode=x64compatible
 
 ; 输出：固定文件名「班集-Setup-x.y.z.exe」，便于更新逻辑按资产名匹配（*-Setup-*.exe）
-OutputDir=..\..\release4
+OutputDir=..\..\{#AppDir}
 OutputBaseFilename=班集-Setup-{#MyAppVersion}
 Compression=lzma2/max
 SolidCompression=yes
@@ -106,9 +116,9 @@ Name: "desktopicon"; Description: "创建桌面快捷方式"; GroupDescription: 
 Source: "..\app-icon.png"; DestDir: "{tmp}"; Flags: dontcopy nocompression
 Source: "..\installer-assets\field-bg.png"; DestDir: "{tmp}"; Flags: dontcopy nocompression
 Source: "..\installer-assets\license.txt"; DestDir: "{tmp}"; Flags: dontcopy nocompression
-; 整目录拷贝 electron-builder 的未打包产物（release4\win-unpacked）
+; 整目录拷贝 electron-builder 的未打包产物（{#AppDir}\win-unpacked）
 ; Excludes：不把 .gitignore 装进安装目录
-Source: "..\..\release4\win-unpacked\*"; DestDir: "{app}"; Excludes: ".gitignore"; Flags: ignoreversion recursesubdirs createallsubdirs
+Source: "..\..\{#AppDir}\win-unpacked\*"; DestDir: "{app}"; Excludes: ".gitignore"; Flags: ignoreversion recursesubdirs createallsubdirs
 
 [Icons]
 Name: "{group}\班集"; Filename: "{app}\{#MyAppExeName}"

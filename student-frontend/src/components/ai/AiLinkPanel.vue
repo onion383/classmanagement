@@ -1,6 +1,7 @@
 <template>
   <!-- 右侧网页抽屉：与左侧「对话列表」抽屉同款毛玻璃卡片，从右侧滑入，内嵌 <webview> 打开链接网页。
-       项目未配置 Vue 自定义元素白名单，故 webview 用 JS 动态创建、装载时挂到 host、卸载时摘除。
+       webview 由模板声明（vite.config 里已按 isCustomElement 放行），交给 Vue 管理节点生命周期；
+       早期版本用 createElement + appendChild 手动挂载，现在不需要了。
        flex 布局让头部固定、正文自适应撑满。 -->
   <div class="link-panel pointer-events-auto absolute top-3 right-3 bottom-3 w-[520px] max-w-[72%] bg-surface border border-border shadow-md overflow-hidden flex flex-col">
     <div class="flex items-center justify-between gap-2 px-3.5 py-2.5 border-b border-border flex-shrink-0">
@@ -17,8 +18,15 @@
         <button class="dlg-close" title="关闭" @click="$emit('close')">✕</button>
       </div>
     </div>
-    <div class="relative flex-1 min-h-0">
-      <div ref="host" class="link-host absolute inset-0"></div>
+    <div class="relative flex-1 min-h-0 link-host">
+      <!-- 独立会话分区（无 persist: 前缀 = 内存级）：外部网页的 Cookie / localStorage / 登录态
+           与本应用的 default session 完全隔离，互不可见、互不影响，关闭后即清空。 -->
+      <webview
+        ref="wv"
+        class="link-webview absolute inset-0"
+        partition="ai-link-preview"
+        :src="url || 'about:blank'"
+      />
       <div v-if="loading" class="absolute inset-0 flex items-center justify-center text-sm text-text-muted pointer-events-none">加载中…</div>
       <div v-if="failed" class="absolute inset-x-0 top-0 text-center text-xs text-danger py-1.5 bg-surface/80">网页加载失败，可能不允许内嵌，可点右上角「在浏览器打开」</div>
     </div>
@@ -38,48 +46,22 @@ defineEmits(['close', 'open-external'])
 const pageTitle = ref('')
 const loading = ref(false)
 const failed = ref(false)
-const host = ref(null)
-let _wv = null
+// 模板 ref：webview 元素由 Vue 创建/销毁，这里只拿引用挂事件监听
+const wv = ref(null)
+
 let _onTitle = null
 let _onStart = null
 let _onStop = null
 let _onFail = null
 
-// 抽屉已打开时切换链接：直接改 webview 的 src 复用同一个进程，不重建
-watch(() => props.url, (v) => {
-  if (_wv && v) _wv.setAttribute('src', v)
+// 抽屉已打开时切换链接：src 由模板绑定驱动（Vue 更新属性即触发导航），这里只清旧标题
+watch(() => props.url, () => {
   pageTitle.value = ''
 })
 
 onMounted(() => {
-  _createWebview()
-})
-onBeforeUnmount(() => {
-  const wv = _wv
-  if (wv) {
-    if (_onTitle) wv.removeEventListener('page-title-updated', _onTitle)
-    if (_onStart) wv.removeEventListener('did-start-loading', _onStart)
-    if (_onStop) wv.removeEventListener('did-stop-loading', _onStop)
-    if (_onFail) wv.removeEventListener('did-fail-load', _onFail)
-    if (wv.parentNode) wv.parentNode.removeChild(wv)
-  }
-  _wv = null
-})
-
-function hostOf(url) {
-  try { return new URL(url).host } catch (_) { return url }
-}
-function _createWebview() {
-  if (!host.value) return
-  const wv = document.createElement('webview')
-  // 独立会话分区（无 persist: 前缀 = 内存级）：外部网页的 Cookie / localStorage / 登录态
-  // 与本应用的 default session 完全隔离，互不可见、互不影响，关闭后即清空。
-  wv.setAttribute('partition', 'ai-link-preview')
-  wv.setAttribute('src', props.url || 'about:blank')
-  wv.style.width = '100%'
-  wv.style.height = '100%'
-  wv.style.display = 'flex'
-  wv.style.border = 'none'
+  const el = wv.value
+  if (!el) return
   // 标题/加载态：webview 支持的三个标准事件
   _onTitle = (e) => { pageTitle.value = (e && e.title) || '' }
   _onStart = () => { loading.value = true; failed.value = false }
@@ -89,13 +71,26 @@ function _createWebview() {
     // errorCode -3（ABORTED）多出现在重定向/被取消场景，忽略；其余主框架失败才提示
     if (e && e.errorCode !== -3 && e.isMainFrame !== false) failed.value = true
   }
-  wv.addEventListener('page-title-updated', _onTitle)
-  wv.addEventListener('did-start-loading', _onStart)
-  wv.addEventListener('did-stop-loading', _onStop)
-  wv.addEventListener('did-fail-load', _onFail)
-  _wv = wv
-  host.value.appendChild(wv)
+  el.addEventListener('page-title-updated', _onTitle)
+  el.addEventListener('did-start-loading', _onStart)
+  el.addEventListener('did-stop-loading', _onStop)
+  el.addEventListener('did-fail-load', _onFail)
   loading.value = true
+})
+
+onBeforeUnmount(() => {
+  const el = wv.value
+  if (!el) return
+  // 元素本身由 Vue 卸载，这里只摘监听，避免持有已销毁节点
+  if (_onTitle) el.removeEventListener('page-title-updated', _onTitle)
+  if (_onStart) el.removeEventListener('did-start-loading', _onStart)
+  if (_onStop) el.removeEventListener('did-stop-loading', _onStop)
+  if (_onFail) el.removeEventListener('did-fail-load', _onFail)
+  _onTitle = _onStart = _onStop = _onFail = null
+})
+
+function hostOf(url) {
+  try { return new URL(url).host } catch (_) { return url }
 }
 </script>
 
@@ -116,4 +111,11 @@ function _createWebview() {
 }
 /* 内嵌网页是矩形，只让外层面板裁角 */
 .link-host { overflow: hidden; }
+/* webview 原先是 JS 设 inline style（100%/100%/flex/无边框），改由类统一描述 */
+.link-webview {
+  width: 100%;
+  height: 100%;
+  display: flex;
+  border: none;
+}
 </style>

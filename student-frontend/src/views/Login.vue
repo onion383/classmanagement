@@ -32,7 +32,7 @@
       <input v-if="restoreFile" :value="restoreBundle?.username || ''" readonly placeholder="账号" autocomplete="off" class="border p-2 w-full mb-2 rounded-xl" />
       <input v-model="password" type="password" placeholder="密码（与导出时一致）" autocomplete="new-password" class="border p-2 w-full mb-2 rounded-xl" />
       <input v-model="recoverPhrase" placeholder="或助记词（12字）" autocomplete="off" class="border p-2 w-full mb-4 rounded-xl" />
-      <button type="submit" :disabled="busy" v-preload="loadConfirmDialog" class="bg-info text-text-inverse px-4 py-2 rounded-xl w-full disabled:opacity-50">
+      <button type="submit" :disabled="busy" @mouseenter="prefetch(loadConfirmDialog)" class="bg-info text-text-inverse px-4 py-2 rounded-xl w-full disabled:opacity-50">
         {{ busy ? '恢复中…' : '解包并恢复' }}
       </button>
     </form>
@@ -68,7 +68,7 @@
       </div>
       <input v-model="copyWords" placeholder="抄写前 3 个词（可带序号、可不带空格）" class="border p-2 w-full mb-2 rounded-xl" autocomplete="off" />
       <p v-if="copyError" class="text-xs text-danger mb-2">{{ copyError }}</p>
-      <button type="button" v-preload="loadConfirmDialog" class="bg-info text-text-inverse px-4 py-2 rounded-xl w-full" @click="finishRecovery">确认并完成注册</button>
+      <button type="button" @mouseenter="prefetch(loadConfirmDialog)" class="bg-info text-text-inverse px-4 py-2 rounded-xl w-full" @click="finishRecovery">确认并完成注册</button>
     </form>
 
     <!-- 忘记密码：统一入口（恢复词恢复 / 本机信息恢复） -->
@@ -167,6 +167,7 @@
 </template>
 
 <script setup>
+import { prefetch } from '../utils/dialogPrefetch.js'
 import { setToken, setCurrentUser } from '../utils/authStorage.js'
 import axios from 'axios';
 import { defineAsyncComponent, ref, computed, watch, nextTick } from 'vue';
@@ -179,7 +180,7 @@ import { INVOKE } from '../electronChannels.js';
 import { storeMediaToken } from '../utils/apiUrl';
 
 // 弹窗类组件懒加载：打开时才加载对应 chunk
-// 悬停预取：ConfirmDialog 的 chunk 提前加载（供 v-preload 使用）
+// 悬停预取：ConfirmDialog 的 chunk 提前加载（供 @mouseenter → prefetch 使用）
 const loadConfirmDialog = () => import('../components/base/ConfirmDialog.vue');
 const ConfirmDialog = defineAsyncComponent(loadConfirmDialog);
 

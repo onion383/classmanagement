@@ -14,7 +14,7 @@
           <section class="mb-10">
             <h2 class="text-xl font-semibold mb-4">📅 实行课表（临时）</h2>
             <div class="mb-4 flex items-center gap-3 opbar">
-              <button @click="activeSettingsVisible = true" v-preload="loadSettingsDialog" class="bg-primary text-text-inverse px-4 py-2 rounded flex items-center gap-1.5"><IconGlyph name="settings" :size="14" tint="current" /> 设置</button>
+              <button @click="activeSettingsVisible = true" @mouseenter="prefetch(loadSettingsDialog)" class="bg-primary text-text-inverse px-4 py-2 rounded flex items-center gap-1.5"><IconGlyph name="settings" :size="14" tint="current" /> 设置</button>
               <button @click="refreshActive" class="bg-text-muted text-text-inverse px-4 py-2 rounded flex items-center gap-1.5 btn-refresh"><IconGlyph name="refresh" :size="14" tint="current" /> 刷新</button>
               <button @click="applyMasterVisible = true" class="bg-primary text-text-inverse px-4 py-2 rounded flex items-center gap-1.5"><IconGlyph name="upload" :size="14" tint="current" /> 从模板导入</button>
               <button @click="openActiveExport" class="bg-warning text-text-inverse px-4 py-2 rounded">📥 导出 Excel</button>
@@ -70,7 +70,7 @@
           <section>
             <h2 class="text-xl font-semibold mb-4 flex items-center gap-2"><IconGlyph name="clipboard" :size="20" /> 一般课表（模板）</h2>
             <div class="mb-4 flex items-center gap-3 opbar">
-              <button @click="masterSettingsVisible = true" v-preload="loadSettingsDialog" class="bg-primary text-text-inverse px-4 py-2 rounded flex items-center gap-1.5"><IconGlyph name="settings" :size="14" tint="current" /> 设置</button>
+              <button @click="masterSettingsVisible = true" @mouseenter="prefetch(loadSettingsDialog)" class="bg-primary text-text-inverse px-4 py-2 rounded flex items-center gap-1.5"><IconGlyph name="settings" :size="14" tint="current" /> 设置</button>
               <button @click="refreshMaster" class="bg-text-muted text-text-inverse px-4 py-2 rounded flex items-center gap-1.5 btn-refresh"><IconGlyph name="refresh" :size="14" tint="current" /> 刷新</button>
               <button @click="applyActiveVisible = true" class="bg-primary text-text-inverse px-4 py-2 rounded flex items-center gap-1.5"><IconGlyph name="upload" :size="14" tint="current" /> 从实行导入</button>
               <button @click="openMasterExport" class="bg-warning text-text-inverse px-4 py-2 rounded flex items-center gap-1.5"><IconGlyph name="download" :size="14" tint="current" /> 导出 Excel</button>
@@ -205,6 +205,7 @@
 
 
 <script setup>
+import { prefetch } from '../../utils/dialogPrefetch.js'
 import { ref, computed, watch, onMounted, onActivated, defineAsyncComponent } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import EmptySnapshot from '../../components/base/EmptySnapshot.vue';
@@ -223,7 +224,7 @@ import { useScheduleHistory } from './ScheduleView.history.js';
 defineOptions({ name: 'ScheduleView' })
 
 // 弹窗类组件懒加载：打开时才加载对应 chunk。loader 抽出为命名函数，
-// 可用 v-preload="loadXxx" 在悬停按钮时预取，点击时即时弹出。
+// 可用 @mouseenter="prefetch(loadXxx)" 在悬停按钮时预取，点击时即时弹出。
 const loadSettingsDialog = () => import('../../components/dialogs/SettingsDialog.vue');
 const SettingsDialog = defineAsyncComponent(loadSettingsDialog);
 const ExportExcel = defineAsyncComponent(() => import('../../components/import-export/ExportExcel/ExportExcel.vue'));
@@ -373,10 +374,11 @@ const {
   loadMaster, loadActive, refreshMaster, refreshActive,
   saveMasterSettings, saveActiveSettings, openMasterExport, openActiveExport,
   onMasterCellsUpdate, onActiveCellsUpdate, onMasterRowMeta, onActiveRowMeta,
+  onMasterSwapRows, onMasterSwapColumns, onActiveSwapRows, onActiveSwapColumns,
   applyMasterToActive, applyActiveToMaster,
 } = { ...master, ...active }
 const {
-  captureHistorySnapshot, requestDeleteHistorySnapshot, confirmDeleteHistorySnapshot, onSwitchWeek,
+  loadHistorySnapshot, captureHistorySnapshot, requestDeleteHistorySnapshot, confirmDeleteHistorySnapshot, onSwitchWeek,
 } = history
 const { retryFailedLoads, _applyRowFocus } = common
 

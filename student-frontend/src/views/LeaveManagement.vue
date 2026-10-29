@@ -31,13 +31,13 @@
 
       <!-- 工具栏 -->
       <div class="mb-4 flex items-center gap-3 opbar">
-        <button v-preload="loadAddLeaveDialog" @click="openAddLeave" class="bg-primary hover:bg-primary-hover text-text-inverse px-5 py-2 rounded transition-theme">
+        <button @mouseenter="prefetch(loadAddLeaveDialog)" @click="openAddLeave" class="bg-primary hover:bg-primary-hover text-text-inverse px-5 py-2 rounded transition-theme">
           ＋ 添加请假
         </button>
         <button @click="refresh" class="bg-text-muted hover:bg-text-secondary text-text-inverse px-4 py-2 rounded flex items-center gap-1.5 btn-refresh transition-theme">
           <IconGlyph name="refresh" :size="14" tint="current" /> 刷新
         </button>
-        <button v-preload="loadExportExcel" @click="openExportToday" class="bg-warning hover:bg-warning-hover text-text-inverse px-4 py-2 rounded flex items-center gap-1.5 transition-theme">
+        <button @mouseenter="prefetch(loadExportExcel)" @click="openExportToday" class="bg-warning hover:bg-warning-hover text-text-inverse px-4 py-2 rounded flex items-center gap-1.5 transition-theme">
           <IconGlyph name="download" :size="14" tint="current" /> 导出今日表
         </button>
       </div>
@@ -141,7 +141,7 @@
         <button @click="refreshStats" class="bg-text-muted hover:bg-text-secondary text-text-inverse px-4 py-2 rounded flex items-center gap-1.5 btn-refresh transition-theme">
           <IconGlyph name="refresh" :size="14" tint="current" /> 刷新
         </button>
-        <button v-preload="loadExportExcel" @click="openStatsExport" class="bg-warning hover:bg-warning-hover text-text-inverse px-4 py-2 rounded flex items-center gap-1.5 transition-theme">
+        <button @mouseenter="prefetch(loadExportExcel)" @click="openStatsExport" class="bg-warning hover:bg-warning-hover text-text-inverse px-4 py-2 rounded flex items-center gap-1.5 transition-theme">
           <IconGlyph name="download" :size="14" tint="current" /> 导出 Excel
         </button>
       </div>
@@ -154,13 +154,13 @@
 
       <!-- 工具栏：视图切换右对齐 -->
       <div class="mb-4 flex items-center gap-3 opbar">
-        <button v-preload="loadAddLeaveDialog" @click="openAddLeave" class="bg-primary hover:bg-primary-hover text-text-inverse px-5 py-2 rounded transition-theme">
+        <button @mouseenter="prefetch(loadAddLeaveDialog)" @click="openAddLeave" class="bg-primary hover:bg-primary-hover text-text-inverse px-5 py-2 rounded transition-theme">
           ＋ 添加请假
         </button>
         <button @click="refresh" class="bg-text-muted hover:bg-text-secondary text-text-inverse px-4 py-2 rounded flex items-center gap-1.5 btn-refresh transition-theme">
           <IconGlyph name="refresh" :size="14" tint="current" /> 刷新
         </button>
-        <button v-preload="loadExportExcel" @click="openRecordsExport" class="bg-warning hover:bg-warning-hover text-text-inverse px-4 py-2 rounded flex items-center gap-1.5 transition-theme">
+        <button @mouseenter="prefetch(loadExportExcel)" @click="openRecordsExport" class="bg-warning hover:bg-warning-hover text-text-inverse px-4 py-2 rounded flex items-center gap-1.5 transition-theme">
           <IconGlyph name="download" :size="14" tint="current" /> 导出 Excel
         </button>
         <ViewSwitch v-model="recordsView" :options="recordsViewOptions" class="ml-auto" />
@@ -249,6 +249,7 @@
 </template>
 
 <script setup>
+import { prefetch } from '../utils/dialogPrefetch.js'
 import { ref, computed, watch, onMounted, onActivated, onDeactivated, onBeforeUnmount, defineAsyncComponent } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { reportError } from '../utils/reportError.js'

@@ -27,13 +27,13 @@
     <!-- 工具栏：相册级操作 + 右侧视图切换（时间轴 / 相册），两个视图下都保留 -->
     <!-- flex-wrap：窗口贴到最小宽度（900）时按钮多，宁可换行也不要横向溢出把 ViewSwitch 挤出去 -->
     <div class="flex items-center gap-3 mb-4 flex-shrink-0 flex-wrap">
-      <button v-preload="loadNewAlbumDialog" @click="openNewAlbum" class="bg-primary hover:bg-primary-hover text-text-inverse px-4 py-2 rounded transition-theme flex items-center gap-1.5">
+      <button @mouseenter="prefetch(loadNewAlbumDialog)" @click="openNewAlbum" class="bg-primary hover:bg-primary-hover text-text-inverse px-4 py-2 rounded transition-theme flex items-center gap-1.5">
         <IconGlyph name="folder" :size="14" tint="current" /> 新建相册
       </button>
-      <button v-preload="loadAlbumManageDialog" @click="openManage" class="bg-text-muted hover:bg-text-secondary text-text-inverse px-4 py-2 rounded flex items-center gap-1.5 btn-refresh transition-theme">
+      <button @mouseenter="prefetch(loadAlbumManageDialog)" @click="openManage" class="bg-text-muted hover:bg-text-secondary text-text-inverse px-4 py-2 rounded flex items-center gap-1.5 btn-refresh transition-theme">
         <IconGlyph name="settings" :size="14" tint="current" /> 管理相册
       </button>
-      <button v-preload="loadAlbumTaskDialog" @click="openTask" class="bg-warning hover:bg-warning-hover text-text-inverse px-4 py-2 rounded transition-theme flex items-center gap-1.5">
+      <button @mouseenter="prefetch(loadAlbumTaskDialog)" @click="openTask" class="bg-warning hover:bg-warning-hover text-text-inverse px-4 py-2 rounded transition-theme flex items-center gap-1.5">
         <IconGlyph name="clock" :size="14" tint="current" /> 任务管理
       </button>
       <!-- 多选：时间轴选照片（移动/全选），相册视图选虚拟相册（合并）；再点一次退出 -->
@@ -45,7 +45,7 @@
       >
         <IconGlyph name="check" :size="14" tint="current" /> 多选
       </button>
-      <button v-preload="loadExportAlbumIndex" @click="openExport" class="bg-warning hover:bg-warning-hover text-text-inverse px-4 py-2 rounded transition-theme flex items-center gap-1.5">
+      <button @mouseenter="prefetch(loadExportAlbumIndex)" @click="openExport" class="bg-warning hover:bg-warning-hover text-text-inverse px-4 py-2 rounded transition-theme flex items-center gap-1.5">
         <IconGlyph name="download" :size="14" tint="current" /> 导出相册索引
       </button>
       <!-- 刷新：从标题栏移到菜单栏，增量更新当前相册的照片索引 -->
@@ -222,7 +222,7 @@
             <button @click="selectAllPhotos" class="px-3 py-1 rounded-full bg-surface-hover text-text border border-border text-sm transition-theme whitespace-nowrap">全选</button>
             <button @click="clearSelection" class="px-3 py-1 rounded-full bg-surface-hover text-text border border-border text-sm transition-theme whitespace-nowrap">取消选择</button>
             <button
-              v-preload="loadMoveAlbumDialog"
+              @mouseenter="prefetch(loadMoveAlbumDialog)"
               @click="openMove"
               :disabled="!selectedCount"
               class="px-3 py-1 rounded-full bg-info hover:bg-info-hover text-text-inverse text-sm transition-theme whitespace-nowrap disabled:opacity-50"
@@ -357,6 +357,7 @@
 </template>
 
 <script setup>
+import { prefetch } from '../utils/dialogPrefetch.js'
 import { getToken } from '../utils/authStorage.js'
 import { ref, computed, nextTick, onMounted, onActivated, onDeactivated, onBeforeUnmount, watch, defineAsyncComponent } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
