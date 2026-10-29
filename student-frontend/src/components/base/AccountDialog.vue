@@ -40,6 +40,7 @@
 </template>
 
 <script setup>
+import { getCurrentUser, clearAuth } from '../../utils/authStorage.js'
 import { ref, computed, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { User } from '@lucide/vue'
@@ -59,7 +60,7 @@ watch(() => props.visible, (v) => {
   if (!v) return
   // 本地数据可能被手工改坏（非 JSON）：解析失败时退回空对象，不能让弹窗打不开
   try {
-    user.value = JSON.parse(localStorage.getItem('currentUser') || '{}') || {}
+    user.value = getCurrentUser() || {}
   } catch (_) {
     user.value = {}
   }
@@ -70,8 +71,7 @@ const roleText = computed(() => (user.value.role === 'teacher' ? '班主任' : '
 function doLogout() {
   // 通知后端吊销本次会话（原 token 立即失效），再清本地登录态
   axios.post('/api/auth/logout').catch(() => {})
-  localStorage.removeItem('token')
-  localStorage.removeItem('currentUser')
+  clearAuth()
   clearMediaToken() // 媒体凭据与登录同 sid，登出即失效；本地也清掉，避免死 token 继续拼进图片 URL
   confirmOpen.value = false
   emit('close')

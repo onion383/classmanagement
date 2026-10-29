@@ -1,6 +1,6 @@
 <template>
   <!-- 输入区：整体是一块二级毛玻璃（上半无边框输入框，下半工具行） -->
-  <div class="mt-0 flex-shrink-0 relative">
+  <div class="mt-0 flex-shrink-0 relative" ref="composerRoot">
     <!-- 提问悬浮窗：AI 通过 ask_user 提问时在输入框上方弹出，选完即关闭（不混入对话流） -->
     <div
       v-if="pendingAsk"
@@ -448,7 +448,7 @@
 </style>
 
 <script setup>
-import { ref, computed, onMounted, onBeforeUnmount, nextTick, getCurrentInstance } from 'vue'
+import { ref, computed, onMounted, onBeforeUnmount, nextTick } from 'vue'
 import { ShieldAlert, ShieldCheck, Globe } from '@lucide/vue'
 import AiProposalTable from '../../tables/AiProposalTable.vue'
 import AppSelect from '../../base/AppSelect.vue'
@@ -491,6 +491,7 @@ const emit = defineEmits([
 ])
 
 // 模板 ref（与模板 ref="xxx" 同名自动绑定）
+const composerRoot = ref(null)
 const permMenuRef = ref(null)
 const fileInput = ref(null)
 const textareaRef = ref(null)
@@ -514,8 +515,8 @@ const PERMISSION_OPTIONS = [
 // 点击输入区以外的任意位置关闭浮窗用的文档级监听句柄（非响应式）
 let _onDocMouseDown = null
 let _onDocKeyDown = null
-// this.$el 契约（组件根 DOM）：由实例代理承载，供 contains 判定使用
-const inst = getCurrentInstance()
+// 组件根 DOM（contains 判定用）：走 composerRoot 模板 ref，不再经实例代理
+
 
 // v-model:input 的本组件内部双向绑定壳（父为唯一数据源）
 const inputModel = computed({
@@ -571,7 +572,7 @@ onMounted(() => {
   // 也要排除「权限」按钮本身（它自己用 @click 开合，否则会先关再开、点了没反应）。
   _onDocMouseDown = (e) => {
     const t = e.target
-    const root = inst.proxy.$el
+    const root = composerRoot.value
     const inRoot = !!(root && root.contains(t))
     const menu = permMenuRef.value
     const inMenu = !!(menu && menu.contains(t))

@@ -3,7 +3,7 @@
 import { useNotification } from '../../composables/useNotification.js'
 import { applyRouteRowFocus } from '../../composables/useRowFocus.js'
 
-// ctx 契约：状态 ref（.value 访问）、临时字段、notify* 函数、host（applyRouteRowFocus 的 $el/$route 载体）与跨模块方法。
+// ctx 契约：状态 ref（.value 访问）、临时字段、notify* 函数、host（applyRouteRowFocus 的宿主 { route, router }）与跨模块方法。
 export function useScheduleCommon(ctx, { SECTION_NAMES }) {
   return {
     // ============= 公共：构建显示行 =============

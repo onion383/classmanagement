@@ -1,3 +1,4 @@
+import { getToken, setToken } from './authStorage.js'
 import { safe, applyAuthHeader, encryptBody, decryptBody, resetAuthBinding } from '../composables/secureChannel'
 import { decodeJwtPayload } from './jwt'
 
@@ -18,7 +19,7 @@ export async function apiFetch(path, options = {}) {
   const send = async (forceToken) => {
     const headers = { ...(options.headers || {}) }
     let body = options.body
-    const token = localStorage.getItem('token')
+    const token = getToken()
     if (token) await applyAuthHeader(headers, token, { forceToken })
     // JSON 请求体同样走会话加密（调用方已加密的 { session, d } 信封原样透传，避免二次封装）
     if (safe() && typeof body === 'string' && /application\/json/i.test(String(headers['Content-Type'] || ''))) {
@@ -80,7 +81,7 @@ export function absorbRenewal(headers, { onTokenRenewed } = {}) {
   const get = typeof headers.get === 'function' ? (n) => headers.get(n) : (n) => headers[n]
   const renewed = get('x-renewed-token')
   if (renewed) {
-    try { localStorage.setItem('token', renewed) } catch (_) {}
+    try { setToken(renewed) } catch (_) {}
     onTokenRenewed?.(renewed)
   }
   const renewedMedia = get('x-renewed-media')
@@ -100,7 +101,7 @@ let mediaRefresh = null
 export function refreshMediaToken() {
   if (mediaRefresh) return mediaRefresh
   mediaRefresh = (async () => {
-    const token = localStorage.getItem('token')
+    const token = getToken()
     if (!token || !safe()) return null
     try {
       const headers = {}
@@ -123,7 +124,7 @@ export function refreshMediaToken() {
 
 // 确保持有可用的媒体凭据（缺失或即将过期时才发起刷新）
 export async function ensureMediaToken() {
-  const token = localStorage.getItem('token')
+  const token = getToken()
   if (!token) return null
   const cur = localStorage.getItem(MEDIA_KEY)
   if (cur && jwtExp(cur) > Date.now() + 60 * 1000) return cur
@@ -140,7 +141,7 @@ export function resourceUrl(path) {
   if (!url) return ''
   const token = safe()
     ? localStorage.getItem(MEDIA_KEY)
-    : localStorage.getItem('token')
+    : getToken()
   if (!token) return url
   const sep = url.includes('?') ? '&' : '?'
   return `${url}${sep}token=${encodeURIComponent(token)}`

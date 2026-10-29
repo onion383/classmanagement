@@ -5,11 +5,13 @@
 // 行元素需带 [data-row-id]：DynamicTable 已内置；自定义渲染的页面自行在行根元素上添加。
 //
 // 用法：
-//   Options API：watch/activated/mounted 里调用 applyRouteRowFocus(this)
-//   <script setup>：const inst = getCurrentInstance();
-//                  watch/onActivated/onMounted 里调用 applyRouteRowFocus(inst.proxy)
+//   host 传稳定的宿主描述对象（setup 里创建一次即可）：
+//     const rowFocusHost = { route, router }   // route/router 来自 useRoute()/useRouter()
+//   watch/onActivated/onMounted 里调用 applyRouteRowFocus(rowFocusHost, options)
 // 需要先切页签/展开等预处理时，通过 options.parse(key) 返回定位 id
 // （返回 null/undefined 表示时机未到，跳过本次，等待下次触发）。
+// 契约不走实例代理（getCurrentInstance）：Vapor 模式下实例代理不存在，
+// 宿主身份稳定（内部按 host 记签名去重）即可，字段显式传递。
 
 // 闪动样式：沿用设置页搜索跳转的「圆角荧光边框呼吸」（内描边 + 内发光）。
 // 用 box-shadow 实现：主题对 <td> 底色是 !important，会盖掉 background 动画，
@@ -142,11 +144,14 @@ export function focusRowWhenReady(containerGetter, id, { tries = 25, interval = 
 }
 
 // 读取路由 query.focus 并执行定位。
-// host：组件公共实例（Options API 的 this / setup 里的 getCurrentInstance().proxy）。
+// host：稳定的宿主描述对象 { route, router, container? }（组件 setup 里创建一次，身份稳定供内部记签名）。
+//   - route/router：useRoute()/useRouter() 的返回值
+//   - container：查询根容器（元素或返回元素的 getter）。省略时退回 document ——
+//     页面级定位查 [data-row-id] 用 document 即可，且比实例 $el 更稳（多根组件没有单一根）。
 // options.parse(key)：返回真正用于定位的 id，返回空值表示时机未到、跳过本次。
-// options.container()：返回查询容器，默认 host.$el。
+// options.container()：返回查询容器，优先于 host.container。
 export function applyRouteRowFocus(host, options = {}) {
-  const route = host && host.$route
+  const route = host && host.route
   if (!route) return
   const raw = route.query ? route.query.focus : undefined
   if (raw == null || raw === '') {
@@ -165,8 +170,9 @@ export function applyRouteRowFocus(host, options = {}) {
   sigMap.set(host, key)
   clearRetry(host)
   // 定位成功后清掉 query，避免回退/刷新时重复定位
-  host.$router.replace({ path: route.path })
-  const container = options.container ? options.container() : host.$el
+  host.router.replace({ path: route.path })
+  const c = options.container ? options.container() : host.container
+  const container = typeof c === 'function' ? c() : (c || document)
   focusRowWhenReady(container, id)
 }
 

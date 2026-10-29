@@ -73,6 +73,7 @@
 </template>
 
 <script setup>
+import { getToken } from '../../utils/authStorage.js'
 import { reportError } from '../../utils/reportError.js'
 import { ref, computed, watch, onBeforeUnmount } from 'vue'
 import axios from 'axios'
@@ -101,7 +102,7 @@ const { waitScan, stopAll: stopScanPolling } = useAlbumScan()
 let pollTimer = 0
 let pumping = false
 
-const token = () => localStorage.getItem('token') || ''
+const token = () => getToken() || ''
 const authHeaders = () => ({ Authorization: 'Bearer ' + token() })
 
 function modeLabel(mode) {

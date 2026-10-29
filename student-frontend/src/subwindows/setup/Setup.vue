@@ -321,6 +321,7 @@
 </template>
 
 <script setup>
+import { setToken, setCurrentUser } from '../../utils/authStorage.js'
 import { ref, computed, watch, onMounted, onBeforeUnmount, nextTick } from 'vue'
 import axios from 'axios'
 import { useThemeStore } from '../../stores/theme'
@@ -675,9 +676,9 @@ async function confirmRegister() {
   }
 }
 function onRegistered(data) {
-  if (data && data.token) localStorage.setItem('token', data.token)
+  if (data && data.token) setToken(data.token)
   storeMediaToken(data && data.mediaToken)
-  if (data && data.user) localStorage.setItem('currentUser', JSON.stringify(data.user))
+  if (data && data.user) setCurrentUser(data.user)
   registered.value = true
   sub.value = 0
   step.value += 1

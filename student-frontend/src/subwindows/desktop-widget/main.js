@@ -1,3 +1,4 @@
+import { getToken as loadStoredToken, TOKEN_KEY } from '../../utils/authStorage.js'
 import { createApp } from 'vue'
 import { createPinia } from 'pinia'
 import DesktopWidget from './DesktopWidget.vue'
@@ -15,7 +16,7 @@ let tokenWarned = false
 
 function getToken() {
   if (tokenPromise) return tokenPromise
-  const token = localStorage.getItem('token')
+  const token = loadStoredToken()
   if (!token) {
     // 空结果不缓存：组件可能比主窗口登录更早启动，登录完成后下一次请求要能重新取到
     if (import.meta.env.DEV && !tokenWarned) {
@@ -67,7 +68,7 @@ function bootstrap() {
   // 同一 profile 下，主窗口改主题/日夜间/token 都会在本窗口触发 storage 事件
   window.addEventListener('storage', (e) => {
     if (!e.key) return
-    if (e.key === 'token') {
+    if (e.key === TOKEN_KEY) {
       tokenPromise = null
       return
     }

@@ -33,6 +33,7 @@
 </template>
 
 <script setup>
+import { getToken } from '../../utils/authStorage.js'
 import { ref, onMounted, onUnmounted } from 'vue'
 import axios from 'axios'
 import IconGlyph from '../../components/base/IconGlyph.vue'
@@ -56,7 +57,7 @@ let rollInterval = null
 let autoCloseTimer = null
 
 async function fetchStudents() {
-  const token = localStorage.getItem('token')
+  const token = getToken()
   if (!token) throw new Error('未登录，请先登录主应用')
   const res = await axios.get('/api/students')
   return res.data.data || []

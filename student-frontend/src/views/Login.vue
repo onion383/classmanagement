@@ -167,6 +167,7 @@
 </template>
 
 <script setup>
+import { setToken, setCurrentUser } from '../utils/authStorage.js'
 import axios from 'axios';
 import { defineAsyncComponent, ref, computed, watch, nextTick } from 'vue';
 import { useRouter } from 'vue-router';
@@ -313,9 +314,9 @@ function login() {
   loginError.value = '';
   busy.value = true;
   axios.post('/api/login', { username: username.value, password: password.value }).then(res => {
-    localStorage.setItem('token', res.data.token);
+    setToken(res.data.token);
     storeMediaToken(res.data.mediaToken);
-    localStorage.setItem('currentUser', JSON.stringify(res.data.user));
+    setCurrentUser(res.data.user);
     router.push('/');
   }).catch(err => {
     // 账号/密码错误：内联显示在表单上方，不再弹提示条
@@ -341,9 +342,9 @@ function register() {
       mode.value = 'recovery';
     } else {
       // 其余等级：建库即签发登录态，直接进入系统
-      localStorage.setItem('token', res.data.token);
+      setToken(res.data.token);
       storeMediaToken(res.data.mediaToken);
-      localStorage.setItem('currentUser', JSON.stringify(res.data.user));
+      setCurrentUser(res.data.user);
       router.push('/');
     }
   }).catch(err => {
@@ -422,9 +423,9 @@ async function confirmRecovery() {
   })
     .then(res => {
       // 注册成功即自动登录并进入首页
-      localStorage.setItem('token', res.data.token);
+      setToken(res.data.token);
       storeMediaToken(res.data.mediaToken);
-      localStorage.setItem('currentUser', JSON.stringify(res.data.user));
+      setCurrentUser(res.data.user);
       router.push('/');
     })
     .catch(err => {
@@ -452,9 +453,9 @@ async function restore() {
     const res = await axios.post('/api/account/restore-offline', payload);
     // 覆盖恢复成功：后端已签发登录态，直接存 token 并跳首页
     if (res.data.token) {
-      localStorage.setItem('token', res.data.token);
+      setToken(res.data.token);
       storeMediaToken(res.data.mediaToken);
-      localStorage.setItem('currentUser', JSON.stringify(res.data.user));
+      setCurrentUser(res.data.user);
       router.push('/');
       return;
     }
@@ -489,9 +490,9 @@ async function confirmRestore() {
     const res = await axios.post('/api/account/restore-offline', payload);
     // 覆盖恢复成功：后端已签发登录态，直接存 token 并跳首页
     if (res.data.token) {
-      localStorage.setItem('token', res.data.token);
+      setToken(res.data.token);
       storeMediaToken(res.data.mediaToken);
-      localStorage.setItem('currentUser', JSON.stringify(res.data.user));
+      setCurrentUser(res.data.user);
       router.push('/');
       return;
     }
@@ -574,7 +575,7 @@ function recoverByLocalAccount() {
   if (!recoverSlug.value) return useNotification().warning('请先选择要恢复的账号');
   busy.value = true;
   axios.post('/api/db-recover', { file: recoverSlug.value + '.db' }).then(res => {
-    localStorage.setItem('token', res.data.token);
+    setToken(res.data.token);
     storeMediaToken(res.data.mediaToken);
     recoveredUser.value = res.data.user;
     recoveredAccount.value = res.data.user.username;
@@ -594,10 +595,10 @@ function saveRecoveredPassword() {
   axios.put('/api/account/password', { newPassword: password.value }).then(res => {
     // 后端换发了不含 recover 标记的常规 token，落盘后进入系统
     if (res.data && res.data.token) {
-      localStorage.setItem('token', res.data.token);
+      setToken(res.data.token);
       storeMediaToken(res.data.mediaToken);
     }
-    localStorage.setItem('currentUser', JSON.stringify(recoveredUser.value || {}));
+    setCurrentUser(recoveredUser.value || {});
     useNotification().success('新密码已设置');
     router.push('/');
   }).catch(err => {

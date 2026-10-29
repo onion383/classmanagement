@@ -149,7 +149,7 @@
 
 <script setup>
 import axios from 'axios'
-import { ref, computed, watch, onMounted, onActivated, defineAsyncComponent, getCurrentInstance } from 'vue'
+import { ref, computed, watch, onMounted, onActivated, defineAsyncComponent } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import Tabs from '../components/base/Tabs.vue'
 import LeaveTimeline from '../components/base/LeaveTimeline.vue'
@@ -204,8 +204,8 @@ function countdownDays(deadline, includeDay) {
 
 const route = useRoute()
 const router = useRouter()
-// applyRouteRowFocus 的 host 契约：需要 $route/$router/$el 且对象身份稳定（内部按 host 记签名）
-const inst = getCurrentInstance()
+// 行定位宿主：显式传路由对象（身份稳定供 useRowFocus 记签名；不再经实例代理）
+const rowFocusHost = { route, router }
 
 const activeTab = ref('daily')
 const loading = ref(false)
@@ -340,7 +340,7 @@ function _applyTabQuery() {
 }
 // 跨页定位：活动/倒计时共用本页。倒计时结果带 countdown: 前缀，先切到倒计时页签再定位。
 function _applyRowFocus() {
-  applyRouteRowFocus(inst.proxy, {
+  applyRouteRowFocus(rowFocusHost, {
     parse: (key) => {
       if (key.startsWith('countdown:')) {
         activeTab.value = 'countdown'

@@ -17,6 +17,7 @@
 //
 // 未登录时不做任何事（接口需要 token 才能绑定到正确的库）。
 // =========================================================================
+import { getToken } from '../utils/authStorage.js'
 import { ref } from 'vue'
 import axios from 'axios'
 import { useNotification } from './useNotification.js'
@@ -33,7 +34,7 @@ export function useAlbumTaskResume() {
   let timer = null
   let started = false
 
-  const token = () => localStorage.getItem('token') || ''
+  const token = () => getToken() || ''
   const authHeaders = () => ({ Authorization: 'Bearer ' + token() })
 
   // 查待恢复任务并续跑。返回续跑的任务数。

@@ -1,5 +1,5 @@
 <template>
-  <div class="dynamic-table">
+  <div class="dynamic-table" ref="rootEl">
   <div
     ref="scrollWrapper"
     class="table-scroll-wrapper overflow-x-auto overflow-y-auto"
@@ -236,7 +236,7 @@
                     @keyup.enter="onCellEnter(row, field)"
                     class="w-full h-6 leading-6 px-1 py-0 border border-transparent bg-warning/10 focus:outline-none focus:border-primary box-border"
                     :placeholder="field.name"
-                    :ref="row._isNew ? 'newRowInput' : 'editInput-' + row._rowKey + '-' + field.name"
+                    :ref="(el) => setCellInputRef(row, field, el)"
                   />
                   <span v-else @dblclick="$emit('startEdit', row, field)" class="dcell block w-full min-h-[24px] leading-6 px-1 cursor-default">{{ row[field.name] != null ? row[field.name] : '' }}</span>
                 </template>
@@ -329,7 +329,7 @@
 </template>
 
 <script setup>
-import { ref, computed, watch, onMounted, onActivated, onBeforeUnmount, nextTick, defineAsyncComponent, TransitionGroup, getCurrentInstance, toRef } from 'vue'
+import { ref, computed, watch, onMounted, onActivated, onBeforeUnmount, nextTick, defineAsyncComponent, TransitionGroup, toRef } from 'vue'
 import AppSelect from '../../base/AppSelect.vue'
 import ConfirmDialog from '../../base/ConfirmDialog.vue'
 import { Search, Filter } from '@lucide/vue'
@@ -443,12 +443,23 @@ const emit = defineEmits([
     'clearSearch',
 ])
 
-// 模板 ref（静态名自动绑定；动态 :ref="editInput-*" 走 ctx.$refs）
+// 模板 ref（静态名自动绑定）；动态 :ref（editInput-* / newRowInput）由函数 ref 收集进 cellInputRefs
+const rootEl = ref(null)
 const scrollWrapper = ref(null)
 const tbodyRef = ref(null)
 const theadRow = ref(null)
 
-const inst = getCurrentInstance()
+// 动态 :ref 的登记表：key 形如 editInput-<rowKey>-<field> / newRowInput。
+// 用函数 ref 收集而不是实例 $refs —— Vapor 模式没有 $refs，函数 ref 在两种模式下通用。
+const cellInputRefs = new Map()
+function setCellInputRef(row, field, el) {
+  const key = row._isNew ? 'newRowInput' : `editInput-${row._rowKey}-${field.name}`
+  if (el) cellInputRefs.set(key, el)
+  else cellInputRefs.delete(key)
+}
+function getCellInput(key) {
+  return cellInputRefs.get(key) || null
+}
 
 // ===== 状态 =====
 const internalEditCell = ref(null)
@@ -662,11 +673,8 @@ const isIndeterminate = computed(() => {
 
 // ===== ctx 袋：拖拽模块与本组件方法经它互调 =====
 const ctx = {
-  // $el/$refs 经实例代理取（动态 :ref 的 editInput-* 也存放在 $refs 里）
-  get $el() { return inst.proxy.$el },
-  get $refs() { return inst.proxy.$refs },
-  // 模板 ref
-  scrollWrapper, tbodyRef, theadRow,
+  // 模板 ref（拖拽模块经 ctx.rootEl.value 取组件根节点；动态输入框 ref 由函数 ref 收集进 cellInputRefs）
+  rootEl, scrollWrapper, tbodyRef, theadRow,
   // props（toRef，供模块经 ctx.x.value 读）
   fields: toRef(props, "fields"),
   rows: toRef(props, "rows"),
@@ -1047,15 +1055,15 @@ function playTableEnter() {
     // 按当前「内容」量出自然自适应列宽，并立刻切到 fixed 布局钉住，
     // 这样新增行里空 input 不会撑宽窄列，动画前后列宽都稳定
 function snapshotWidths() {
-      if (!ctx.$el) return;
+      if (!ctx.rootEl.value) return;
       // 等首帧绘制完成后再测量/钉住列宽，避免首次进入页面时列宽跳变产生的 layout shift
       if (ctx._snapshotRaf) cancelAnimationFrame(ctx._snapshotRaf);
       ctx._snapshotRaf = requestAnimationFrame(() => ctx._doSnapshotWidths());
     }
 function _doSnapshotWidths() {
       ctx._snapshotRaf = null;
-      const tbl = ctx.$el.querySelector('table');
-      const ths = ctx.$el.querySelectorAll('thead th');
+      const tbl = ctx.rootEl.value.querySelector('table');
+      const ths = ctx.rootEl.value.querySelectorAll('thead th');
       if (!tbl || !ths.length) return;
       tbl.style.tableLayout = 'auto'; // 自动布局：列可随容器宽度收缩，内容宽时换行，不撑出横向滚动
       const widths = [...ths].map(th => th.getBoundingClientRect().width);
@@ -1081,7 +1089,7 @@ function _doSnapshotWidths() {
     // 仅对操作列额外锁 min-width 锁定下界，保证新增前后操作列宽度一致、不左右位移；
     // 数据列不锁 min-width，容器不足时仍可收缩换行，避免全屏/小窗口横向滚动条。
 function _freezeHeaderWidths() {
-      const ths = ctx.$el?.querySelectorAll('thead th');
+      const ths = ctx.rootEl.value?.querySelectorAll('thead th');
       if (!ths?.length) return;
       ths.forEach(th => {
         // 操作列统一固定宽度：与 snapshotWidths 保持一致，任何行态下列宽恒为 150px，
@@ -1100,7 +1108,7 @@ function _freezeHeaderWidths() {
     }
     // 解除冻结：恢复原有宽度、清除 min-width，由后续 snapshotWidths 重算自然列宽
 function _unfreezeHeaderWidths() {
-      const ths = ctx.$el?.querySelectorAll('thead th');
+      const ths = ctx.rootEl.value?.querySelectorAll('thead th');
       ths?.forEach(th => {
         th.style.minWidth = '';
         if (th._frozenWidth != null) {
@@ -1122,8 +1130,8 @@ function isEditing(row, fieldName) {
     }
 function focusEditInput(rowKey, fieldName) {
       nextTick(() => {
-        const inputs = ctx.$refs['editInput-' + rowKey + '-' + fieldName];
-        if (inputs && inputs[0]) inputs[0].focus();
+        const el = getCellInput('editInput-' + rowKey + '-' + fieldName);
+        if (el) el.focus();
       });
     }
     // 单击高亮改为命令式增删 class：避免 activeCell 成为响应式依赖触发整表重渲染
@@ -1179,8 +1187,8 @@ function handleGlobalEnter(e) {
     }
 function handleClickOutside(event) {
       if (!ctx.editingCell.value) return;
-      if (!ctx.$el.contains(event.target)) { ctx.emitSaveAndClear(); return; }
-      const editingInput = ctx.$el.querySelector('input:focus, select:focus');
+      if (!ctx.rootEl.value.contains(event.target)) { ctx.emitSaveAndClear(); return; }
+      const editingInput = ctx.rootEl.value.querySelector('input:focus, select:focus');
       if (!editingInput || !editingInput.contains(event.target)) ctx.emitSaveAndClear();
     }
 function emitSaveAndClear() {
@@ -1262,7 +1270,7 @@ function confirmDiscardNewRow() {
     // 取消（关闭）新增行：先播放「向上加速淡出」的收起动画，动画结束后才真正移除该行，
     // 否则父组件会立即卸载该行，关闭时没有任何过渡。
 function animateCancelNewRow() {
-      const el = ctx.$el && ctx.$el.querySelector('tr.row-pop-in');
+      const el = ctx.rootEl.value && ctx.rootEl.value.querySelector('tr.row-pop-in');
       if (!el) {
         emit('cancelNewRow');
         return;
@@ -1304,8 +1312,7 @@ function focusNewRowInput() {
     // 通过 :ref="'newRowInput'" 精确取新增行的数据输入框，不用宽泛的 querySelector，
     // 避免在搜索过滤导致行数变化时误聚焦到普通行的复选框而抢走搜索框焦点
 function _focusNewRowEl() {
-      const inputs = ctx.$refs.newRowInput;
-      const el = Array.isArray(inputs) ? inputs[0] : inputs;
+      const el = getCellInput('newRowInput');
       if (!el) return false;
       // 容器固定高度时新增行可能在底部被遮住：滚入视口让用户立即看到新行
       el.scrollIntoView({ block: 'nearest', inline: 'nearest' });
@@ -1315,8 +1322,8 @@ function _focusNewRowEl() {
     // 固定高度判断纵向滚动：测量表格完整内容高度（scrollHeight 不被容器裁剪），
     // 超过 fixedMaxHeight 即启用纵向滚动，表头随之吸顶。多行/换行行高不同也适用。
 function updateVScroll() {
-      if (!ctx.$el) return;
-      const tbl = ctx.$el.querySelector('table');
+      if (!ctx.rootEl.value) return;
+      const tbl = ctx.rootEl.value.querySelector('table');
       ctx.vScroll.value = !!tbl && tbl.scrollHeight > ctx.fixedMaxHeight.value;
     }
     // 行数要变化了（删掉一行 / 撤销恢复一行）——由父组件在**动手之前**调用。
@@ -1392,8 +1399,8 @@ watch(() => ctx.editingCell.value, (newVal) => {
     _clearActiveCell();
     nextTick(() => {
       const key = 'editInput-' + newVal.rowKey + '-' + newVal.field;
-      const inputs = ctx.$refs[key];
-      if (inputs && inputs[0]) inputs[0].focus();
+      const el = getCellInput(key);
+      if (el) el.focus();
     });
     document.addEventListener('click', handleClickOutside);
   } else {
@@ -1522,6 +1529,13 @@ onBeforeUnmount(() => {
   if (ctx._colAnimTimer) clearTimeout(ctx._colAnimTimer);
   if (ctx._snapshotRaf) cancelAnimationFrame(ctx._snapshotRaf);
   if (ctx._tableEnterCleanup) ctx._tableEnterCleanup();
+})
+
+// 对外暴露：父组件删行/恢复时触发行出入动画；导出截图/行定位取根节点 DOM。
+// 用 getter 暴露 rootEl —— exposed 对象不带 proxyRefs，直接暴露 ref 父侧拿到的是 Ref 而非元素。
+defineExpose({
+  beginRowsAnimWindow,
+  get rootEl() { return rootEl.value },
 })
 
 </script>

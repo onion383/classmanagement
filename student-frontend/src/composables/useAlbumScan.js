@@ -6,9 +6,10 @@
 // 页面顶部刷新（单相册、不显示进度）与管理弹窗（多相册、显示进度）共用这份逻辑，
 // 避免两处各写一份 setInterval 且都要记得清理定时器。
 // =========================================================================
+import { getToken } from '../utils/authStorage.js'
 import axios from 'axios'
 
-const authHeaders = () => ({ Authorization: 'Bearer ' + (localStorage.getItem('token') || '') })
+const authHeaders = () => ({ Authorization: 'Bearer ' + (getToken() || '') })
 
 // 未结束的轮询定时器：**每个调用方一份**（不是模块级单例）。
 // 页面级刷新与管理弹窗各自持有实例，任一方卸载只清理自己的定时器，

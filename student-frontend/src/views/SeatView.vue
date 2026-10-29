@@ -276,7 +276,8 @@
 </template>
 
 <script setup>
-import { ref, computed, watch, onMounted, onActivated, getCurrentInstance, defineAsyncComponent } from 'vue'
+import { ref, computed, watch, onMounted, onActivated, defineAsyncComponent } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
 import axios from 'axios'
 import { shiftDateStr } from '../utils/dateTime.js'
 import { getSemesterStart } from '../utils/semesterStart.js'
@@ -287,6 +288,7 @@ import ViewSwitch from '../components/base/ViewSwitch.vue'
 import WeekSwitcher from '../components/base/WeekSwitcher.vue'
 import StatBarList from '../components/base/StatBarList.vue'
 import { useSeatGrid, buildSeatLikeRows, isAisleCol, getDisplayColCount } from '../composables/useSeatGrid.js'
+import { createSerialSaver } from '../utils/serialSaver.js'
 import { createRowReuseCache } from '../utils/rowReuse.js'
 import { useUndoShortcut, recordGridSnapshotUndo } from '../composables/useUndo.js'
 import { useNotification } from '../composables/useNotification.js'
@@ -311,7 +313,10 @@ const SeatBackfillDialog = defineAsyncComponent(loadSeatBackfillDialog)
 
 const API_BASE = '/api'
 
-const inst = getCurrentInstance()
+const route = useRoute()
+const router = useRouter()
+// 行定位宿主：显式传路由对象（身份稳定供 useRowFocus 记签名；不再经实例代理）
+const rowFocusHost = { route, router }
 
 const activeTab = ref('seat')
 const tabItems = [
@@ -343,7 +348,7 @@ function displayColOfReal(realCol, cols, mode, showAisle) {
 // （seat=当前座位 / seatt=座位模板 / seatw=权重表）→ 先切到座位页签并选中对应视图，
 // 再把真实列换算成显示列，滚动到该格子并闪动高亮。
 function _applyRowFocus() {
-  applyRouteRowFocus(inst.proxy, {
+  applyRouteRowFocus(rowFocusHost, {
     parse: (key) => {
       const m = /^(seat|seatt|seatw):(\d+):(\d+)$/.exec(key)
       if (!m) return null
@@ -364,7 +369,7 @@ function _applyRowFocus() {
     }
   })
 }
-watch(() => inst.proxy.$route.query.focus, _applyRowFocus)
+watch(() => route.query.focus, _applyRowFocus)
 onActivated(_applyRowFocus)
 
 // ==================== 学生数据 ====================
@@ -714,16 +719,23 @@ async function refreshWeight() {
   } catch (e) { /* 错误已在 load 内部处理 */ }
 }
 
+// 权重表保存：与 DutyView.saveWeight 同口径——串行保存防并发乱序；
+// 失败必须提示并重拉回滚：界面已就地改过、库里没改，只 console 的话用户以为保存成功，
+// 刷新后权重改动「凭空消失」。
+const weightSaver = createSerialSaver(() => axios.put(`${API_BASE}/seats/weight`, {
+  mode: weightMode.value,
+  rows: weightRows.value,
+  cols: weightCols.value,
+  weights: weightWeights.value,
+  settings: { showAisle: weightShowAisle.value }
+}))
 async function saveWeight() {
-  try {
-    await axios.put(`${API_BASE}/seats/weight`, {
-      mode: weightMode.value,
-      rows: weightRows.value,
-      cols: weightCols.value,
-      weights: weightWeights.value,
-      settings: { showAisle: weightShowAisle.value }
-    })
-  } catch (e) { console.error(e) }
+  const ok = await weightSaver.request()
+  if (ok) return true
+  console.error('[seat] 权重保存失败', weightSaver.error)
+  notifyError('权重保存失败，改动未保存')
+  try { await loadWeight() } catch (_) { /* 回滚也失败时保持提示，不叠加错误 */ }
+  return false
 }
 
 // 编辑/交换单元格：跳过讲台行与走廊列，空或非数字 → null，其余转数字存储

@@ -175,6 +175,7 @@
 </template>
 
 <script setup>
+import { getToken } from './utils/authStorage.js'
 import Sidebar from './components/layout/Sidebar.vue'
 import NotificationToast from './components/base/NotificationToast.vue'
 import ConfirmDialog from './components/base/ConfirmDialog.vue'
@@ -539,7 +540,7 @@ async function fetchPendingNotification() {
 // ---- 智能排表草稿：启动查到草稿就弹一次模态提示（内容待打开智能排表时恢复） ----
 async function checkSeatDraft() {
   // 未登录（登录页）没有 token，接口会 401，直接跳过；查过就不再重复查（就绪事件可能多次到达）
-  if (seatDraftChecked.value || !localStorage.getItem('token')) return
+  if (seatDraftChecked.value || !getToken()) return
   seatDraftChecked.value = true
   const { draft, fetchDraft } = useSeatDraft()
   await fetchDraft()
@@ -549,7 +550,7 @@ async function checkSeatDraft() {
 // 拉取 AI 助手启用状态：未启用时隐藏右下角悬浮按钮
 async function loadAiEnabled() {
   // 未登录（登录页）没有 token，接口会 401，直接跳过
-  if (!localStorage.getItem('token')) return
+  if (!getToken()) return
   try {
     const { data } = await axios.get('/api/ai/config')
     aiEnabled.value = !!(data && data.success && data.data && data.data.enabled)

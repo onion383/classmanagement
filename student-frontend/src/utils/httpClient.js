@@ -3,6 +3,7 @@ import { setupSecureAxios } from '../composables/secureAxios'
 import { applyAuthHeader, safe } from '../composables/secureChannel'
 import { waitForBackendReady, isBackendUnreachable, resetBackendReady } from './backendReady'
 import { absorbRenewal } from './apiUrl'
+import { getToken as loadStoredToken } from './authStorage'
 
 // 安全通道「会话过期」不是登录态失效：加密会话 15 分钟被动过期时，后端在请求解密阶段
 // 直接回 401 且 body 为 { d:'session-expired' }（不是密文，也非登录 token 问题）。
@@ -30,7 +31,7 @@ function isAuthRequired(error) {
 //   - writeRetryGuard：重连期间是否允许自动重发该请求（写请求禁重发，避免重复落库）
 export function setupApiClient({
   baseURL,
-  getToken = () => localStorage.getItem('token'),
+  getToken = loadStoredToken,
   onTokenRenewed,
   onAuthExpired,
   onUnreachable,

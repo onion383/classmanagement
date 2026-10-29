@@ -57,6 +57,7 @@
 </template>
 
 <script setup>
+import { getToken } from '../../utils/authStorage.js'
 import { reportError } from '../../utils/reportError.js'
 import { ref, nextTick, watch, onBeforeUnmount } from 'vue'
 import axios from 'axios'
@@ -82,7 +83,7 @@ const confirmDelete = ref(null)
 const albumListRef = ref(null)
 let sortableInstance = null
 
-const token = () => localStorage.getItem('token') || ''
+const token = () => getToken() || ''
 const authHeaders = () => ({ Authorization: 'Bearer ' + token() })
 
 async function loadAlbums() {

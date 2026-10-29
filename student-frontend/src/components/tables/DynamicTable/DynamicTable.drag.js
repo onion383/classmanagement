@@ -12,7 +12,7 @@ import { nextTick } from 'vue'
 // 若一律按 1 算，no-select 的表（今日到班两张表）列拖拽的落点框与虚影会整体错开一列。
 const thOffsetOf = (vm) => (!vm.readonly && !vm.noSelect ? 1 : 0);
 
-// ctx 契约：状态/computed/props ref 用 .value 访问，$el 经 ctx getter 取组件根节点，
+// ctx 契约：状态/computed/props ref 用 .value 访问，组件根节点取 ctx.rootEl.value（模板 ref），
 // _ 开头临时字段（拖拽几何/ghost/RAF 句柄）为 ctx 普通字段，跨模块方法经 ctx 运行时解析。
 export function useDynamicTableDrag(ctx) {
   return {
@@ -47,20 +47,20 @@ export function useDynamicTableDrag(ctx) {
     // 拖拽开始时一次性缓存各行与容器的几何信息，拖动过程中纯计算，避免每帧 O(n) 布局读取
     _cacheRowGeom() {
       // 只取真实数据行：虚拟滚动的上下垫片行不参与几何计算，否则下标会整体错位
-      const trs = ctx.$el ? ctx.$el.querySelectorAll('tbody tr.data-drag-item') : [];
+      const trs = ctx.rootEl.value ? ctx.rootEl.value.querySelectorAll('tbody tr.data-drag-item') : [];
       const arr = [];
       for (let i = 0; i < trs.length; i++) {
         const r = trs[i].getBoundingClientRect();
         arr.push({ left: r.left, top: r.top, right: r.right, bottom: r.bottom });
       }
       ctx._rowGeom = arr;
-      ctx._rowGeomContainer = ctx.$el ? ctx.$el.getBoundingClientRect() : null;
+      ctx._rowGeomContainer = ctx.rootEl.value ? ctx.rootEl.value.getBoundingClientRect() : null;
     },
     // 列拖拽几何缓存：按下时一次性量出各数据列的左右边界、表头行 top、表底 bottom 与容器 rect，
     // 拖动过程中纯数值比较，避免每帧 O(n) getBoundingClientRect 触发布局（INP 优化）
     _cacheColGeom() {
-      const ths = ctx.$el ? ctx.$el.querySelectorAll('thead th') : [];
-      const hasOp = !!ctx.$el && !!ctx.$el.querySelector('th.col-op');
+      const ths = ctx.rootEl.value ? ctx.rootEl.value.querySelectorAll('thead th') : [];
+      const hasOp = !!ctx.rootEl.value && !!ctx.rootEl.value.querySelector('th.col-op');
       const off = thOffsetOf(this);
       const arr = [];
       for (let i = off; i < ths.length; i++) {
@@ -71,9 +71,9 @@ export function useDynamicTableDrag(ctx) {
       }
       ctx._colGeom = arr;
       ctx._colGeomHeaderTop = ths.length ? ths[0].parentElement.getBoundingClientRect().top : null;
-      const tbl = ctx.$el ? ctx.$el.querySelector('table') : null;
+      const tbl = ctx.rootEl.value ? ctx.rootEl.value.querySelector('table') : null;
       ctx._colGeomTblBottom = tbl ? tbl.getBoundingClientRect().bottom : null;
-      ctx._colGeomContainer = ctx.$el ? ctx.$el.getBoundingClientRect() : null;
+      ctx._colGeomContainer = ctx.rootEl.value ? ctx.rootEl.value.getBoundingClientRect() : null;
     },
     // 复制一份跟手虚影作为「落点虚影」：更淡、无阴影、初始隐藏，
     // 位置由 update*DropBox 贴在目标格上。两个虚影同时存在：
@@ -266,13 +266,13 @@ export function useDynamicTableDrag(ctx) {
       ctx._cacheRowGeom();
       // 让位与自动滚动的初始状态：行元素列表 + 「空槽」高度（取被拖行自身高度）
       // 与 _cacheRowGeom 同一口径：垫片行不算行元素
-      ctx._rowEls = Array.from(ctx.$el.querySelectorAll('tbody tr.data-drag-item'));
+      ctx._rowEls = Array.from(ctx.rootEl.value.querySelectorAll('tbody tr.data-drag-item'));
       const g0 = ctx._rowGeom ? ctx._rowGeom[index] : null;
       ctx._rowSlotH = g0 ? Math.round(g0.bottom - g0.top) : 0;
       // 虚拟滚动：拖行期间窗口锁死（见 DynamicTable.recalcWindow），滚出去只会看到垫片空白，
       // 故这一轮不启用边缘自动滚动——拖放范围就是当前可见窗口。
       ctx._rowAutoScroll = ctx.virtualOn.value ? null : createEdgeAutoScroll(
-        () => ctx.$el,
+        () => ctx.rootEl.value,
         (mx, my) => ctx._onRowScrolled(mx, my)
       );
       ctx._rowDropBox = ctx.createDropBox();
@@ -308,7 +308,7 @@ export function useDynamicTableDrag(ctx) {
         }
         return best;
       }
-      const trs = ctx.$el ? ctx.$el.querySelectorAll('tbody tr.data-drag-item') : [];
+      const trs = ctx.rootEl.value ? ctx.rootEl.value.querySelectorAll('tbody tr.data-drag-item') : [];
       let best = null, min = Infinity;
       trs.forEach((tr, i) => {
         const r = tr.getBoundingClientRect();
@@ -465,7 +465,7 @@ export function useDynamicTableDrag(ctx) {
       ctx._cacheColGeom();
       // 落点虚影：被拖列的半透明副本，固定贴在落点上（不跟随鼠标）
       {
-        const tbl = ctx.$el.querySelector('table');
+        const tbl = ctx.rootEl.value.querySelector('table');
         const thsH = tbl ? tbl.querySelectorAll('thead th') : [];
         const thOff = thOffsetOf(this);
         const srcTh = thsH[colIndex + thOff] || null;
@@ -535,7 +535,7 @@ export function useDynamicTableDrag(ctx) {
         }
       }
       // 让位：每列 = 表头 th + 各行该列 td（按 data-col 分组，顺序与 fields 一致）
-      const ths0 = ctx.$el.querySelectorAll('thead th');
+      const ths0 = ctx.rootEl.value.querySelectorAll('thead th');
       const thOff = thOffsetOf(this);
       const colEls = [];
       const tbody0 = ctx.tbodyRef.value;
@@ -556,7 +556,7 @@ export function useDynamicTableDrag(ctx) {
       const gc0 = ctx._colGeom ? ctx._colGeom[colIndex] : null;
       ctx._colSlotW = gc0 ? Math.round(gc0.right - gc0.left) : 0;
       ctx._colAutoScroll = createEdgeAutoScroll(
-        () => ctx.$el,
+        () => ctx.rootEl.value,
         (mx, my) => ctx._onColScrolled(mx, my)
       );
       ctx._colDropBox = ctx.createDropBox();
@@ -603,7 +603,7 @@ export function useDynamicTableDrag(ctx) {
       applyColShift(ctx._colEls, ctx.colDragIndex.value, ctx.colDragOverIndex.value, ctx._colGeom, ctx._colSlotW);
     },
     _clearColShiftFx() {
-      clearShift(ctx.$el);
+      clearShift(ctx.rootEl.value);
       ctx._colEls = null;
       ctx._colSlotW = 0;
     },
@@ -636,8 +636,8 @@ export function useDynamicTableDrag(ctx) {
         }
         return best; // 落在间隙，取最近邻列
       }
-      const ths = ctx.$el ? ctx.$el.querySelectorAll('thead th') : [];
-      const hasOp = !!ctx.$el && !!ctx.$el.querySelector('th.col-op');
+      const ths = ctx.rootEl.value ? ctx.rootEl.value.querySelectorAll('thead th') : [];
+      const hasOp = !!ctx.rootEl.value && !!ctx.rootEl.value.querySelector('th.col-op');
       let best = null;
       let minDist = Infinity;
       const off = thOffsetOf(this);
@@ -688,7 +688,7 @@ export function useDynamicTableDrag(ctx) {
     // 落位动画：被移动的这一列从「松手位置」滑进落点（X/Y 双向；表头随列一起）
     _slideInCol(to, rel) {
       if (!rel) return;
-      const ths = ctx.$el.querySelectorAll('thead th');
+      const ths = ctx.rootEl.value.querySelectorAll('thead th');
       const thOff = thOffsetOf(this);
       const th = ths[to + thOff];
       if (!th) return;

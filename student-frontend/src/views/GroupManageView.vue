@@ -368,7 +368,8 @@
 </template>
 
 <script setup>
-import { ref, reactive, computed, onMounted, onActivated, nextTick, getCurrentInstance, watch, defineAsyncComponent } from 'vue';
+import { ref, reactive, computed, onMounted, onActivated, nextTick, watch, defineAsyncComponent } from 'vue';
+import { useRoute, useRouter } from 'vue-router';
 import axios from 'axios';
 import Tabs from '../components/base/Tabs.vue';
 import AppSelect from '../components/base/AppSelect.vue';
@@ -1107,10 +1108,14 @@ async function openExport() {
 
 // 跨页定位：标题栏全局搜索点「分组」结果跳转 /group-manage?focus=dim:<dimId>:<groupId>。
 // 组可能不在当前维度下：先切到其所属维度（异步加载），加载完成后再滚动并高亮该组卡片。
-const inst = getCurrentInstance();
+const route = useRoute()
+const router = useRouter()
+// 行定位宿主：显式传路由对象（身份稳定供 useRowFocus 记签名；不再经实例代理）
+const rowFocusHost = { route, router }
+;
 let pendingDim = null;
 function applyFocus() {
-  applyRouteRowFocus(inst.proxy, {
+  applyRouteRowFocus(rowFocusHost, {
     parse: (key) => {
       const [tag, dimId, gid] = String(key).split(':');
       if (tag !== 'dim' || !gid) return null;
@@ -1129,7 +1134,7 @@ function applyFocus() {
 
 onMounted(async () => { await loadAll(); fetchStudents(); applyFocus(); });
 onActivated(applyFocus);
-watch(() => inst.proxy.$route.query.focus, applyFocus);
+watch(() => route.query.focus, applyFocus);
 </script>
 
 <style scoped>

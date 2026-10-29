@@ -1,3 +1,4 @@
+import { getToken, clearToken } from '../utils/authStorage.js'
 import { createRouter, createWebHistory, createWebHashHistory } from 'vue-router'
 import axios from 'axios'
 import { ensureDashboardData } from '../composables/useDashboardData'
@@ -41,10 +42,10 @@ function isTokenExpired(token) {
 
 // 路由守卫必须在 router 实例创建之后
 router.beforeEach(async (to, from) => {
-  const stored = localStorage.getItem('token')
+  const stored = getToken()
   if (stored && isTokenExpired(stored)) {
     // 残留的过期 token 直接在路由阶段清除，避免先渲染内部页、再被 401 踢回登录页的闪烁
-    localStorage.removeItem('token')
+    clearToken()
     return to.path === '/login' ? true : '/login'
   }
   if (!stored) {

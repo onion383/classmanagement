@@ -250,7 +250,8 @@
 </template>
 
 <script setup>
-import { ref, computed, watch, onMounted, onActivated, onDeactivated, onBeforeUnmount, defineAsyncComponent, getCurrentInstance } from 'vue'
+import { ref, computed, watch, onMounted, onActivated, onDeactivated, onBeforeUnmount, defineAsyncComponent } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
 import { reportError } from '../utils/reportError.js'
 import axios from 'axios'
 import Tabs from '../components/base/Tabs.vue'
@@ -279,8 +280,10 @@ defineOptions({ name: 'LeaveManagement' })
 
 const { success: notifySuccess, error: notifyError, info: notifyInfo } = useNotification()
 
-// applyRouteRowFocus 需要 $route/$router/$el 且对象身份稳定，经实例代理承载
-const inst = getCurrentInstance()
+const route = useRoute()
+const router = useRouter()
+// 行定位宿主：显式传路由对象（身份稳定供 useRowFocus 记签名；不再经实例代理）
+const rowFocusHost = { route, router }
 
 // Ctrl+Z / Ctrl+Shift+Z / Ctrl+Y 撤销、重做请假表
 useUndoShortcut('leave_records', {
@@ -458,7 +461,7 @@ watch(exportVisible, (n) => { if (n) exportMounted.value = true })
 watch(() => confirm.value.visible, (n) => { if (n) confirmMounted.value = true })
 watch(overdueDialogVisible, (n) => { if (n) overdueDialogMounted.value = true })
 // 跨页定位：标题栏全局搜索点「请假记录」结果跳转 /leaves?focus=<id>
-watch(() => inst.proxy.$route.query.focus, () => { _applyRowFocus() })
+watch(() => route.query.focus, () => { _applyRowFocus() })
 
 // 非响应式实例状态
 let _overdueTimer = null
@@ -478,7 +481,7 @@ function _stopOverdueTimer() {
 // 跨页定位：切到「请假记录」页签后滚动到目标并高亮闪动。
 // 裸 id 定位请假记录表格的整行；`tl:<节点key>` 定位请假时间轴上的那一项（如 tl:12-leave）。
 function _applyRowFocus() {
-  applyRouteRowFocus(inst.proxy, {
+  applyRouteRowFocus(rowFocusHost, {
     parse: (key) => {
       activeTab.value = 'records'
       if (key.startsWith('tl:')) return key.slice('tl:'.length)

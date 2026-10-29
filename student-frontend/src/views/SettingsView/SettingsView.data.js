@@ -1,5 +1,6 @@
 // ===== 设置页：学期设置、撤销记录、弹窗/消息、账号与数据库导出 =====
 // 纯代码搬运自 SettingsView.vue 的 methods，未改写逻辑；经 ctx 闭包调用（script setup）。
+import { getCurrentUser, setCurrentUser, clearAuth } from '../../utils/authStorage.js'
 import { reportError } from '../../utils/reportError.js'
 import axios from 'axios'
 import { listUndo, undoById, redoById, clearUndo } from '../../api/undo'
@@ -257,9 +258,9 @@ export function useSettingsData(ctx) {
           newUsername: name,
           password: ctx.usernamePassword.value,
         })
-        const currentUser = JSON.parse(localStorage.getItem('currentUser'))
+        const currentUser = getCurrentUser() || {}
         currentUser.username = name
-        localStorage.setItem('currentUser', JSON.stringify(currentUser))
+        setCurrentUser(currentUser)
         ctx.closeModal()
         ctx.showAlert(res.data.message)
       } catch (err) {
@@ -300,8 +301,7 @@ export function useSettingsData(ctx) {
       ctx.showConfirm('确认退出登录？', async () => {
         // 通知后端吊销本次会话：原 token 立即失效（先发请求再清本地，token 已清会 401）
         try { await axios.post('/api/auth/logout') } catch (_) {}
-        localStorage.removeItem('token')
-        localStorage.removeItem('currentUser')
+        clearAuth()
         clearMediaToken()
         ctx.router.push('/login')
       }, '确认')
@@ -335,8 +335,7 @@ export function useSettingsData(ctx) {
     async performDeleteAccount() {
       try {
         await axios.delete('/api/account')
-        localStorage.removeItem('token')
-        localStorage.removeItem('currentUser')
+        clearAuth()
         clearMediaToken()
         ctx.router.push('/login')
       } catch (err) {

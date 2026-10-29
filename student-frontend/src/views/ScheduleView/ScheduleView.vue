@@ -205,8 +205,8 @@
 
 
 <script setup>
-import { ref, computed, watch, onMounted, onActivated, getCurrentInstance, defineAsyncComponent } from 'vue';
-import { useRoute } from 'vue-router';
+import { ref, computed, watch, onMounted, onActivated, defineAsyncComponent } from 'vue';
+import { useRoute, useRouter } from 'vue-router';
 import EmptySnapshot from '../../components/base/EmptySnapshot.vue';
 import GridView from '../../components/tables/GridView/GridView.vue';
 import Tabs from '../../components/base/Tabs.vue';
@@ -269,8 +269,9 @@ const COURSE_CANDIDATES = [
 ].map((name, idx) => ({ id: idx, label: name, value: name }));
 
 const route = useRoute()
-// applyRouteRowFocus 的 host 契约：需要 $route/$router/$el 且对象身份稳定（内部按 host 记签名）
-const inst = getCurrentInstance()
+const router = useRouter()
+// 行定位宿主：显式传路由对象（身份稳定供 useRowFocus 记签名；不再经实例代理）
+const rowFocusHost = { route, router }
 const { success: notifySuccess, error: notifyError } = useNotification()
 
 // 行对象复用缓存（非响应式）：编辑一格时只重建真正变化的那一行，避免整表重画
@@ -358,7 +359,7 @@ const ctx = {
   _masterSaveErrorShown: false,
   masterRowReuse, activeRowReuse,
   notifySuccess, notifyError,
-  host: inst.proxy,
+  host: rowFocusHost,
   emit: () => {},
 }
 const common = useScheduleCommon(ctx, { SECTION_NAMES })

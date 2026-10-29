@@ -6,12 +6,6 @@ import { refreshUndoStatus } from '../useUndo.js'
 import { useThemeStore } from '../../stores/theme.js'
 import { EXEC, DOC_UNDO_KEY } from './aiConstants.js'
 
-// 数值型设置的安全读取：0 是合法值（不透明度滑到底），不能用 `parseFloat(x) || 默认值`
-const readFrontNum = (key, fallback) => {
-  const v = parseFloat(localStorage.getItem(key))
-  return Number.isFinite(v) ? v : fallback
-}
-
 // 提案执行 + undo 登记 + 前端设置读写 相关的方法组（原 Options API mixin，现为 ctx 闭包 composable）。
 // ctx 契约：状态 ref 用 .value 访问，跨模块方法经 ctx 运行时解析。
 export function useAiExec(ctx) {
@@ -276,17 +270,22 @@ export function useAiExec(ctx) {
       }
     },
     // 读取一项前端设置的当前值（与 _setFrontSetting 的 value 类型一致）
+    // 读一项前端设置：统一从主题 store 取（与界面同源），不再裸读 localStorage ——
+    // 裸键与 store 双真相会漂移（键名/默认值/写入路径任一变化都会让 AI 回读到假值）。
+    // 不透明度两项不能用 `parseFloat(x) || 默认值`：0 是合法取值（滑到底 = 完全透明），
+    // 会被 `||` 判成"没设置"。AI 回读设置值时必须与 store 的读数口径一致。
     _readFrontSetting(key) {
+      const store = useThemeStore()
       switch (key) {
-        case 'theme': return localStorage.getItem('app-theme') || 'glass'
-        case 'mode': return localStorage.getItem('app-mode') === 'night' ? 'night' : 'day'
-        case 'iconStyle': return localStorage.getItem('app-icon-style') || 'color'
-        case 'topbarColor': return localStorage.getItem('app-topbar-color') || 'light'
-        case 'animations': return (localStorage.getItem('app-animations') ?? '1') !== '0'
-        // 不透明度两项不能用 `parseFloat(x) || 默认值`：0 是合法取值（滑到底 = 完全透明），
-        // 会被 `||` 判成"没设置"。AI 回读设置值时必须与 store 的读数口径一致。
-        case 'bgMaskOpacity': return readFrontNum('app-bg-mask-opacity', 0.6)
-        case 'glassOpacity': return readFrontNum('app-glass-opacity', 0.4)
+        case 'theme': return store.currentTheme || 'glass'
+        case 'mode': return store.pendingMode === 'night' ? 'night' : 'day'
+        case 'iconStyle': return store.iconStyle || 'color'
+        case 'topbarColor': return store.topbarColor || 'light'
+        case 'animations': return !!store.animationsEnabled
+        // store 的不透明度本身就是 number（0 是合法值），直接透传即可
+        case 'bgMaskOpacity': return store.bgMaskOpacity
+        case 'glassOpacity': return store.glassOpacity
+        // 无 store 的独立偏好：localStorage 即唯一真相，不存在双源
         case 'mergeNotifications': return (localStorage.getItem('mergeNotifications') ?? '1') !== '0'
         default: return null
       }

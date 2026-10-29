@@ -69,6 +69,7 @@
 </template>
 
 <script setup>
+import { getToken } from '../../utils/authStorage.js'
 import { reportError } from '../../utils/reportError.js'
 import { ref, computed, watch } from 'vue'
 import axios from 'axios'
@@ -104,7 +105,7 @@ const busy = ref(false)
 const pickerVisible = ref(false)
 const pickerMounted = ref(false)
 
-const token = () => localStorage.getItem('token') || ''
+const token = () => getToken() || ''
 const authHeaders = () => ({ Authorization: 'Bearer ' + token() })
 
 const albumOptions = computed(() => props.albums.map(a => ({ value: a.id, label: a.name })))

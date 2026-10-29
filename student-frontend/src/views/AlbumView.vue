@@ -357,7 +357,9 @@
 </template>
 
 <script setup>
-import { ref, computed, nextTick, onMounted, onActivated, onDeactivated, onBeforeUnmount, getCurrentInstance, watch, defineAsyncComponent } from 'vue'
+import { getToken } from '../utils/authStorage.js'
+import { ref, computed, nextTick, onMounted, onActivated, onDeactivated, onBeforeUnmount, watch, defineAsyncComponent } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
 import axios from 'axios'
 import { pushUndo } from '../api/undo'
 import { useNotification } from '../composables/useNotification.js'
@@ -431,7 +433,7 @@ const dragging = ref(false)
 
 const { waitScan, stopAll } = useAlbumScan()
 
-const token = () => localStorage.getItem('token') || ''
+const token = () => getToken() || ''
 const authHeaders = () => ({ Authorization: 'Bearer ' + token() })
 
 const VIDEO_RE = /\.(mp4|webm|mov|avi|mkv|m4v|ogv)$/i
@@ -625,9 +627,12 @@ watch(activeTab, async (v) => {
 })
 
 // 跨页定位：/album?focus=<相册id>
-const inst = getCurrentInstance()
+const route = useRoute()
+const router = useRouter()
+// 行定位宿主：显式传路由对象（身份稳定供 useRowFocus 记签名；不再经实例代理）
+const rowFocusHost = { route, router }
 function applyFocus() {
-  applyRouteRowFocus(inst.proxy, {
+  applyRouteRowFocus(rowFocusHost, {
     parse: (key) => {
       const id = Number(key)
       if (!albums.value.some((a) => a.id === id)) return null
@@ -1079,7 +1084,7 @@ onActivated(() => {
   // KeepAlive 首次挂载也会触发 activated；startScanWatch 幂等，重复调用无害
   startScanWatch()
 })
-watch(() => inst.proxy.$route.query.focus, applyFocus)
+watch(() => route.query.focus, applyFocus)
 
 // 被 KeepAlive 缓存时定时器要停（见 scanWatch 注释），否则切走后仍在发请求
 onDeactivated(stopScanWatch)

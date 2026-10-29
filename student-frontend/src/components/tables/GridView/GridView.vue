@@ -218,7 +218,7 @@
 </template>
 
 <script setup>
-import { ref, computed, watch, onMounted, onActivated, onBeforeUnmount, nextTick, getCurrentInstance, toRef, TransitionGroup } from 'vue';
+import { ref, computed, watch, onMounted, onActivated, onBeforeUnmount, nextTick, toRef, TransitionGroup } from 'vue';
 import { useGridViewDrag } from './GridView.drag.js';
 
 defineOptions({ name: 'GridView' })
@@ -321,8 +321,7 @@ const candidatePopupX = ref(0)
 const candidatePopupY = ref(0)
 const cellRefs = ref({})
 
-// applyRouteRowFocus 类 host 契约之外的实例访问：$el 经 getter 取（拖拽模块 29 处用到）
-const inst = getCurrentInstance()
+// 拖拽模块取组件根节点（原 $el）走 ctx.gridContainer（模板 ref），不再经实例代理
 
 // 跨模块共享的上下文：状态为 ref（模块内 .value 访问），DOM 挂载句柄等临时字段非响应式；
 // 拖拽模块的方法与本组件 methods 在下方 Object.assign 回填，彼此经 ctx 互相调用（运行时解析）
@@ -369,7 +368,6 @@ const ctx = {
   _rowGeom: null, _colGeom: null, _rowPending: null, _colPending: null,
   _rowAutoScroll: null, _colAutoScroll: null,
   emit,
-  get $el() { return inst.proxy.$el },
 }
 
 const totalColumns = computed(() => {

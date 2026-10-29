@@ -157,7 +157,8 @@
 
 <script setup>
 import { reportError } from '../utils/reportError.js'
-import { ref, computed, watch, onMounted, onActivated, getCurrentInstance, defineAsyncComponent } from 'vue'
+import { ref, computed, watch, onMounted, onActivated, defineAsyncComponent } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
 import axios from 'axios'
 import SearchBar from '../components/base/SearchBar.vue'
 import DynamicTable from '../components/tables/DynamicTable/DynamicTable.vue'
@@ -224,13 +225,16 @@ const table = useTableCRUD(`${API_BASE}/students`, DEFAULT_FIELDS, {
 
 // 跨页定位：标题栏全局搜索点「学生」结果跳转 /students?focus=<id> 时，
 // 先切回「学生信息」页签，再滚动到目标行并高亮闪动
-const inst = getCurrentInstance()
-const applyFocus = () => applyRouteRowFocus(inst.proxy, {
+const route = useRoute()
+const router = useRouter()
+// 行定位宿主：显式传路由对象（身份稳定供 useRowFocus 记签名；不再经实例代理）
+const rowFocusHost = { route, router }
+const applyFocus = () => applyRouteRowFocus(rowFocusHost, {
   parse: (key) => { activeTab.value = 'students'; return key }
 })
 onMounted(applyFocus)
 onActivated(applyFocus)
-watch(() => inst.proxy.$route.query.focus, applyFocus)
+watch(() => route.query.focus, applyFocus)
 
 // 为了兼容原有模板，创建别名
 const students = table.rows
@@ -342,7 +346,7 @@ async function onSubmitStudent(data) {
 }
 
 const tableElement = computed(() => {
-  return dynamicTable.value?.$el || null
+  return dynamicTable.value?.rootEl || null
 })
 
 async function deleteStudent(id) {

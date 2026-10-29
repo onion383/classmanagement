@@ -164,8 +164,8 @@
 </template>
 
 <script setup>
-import { ref, computed, watch, onMounted, onActivated, onDeactivated, onBeforeUnmount, defineAsyncComponent, getCurrentInstance } from 'vue'
-import { useRoute } from 'vue-router'
+import { ref, computed, watch, onMounted, onActivated, onDeactivated, onBeforeUnmount, defineAsyncComponent } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
 import { reportError } from '../utils/reportError.js'
 import axios from 'axios'
 import AppSelect from '../components/base/AppSelect.vue'
@@ -191,8 +191,9 @@ const ExportExcel = defineAsyncComponent(loadExportExcel)
 const API = '/api'
 
 const route = useRoute()
-// applyRouteRowFocus 的 host 契约：需要 $route/$router/$el 且对象身份稳定（内部按 host 记签名）
-const inst = getCurrentInstance()
+const router = useRouter()
+// 行定位宿主：显式传路由对象（身份稳定供 useRowFocus 记签名；不再经实例代理）
+const rowFocusHost = { route, router }
 
 const activeTab = ref('today')
 const loading = ref(false)
@@ -370,7 +371,7 @@ function _stopDayWatch() {
 // 跨页定位：命中记录在个人/小组哪一份数据里，就切到对应加分对象与「加分统计」页签，
 // 再滚动到目标行并高亮闪动。数据尚未加载时返回 null，由 helper 安排重试。
 function _applyRowFocus() {
-  applyRouteRowFocus(inst.proxy, {
+  applyRouteRowFocus(rowFocusHost, {
     parse: (key) => {
       const id = Number(key)
       const mode = scores.value.some(r => r.id === id) ? 'personal'

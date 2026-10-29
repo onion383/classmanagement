@@ -34,6 +34,7 @@
 </template>
 
 <script setup>
+import { getToken } from '../../utils/authStorage.js'
 import { reportError } from '../../utils/reportError.js'
 import { ref, computed, watch } from 'vue'
 import axios from 'axios'
@@ -59,7 +60,7 @@ const emit = defineEmits(['close', 'moved'])
 const targetId = ref(null)
 const busy = ref(false)
 
-const token = () => localStorage.getItem('token') || ''
+const token = () => getToken() || ''
 const authHeaders = () => ({ Authorization: 'Bearer ' + token() })
 
 // 目标只能是虚拟相册：文件夹相册受磁盘目录内容约束，不能塞进别的相册的索引

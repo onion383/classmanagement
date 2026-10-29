@@ -78,6 +78,7 @@
 </template>
 
 <script setup>
+import { getToken } from '../utils/authStorage.js'
 import { ref, reactive, computed, onMounted } from 'vue'
 import axios from 'axios'
 import CadreTreeList from './CadreTreeList.vue'
@@ -96,7 +97,7 @@ const selectedNode = computed(() => (selectedId.value == null ? null : findNode(
 
 const api = (options = {}) => {
   const opts = {
-    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${localStorage.getItem('token')}` },
+    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${getToken()}` },
     ...options
   }
   return axios({ baseURL: API_BASE, method: 'get', ...opts })

@@ -68,6 +68,7 @@
 </template>
 
 <script setup>
+import { getToken } from '../../utils/authStorage.js'
 import { reportError } from '../../utils/reportError.js'
 import { ref, computed, nextTick, watch } from 'vue'
 import axios from 'axios'
@@ -111,7 +112,7 @@ const {
   clear: clearThumbBatch,
 } = useThumbBatch(() => visiblePhotoIds.value)
 
-const token = () => localStorage.getItem('token') || ''
+const token = () => getToken() || ''
 const authHeaders = () => ({ Authorization: 'Bearer ' + token() })
 
 const VIDEO_RE = /\.(mp4|webm|mov|avi|mkv|m4v|ogv)$/i

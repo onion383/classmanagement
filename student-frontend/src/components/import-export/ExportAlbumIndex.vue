@@ -34,6 +34,7 @@
 </template>
 
 <script setup>
+import { getToken } from '../../utils/authStorage.js'
 import { reportError } from '../../utils/reportError.js'
 import { ref, computed, watch } from 'vue'
 import axios from 'axios'
@@ -81,7 +82,7 @@ const defaultFilename = computed(() => {
   return a ? `相册索引_${a.name}` : '相册索引'
 })
 
-const token = () => localStorage.getItem('token') || ''
+const token = () => getToken() || ''
 const authHeaders = () => ({ Authorization: 'Bearer ' + token() })
 
 // 拉一个相册的全部照片（把按日期分组的返回拍平）

@@ -373,7 +373,7 @@
                 @change="onBgImageFileChange"
                 class="hidden"
               />
-              <button @click="$refs.bgImageInput.click()" class="bg-info hover:bg-info-hover text-text-inverse px-4 py-2 rounded transition-theme whitespace-nowrap flex items-center gap-1.5"><IconGlyph name="folder" :size="14" tint="current" /> 选择本地图片</button>
+              <button @click="pickBgImage" class="bg-info hover:bg-info-hover text-text-inverse px-4 py-2 rounded transition-theme whitespace-nowrap flex items-center gap-1.5"><IconGlyph name="folder" :size="14" tint="current" /> 选择本地图片</button>
               <span v-if="bgImageFileName" class="text-sm text-text-secondary">已选: {{ bgImageFileName }}</span>
               <button v-if="bgImageUrl" @click="clearBgImage" class="text-sm text-danger hover:underline">清除</button>
             </div>
@@ -722,6 +722,7 @@
 </template>
 
 <script setup>
+import { getCurrentUser } from '../../utils/authStorage.js'
 import { ref, computed, watch, onMounted, onActivated, onDeactivated, onBeforeUnmount, defineAsyncComponent } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import AppHelp from '../../components/base/AppHelp.vue'
@@ -750,6 +751,11 @@ const { currentTheme, bgMaskOpacity, glassOpacity, iconStyle, topbarColor, anima
 const settingsSearchInput = ref(null)
 const settingsSearchPopup = ref(null)
 const bgImageInput = ref(null)
+// 触发隐藏的背景图 file input（「选择本地图片」按钮）：走模板 ref 变量，不用 $refs
+function pickBgImage() {
+  const el = bgImageInput.value
+  if (el) el.click()
+}
 
 // 设置项搜索：输入即匹配，结果以悬浮弹窗显示在搜索框下方，点击滚动到对应设置区
 const settingsSearch = ref('')
@@ -925,7 +931,7 @@ const presetThemes = ref([
 // 非响应式实例状态（动画帧/定时器句柄与搜索闪动标记）挂在 ctx 上单源共享
 
 const user = computed(() => {
-  return JSON.parse(localStorage.getItem('currentUser') || '{}')
+  return getCurrentUser()
 })
 // 安全等级下拉选项（与引导页同一套文案）
 const securityLevelOptions = computed(() => {

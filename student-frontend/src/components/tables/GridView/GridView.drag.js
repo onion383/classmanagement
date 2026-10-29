@@ -2,7 +2,7 @@
 // GridView.drag.js —— GridView 的行/列拖拽、落点高亮框与虚影（方法模块）
 //
 // 逐字搬运自 GridView.vue 的 methods，未改写任何逻辑与注释；
-// 方法体内部经 ctx 闭包调用（script setup）：状态为 ref（.value 访问），$el/$refs 经 ctx 的 getter 取组件实例。
+// 方法体内部经 ctx 闭包调用（script setup）：状态为 ref（.value 访问），组件根节点取 ctx.gridContainer.value（模板 ref）。
 // =========================================================================
 
 import { applyRowShift, applyColShift, clearShift, createEdgeAutoScroll } from '../../../composables/tableDragFx';
@@ -41,7 +41,7 @@ export function useGridViewDrag(ctx) {
     },
     // 拖拽开始时一次性缓存各行与容器的几何信息，拖动过程中纯计算，避免每帧 O(n) 布局读取
     _cacheRowGeom() {
-      const trs = ctx.$el ? ctx.$el.querySelectorAll('tbody tr') : [];
+      const trs = ctx.gridContainer.value ? ctx.gridContainer.value.querySelectorAll('tbody tr') : [];
       const arr = [];
       for (let i = 0; i < trs.length; i++) {
         const r = trs[i].getBoundingClientRect();
@@ -71,7 +71,7 @@ export function useGridViewDrag(ctx) {
       ctx._colGeomHeaderTop = ths.length ? ths[0].parentElement.getBoundingClientRect().top : null;
       // 数据区顶端（表头下沿）：列虚影按这个位置对齐，表头不投影
       ctx._colGeomDataTop = ths.length ? ths[0].parentElement.getBoundingClientRect().bottom : null;
-      const tbl = ctx.$el ? ctx.$el.querySelector('table') : null;
+      const tbl = ctx.gridContainer.value ? ctx.gridContainer.value.querySelector('table') : null;
       ctx._colGeomTblBottom = tbl ? tbl.getBoundingClientRect().bottom : null;
       const c = ctx.gridTable.value;
       ctx._colGeomContainer = c ? c.getBoundingClientRect() : null;
@@ -214,7 +214,7 @@ export function useGridViewDrag(ctx) {
         el.style.transition = 'none';
         el.style.transform = `translate(${dx}px, ${dy}px)`;
       });
-      void ctx.$el.offsetWidth; // 强制重排，让起始位移先生效
+      void ctx.gridContainer.value.offsetWidth; // 强制重排，让起始位移先生效
       list.forEach(({ el }) => {
         el.classList.add('swap-flip');
         el.style.transition = '';
@@ -236,7 +236,7 @@ export function useGridViewDrag(ctx) {
       return (ctx.rows.value || []).map(r => (r.cells && r.cells[idx] ? r.cells[idx].course || '' : '')).join(',');
     },
     animateRowSwap(fromIdx, toIdx) {
-      const trs = ctx.$el ? ctx.$el.querySelectorAll('tbody tr') : [];
+      const trs = ctx.gridContainer.value ? ctx.gridContainer.value.querySelectorAll('tbody tr') : [];
       const a = trs[fromIdx], b = trs[toIdx];
       if (!a || !b) return;
       const dy = b.getBoundingClientRect().top - a.getBoundingClientRect().top;
@@ -251,7 +251,7 @@ export function useGridViewDrag(ctx) {
       const dx = thTo.getBoundingClientRect().left - thFrom.getBoundingClientRect().left;
       if (!dx) return;
       const items = [];
-      const trs = ctx.$el ? ctx.$el.querySelectorAll('tbody tr') : [];
+      const trs = ctx.gridContainer.value ? ctx.gridContainer.value.querySelectorAll('tbody tr') : [];
       trs.forEach((tr, rowIdx) => {
         const refs = ctx.cellRefs.value[rowIdx];
         if (!refs) return;
@@ -290,7 +290,7 @@ export function useGridViewDrag(ctx) {
 
     // ==================== 数据区(tbody)整体从左往右弹入（不含表头） ====================
     playTableEnter() {
-      const tbody = ctx.$el ? ctx.$el.querySelector('tbody') : null;
+      const tbody = ctx.gridContainer.value ? ctx.gridContainer.value.querySelector('tbody') : null;
       if (!tbody) return;
       if (ctx._tableEnterCleanup) ctx._tableEnterCleanup();
       const onEnd = (e) => { if (e && e.target !== tbody) return; ctx._tableEnterCleanup(); };
@@ -313,7 +313,7 @@ export function useGridViewDrag(ctx) {
       if (!ctx.hideMetaColumns.value) return 2 + (ctx.showPeriodColumn.value ? 1 : 0);
       return ctx.showRowNumber.value ? 1 : 0;
     },
-    colHeaderEls() { return ctx.$el ? ctx.$el.querySelectorAll('thead tr:last-child th') : []; },
+    colHeaderEls() { return ctx.gridContainer.value ? ctx.gridContainer.value.querySelectorAll('thead tr:last-child th') : []; },
     // 统一创建虚影的外层容器：fixed + overflow:hidden，滚动区外的像素本来就被裁掉
     _ghostWrapper(width, height, opacity, radius) {
       const wrapper = document.createElement('div');
@@ -328,8 +328,8 @@ export function useGridViewDrag(ctx) {
     // 行虚影：只克隆被拖的那一行（原来克隆整表，屏外行也会参与样式/布局计算）。
     // 列宽按原件实测宽度显式固定，避免单行自动布局重新分配列宽。
     createRowSliceGhost(rowIdx, opacity, radius) {
-      const table = ctx.$el ? ctx.$el.querySelector('table') : null;
-      const tr = ctx.$el ? ctx.$el.querySelectorAll('tbody tr')[rowIdx] : null;
+      const table = ctx.gridContainer.value ? ctx.gridContainer.value.querySelector('table') : null;
+      const tr = ctx.gridContainer.value ? ctx.gridContainer.value.querySelectorAll('tbody tr')[rowIdx] : null;
       if (!table || !tr) return null;
       const tblRect = table.getBoundingClientRect();
       const trRect = tr.getBoundingClientRect();
@@ -367,7 +367,7 @@ export function useGridViewDrag(ctx) {
       const gTable = document.createElement('table');
       gTable.style.cssText = 'position:absolute;left:0;border-collapse:collapse;table-layout:fixed;width:' + colWidth + 'px;';
       const gTbody = document.createElement('tbody');
-      const trs = ctx.$el ? ctx.$el.querySelectorAll('tbody tr') : [];
+      const trs = ctx.gridContainer.value ? ctx.gridContainer.value.querySelectorAll('tbody tr') : [];
       let firstTop = null;
       for (let r = 0; r < trs.length; r++) {
         const tr = trs[r];
@@ -404,7 +404,7 @@ export function useGridViewDrag(ctx) {
       if (ctx.disableRowDrag.value || ctx.editingCell.value) return;
       const row = ctx.rows.value[rowIdx];
       if (!row || !ctx.canDragRow(row)) return;
-      const table = ctx.$el.querySelector('table');
+      const table = ctx.gridContainer.value.querySelector('table');
       const tr = event.currentTarget.closest('tr');
       if (!table || !tr) return;
       event.preventDefault();
@@ -422,7 +422,7 @@ export function useGridViewDrag(ctx) {
       // 落点高亮框：包住即将落位的那一行（几何信息在此一次性缓存）
       ctx._cacheRowGeom();
       // 让位与自动滚动的初始状态
-      ctx._rowEls = Array.from(ctx.$el.querySelectorAll('tbody tr'));
+      ctx._rowEls = Array.from(ctx.gridContainer.value.querySelectorAll('tbody tr'));
       const rg0 = ctx._rowGeom ? ctx._rowGeom[rowIdx] : null;
       ctx._rowSlotH = rg0 ? Math.round(rg0.bottom - rg0.top) : 0;
       ctx._rowAutoScroll = createEdgeAutoScroll(
@@ -463,7 +463,7 @@ export function useGridViewDrag(ctx) {
         }
         return best;
       }
-      const trs = ctx.$el ? ctx.$el.querySelectorAll('tbody tr') : [];
+      const trs = ctx.gridContainer.value ? ctx.gridContainer.value.querySelectorAll('tbody tr') : [];
       let best = null, min = Infinity;
       for (let i = 0; i < trs.length; i++) {
         if (!ctx.isRowDropTarget(ctx.rows.value[i])) continue;
@@ -495,7 +495,7 @@ export function useGridViewDrag(ctx) {
       applyRowShift(ctx._rowEls, ctx.rowDragIdx.value, ctx.rowDragOverIdx.value, ctx._rowGeom, ctx._rowSlotH);
     },
     _clearRowShiftFx() {
-      const tbody = ctx.$el ? ctx.$el.querySelector('tbody') : null;
+      const tbody = ctx.gridContainer.value ? ctx.gridContainer.value.querySelector('tbody') : null;
       if (tbody) clearShift(tbody);
       ctx._rowEls = null;
       ctx._rowSlotH = 0;
@@ -542,7 +542,7 @@ export function useGridViewDrag(ctx) {
     // 松手滑入：被移动的这一行从「松手时的指针位置」滑到落点（X/Y 两个方向）
     _slideInRow(to, rel) {
       if (!rel) return;
-      const trs = ctx.$el ? ctx.$el.querySelectorAll('tbody tr') : [];
+      const trs = ctx.gridContainer.value ? ctx.gridContainer.value.querySelectorAll('tbody tr') : [];
       const tr = trs[to];
       if (!tr || typeof tr.animate !== 'function') return;
       const r = tr.getBoundingClientRect();
@@ -584,7 +584,7 @@ export function useGridViewDrag(ctx) {
     onColHandleDown(event, colIndex) {
       if (ctx.editingCell.value) return;
       if (ctx.colHeaders.value[colIndex] === '走廊') return;
-      const table = ctx.$el.querySelector('table');
+      const table = ctx.gridContainer.value.querySelector('table');
       const ths = ctx.colHeaderEls();
       const th = ths[ctx.colThOffset() + colIndex];
       if (!table || !th) return;
@@ -671,7 +671,7 @@ export function useGridViewDrag(ctx) {
       applyColShift(ctx._colEls, ctx.colDragIdx.value, ctx.colDragOverIdx.value, ctx._colGeom, ctx._colSlotW);
     },
     _clearColShiftFx() {
-      clearShift(ctx.$el);
+      clearShift(ctx.gridContainer.value);
       ctx._colEls = null;
       ctx._colSlotW = 0;
     },

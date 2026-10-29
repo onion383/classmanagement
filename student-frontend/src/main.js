@@ -1,3 +1,4 @@
+import { getToken, clearToken } from './utils/authStorage.js'
 import { createApp } from 'vue'
 import { createPinia } from 'pinia'
 import App from './App.vue'
@@ -38,7 +39,7 @@ setupApiClient({
     const isAuthReq = /(login|register|restore|recover)/i.test(url)
     if (!config?.__skipAuth && !isAuthReq && Date.now() - lastAuthPrompt > 2000) {
       lastAuthPrompt = Date.now()
-      localStorage.removeItem('token')
+      clearToken()
       clearMediaToken()
       useNotification().error('登录已过期，请重新登录', 5000)
       if (router.currentRoute.value.path !== '/login') {
@@ -60,7 +61,7 @@ setupApiClient({
 
 // 媒体凭据（<img>/CSS 用）：已有登录态时补一份/续期，避免首屏图片缺少受限凭据而 401。
 // 与启动流程并行执行，不阻塞首屏渲染。
-if (localStorage.getItem('token')) ensureMediaToken()
+if (getToken()) ensureMediaToken()
 
 // ===== 关键路径优化：在 Vue 初始化之前就设置主题和预加载资源 =====
 
@@ -130,7 +131,7 @@ if (startupBg) { const img = new Image(); img.src = startupBg }
 // 3. 预加载默认落地页组件（已登录→业务首页 DashboardView；未登录→登录页 Login），
 //    与 Vue 初始化并行执行，命中路由实际首帧，避免首屏首帧多等一次 chunk 下载。
 //    必须用静态字符串导入，保证 Vite/Rollup 能静态分析生成对应 chunk。
-const landingPreload = localStorage.getItem('token')
+const landingPreload = getToken()
   ? import('./views/DashboardView.vue')
   : import('./views/Login.vue')
 landingPreload.catch(() => {})
@@ -361,7 +362,7 @@ if (splashEl) {
   // 新方案只等路由与样式：首页数据不再阻塞占位移除，未到的部分由 DashboardView 骨架屏先顶上，
   // 避免占位页长时间挡在整窗前。ensureDashboardData 各请求均有 .catch() 兜底，不会永久卡住。
   const whenSplashReady = router.isReady().catch(() => {}).then(() => {
-    const onHome = router.currentRoute.value.path === '/' && localStorage.getItem('token')
+    const onHome = router.currentRoute.value.path === '/' && getToken()
     const dataReady = (onHome && !HOME_SKELETON_ONLY)
       ? Promise.race([ensureDashboardData().catch(() => {}), new Promise((r) => setTimeout(r, 2000))])
       : Promise.resolve()

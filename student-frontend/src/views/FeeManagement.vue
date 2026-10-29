@@ -215,7 +215,8 @@
 
 <script setup>
 import { reportError } from '../utils/reportError.js'
-import { ref, computed, watch, onMounted, onActivated, getCurrentInstance, defineAsyncComponent } from 'vue'
+import { ref, computed, watch, onMounted, onActivated, defineAsyncComponent } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
 import axios from 'axios'
 import SearchBar from '../components/base/SearchBar.vue'
 import DynamicTable from '../components/tables/DynamicTable/DynamicTable.vue'
@@ -281,11 +282,14 @@ const table = useTableCRUD(`${API_BASE}/fee-records`, DEFAULT_FIELDS, {
 })
 
 // 跨页定位：标题栏全局搜索点「班费记录」结果跳转 /fee?focus=<id> 时定位到该行
-const inst = getCurrentInstance()
-const applyFocus = () => applyRouteRowFocus(inst.proxy)
+const route = useRoute()
+const router = useRouter()
+// 行定位宿主：显式传路由对象（身份稳定供 useRowFocus 记签名；不再经实例代理）
+const rowFocusHost = { route, router }
+const applyFocus = () => applyRouteRowFocus(rowFocusHost)
 onMounted(applyFocus)
 onActivated(applyFocus)
-watch(() => inst.proxy.$route.query.focus, applyFocus)
+watch(() => route.query.focus, applyFocus)
 
 const feeRecords = table.rows
 const {
@@ -449,7 +453,7 @@ const monthlyExpense = computed(() => {
 
 // ==================== 表格元素引用 ====================
 const tableElement = computed(() => {
-  return dynamicTable.value?.$el || null
+  return dynamicTable.value?.rootEl || null
 })
 
 // ==================== 删除记录 ====================
