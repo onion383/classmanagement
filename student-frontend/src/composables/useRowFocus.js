@@ -98,9 +98,7 @@ function cellEdgeFrames(isFirst, isLast) {
 // 等目标元素滚动到位后再回调（避免闪动被平滑滚动过程吃掉）。
 // 优先用 scrollend；不支持时用「scroll 事件静止 120ms」兜底；元素本就可见时立即回调。
 function runAfterScroll(el, cb) {
-  const win = (el.ownerDocument && el.ownerDocument.defaultView) ||
-    (typeof window !== 'undefined' ? window : null)
-  if (!win) { cb(); return }
+  const win = (el.ownerDocument && el.ownerDocument.defaultView) || window
   let started = false
   let settleTimer = null
   let noScrollTimer = null

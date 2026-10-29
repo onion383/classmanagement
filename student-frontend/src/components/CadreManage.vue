@@ -123,7 +123,12 @@ async function onRefresh() {
 async function fetchStudents() {
   try {
     const res = await api({ url: '/students' })
-    allStudents.value = res.data.data || res.data || []
+    // 只接受数组或 {data:数组}：异常形状（如旧缓存解不开的 {d}）不覆盖现有名册，
+    // 否则 CadreTreeList 里的 .filter/.find 会直接崩
+    const body = res && res.data
+    const list = Array.isArray(body) ? body : (body && Array.isArray(body.data) ? body.data : null)
+    if (!list) { console.error('[students] 响应形状异常', body); return }
+    allStudents.value = list
   } catch (e) { /* 学生列表不可用时不阻塞 */ }
 }
 

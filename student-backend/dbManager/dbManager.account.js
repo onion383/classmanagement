@@ -21,7 +21,7 @@ const { getConn, evictConn } = require('./dbManager.conn');
 
 // 用「密码 / 恢复词」解出受保护库的库钥匙。密码优先，失败再试恢复词；
 // 两者都对不上返回 null（由调用方转成「密码错误 / 恢复词不正确」）。
-// 两份包裹各自记录 KDF 参数：旧版本开启的库（参数列为空）按旧参数解锁。
+// 两份包裹各自记录 KDF 参数，解锁按登记行的参数派生（缺省回退当前默认参数）。
 function unlockPrivacy(rec, { password, mnemonic } = {}) {
   if (rec.wrapped_by_password && password) {
     try {

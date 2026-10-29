@@ -328,10 +328,10 @@
   </div>
 </template>
 
-<script>
+<script setup>
+import { ref, computed, watch, onMounted, onActivated, onBeforeUnmount, nextTick, defineAsyncComponent, TransitionGroup, getCurrentInstance, toRef } from 'vue'
 import AppSelect from '../../base/AppSelect.vue'
 import ConfirmDialog from '../../base/ConfirmDialog.vue'
-import { TransitionGroup, defineAsyncComponent } from 'vue'
 import { Search, Filter } from '@lucide/vue'
 import { useDynamicTableDrag } from './DynamicTable.drag.js'
 import { vPreload } from '../../../utils/dialogPrefetch.js'
@@ -362,12 +362,9 @@ const RowsFragment = {
   },
 }
 
-export default {
-  name: 'DynamicTable',
-  components: { AppSelect, ConfirmDialog, TransitionGroup, Search, Filter, ColumnFilter },
-  // v-preload 在主窗口是全局指令；这里本地再注册一次，保证本组件在任意窗口/单测里都能解析
-  directives: { preload: vPreload },
-  props: {
+defineOptions({ name: 'DynamicTable' })
+
+const props = defineProps({
     fields: { type: Array, required: true },
     rows: { type: Array, required: true },
     newRow: { type: Object, default: null },
@@ -431,8 +428,9 @@ export default {
     // 退回整表的行数阈值（≤ 该值关虚拟）。必须 < virtualFrom（syncVirtualActive 内夹紧）
     virtualOffBelow: { type: Number, default: 140 },
     virtualOverscan: { type: Number, default: 8 }          // 缓冲行数下限；实际按视口高度动态放大到两整屏（见 recalcWindow）
-  },
-  emits: [
+})
+const emit = defineEmits([
+
     'contextmenu', 'search', 'toggleSort', 'saveNewRow', 'cancelNewRow',
     'startEdit', 'saveCell', 'moveRow', 'deleteRow', 'addNewRowAtBottom',
     'updateNewRow', 'manageReceipt', 'swapRows', 'swapColumns', 'moveSelectedRows',
@@ -443,189 +441,196 @@ export default {
     'retry',
     // 搜索无结果态里的「清除搜索」
     'clearSearch',
-  ],
-  data() {
-    return {
-      internalEditCell: null,
-      selectedRowKeys: [],
+])
+
+// 模板 ref（静态名自动绑定；动态 :ref="editInput-*" 走 ctx.$refs）
+const scrollWrapper = ref(null)
+const tbodyRef = ref(null)
+const theadRow = ref(null)
+
+const inst = getCurrentInstance()
+
+// ===== 状态 =====
+const internalEditCell = ref(null)
+const selectedRowKeys = ref([])
       // 空态是否真正显示。不跟着 showEmptyBase 立刻变：条件成立后先挂 260ms，
       // 数据在这期间到达就一次都不显示 —— 否则每次进页面都会先闪一下「还没有数据」。
-      emptyVisible: false,
-      _emptyTimer: null,
-      dragIndex: null,
-      dragOverIndex: null,
-      colDragIndex: null,
-      colDragOverIndex: null,
-      _dragGhost: null,
-      _colDragGhost: null,
-      _rowDropBox: null,
-      _colDropBox: null,
+const emptyVisible = ref(false)
+const _emptyTimer = ref(null)
+const dragIndex = ref(null)
+const dragOverIndex = ref(null)
+const colDragIndex = ref(null)
+const colDragOverIndex = ref(null)
+const _dragGhost = ref(null)
+const _colDragGhost = ref(null)
+const _rowDropBox = ref(null)
+const _colDropBox = ref(null)
       // 列换位时用于 body 单元格 FLIP 的「换位前」位置快照（松手瞬间采集，动画后清空）
-      _flipColCells: null,
+const _flipColCells = ref(null)
       // 行换位时用于整行 FLIP 的「换位前」位置快照
-      _flipRows: null,
+const _flipRows = ref(null)
       // 底部「添加一行」行动画开关：默认开启，首屏与取消重现都播放上浮动效
-      addRowAnimated: true,
+const addRowAnimated = ref(true)
       // 底部行 key：切换状态栏重新激活时递增，强制重建以重播上浮动画
-      addRowAnimKey: 0,
+const addRowAnimKey = ref(0)
       // 放弃新增行确认弹窗：仅当新增行已填写数据时弹出
-      discardConfirmVisible: false,
+const discardConfirmVisible = ref(false)
       // 列交换 FLIP 动画是否就绪：页面进入/数据初载时不播放，避免表头乱跳；
       // 仅当首次数据渲染稳定后才启用，此后真实拖列换位才平滑滑动
-      colAnimDone: false,
-      firstActivate: true,
+const colAnimDone = ref(false)
+const firstActivate = ref(true)
       // 纵向滚动判定：按固定高度（fixedMaxHeight）判断，内容超高才出现纵向滚动条，
       // 而不再按行数判断——多行/换行导致的行高不同也能正确触发，表头随之吸顶。
-      vScroll: false,
+const vScroll = ref(false)
       // 行增删后的短动画窗：只有它开着，行容器才切成 TransitionGroup ——
       // 被删掉的那行才播离场、恢复的那行才播入场。平时保持 Fragment（见 beginRowsAnimWindow）。
-      rowsAnimWindow: false,
+const rowsAnimWindow = ref(false)
       // 窗口刚打开的那一帧静默：容器从 Fragment 换成 TransitionGroup 时现存行都算新节点，
       // 不禁掉入场动画会整表弹一遍
-      rowsAnimSilent: false,
-      _rowsAnimTimer: null,
+const rowsAnimSilent = ref(false)
+const _rowsAnimTimer = ref(null)
       // 表格最大高度：内容超过此高度即启用纵向滚动（固定高度判断），默认 400，可由父组件按内容调整
-      fixedMaxHeight: this.maxHeight,
+const fixedMaxHeight = ref(props.maxHeight)
       // 列筛选状态：{ 列名: Set(允许出现的值) }。值为空表示该列未筛选（不参与过滤）
-      columnFilters: {},
+const columnFilters = ref({})
       // 当前打开筛选面板的列名（'' = 未打开）
-      filterField: '',
+const filterField = ref('')
       // 筛选面板打开期间才开启行错峰动画（面板关闭后延时关闭，见 rowAnimEnabled）
-      filterAnimating: false,
+const filterAnimating = ref(false)
       // 面板里的值列表：由 buildFilterOptions 在打开/勾选时算出，缓存避免每次渲染重算
-      filterOptions: [],
+const filterOptions = ref([])
       // 面板定位锚点（表头上的那个放大镜/漏斗按钮）
-      filterAnchorEl: null,
+const filterAnchorEl = ref(null)
       // ===== 行虚拟滚动 =====
       // 当前渲染窗口 [virtualStart, virtualEnd)（下标针对 bodyRows）
-      virtualStart: 0,
-      virtualEnd: 0,
+const virtualStart = ref(0)
+const virtualEnd = ref(0)
       // 滞后开关的当前状态（由 syncVirtualActive 维护）：≥virtualFrom 置真、≤virtualOffBelow 置假、
       // 中间区间维持现状。不能用纯 computed——「维持现状」需要记住上一次的状态。
-      virtualActive: false,
+const virtualActive = ref(false)
       // 拖行期间锁死窗口：行在拖动中途被卸载会直接打乱几何缓存与落点判定
-      virtualFrozen: false,
+const virtualFrozen = ref(false)
       // 实测行高缓存：{ rowKey → 高度 }。未测到的行用 estRowH 估算
-      rowHeights: new Map(),
-      estRowH: 33,
-    };
-  },
-  computed: {
-    hasNewRow() { return this.rows && this.rows.some(r => r._isNew); },
+const rowHeights = ref(new Map())
+const estRowH = ref(33)
+
+// ===== computed =====
+
+const hasNewRow = computed(() => { return ctx.rows.value && ctx.rows.value.some(r => r._isNew); })
     // 新增行是否已填写数据（用于取消新增前确认，id/position 属自动列不计入）
-    newRowHasData() {
-      const nr = this.newRow || (this.rows || []).find(r => r._isNew);
+const newRowHasData = computed(() => {
+      const nr = ctx.newRow.value || (ctx.rows.value || []).find(r => r._isNew);
       if (!nr) return false;
-      return (this.fields || []).some(f => {
+      return (ctx.fields.value || []).some(f => {
         if (f.name === 'id' || f.name === 'position') return false;
         const v = nr[f.name];
         return v != null && String(v).trim() !== '';
       });
-    },
+    })
     // 是否有任何列处于筛选状态
-    columnFilterActive() { return Object.keys(this.columnFilters).length > 0; },
+const columnFilterActive = computed(() => { return Object.keys(ctx.columnFilters.value).length > 0; })
     // 实际渲染的行：columns 筛选后的结果。未筛选时直接返回原数组引用（零开销、不破坏行对象复用）
-    bodyRows() {
-      if (!this.columnFilterActive) return this.rows;
-      const active = Object.keys(this.columnFilters);
-      return this.rows.filter(r => {
+const bodyRows = computed(() => {
+      if (!ctx.columnFilterActive.value) return ctx.rows.value;
+      const active = Object.keys(ctx.columnFilters.value);
+      return ctx.rows.value.filter(r => {
         // 正在录入的新行不参与筛选，否则一勾筛选它就凭空消失
         if (r._isNew) return true;
         // 分隔带在筛选态下没有意义（它不代表任何数据）
         if (r._isSeparator) return false;
-        return active.every(f => this.matchColumnFilter(r, f));
+        return active.every(f => ctx.matchColumnFilter(r, f));
       });
-    },
+    })
     // 渲染下标 → rows 原始下标 的映射（仅供拖拽/序号回查用）。
     // 未筛选时为 null，调用方按恒等处理，避免多算一份数组。
-    srcIndexList() {
-      if (!this.columnFilterActive) return null;
+const srcIndexList = computed(() => {
+      if (!ctx.columnFilterActive.value) return null;
       const pos = new Map();
-      this.rows.forEach((r, i) => pos.set(r, i));
-      return this.bodyRows.map(r => (pos.has(r) ? pos.get(r) : -1));
-    },
+      ctx.rows.value.forEach((r, i) => pos.set(r, i));
+      return ctx.bodyRows.value.map(r => (pos.has(r) ? pos.get(r) : -1));
+    })
     // 筛选后一行都不剩：提示用。
     // 搜索无结果时不算「筛选没结果」——父组件的关键字搜索已经把行筛空了，
     // 这时该给的是「暂无 XX 的搜索结果 + 清除搜索」，不是「没有符合筛选条件的数据」。
-    filterNoResult() { return this.columnFilterActive && this.bodyRows.length === 0 && !this.searchNoResult; },
+const filterNoResult = computed(() => { return ctx.columnFilterActive.value && ctx.bodyRows.value.length === 0 && !ctx.searchNoResult.value; })
     // ===== 空态 =====
-    emptyMessage() {
-      if (this.emptyLabel) return `还没有${this.emptyLabel}数据`;
-      return this.emptyText || '还没有数据';
-    },
+const emptyMessage = computed(() => {
+      if (ctx.emptyLabel.value) return `还没有${ctx.emptyLabel.value}数据`;
+      return ctx.emptyText.value || '还没有数据';
+    })
     // 搜索无结果的文案：和「还没有 XX 数据」区分开。
     // 「还没有数据」暗示要去添加，「暂无搜索结果」暗示数据在、只是没匹配上 ——
     // 用户该做的动作完全不同（清除搜索 vs 添加记录）。
-    emptySearchMessage() {
-      return this.emptyLabel ? `暂无${this.emptyLabel}的搜索结果` : '暂无搜索结果';
-    },
+const emptySearchMessage = computed(() => {
+      return ctx.emptyLabel.value ? `暂无${ctx.emptyLabel.value}的搜索结果` : '暂无搜索结果';
+    })
     // 三个条件：数据已就绪、一行都没有、且不是「筛选把数据筛空了」
     // （筛选无结果有单独的提示行，不能说成「还没有数据」）。
-    showEmptyBase() {
-      return this.emptyReady && this.bodyRows.length === 0 && !this.filterNoResult;
-    },
+const showEmptyBase = computed(() => {
+      return ctx.emptyReady.value && ctx.bodyRows.value.length === 0 && !ctx.filterNoResult.value;
+    })
     // 「判定中」：空态条件已经成立，但还没到延迟上屏的时间。
     // 这期间**既不算表格也不算空态**，模板里只放一块同高的静默占位、不渲染表头 ——
     // 否则首帧会先画出表头，260ms 后确认没数据、表头又被空态换掉，闪一下。
     // 数据若在这 260ms 内到达，showEmptyBase 立刻变 false，表格（表头）随即出现，不会被拖慢。
-    emptyPending() {
-      return this.showEmptyBase && !this.emptyVisible;
-    },
+const emptyPending = computed(() => {
+      return ctx.showEmptyBase.value && !ctx.emptyVisible.value;
+    })
     // 空态的种类：'' = 不显示空态；'data' = 真的没数据；'search' = 搜索没匹配上。
     // 分开是因为两者的文案、按钮、用户的下一步动作都不同。
-    emptyKind() {
-      if (!this.showEmptyBase) return '';
-      return this.searchNoResult ? 'search' : 'data';
-    },
+const emptyKind = computed(() => {
+      if (!ctx.showEmptyBase.value) return '';
+      return ctx.searchNoResult.value ? 'search' : 'data';
+    })
     // ===== 行虚拟滚动 =====
     // 是否启用窗口化渲染：走滞后开关 virtualActive（见 syncVirtualActive），小表格保持整表 DOM。
     // virtualFrom <= 0 时整体关闭（走整表 DOM），与旧行为一致。
-    virtualOn() { return this.virtualFrom > 0 && this.virtualActive; },
+const virtualOn = computed(() => { return ctx.virtualFrom.value > 0 && ctx.virtualActive.value; })
     // 真正的渲染列表：窗口化时是 bodyRows 的一段切片，否则就是 bodyRows 本身（零拷贝）
-    renderRows() {
-      if (!this.virtualOn) return this.bodyRows;
-      return this.bodyRows.slice(this.virtualStart, this.virtualEnd);
-    },
+const renderRows = computed(() => {
+      if (!ctx.virtualOn.value) return ctx.bodyRows.value;
+      return ctx.bodyRows.value.slice(ctx.virtualStart.value, ctx.virtualEnd.value);
+    })
     // 渲染下标 → bodyRows 下标的偏移量。
     // 模板里的 rowIndex 是「渲染顺序」，窗口化时必须加回窗口起点才能对回真实数据。
-    winOffset() { return this.virtualOn ? this.virtualStart : 0; },
+const winOffset = computed(() => { return ctx.virtualOn.value ? ctx.virtualStart.value : 0; })
     // 行高前缀和：pre[i] = 前 i 行的累计高度。实测过的行用真实高度，其余用均值估算。
     // 只依赖 rowHeights / estRowH / bodyRows，滚动时不会重算（窗口定位走二分查找）。
-    rowPrefix() {
-      const rows = this.bodyRows;
+const rowPrefix = computed(() => {
+      const rows = ctx.bodyRows.value;
       const n = rows.length;
       const pre = new Array(n + 1);
       pre[0] = 0;
-      const est = this.estRowH;
+      const est = ctx.estRowH.value;
       for (let i = 0; i < n; i++) {
-        const h = this.rowHeights.get(rows[i]._rowKey);
+        const h = ctx.rowHeights.value.get(rows[i]._rowKey);
         pre[i + 1] = pre[i] + (h != null ? h : est);
       }
       return pre;
-    },
+    })
     // 上垫片高度 = 窗口之前所有行的高度和；下垫片 = 窗口之后的高度和。
     // 两段垫片保证 <table> 的总高度与真实全量渲染一致，滚动条长度不会随窗口变化而跳动。
     // 行数骤减时窗口下标可能暂时越界（浏览器还没把 scrollTop 夹回范围内），这里统一夹住。
-    padTop() {
-      if (!this.virtualOn) return 0;
-      const pre = this.rowPrefix;
-      return pre[Math.min(Math.max(0, this.virtualStart), pre.length - 1)];
-    },
-    padBottom() {
-      if (!this.virtualOn) return 0;
-      const pre = this.rowPrefix;
-      const end = Math.min(Math.max(0, this.virtualEnd), pre.length - 1);
+const padTop = computed(() => {
+      if (!ctx.virtualOn.value) return 0;
+      const pre = ctx.rowPrefix.value;
+      return pre[Math.min(Math.max(0, ctx.virtualStart.value), pre.length - 1)];
+    })
+const padBottom = computed(() => {
+      if (!ctx.virtualOn.value) return 0;
+      const pre = ctx.rowPrefix.value;
+      const end = Math.min(Math.max(0, ctx.virtualEnd.value), pre.length - 1);
       return Math.max(0, pre[pre.length - 1] - pre[end]);
-    },
+    })
     // 垫片行 / 空状态行的跨列数
-    tableColSpan() {
-      if (this.readonly) return this.fields.length + (this.actionsHeader ? 1 : 0);
-      return this.fields.length + (this.noSelect ? 1 : 2);
-    },
+const tableColSpan = computed(() => {
+      if (ctx.readonly.value) return ctx.fields.value.length + (ctx.actionsHeader.value ? 1 : 0);
+      return ctx.fields.value.length + (ctx.noSelect.value ? 1 : 2);
+    })
     // 面板里的排序高亮态：只有当前列就是排序列时才显示升/降序选中
-    filterSortOrder() {
-      return this.filterField && this.sortField === this.filterField ? this.sortOrder : '';
-    },
+const filterSortOrder = computed(() => {
+      return ctx.filterField.value && ctx.sortField.value === ctx.filterField.value ? ctx.sortOrder.value : '';
+    })
     // 行过渡容器是否启用：仅在搜索过滤/筛选面板打开期间启用错峰动画（见模板里的说明）。
     // 为什么不用「有筛选就开」：TransitionGroup 每次更新都要强制读写布局，而在有筛选的情况下
     // 用户还会继续双击编辑单元格，那时动画毫无收益。故只在「筛选面板打开」这个窗口内开启，
@@ -634,289 +639,189 @@ export default {
     // 注意判据是「窗口真的截断了行」而不是「virtualOn」——行全都在窗口里时虚拟滚动等同没开，
     // 这时动画照旧（否则把阈值调小做验证时，小表格的筛选动画会被无辜关掉）。
     // rowsAnimWindow：行增删（删除 / 撤销恢复 / 保存新行）后的短窗口，见 openRowsAnimWindow。
-    rowAnimEnabled() {
-      const truncating = this.virtualOn && (this.virtualEnd - this.virtualStart) < this.bodyRows.length;
-      return !truncating && (!!this.searchActive || this.filterAnimating || this.rowsAnimWindow);
-    },
+const rowAnimEnabled = computed(() => {
+      const truncating = ctx.virtualOn.value && (ctx.virtualEnd.value - ctx.virtualStart.value) < ctx.bodyRows.value.length;
+      return !truncating && (!!ctx.searchActive.value || ctx.filterAnimating.value || ctx.rowsAnimWindow.value);
+    })
     // 行容器组件：错峰动画窗口内（搜索中 / 筛选面板打开）用 TransitionGroup，否则用 RowsFragment 做「透明包裹」，
     // 让 <tr> 始终是 <tbody> 的直接子节点。两者都必须能在实例上取到（模板表达式不会
     // 自动解析 components 选项，直接写 TransitionGroup 会得到 undefined 而整表不渲染）。
-    rowWrapper() { return this.rowAnimEnabled ? TransitionGroup : RowsFragment; },
+const rowWrapper = computed(() => { return ctx.rowAnimEnabled.value ? TransitionGroup : RowsFragment; })
     // 选中行键集合：O(n) 建一次，模板内 O(1) 查用，避免整张表 O(n²) 的 includes 查找
-    selectedKeySet() { return new Set(this.selectedRowKeys); },
-    isAllSelected() {
-      const normalRows = (this.bodyRows || []).filter(r => !r._isSeparator);
-      return normalRows.length > 0 && normalRows.every(r => this.selectedKeySet.has(r._rowKey));
-    },
-    isIndeterminate() {
-      const normalRows = (this.bodyRows || []).filter(r => !r._isSeparator);
+const selectedKeySet = computed(() => { return new Set(ctx.selectedRowKeys.value); })
+const isAllSelected = computed(() => {
+      const normalRows = (ctx.bodyRows.value || []).filter(r => !r._isSeparator);
+      return normalRows.length > 0 && normalRows.every(r => ctx.selectedKeySet.value.has(r._rowKey));
+    })
+const isIndeterminate = computed(() => {
+      const normalRows = (ctx.bodyRows.value || []).filter(r => !r._isSeparator);
       // 只统计「当前可见行」里被选中的数量：筛选态下被隐藏的选中行不应该让全选框保持半选
-      const s = normalRows.filter(r => this.selectedKeySet.has(r._rowKey)).length;
+      const s = normalRows.filter(r => ctx.selectedKeySet.value.has(r._rowKey)).length;
       return s > 0 && s < normalRows.length;
-    },
-  },
-  watch: {
-    // 空态延迟上屏（见 data 里 emptyVisible 的说明）：条件成立不是立刻显示，
-    // 取消时立刻收回，不给「闪一下又消失」留窗口。
-    // 搜索无结果（emptyKind === 'search'）例外：那是用户主动输入关键字后的确定结论，
-    // 立刻给反馈才对；再等 260ms 会让人觉得「按了没反应」。
-    emptyKind: {
-      immediate: true,
-      handler(v) {
-        if (this._emptyTimer) { clearTimeout(this._emptyTimer); this._emptyTimer = null; }
-        if (!v) { this.emptyVisible = false; return; }
-        if (v === 'search') { this.emptyVisible = true; return; }
-        this._emptyTimer = setTimeout(() => { this._emptyTimer = null; this.emptyVisible = true; }, 260);
-      },
-    },
-    hasNewRow(val) {
-      // 取消新增行 → 底部添加行重现，仅此后播放上浮动画
-      if (!val) this.addRowAnimated = true;
-    },
-    'rows.length'() {
-      // 就地增删（数组引用没变）也会走到这里：滞后开关要跟进行数，否则跨阈值不切换
-      this.syncVirtualActive();
-      this.$nextTick(() => {
-        this.updateVScroll();
-        // 仅当确实存在新增行时才聚焦其数据输入框；
-        // 行数变化也可能来自搜索过滤/增删等场景，此时不得用 .focus() 抢占焦点（否则搜索输入框失焦）
-        if (this.hasNewRow) this.focusNewRowInput();
-      });
-    },
-    // 列筛选只改变渲染行，不改变 rows 长度，这里单独跟进底部渐隐条/纵向滚动的判定
-    'bodyRows.length'() {
-      this.$nextTick(() => this.updateVScroll());
-    },
-    // 行集合（增删/筛选/排序）变化：总高度变了，窗口要重算，行高也要重测。
-    // 重算必须同步跑（不能塞进 $nextTick）：数据到位后的首帧就要用正确的窗口渲染，
-    // 否则会先按旧窗口 [0,0) 出一帧空表、下一帧才补行——这就是虚拟滚动的「加载延迟」观感。
-    // 量高要读 DOM，只能等渲染后（$nextTick）。
-    bodyRows() {
-      this.syncVirtualActive();
-      this.recalcWindow();
-      this.$nextTick(() => {
-        this.measureRows();
-        // 数据整体替换（如刷新）后按当前容器宽度重钉列宽：
-        // 纵向滚动条状态可能在这一帧才稳定，旧列宽会让表格短暂溢出、横向滚动条闪一下
-        this.snapshotWidths();
-      });
-    },
-    // 阈值/行数跨过开关点时，窗口模式会切换（整表 ↔ 窗口化），重新算一次并重新量高。
-    // 同理同步重算，避免切换模式的首帧按旧窗口渲染。
-    virtualOn() {
-      this.recalcWindow();
-      this.$nextTick(() => this.measureRows());
-    },
-    editingCell: {
-      handler(newVal) {
-        if (newVal) {
-          // 进入编辑态：清除单击高亮（原先由模板条件在重渲染时移除，现改为命令式移除）
-          this._clearActiveCell();
-          this.$nextTick(() => {
-            const key = 'editInput-' + newVal.rowKey + '-' + newVal.field;
-            const inputs = this.$refs[key];
-            if (inputs && inputs[0]) inputs[0].focus();
-          });
-          document.addEventListener('click', this.handleClickOutside);
-        } else {
-          document.removeEventListener('click', this.handleClickOutside);
-        }
-      },
-      immediate: true,
-    },
-    rows: {
-      handler(newVal, oldVal) {
-        // 性能探针：rows 变化是「整表重渲染」的起点（筛选/排序/增删行都会换数组引用）。
-        // 从 watch 触发量到「下一帧渲染完成」，得到本次整表渲染+补丁的真实耗时，
-        // 供 perf/probe.js 与 INP 交互时间窗做归因。
-        this._perfMeasureRender();
-        // 先构建行键集合再过滤，避免选中项多 + 行数大时的 O(n×m) 逐条 some
-        const keys = new Set(newVal.map(r => r._rowKey));
-        this.selectedRowKeys = this.selectedRowKeys.filter(key => keys.has(key));
-        // 仅当「新增行被保存/取消」（由有 → 无）时才重算列宽并钉住；
-        // 普通增删/移动行前后都没有新增行，列宽不会因新增输入而变，无需测量
-        const prevHadNew = (oldVal || []).some(r => r._isNew);
-        const nowHasNew = newVal.some(r => r._isNew);
-        // 新增行出现（无 → 有）：在 DOM 插入新行前（watch 默认 flush:'pre'）量出并冻结旧列宽，
-        // 让新增行的空输入不会撑动表头宽度，避免表头跳动。
-        if (!prevHadNew && nowHasNew) {
-          this._freezeHeaderWidths();
-        } else if (prevHadNew && !nowHasNew && !this.editingCell) {
-          // 新增行消失（保存/取消）：先保持冻结列宽不动（不立即解锁），
-          // 待 280ms 后快照统一清除 min-width 并重算钉住，避免取消瞬间列宽回弹。
-          this.$nextTick(() => {
-            clearTimeout(this._snapshotTimer);
-            this._snapshotTimer = setTimeout(() => this.snapshotWidths(), 280);
-          });
-        }
-      },
-      immediate: true,
-    },
-    fields: {
-      handler(newFields) {
-        // 列被删/改名后，残留的筛选状态会让整表永久空表 → 只保留仍然存在的列
-        const names = new Set((newFields || []).map(f => f.name));
-        Object.keys(this.columnFilters).forEach(n => {
-          if (!names.has(n)) delete this.columnFilters[n];
-        });
-        if (this.filterField && !names.has(this.filterField)) this.closeFilter();
-        // 增删/改名/移动列后重算列宽
-        this.$nextTick(() => this.snapshotWidths());
-      },
-      immediate: true,
-    },
-    selectedRowKeys: {
-      handler() {
-        this.$emit('selectionChange', {
-          count: this.selectedRowKeys.length,
-          keys: [...this.selectedRowKeys]
-        });
-      },
-      immediate: true,
-    },
-  },
-  created() {
-    // 收据数量缓存：WeakMap 键为行对象，避免每次渲染逐行 JSON.parse（不参与响应式）
-    this._receiptCache = new WeakMap();
-    // 虚拟滚动用的滚动位置/视口高度/ResizeObserver：纯运行时值，不进响应式
-    this._scrollTop = 0;
-    this._viewportH = 0;
-    this._ro = null;
-    // 估算行高是否已锁定（只取第一次实测均值，之后不再漂移，见 measureRows）
-    this._estLocked = false;
-    // 首帧之前就先按容器固定高度估一次窗口——否则第一帧会把全部行都画出来，
-    // 正好抵消掉虚拟滚动想省的那次整表渲染（挂载后再收缩窗口已经晚了）。
-    this._viewportH = this.fixedMaxHeight;
-    this.syncVirtualActive();
-    this.recalcWindow();
-  },
-  mounted() {
-    this.focusNewRowInput();
-    this.updateVScroll();
-    this.initVirtual();
-    // 首屏：数据区整体从左往右弹入
-    this.playTableEnter();
-    // 整表 Enter 保存新增行：焦点不在输入框时按回车也触发保存
-    document.addEventListener('keydown', this.handleGlobalEnter);
-    // 筛选面板：点面板外部 / 按 Esc / 容器滚动时收起
-    document.addEventListener('click', this.onFilterDocClick);
-    document.addEventListener('keydown', this.handleFilterKeydown);
-    window.addEventListener('scroll', this.onFilterScroll, true);
-    // 列交换 FLIP 动画延迟就绪：等本页首次 table 滑入播完（350ms）、表头稳定后再启用，
-    // 否则挂载时 TransitionGroup 会对静态表头播放 move，造成进入页面时表头乱跳。
-    this._colAnimTimer = setTimeout(() => { this.colAnimDone = true; }, 400);
-  },
-  // KeepAlive：从其它状态栏/页签切换回来时重播数据区整体弹入动效
-  // （取消新增行后「添加一行」重现的上浮动效由 hasNewRow 驱动，不在此处触发，
-  //   否则它会和 tbody 整体滑入叠加造成闪动）
-  activated() {
-    if (this.firstActivate) { this.firstActivate = false; return; }
-    this.playTableEnter();
-    // 从其它页签切回时也会重载数据/重建表头，同样延迟启用列 FLIP，避免表头乱跳
-    this.colAnimDone = false;
-    if (this._colAnimTimer) clearTimeout(this._colAnimTimer);
-    this._colAnimTimer = setTimeout(() => { this.colAnimDone = true; }, 400);
-    // 缓存的 DOM 尺寸可能已随页签切换变化，重新量一次窗口
-    this.$nextTick(() => { this.initVirtual(); });
-  },
-  beforeUnmount() {
-    if (this._ro) { this._ro.disconnect(); this._ro = null; }
-    // 空态延迟定时器：卸载后还在跑会往已销毁的实例上写状态
-    if (this._emptyTimer) { clearTimeout(this._emptyTimer); this._emptyTimer = null; }
-    // 行动画窗定时器同理
-    if (this._rowsAnimTimer) { clearTimeout(this._rowsAnimTimer); this._rowsAnimTimer = null; }
-    // 取消新增行的 140ms 兜底定时器：卸载后触发会往已销毁的实例上 emit
-    if (this._cancelRowTimer) { clearTimeout(this._cancelRowTimer); this._cancelRowTimer = null; }
-    document.removeEventListener('click', this.handleClickOutside);
-    document.removeEventListener('keydown', this.handleGlobalEnter);
-    document.removeEventListener('click', this.onFilterDocClick);
-    document.removeEventListener('keydown', this.handleFilterKeydown);
-    window.removeEventListener('scroll', this.onFilterScroll, true);
-    // 拖拽中途被卸载：停掉自动滚动并清掉让位位移，避免残留定时器/内联样式
-    if (this._rowAutoScroll) { this._rowAutoScroll.stop(); this._rowAutoScroll = null; }
-    if (this._colAutoScroll) { this._colAutoScroll.stop(); this._colAutoScroll = null; }
-    this._clearRowShiftFx();
-    this._clearColShiftFx();
-    if (this._dragGhost) this._dragGhost.remove();
-    if (this._rowGhost) this._rowGhost.remove();
-    if (this._rowSlotGhost) this._rowSlotGhost.remove();
-    if (this._rowMove) window.removeEventListener('mousemove', this._rowMove);
-    if (this._rowUp) window.removeEventListener('mouseup', this._rowUp);
-    if (this._rowRaf) cancelAnimationFrame(this._rowRaf);
-    if (this._colGhost) this._colGhost.remove();
-    if (this._colSlotGhost) this._colSlotGhost.remove();
-    if (this._colMove) window.removeEventListener('mousemove', this._colMove);
-    if (this._colUp) window.removeEventListener('mouseup', this._colUp);
-    if (this._colRaf) cancelAnimationFrame(this._colRaf);
-    if (this._rowDropBox) this._rowDropBox.remove();
-    if (this._colDropBox) this._colDropBox.remove();
-    clearTimeout(this._snapshotTimer);
-    clearTimeout(this._filterAnimTimer);
-    if (this._colAnimTimer) clearTimeout(this._colAnimTimer);
-    if (this._snapshotRaf) cancelAnimationFrame(this._snapshotRaf);
-    if (this._tableEnterCleanup) this._tableEnterCleanup();
-  },
-  methods: {
-    ...useDynamicTableDrag(),
+    })
+
+// ===== ctx 袋：拖拽模块与本组件方法经它互调 =====
+const ctx = {
+  // $el/$refs 经实例代理取（动态 :ref 的 editInput-* 也存放在 $refs 里）
+  get $el() { return inst.proxy.$el },
+  get $refs() { return inst.proxy.$refs },
+  // 模板 ref
+  scrollWrapper, tbodyRef, theadRow,
+  // props（toRef，供模块经 ctx.x.value 读）
+  fields: toRef(props, "fields"),
+  rows: toRef(props, "rows"),
+  newRow: toRef(props, "newRow"),
+  sortField: toRef(props, "sortField"),
+  sortOrder: toRef(props, "sortOrder"),
+  editingCell: toRef(props, "editingCell"),
+  maxRows: toRef(props, "maxRows"),
+  hideSelectAll: toRef(props, "hideSelectAll"),
+  hideMoveButtons: toRef(props, "hideMoveButtons"),
+  hideEditButton: toRef(props, "hideEditButton"),
+  opColumnWidth: toRef(props, "opColumnWidth"),
+  hideAddRow: toRef(props, "hideAddRow"),
+  noRowDrag: toRef(props, "noRowDrag"),
+  editOnClick: toRef(props, "editOnClick"),
+  readonly: toRef(props, "readonly"),
+  actionsHeader: toRef(props, "actionsHeader"),
+  emptyText: toRef(props, "emptyText"),
+  emptyLabel: toRef(props, "emptyLabel"),
+  emptyActionText: toRef(props, "emptyActionText"),
+  emptyReady: toRef(props, "emptyReady"),
+  loadError: toRef(props, "loadError"),
+  errorText: toRef(props, "errorText"),
+  fitContent: toRef(props, "fitContent"),
+  noSelect: toRef(props, "noSelect"),
+  maxHeight: toRef(props, "maxHeight"),
+  protectedColumns: toRef(props, "protectedColumns"),
+  displayIndexes: toRef(props, "displayIndexes"),
+  searchActive: toRef(props, "searchActive"),
+  searchNoResult: toRef(props, "searchNoResult"),
+  virtualFrom: toRef(props, "virtualFrom"),
+  virtualOffBelow: toRef(props, "virtualOffBelow"),
+  virtualOverscan: toRef(props, "virtualOverscan"),
+  // 状态 / computed ref
+  internalEditCell,
+  selectedRowKeys,
+  emptyVisible,
+  dragIndex,
+  dragOverIndex,
+  colDragIndex,
+  colDragOverIndex,
+  addRowAnimated,
+  addRowAnimKey,
+  discardConfirmVisible,
+  colAnimDone,
+  firstActivate,
+  vScroll,
+  rowsAnimWindow,
+  rowsAnimSilent,
+  fixedMaxHeight,
+  columnFilters,
+  filterField,
+  filterAnimating,
+  filterOptions,
+  filterAnchorEl,
+  virtualStart,
+  virtualEnd,
+  virtualActive,
+  virtualFrozen,
+  rowHeights,
+  estRowH,
+  hasNewRow,
+  newRowHasData,
+  columnFilterActive,
+  bodyRows,
+  srcIndexList,
+  filterNoResult,
+  emptyMessage,
+  emptySearchMessage,
+  showEmptyBase,
+  emptyPending,
+  emptyKind,
+  virtualOn,
+  renderRows,
+  winOffset,
+  rowPrefix,
+  padTop,
+  padBottom,
+  tableColSpan,
+  filterSortOrder,
+  rowAnimEnabled,
+  rowWrapper,
+  selectedKeySet,
+  isAllSelected,
+  isIndeterminate,
+  // 事件
+  emit,
+}
+
+// 拖拽模块（行/列拖拽、落点高亮框与交换 FLIP 动画）与组件自身方法统一挂上 ctx
+Object.assign(ctx, useDynamicTableDrag(ctx), { isProtectedField, syncVirtualActive, onBodyScroll, recalcWindow, lowerBound, commitEditIfLeaving, measureRows, initVirtual, preloadFilterPanel, isColumnFiltered, filterButtonTitle, openFilter, closeFilter, onFilterToggle, onFilterSort, clearColumnFilter, buildFilterOptions, matchColumnFilter, cellFilterValue, compareFilterValue, srcIndex, rowAt, positionOf, onFilterDocClick, handleFilterKeydown, onFilterScroll, playTableEnter, snapshotWidths, _doSnapshotWidths, _freezeHeaderWidths, _unfreezeHeaderWidths, cellSelectOptions, isEditing, focusEditInput, _clearActiveCell, onCellClick, onCellBlur, onCellEnter, handleGlobalEnter, handleClickOutside, emitSaveAndClear, isRowSelected, toggleRowSelect, toggleAllSelect, clearSelection, getReceiptCount, staggerEnter, staggerAfterEnter, staggerLeave, staggerAfterLeave, _perfMeasureRender, onAddRowBarClick, requestCancelNewRow, confirmDiscardNewRow, animateCancelNewRow, focusNewRowInput, _focusNewRowEl, updateVScroll, beginRowsAnimWindow })
+
+// ===== 模板顶层绑定：拖拽模块提供、模板用到的方法 =====
+const { onRowHandleDown, onColHandleDown } = ctx
+
+// ===== 方法 =====
     // 判断字段是否受保护（受保护字段在表头显示 * 提示）
-    isProtectedField(field) { return this.protectedColumns.includes(field.name); },
+function isProtectedField(field) { return ctx.protectedColumns.value.includes(field.name); }
 
     // ==================== 行虚拟滚动 ====================
     // 滞后开关（防抖）：行数 ≥ virtualFrom 才开虚拟，≤ virtualOffBelow 才退回整表，
     // 两者之间维持现状——否则行数在阈值附近增删（加一行/删一行/筛一下）会整表 ↔ 窗口来回切，
     // 每次切换都要重建 DOM。每次切模式的代价远大于中间区间多算几行，故用双阈值锁住。
-    syncVirtualActive() {
-      if (this.virtualFrom <= 0) { this.virtualActive = false; return; }
-      const n = this.bodyRows.length;
-      const onAt = this.virtualFrom;
+function syncVirtualActive() {
+      if (ctx.virtualFrom.value <= 0) { ctx.virtualActive.value = false; return; }
+      const n = ctx.bodyRows.value.length;
+      const onAt = ctx.virtualFrom.value;
       // offAt 至少比 onAt 小 1，防调用方把两个阈值配成同一个数（否则恰好等于阈值时抖动）
-      const offAt = Math.min(this.virtualOffBelow, onAt - 1);
-      if (n >= onAt) this.virtualActive = true;
-      else if (n <= offAt) this.virtualActive = false;
+      const offAt = Math.min(ctx.virtualOffBelow.value, onAt - 1);
+      if (n >= onAt) ctx.virtualActive.value = true;
+      else if (n <= offAt) ctx.virtualActive.value = false;
       // 中间区间：维持现状
-    },
+    }
     // 滚动：同步重算窗口，只有窗口真的变了才触发渲染。
     // 不走 rAF：rAF 会晚一帧出新行，快速滑动/甩动时那一帧就露出垫片空白、下一帧「突然出字」；
     // 同步算完 + Vue 微任务补丁在同一帧内绘制，滚动全程不露白。
     // recalcWindow 只是二分查找 + 写两个响应式值（O(log n)），放进滚动事件里开销可忽略。
     // 视口高由 initVirtual / ResizeObserver 维护，不在滚动事件里读 clientHeight（避免触发布局）。
-    onBodyScroll(e) {
+function onBodyScroll(e) {
       if (!e.target) return;
-      this._scrollTop = e.target.scrollTop;
-      if (!this.virtualOn) return;
-      this.recalcWindow();
-    },
+      ctx._scrollTop = e.target.scrollTop;
+      if (!ctx.virtualOn.value) return;
+      ctx.recalcWindow();
+    }
     // 按当前滚动位置算渲染窗口；窗口没变就什么都不做（滚动过程中的绝大部分帧走这条路）
-    recalcWindow() {
-      const n = this.bodyRows.length;
-      if (!this.virtualOn) {
-        if (this.virtualStart !== 0 || this.virtualEnd !== n) { this.virtualStart = 0; this.virtualEnd = n; }
+function recalcWindow() {
+      const n = ctx.bodyRows.value.length;
+      if (!ctx.virtualOn.value) {
+        if (ctx.virtualStart.value !== 0 || ctx.virtualEnd.value !== n) { ctx.virtualStart.value = 0; ctx.virtualEnd.value = n; }
         return;
       }
       // 拖行期间窗口锁死：行在拖动中途被卸载会打乱 _rowGeom / _rowEls 的下标对应
-      if (this.virtualFrozen) return;
-      const pre = this.rowPrefix;
-      const top = this._scrollTop;
-      const bottom = top + (this._viewportH || this.fixedMaxHeight);
+      if (ctx.virtualFrozen.value) return;
+      const pre = ctx.rowPrefix.value;
+      const top = ctx._scrollTop;
+      const bottom = top + (ctx._viewportH || ctx.fixedMaxHeight.value);
       // 二分：第一个累计高度 > top 的行下标，即当前可视窗口的起点
-      let s = this.lowerBound(pre, top) - 1;
-      let e = this.lowerBound(pre, bottom);
+      let s = ctx.lowerBound(pre, top) - 1;
+      let e = ctx.lowerBound(pre, bottom);
       // 缓冲行数动态取大：固定 8 行在高视口/矮行高下不够（400px ÷ 33px ≈ 12 行可视，缓冲不足一屏），
       // 至少留「两整屏」的缓冲——窗口切换更稀、甩动/触控板惯性滚动的跳跃也落在已渲染范围内。
       // DOM 量仍远小于整表（400px 视口 → 约 60 行 vs 全量 2500 行）。
-      const overscan = Math.max(this.virtualOverscan, Math.ceil((this._viewportH || this.fixedMaxHeight) / (this.estRowH || 33)) * 2);
+      const overscan = Math.max(ctx.virtualOverscan.value, Math.ceil((ctx._viewportH || ctx.fixedMaxHeight.value) / (ctx.estRowH.value || 33)) * 2);
       s = Math.max(0, s - overscan);
       e = Math.min(n, e + overscan);
       if (e < s) e = s;
-      if (s === this.virtualStart && e === this.virtualEnd) return;
+      if (s === ctx.virtualStart.value && e === ctx.virtualEnd.value) return;
       // 编辑中的单元格所在行即将被卸载：输入框消失不会触发 blur，得先落盘再换窗口
-      this.commitEditIfLeaving(s, e);
-      this.virtualStart = s;
-      this.virtualEnd = e;
-      this.$nextTick(() => this.measureRows());
-    },
+      ctx.commitEditIfLeaving(s, e);
+      ctx.virtualStart.value = s;
+      ctx.virtualEnd.value = e;
+      nextTick(() => ctx.measureRows());
+    }
     // 返回第一个 arr[i] > value 的下标（arr 单调不减）
-    lowerBound(arr, value) {
+function lowerBound(arr, value) {
       let lo = 0, hi = arr.length - 1;
       while (lo < hi) {
         const mid = (lo + hi) >> 1;
@@ -924,155 +829,155 @@ export default {
         else hi = mid;
       }
       return lo;
-    },
+    }
     // 窗口切换会把「正在编辑的行」卸载掉：先按失焦语义提交，避免改了的值丢失
-    commitEditIfLeaving(start, end) {
-      const key = this.editingCell ? this.editingCell.rowKey
-        : (this.internalEditCell ? this.internalEditCell.rowKey : null);
+function commitEditIfLeaving(start, end) {
+      const key = ctx.editingCell.value ? ctx.editingCell.value.rowKey
+        : (ctx.internalEditCell.value ? ctx.internalEditCell.value.rowKey : null);
       if (!key) return;
-      const idx = this.bodyRows.findIndex(r => r._rowKey === key);
+      const idx = ctx.bodyRows.value.findIndex(r => r._rowKey === key);
       if (idx >= start && idx < end) return;
-      if (this.editingCell) this.emitSaveAndClear();
-      if (this.internalEditCell) { this.internalEditCell = null; this._clearActiveCell(); }
-    },
+      if (ctx.editingCell.value) ctx.emitSaveAndClear();
+      if (ctx.internalEditCell.value) { ctx.internalEditCell.value = null; ctx._clearActiveCell(); }
+    }
     // 量一次当前渲染行的真实高度，更新缓存；行高变了还要补偿滚动位置避免跳一下。
     // 估算行高只在「第一次量到行」时锁定一次：若让它跟着每次测量漂移，
     // 垫片上方的未测行总高度会跟着变，滚动位置就会莫名其妙地跳。
-    measureRows() {
-      if (!this.virtualOn) return;
-      const tbody = this.$refs.tbodyRef;
-      const list = this.renderRows;
+function measureRows() {
+      if (!ctx.virtualOn.value) return;
+      const tbody = ctx.tbodyRef.value;
+      const list = ctx.renderRows.value;
       if (!tbody || !list.length) return;
       const trs = tbody.querySelectorAll('tr.data-drag-item');
       // 数量对不上说明有行正在离场动画里，这一帧跳过，下一帧再量
       if (trs.length !== list.length) return;
       // 先记下当前 padTop（改缓存之前读），测量后用它算位移补偿
-      const winStart = this.virtualStart;
-      const before = this.rowPrefix[winStart];
+      const winStart = ctx.virtualStart.value;
+      const before = ctx.rowPrefix.value[winStart];
       let sum = 0, cnt = 0, changed = false;
       for (let i = 0; i < trs.length; i++) {
         const h = Math.round(trs[i].getBoundingClientRect().height);
         if (h <= 0) continue;
         sum += h; cnt++;
-        if (this.rowHeights.get(list[i]._rowKey) !== h) {
-          this.rowHeights.set(list[i]._rowKey, h);
+        if (ctx.rowHeights.value.get(list[i]._rowKey) !== h) {
+          ctx.rowHeights.value.set(list[i]._rowKey, h);
           changed = true;
         }
       }
-      if (cnt && !this._estLocked) {
-        this.estRowH = Math.round(sum / cnt);
-        this._estLocked = true;
+      if (cnt && !ctx._estLocked) {
+        ctx.estRowH.value = Math.round(sum / cnt);
+        ctx._estLocked = true;
       }
       if (!changed) return;
       // 上面的行变高/变矮会让可视内容整体位移，用 padTop 的差值把滚动位置补回去
-      this.$nextTick(() => {
-        if (this.virtualFrozen) return;
+      nextTick(() => {
+        if (ctx.virtualFrozen.value) return;
         // 测量期间窗口已被重算（滚动/换窗口）：此时 rowPrefix[virtualStart] 变的是窗口起点而不是行高，
         // 再补偿就会把 scrollTop 二次顶飞（曾表现为首屏直接滚到表格末尾）
-        if (this.virtualStart !== winStart) return;
-        const after = this.rowPrefix[winStart];
+        if (ctx.virtualStart.value !== winStart) return;
+        const after = ctx.rowPrefix.value[winStart];
         const delta = after - before;
-        const wrap = this.$refs.scrollWrapper;
+        const wrap = ctx.scrollWrapper.value;
         if (!delta || !wrap) return;
         wrap.scrollTop += delta;
-        this._scrollTop = wrap.scrollTop;
+        ctx._scrollTop = wrap.scrollTop;
       });
-    },
+    }
     // 初始化：先按容器固定高度估一次窗口（首帧就不能把全部行画出来），再把滚动/尺寸接上
-    initVirtual() {
-      const wrap = this.$refs.scrollWrapper;
+function initVirtual() {
+      const wrap = ctx.scrollWrapper.value;
       if (!wrap) return;
-      this._viewportH = wrap.clientHeight || this.fixedMaxHeight;
-      this._scrollTop = wrap.scrollTop;
-      this.recalcWindow();
-      this.$nextTick(() => this.measureRows());
-      if (typeof ResizeObserver !== 'undefined' && !this._ro) {
-        this._ro = new ResizeObserver(() => {
-          this._viewportH = wrap.clientHeight;
-          this.recalcWindow();
-          this.$nextTick(() => this.measureRows());
+      ctx._viewportH = wrap.clientHeight || ctx.fixedMaxHeight.value;
+      ctx._scrollTop = wrap.scrollTop;
+      ctx.recalcWindow();
+      nextTick(() => ctx.measureRows());
+      if (typeof ResizeObserver !== 'undefined' && !ctx._ro) {
+        ctx._ro = new ResizeObserver(() => {
+          ctx._viewportH = wrap.clientHeight;
+          ctx.recalcWindow();
+          nextTick(() => ctx.measureRows());
         });
-        this._ro.observe(wrap);
+        ctx._ro.observe(wrap);
       }
-    },
+    }
 
     // ==================== 列筛选（表头放大镜/漏斗） ====================
     // 供 v-preload 使用：把懒加载 loader 包成实例方法，模板里才能引用到
-    preloadFilterPanel() { return loadColumnFilter(); },
-    isColumnFiltered(name) { return !!this.columnFilters[name]; },
-    filterButtonTitle(name) {
-      return this.isColumnFiltered(name) ? `${name}：已筛选（点击修改）` : `${name}：筛选 / 排序`;
-    },
-    openFilter(field, event) {
+function preloadFilterPanel() { return loadColumnFilter(); }
+function isColumnFiltered(name) { return !!ctx.columnFilters.value[name]; }
+function filterButtonTitle(name) {
+      return ctx.isColumnFiltered(name) ? `${name}：已筛选（点击修改）` : `${name}：筛选 / 排序`;
+    }
+function openFilter(field, event) {
       if (event) event.stopPropagation();
       // 再点一次同一个按钮 = 收起
-      if (this.filterField === field.name) { this.closeFilter(); return; }
-      this.filterAnchorEl = (event && event.currentTarget) || null;
-      this.filterOptions = this.buildFilterOptions(field.name);
-      this.filterField = field.name;
+      if (ctx.filterField.value === field.name) { ctx.closeFilter(); return; }
+      ctx.filterAnchorEl.value = (event && event.currentTarget) || null;
+      ctx.filterOptions.value = ctx.buildFilterOptions(field.name);
+      ctx.filterField.value = field.name;
       // 面板开着的这段时间就是「会有行进出」的窗口：提前打开错峰动画，
       // 这样第一次勾选也和后续勾选一样有进出动画（而不是切换容器导致的整表重挂载）
-      clearTimeout(this._filterAnimTimer);
-      this.filterAnimating = true;
-    },
-    closeFilter() {
-      if (!this.filterField) return;
-      this.filterField = '';
+      clearTimeout(ctx._filterAnimTimer);
+      ctx.filterAnimating.value = true;
+    }
+function closeFilter() {
+      if (!ctx.filterField.value) return;
+      ctx.filterField.value = '';
       // 留一段尾巴让最后一次收起的行动画播完，再退化回 Fragment 省掉强制布局
-      clearTimeout(this._filterAnimTimer);
-      this._filterAnimTimer = setTimeout(() => { this.filterAnimating = false; }, 600);
-    },
+      clearTimeout(ctx._filterAnimTimer);
+      ctx._filterAnimTimer = setTimeout(() => { ctx.filterAnimating.value = false; }, 600);
+    }
     // 勾选/取消某个值：以「全部值」为起点取反，再把结果存回筛选状态
-    onFilterToggle(value) {
-      const field = this.filterField;
+function onFilterToggle(value) {
+      const field = ctx.filterField.value;
       if (!field) return;
-      const current = this.columnFilters[field];
-      const sel = current ? new Set(current) : new Set(this.filterOptions.map(o => o.value));
+      const current = ctx.columnFilters.value[field];
+      const sel = current ? new Set(current) : new Set(ctx.filterOptions.value.map(o => o.value));
       if (sel.has(value)) sel.delete(value);
       else sel.add(value);
       // 全部勾上 == 没筛选：直接清掉该列状态，图标回到放大镜
-      if (this.filterOptions.length && sel.size === this.filterOptions.length) delete this.columnFilters[field];
-      else this.columnFilters[field] = sel;
+      if (ctx.filterOptions.value.length && sel.size === ctx.filterOptions.value.length) delete ctx.columnFilters.value[field];
+      else ctx.columnFilters.value[field] = sel;
       // 计数只受「其它列」影响，本列勾选不变，故这里重算只为刷新勾选态
-      this.filterOptions = this.buildFilterOptions(field);
-    },
+      ctx.filterOptions.value = ctx.buildFilterOptions(field);
+    }
     // 排序：把「升/降序」的明确意图交给父组件（父组件的 toggleSort 支持第二参数）
-    onFilterSort(order) {
-      if (!this.filterField) return;
-      this.$emit('toggleSort', this.filterField, order);
-    },
-    clearColumnFilter() {
-      const field = this.filterField;
+function onFilterSort(order) {
+      if (!ctx.filterField.value) return;
+      emit('toggleSort', ctx.filterField.value, order);
+    }
+function clearColumnFilter() {
+      const field = ctx.filterField.value;
       if (!field) return;
-      delete this.columnFilters[field];
-      this.filterOptions = this.buildFilterOptions(field);
-    },
+      delete ctx.columnFilters.value[field];
+      ctx.filterOptions.value = ctx.buildFilterOptions(field);
+    }
     // 面板里的值列表：只统计「通过其它列筛选」的行，实现后筛选的列跟着前面的条件收窄
-    buildFilterOptions(field) {
-      const others = Object.keys(this.columnFilters).filter(f => f !== field);
+function buildFilterOptions(field) {
+      const others = Object.keys(ctx.columnFilters.value).filter(f => f !== field);
       const counts = new Map();
-      for (const r of this.rows || []) {
+      for (const r of ctx.rows.value || []) {
         if (r._isSeparator || r._isNew) continue;
-        if (!others.every(f => this.matchColumnFilter(r, f))) continue;
-        const v = this.cellFilterValue(r, field);
+        if (!others.every(f => ctx.matchColumnFilter(r, f))) continue;
+        const v = ctx.cellFilterValue(r, field);
         counts.set(v, (counts.get(v) || 0) + 1);
       }
-      const sel = this.columnFilters[field];
+      const sel = ctx.columnFilters.value[field];
       return [...counts.entries()]
         .map(([value, count]) => ({ value, count, selected: !sel || sel.has(value) }))
-        .sort((a, b) => this.compareFilterValue(a.value, b.value));
-    },
-    matchColumnFilter(row, field) {
-      const sel = this.columnFilters[field];
+        .sort((a, b) => ctx.compareFilterValue(a.value, b.value));
+    }
+function matchColumnFilter(row, field) {
+      const sel = ctx.columnFilters.value[field];
       if (!sel) return true;
-      return sel.has(this.cellFilterValue(row, field));
-    },
+      return sel.has(ctx.cellFilterValue(row, field));
+    }
     // 单元格值统一成字符串比较：null / undefined 视为空白（空串）
-    cellFilterValue(row, field) {
+function cellFilterValue(row, field) {
       const v = row ? row[field] : undefined;
       return v == null ? '' : String(v);
-    },
-    compareFilterValue(a, b) {
+    }
+function compareFilterValue(a, b) {
       if (a === b) return 0;
       if (a === '') return 1;      // 空白永远排最后
       if (b === '') return -1;
@@ -1082,75 +987,75 @@ export default {
       if (aNum && bNum) return na - nb;
       if (aNum !== bNum) return aNum ? -1 : 1;   // 数字排在文字前
       return zhCollator.compare(a, b);
-    },
+    }
     // 渲染下标 → rows 原始下标（未筛选且未窗口化时恒等）
-    srcIndex(i) {
+function srcIndex(i) {
       // 先加回窗口偏移：模板里的下标是「渲染顺序」，而 bodyRows 是完整列表
-      const j = i + this.winOffset;
-      const list = this.srcIndexList;
+      const j = i + ctx.winOffset.value;
+      const list = ctx.srcIndexList.value;
       if (!list) return j;
       const v = list[j];
       return v == null || v < 0 ? j : v;
-    },
+    }
     // 按渲染下标取到真实行对象（拖拽内部按渲染顺序处理，回查行数据时必须走这里）
-    rowAt(i) { return this.rows[this.srcIndex(i)]; },
+function rowAt(i) { return ctx.rows.value[ctx.srcIndex(i)]; }
     // 序号列：筛选后仍显示该行在全表中的原始序号
-    positionOf(rowIndex) {
-      const src = this.srcIndex(rowIndex);
-      if (this.displayIndexes) return this.displayIndexes[src];
-      const row = this.rows[src];
+function positionOf(rowIndex) {
+      const src = ctx.srcIndex(rowIndex);
+      if (ctx.displayIndexes.value) return ctx.displayIndexes.value[src];
+      const row = ctx.rows.value[src];
       return row ? row._displayIndex : '';
-    },
+    }
     // 点面板外部收起
-    onFilterDocClick(e) {
-      if (!this.filterField) return;
+function onFilterDocClick(e) {
+      if (!ctx.filterField.value) return;
       const t = e.target;
       if (t && t.closest && (t.closest('.dtf-panel') || t.closest('.dt-filter-btn'))) return;
-      this.closeFilter();
-    },
-    handleFilterKeydown(e) {
-      if (e.key === 'Escape' && this.filterField) this.closeFilter();
-    },
+      ctx.closeFilter();
+    }
+function handleFilterKeydown(e) {
+      if (e.key === 'Escape' && ctx.filterField.value) ctx.closeFilter();
+    }
     // 表格/页面滚动后锚点位置已失效：收起面板（面板内部列表滚动不算）
-    onFilterScroll(e) {
-      if (!this.filterField) return;
+function onFilterScroll(e) {
+      if (!ctx.filterField.value) return;
       const t = e.target;
       if (t && t.nodeType === 1 && t.closest && t.closest('.dtf-panel')) return;
-      this.closeFilter();
-    },
+      ctx.closeFilter();
+    }
     // 数据区(tbody)整体从左往右弹入：不动 DOM 结构、不加 key，
     // 通过临时加一次性 keyframe 类播放动画（与课程表单行 row-flip 方向一致）。
     // 动画结束后移除类，保证下次导航能重新触发。
-    playTableEnter() {
-      const tbody = this.$refs.tbodyRef;
+function playTableEnter() {
+      const tbody = ctx.tbodyRef.value;
       if (!tbody) return;
       // 清理上次监听
-      if (this._tableEnterCleanup) this._tableEnterCleanup();
-      const onEnd = (e) => { if (e && e.target !== tbody) return; this._tableEnterCleanup(); };
-      this._tableEnterCleanup = () => {
+      if (ctx._tableEnterCleanup) ctx._tableEnterCleanup();
+      const onEnd = (e) => { if (e && e.target !== tbody) return; ctx._tableEnterCleanup(); };
+      ctx._tableEnterCleanup = () => {
         const t = tbody;
         if (!t) return;
         t.classList.remove('table-enter');
         t.removeEventListener('animationend', onEnd);
-        this._tableEnterCleanup = null;
+        ctx._tableEnterCleanup = null;
       };
       tbody.addEventListener('animationend', onEnd);
       // 强制重排后再加类，保证重复导航时动画能重播
       void tbody.offsetWidth;
       tbody.classList.add('table-enter');
-    },
+    }
     // 按当前「内容」量出自然自适应列宽，并立刻切到 fixed 布局钉住，
     // 这样新增行里空 input 不会撑宽窄列，动画前后列宽都稳定
-    snapshotWidths() {
-      if (!this.$el) return;
+function snapshotWidths() {
+      if (!ctx.$el) return;
       // 等首帧绘制完成后再测量/钉住列宽，避免首次进入页面时列宽跳变产生的 layout shift
-      if (this._snapshotRaf) cancelAnimationFrame(this._snapshotRaf);
-      this._snapshotRaf = requestAnimationFrame(() => this._doSnapshotWidths());
-    },
-    _doSnapshotWidths() {
-      this._snapshotRaf = null;
-      const tbl = this.$el.querySelector('table');
-      const ths = this.$el.querySelectorAll('thead th');
+      if (ctx._snapshotRaf) cancelAnimationFrame(ctx._snapshotRaf);
+      ctx._snapshotRaf = requestAnimationFrame(() => ctx._doSnapshotWidths());
+    }
+function _doSnapshotWidths() {
+      ctx._snapshotRaf = null;
+      const tbl = ctx.$el.querySelector('table');
+      const ths = ctx.$el.querySelectorAll('thead th');
       if (!tbl || !ths.length) return;
       tbl.style.tableLayout = 'auto'; // 自动布局：列可随容器宽度收缩，内容宽时换行，不撑出横向滚动
       const widths = [...ths].map(th => th.getBoundingClientRect().width);
@@ -1160,8 +1065,8 @@ export default {
         // 操作列固定统一宽度：新增行（保存/取消）与普通行（↑↓/删除）按钮宽度不同，
         // 按实测会随行态滑动；统一固定常量保证任何行态下列宽一致、无水平位移。
         if (th.classList.contains('col-op')) {
-          th.style.width = this.opColumnWidth + 'px';
-          th.style.minWidth = this.opColumnWidth + 'px';
+          th.style.width = ctx.opColumnWidth.value + 'px';
+          th.style.minWidth = ctx.opColumnWidth.value + 'px';
           return;
         }
         const w = widths[i];
@@ -1171,20 +1076,20 @@ export default {
         if (Number.isFinite(cur) && Math.abs(cur - w) <= 2) return;
         th.style.width = w + 'px';
       });
-    },
+    }
     // 冻结表头列宽：量出当前各列宽度并写入 width 偏好，使新增行的空输入不再撑动列宽。
     // 仅对操作列额外锁 min-width 锁定下界，保证新增前后操作列宽度一致、不左右位移；
     // 数据列不锁 min-width，容器不足时仍可收缩换行，避免全屏/小窗口横向滚动条。
-    _freezeHeaderWidths() {
-      const ths = this.$el?.querySelectorAll('thead th');
+function _freezeHeaderWidths() {
+      const ths = ctx.$el?.querySelectorAll('thead th');
       if (!ths?.length) return;
       ths.forEach(th => {
         // 操作列统一固定宽度：与 snapshotWidths 保持一致，任何行态下列宽恒为 150px，
         // 避免新增行（保存/取消）与普通行（↑↓/删除）按钮宽不同导致水平位移
         if (th.classList.contains('col-op')) {
           if (th._frozenWidth == null) th._frozenWidth = th.style.width || '';
-          th.style.width = this.opColumnWidth + 'px';
-          th.style.minWidth = this.opColumnWidth + 'px';
+          th.style.width = ctx.opColumnWidth.value + 'px';
+          th.style.minWidth = ctx.opColumnWidth.value + 'px';
           return;
         }
         const w = th.getBoundingClientRect().width;
@@ -1192,10 +1097,10 @@ export default {
         if (th._frozenWidth == null) th._frozenWidth = th.style.width || '';
         th.style.width = w + 'px';
       });
-    },
+    }
     // 解除冻结：恢复原有宽度、清除 min-width，由后续 snapshotWidths 重算自然列宽
-    _unfreezeHeaderWidths() {
-      const ths = this.$el?.querySelectorAll('thead th');
+function _unfreezeHeaderWidths() {
+      const ths = ctx.$el?.querySelectorAll('thead th');
       ths?.forEach(th => {
         th.style.minWidth = '';
         if (th._frozenWidth != null) {
@@ -1203,126 +1108,126 @@ export default {
           th._frozenWidth = '';
         }
       });
-    },
-    cellSelectOptions(field) {
+    }
+function cellSelectOptions(field) {
       // 保留原来「空选项」的清除语义：把空串作为首项
       return ['', ...(field.options || [])]
-    },
+    }
 
-    isEditing(row, fieldName) {
-      if (this.editOnClick) {
-        return this.internalEditCell !== null && this.internalEditCell.rowKey === row._rowKey && this.internalEditCell.field === fieldName;
+function isEditing(row, fieldName) {
+      if (ctx.editOnClick.value) {
+        return ctx.internalEditCell.value !== null && ctx.internalEditCell.value.rowKey === row._rowKey && ctx.internalEditCell.value.field === fieldName;
       }
-      return this.editingCell?.rowKey === row._rowKey && this.editingCell?.field === fieldName;
-    },
-    focusEditInput(rowKey, fieldName) {
-      this.$nextTick(() => {
-        const inputs = this.$refs['editInput-' + rowKey + '-' + fieldName];
+      return ctx.editingCell.value?.rowKey === row._rowKey && ctx.editingCell.value?.field === fieldName;
+    }
+function focusEditInput(rowKey, fieldName) {
+      nextTick(() => {
+        const inputs = ctx.$refs['editInput-' + rowKey + '-' + fieldName];
         if (inputs && inputs[0]) inputs[0].focus();
       });
-    },
+    }
     // 单击高亮改为命令式增删 class：避免 activeCell 成为响应式依赖触发整表重渲染
-    _clearActiveCell() {
-      if (this._activeTd) {
-        this._activeTd.classList.remove('cell-active');
-        this._activeTd = null;
+function _clearActiveCell() {
+      if (ctx._activeTd) {
+        ctx._activeTd.classList.remove('cell-active');
+        ctx._activeTd = null;
       }
-    },
-    onCellClick(event, row, field) {
+    }
+function onCellClick(event, row, field) {
       // 忽略由拖拽手柄按下后冒出的 click（避免拖完行误触发单元格编辑/选中）
-      if (this._suppressCellClick) {
-        this._suppressCellClick = false;
+      if (ctx._suppressCellClick) {
+        ctx._suppressCellClick = false;
         return;
       }
-      if (this.readonly) return;
-      if (this.editOnClick) {
-        this._clearActiveCell();
-        if (!this.isEditing(row, field.name)) {
-          this.internalEditCell = { rowKey: row._rowKey, field: field.name };
-          this.focusEditInput(row._rowKey, field.name);
+      if (ctx.readonly.value) return;
+      if (ctx.editOnClick.value) {
+        ctx._clearActiveCell();
+        if (!ctx.isEditing(row, field.name)) {
+          ctx.internalEditCell.value = { rowKey: row._rowKey, field: field.name };
+          ctx.focusEditInput(row._rowKey, field.name);
         }
         return;
       }
-      if (this.isEditing(row, field.name)) return;
+      if (ctx.isEditing(row, field.name)) return;
       const td = event && event.currentTarget;
-      if (td && td === this._activeTd) return;
-      this._clearActiveCell();
+      if (td && td === ctx._activeTd) return;
+      ctx._clearActiveCell();
       if (td) {
         td.classList.add('cell-active');
-        this._activeTd = td;
+        ctx._activeTd = td;
       }
-    },
-    onCellBlur(row, field) {
+    }
+function onCellBlur(row, field) {
       if (row._isNew) return;
-      this.$emit('saveCell', row, field);
-      if (this.editOnClick) { this.internalEditCell = null; this._clearActiveCell(); }
-    },
-    onCellEnter(row, field) {
-      if (row._isNew) { this.$emit('saveNewRow'); return; }
-      this.$emit('saveCell', row, field);
-      if (this.editOnClick) this.internalEditCell = null;
-    },
+      emit('saveCell', row, field);
+      if (ctx.editOnClick.value) { ctx.internalEditCell.value = null; ctx._clearActiveCell(); }
+    }
+function onCellEnter(row, field) {
+      if (row._isNew) { emit('saveNewRow'); return; }
+      emit('saveCell', row, field);
+      if (ctx.editOnClick.value) ctx.internalEditCell.value = null;
+    }
     // 整表 Enter 保存新增行：焦点不在输入框/文本域/下拉等可输入控件时，Enter 即触发保存
-    handleGlobalEnter(e) {
+function handleGlobalEnter(e) {
       if (e.key !== 'Enter' || e.isComposing) return
-      if (!this.hasNewRow) return
+      if (!ctx.hasNewRow.value) return
       const t = e.target
       if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.tagName === 'SELECT' || t.isContentEditable)) return
       // 焦点在「取消」按钮上时按回车应取消而非保存
       if (t && t.tagName === 'BUTTON' && /取消/.test(t.textContent || '')) return
-      this.$emit('saveNewRow')
-    },
-    handleClickOutside(event) {
-      if (!this.editingCell) return;
-      if (!this.$el.contains(event.target)) { this.emitSaveAndClear(); return; }
-      const editingInput = this.$el.querySelector('input:focus, select:focus');
-      if (!editingInput || !editingInput.contains(event.target)) this.emitSaveAndClear();
-    },
-    emitSaveAndClear() {
-      if (!this.editingCell) return;
-      const row = this.rows.find(r => r._rowKey === this.editingCell.rowKey);
-      const field = this.fields.find(f => f.name === this.editingCell.field);
-      if (row && field) this.$emit('saveCell', row, field);
-    },
-    isRowSelected(rowKey) { return this.selectedKeySet.has(rowKey); },
-    toggleRowSelect(rowKey) {
-      if (this.readonly) return;
-      this.selectedRowKeys = this.selectedKeySet.has(rowKey)
-        ? this.selectedRowKeys.filter(k => k !== rowKey)
-        : [...this.selectedRowKeys, rowKey];
-    },
-    toggleAllSelect() {
-      if (this.readonly) return;
+      emit('saveNewRow')
+    }
+function handleClickOutside(event) {
+      if (!ctx.editingCell.value) return;
+      if (!ctx.$el.contains(event.target)) { ctx.emitSaveAndClear(); return; }
+      const editingInput = ctx.$el.querySelector('input:focus, select:focus');
+      if (!editingInput || !editingInput.contains(event.target)) ctx.emitSaveAndClear();
+    }
+function emitSaveAndClear() {
+      if (!ctx.editingCell.value) return;
+      const row = ctx.rows.value.find(r => r._rowKey === ctx.editingCell.value.rowKey);
+      const field = ctx.fields.value.find(f => f.name === ctx.editingCell.value.field);
+      if (row && field) emit('saveCell', row, field);
+    }
+function isRowSelected(rowKey) { return ctx.selectedKeySet.value.has(rowKey); }
+function toggleRowSelect(rowKey) {
+      if (ctx.readonly.value) return;
+      ctx.selectedRowKeys.value = ctx.selectedKeySet.value.has(rowKey)
+        ? ctx.selectedRowKeys.value.filter(k => k !== rowKey)
+        : [...ctx.selectedRowKeys.value, rowKey];
+    }
+function toggleAllSelect() {
+      if (ctx.readonly.value) return;
       // 全选只作用于「当前可见行」：筛选态下不应把被过滤掉的行也勾上
-      const normalRows = (this.bodyRows || []).filter(r => !r._isSeparator && !r._isNew);
-      this.selectedRowKeys = this.isAllSelected ? [] : normalRows.map(r => r._rowKey);
-    },
-    clearSelection() { this.selectedRowKeys = []; },
-    getReceiptCount(row) {
+      const normalRows = (ctx.bodyRows.value || []).filter(r => !r._isSeparator && !r._isNew);
+      ctx.selectedRowKeys.value = ctx.isAllSelected.value ? [] : normalRows.map(r => r._rowKey);
+    }
+function clearSelection() { ctx.selectedRowKeys.value = []; }
+function getReceiptCount(row) {
       const raw = row['收据'] || '[]';
-      const cached = this._receiptCache.get(row);
+      const cached = ctx._receiptCache.get(row);
       if (cached && cached.raw === raw) return cached.count;
       let count = 0;
       try { count = JSON.parse(raw).length; } catch { /* 非法 JSON 视为 0 */ }
-      this._receiptCache.set(row, { raw, count });
+      ctx._receiptCache.set(row, { raw, count });
       return count;
-    },
+    }
     // 搜索过滤/列筛选时的上下级联动画（仅 rowAnimEnabled 启用，不影响其它页/场景的普通过渡）
     // 有结果出现 → 行从上往下依次进入；没有结果 → 行从下往上依次消失
-    staggerEnter(el) {
-      if (!this.rowAnimEnabled) return;
+function staggerEnter(el) {
+      if (!ctx.rowAnimEnabled.value) return;
       el.style.transitionDelay = (Array.prototype.indexOf.call(el.parentNode.children, el) * 30) + 'ms';
-    },
-    staggerAfterEnter(el) { el.style.transitionDelay = ''; },
-    staggerLeave(el) {
-      if (!this.rowAnimEnabled) return;
+    }
+function staggerAfterEnter(el) { el.style.transitionDelay = ''; }
+function staggerLeave(el) {
+      if (!ctx.rowAnimEnabled.value) return;
       const kids = el.parentNode.children;
       const idx = Array.prototype.indexOf.call(kids, el);
       el.style.transitionDelay = ((kids.length - 1 - idx) * 30) + 'ms';
-    },
-    staggerAfterLeave(el) { el.style.transitionDelay = ''; },
+    }
+function staggerAfterLeave(el) { el.style.transitionDelay = ''; }
     // 性能探针：一次整表渲染的耗时（rows 变化 → 下一帧渲染完成）
-    _perfMeasureRender() {
+function _perfMeasureRender() {
       if (typeof performance === 'undefined' || !performance.mark) return;
       try {
         performance.mark('perf:rows:start');
@@ -1333,41 +1238,41 @@ export default {
           } catch (_) { /* 忽略 */ }
         });
       } catch (_) { /* 忽略 */ }
-    },
+    }
     // 底部「添加一行 / 取消添加一行」按钮
-    onAddRowBarClick() {
-      if (!this.hasNewRow) {
-        this.$emit('addNewRowAtBottom');
+function onAddRowBarClick() {
+      if (!ctx.hasNewRow.value) {
+        emit('addNewRowAtBottom');
         return;
       }
-      this.requestCancelNewRow();
-    },
+      ctx.requestCancelNewRow();
+    }
     // 取消新增行：已填写数据时先确认放弃，未填数据直接收起
-    requestCancelNewRow() {
-      if (this.newRowHasData) {
-        this.discardConfirmVisible = true;
+function requestCancelNewRow() {
+      if (ctx.newRowHasData.value) {
+        ctx.discardConfirmVisible.value = true;
         return;
       }
-      this.animateCancelNewRow();
-    },
-    confirmDiscardNewRow() {
-      this.discardConfirmVisible = false;
-      this.animateCancelNewRow();
-    },
+      ctx.animateCancelNewRow();
+    }
+function confirmDiscardNewRow() {
+      ctx.discardConfirmVisible.value = false;
+      ctx.animateCancelNewRow();
+    }
     // 取消（关闭）新增行：先播放「向上加速淡出」的收起动画，动画结束后才真正移除该行，
     // 否则父组件会立即卸载该行，关闭时没有任何过渡。
-    animateCancelNewRow() {
-      const el = this.$el && this.$el.querySelector('tr.row-pop-in');
+function animateCancelNewRow() {
+      const el = ctx.$el && ctx.$el.querySelector('tr.row-pop-in');
       if (!el) {
-        this.$emit('cancelNewRow');
+        emit('cancelNewRow');
         return;
       }
       let done = false;
       const finish = () => {
         if (done) return;
         done = true;
-        if (this._cancelRowTimer) { clearTimeout(this._cancelRowTimer); this._cancelRowTimer = null; }
-        this.$emit('cancelNewRow');
+        if (ctx._cancelRowTimer) { clearTimeout(ctx._cancelRowTimer); ctx._cancelRowTimer = null; }
+        emit('cancelNewRow');
       };
       const onEnd = (e) => {
         if (e.target !== el) return;
@@ -1378,63 +1283,247 @@ export default {
       el.classList.add('row-pop-out');
       el.addEventListener('animationend', onEnd);
       // 兜底：动画事件缺失（如被禁用）时按动画时长收尾，避免行一直留着
-      this._cancelRowTimer = setTimeout(finish, 140);
-    },
-    focusNewRowInput() {
+      ctx._cancelRowTimer = setTimeout(finish, 140);
+    }
+function focusNewRowInput() {
       // 没有新增行就不做任何事：下面的「滚到底部」兜底是给新增行准备的，
       // 若在挂载时无条件走到那里，整张表会在首帧被直接滚到末页（表头/首行看起来「没固定」）
-      if (!this.hasNewRow) return;
-      this.$nextTick(() => {
-        if (this._focusNewRowEl()) return;
+      if (!ctx.hasNewRow.value) return;
+      nextTick(() => {
+        if (ctx._focusNewRowEl()) return;
         // 虚拟滚动下新增行可能落在窗口之外（根本没被渲染）：先把容器滚到底，重算窗口后再聚焦
-        if (!this.virtualOn) return;
-        const wrap = this.$refs.scrollWrapper;
+        if (!ctx.virtualOn.value) return;
+        const wrap = ctx.scrollWrapper.value;
         if (!wrap) return;
         wrap.scrollTop = wrap.scrollHeight;
-        this._scrollTop = wrap.scrollTop;
-        this.recalcWindow();
-        this.$nextTick(() => { this._focusNewRowEl(); });
+        ctx._scrollTop = wrap.scrollTop;
+        ctx.recalcWindow();
+        nextTick(() => { ctx._focusNewRowEl(); });
       });
-    },
+    }
     // 通过 :ref="'newRowInput'" 精确取新增行的数据输入框，不用宽泛的 querySelector，
     // 避免在搜索过滤导致行数变化时误聚焦到普通行的复选框而抢走搜索框焦点
-    _focusNewRowEl() {
-      const inputs = this.$refs.newRowInput;
+function _focusNewRowEl() {
+      const inputs = ctx.$refs.newRowInput;
       const el = Array.isArray(inputs) ? inputs[0] : inputs;
       if (!el) return false;
       // 容器固定高度时新增行可能在底部被遮住：滚入视口让用户立即看到新行
       el.scrollIntoView({ block: 'nearest', inline: 'nearest' });
       el.focus();
       return true;
-    },
+    }
     // 固定高度判断纵向滚动：测量表格完整内容高度（scrollHeight 不被容器裁剪），
     // 超过 fixedMaxHeight 即启用纵向滚动，表头随之吸顶。多行/换行行高不同也适用。
-    updateVScroll() {
-      if (!this.$el) return;
-      const tbl = this.$el.querySelector('table');
-      this.vScroll = !!tbl && tbl.scrollHeight > this.fixedMaxHeight;
-    },
+function updateVScroll() {
+      if (!ctx.$el) return;
+      const tbl = ctx.$el.querySelector('table');
+      ctx.vScroll.value = !!tbl && tbl.scrollHeight > ctx.fixedMaxHeight.value;
+    }
     // 行数要变化了（删掉一行 / 撤销恢复一行）——由父组件在**动手之前**调用。
     // 为什么必须提前：行容器平时是 Fragment（性能考虑，见 rowAnimEnabled），
     // 只有已经在 TransitionGroup 里的行，被移出时才会播离场动画。
     // 如果等 rows 更新完再切换容器，那时旧行已经没了、新容器也从未渲染过它，
     // 离场动画就永远不会播；反而所有现存行会被当成新节点整表重播一遍入场。
     // 所以顺序是：先切容器（首帧静默，见 rowsAnimSilent）→ 再改数据 → 只有真正增删的那一行有动画。
-    beginRowsAnimWindow() {
-      if (this._rowsAnimTimer) clearTimeout(this._rowsAnimTimer);
+function beginRowsAnimWindow() {
+      if (ctx._rowsAnimTimer) clearTimeout(ctx._rowsAnimTimer);
       // 首帧静默：容器刚换成 TransitionGroup 时，现存行都会被视为新节点，
       // 不禁掉入场就会整表一起弹一遍。静默只覆盖这一次 patch，下一帧就恢复正常。
-      this.rowsAnimSilent = true;
-      this.rowsAnimWindow = true;
-      this.$nextTick(() => { this.rowsAnimSilent = false; });
+      ctx.rowsAnimSilent.value = true;
+      ctx.rowsAnimWindow.value = true;
+      nextTick(() => { ctx.rowsAnimSilent.value = false; });
       // 450ms ≈ 离场 0.3s / 入场 0.3s，再留一点余量；窗口一过退回 Fragment。
-      this._rowsAnimTimer = setTimeout(() => {
-        this._rowsAnimTimer = null;
-        this.rowsAnimWindow = false;
+      ctx._rowsAnimTimer = setTimeout(() => {
+        ctx._rowsAnimTimer = null;
+        ctx.rowsAnimWindow.value = false;
       }, 450);
-    },
-  },
-};
+    }
+// 空态延迟上屏（见 data 里 emptyVisible 的说明）：条件成立不是立刻显示，
+// 取消时立刻收回，不给「闪一下又消失」留窗口。
+// 搜索无结果（emptyKind === 'search'）例外：那是用户主动输入关键字后的确定结论，
+// 立刻给反馈才对；再等 260ms 会让人觉得「按了没反应」。
+watch(emptyKind, (v) => {
+  if (ctx._emptyTimer) { clearTimeout(ctx._emptyTimer); ctx._emptyTimer = null; }
+  if (!v) { emptyVisible.value = false; return; }
+  if (v === 'search') { emptyVisible.value = true; return; }
+  ctx._emptyTimer = setTimeout(() => { ctx._emptyTimer = null; emptyVisible.value = true; }, 260);
+}, { immediate: true })
+watch(hasNewRow, (val) => {
+  // 取消新增行 → 底部添加行重现，仅此后播放上浮动画
+  if (!val) addRowAnimated.value = true;
+})
+watch(() => ctx.rows.value.length, () => {
+  // 就地增删（数组引用没变）也会走到这里：滞后开关要跟进行数，否则跨阈值不切换
+  syncVirtualActive();
+  nextTick(() => {
+    updateVScroll();
+    // 仅当确实存在新增行时才聚焦其数据输入框；
+    // 行数变化也可能来自搜索过滤/增删等场景，此时不得用 .focus() 抢占焦点（否则搜索输入框失焦）
+    if (hasNewRow.value) focusNewRowInput();
+  });
+})
+// 列筛选只改变渲染行，不改变 rows 长度，这里单独跟进底部渐隐条/纵向滚动的判定
+watch(() => bodyRows.value.length, () => {
+  nextTick(() => updateVScroll());
+})
+// 行集合（增删/筛选/排序）变化：总高度变了，窗口要重算，行高也要重测。
+// 重算必须同步跑（不能塞进 $nextTick）：数据到位后的首帧就要用正确的窗口渲染，
+// 否则会先按旧窗口 [0,0) 出一帧空表、下一帧才补行——这就是虚拟滚动的「加载延迟」观感。
+// 量高要读 DOM，只能等渲染后（$nextTick）。
+watch(bodyRows, () => {
+  syncVirtualActive();
+  recalcWindow();
+  nextTick(() => {
+    measureRows();
+    // 数据整体替换（如刷新）后按当前容器宽度重钉列宽：
+    // 纵向滚动条状态可能在这一帧才稳定，旧列宽会让表格短暂溢出、横向滚动条闪一下
+    snapshotWidths();
+  });
+})
+// 阈值/行数跨过开关点时，窗口模式会切换（整表 ↔ 窗口化），重新算一次并重新量高。
+// 同理同步重算，避免切换模式的首帧按旧窗口渲染。
+watch(virtualOn, () => {
+  recalcWindow();
+  nextTick(() => measureRows());
+})
+watch(() => ctx.editingCell.value, (newVal) => {
+  if (newVal) {
+    // 进入编辑态：清除单击高亮（原先由模板条件在重渲染时移除，现改为命令式移除）
+    _clearActiveCell();
+    nextTick(() => {
+      const key = 'editInput-' + newVal.rowKey + '-' + newVal.field;
+      const inputs = ctx.$refs[key];
+      if (inputs && inputs[0]) inputs[0].focus();
+    });
+    document.addEventListener('click', handleClickOutside);
+  } else {
+    document.removeEventListener('click', handleClickOutside);
+  }
+}, { immediate: true })
+watch(() => ctx.rows.value, (newVal, oldVal) => {
+  // 性能探针：rows 变化是「整表重渲染」的起点（筛选/排序/增删行都会换数组引用）。
+  // 从 watch 触发量到「下一帧渲染完成」，得到本次整表渲染+补丁的真实耗时，
+  // 供 perf/probe.js 与 INP 交互时间窗做归因。
+  _perfMeasureRender();
+  // 先构建行键集合再过滤，避免选中项多 + 行数大时的 O(n×m) 逐条 some
+  const keys = new Set(newVal.map(r => r._rowKey));
+  selectedRowKeys.value = selectedRowKeys.value.filter(key => keys.has(key));
+  // 仅当「新增行被保存/取消」（由有 → 无）时才重算列宽并钉住；
+  // 普通增删/移动行前后都没有新增行，列宽不会因新增输入而变，无需测量
+  const prevHadNew = (oldVal || []).some(r => r._isNew);
+  const nowHasNew = newVal.some(r => r._isNew);
+  // 新增行出现（无 → 有）：在 DOM 插入新行前（watch 默认 flush:'pre'）量出并冻结旧列宽，
+  // 让新增行的空输入不会撑动表头宽度，避免表头跳动。
+  if (!prevHadNew && nowHasNew) {
+    _freezeHeaderWidths();
+  } else if (prevHadNew && !nowHasNew && !ctx.editingCell.value) {
+    // 新增行消失（保存/取消）：先保持冻结列宽不动（不立即解锁），
+    // 待 280ms 后快照统一清除 min-width 并重算钉住，避免取消瞬间列宽回弹。
+    nextTick(() => {
+      clearTimeout(ctx._snapshotTimer);
+      ctx._snapshotTimer = setTimeout(() => snapshotWidths(), 280);
+    });
+  }
+}, { immediate: true })
+watch(() => ctx.fields.value, (newFields) => {
+  // 列被删/改名后，残留的筛选状态会让整表永久空表 → 只保留仍然存在的列
+  const names = new Set((newFields || []).map(f => f.name));
+  Object.keys(columnFilters.value).forEach(n => {
+    if (!names.has(n)) delete columnFilters.value[n];
+  });
+  if (filterField.value && !names.has(filterField.value)) closeFilter();
+  // 增删/改名/移动列后重算列宽
+  nextTick(() => snapshotWidths());
+}, { immediate: true })
+watch(selectedRowKeys, () => {
+  emit('selectionChange', {
+    count: selectedRowKeys.value.length,
+    keys: [...selectedRowKeys.value]
+  });
+}, { immediate: true })
+
+// created 等价：非响应式运行时状态 + 首帧之前先估一次虚拟窗口
+// 收据数量缓存：WeakMap 键为行对象，避免每次渲染逐行 JSON.parse（不参与响应式）
+ctx._receiptCache = new WeakMap();
+// 虚拟滚动用的滚动位置/视口高度/ResizeObserver：纯运行时值，不进响应式
+ctx._scrollTop = 0;
+ctx._viewportH = 0;
+ctx._ro = null;
+// 估算行高是否已锁定（只取第一次实测均值，之后不再漂移，见 measureRows）
+ctx._estLocked = false;
+// 首帧之前就先按容器固定高度估一次窗口——否则第一帧会把全部行都画出来，
+// 正好抵消掉虚拟滚动想省的那次整表渲染（挂载后再收缩窗口已经晚了）。
+ctx._viewportH = fixedMaxHeight.value;
+syncVirtualActive();
+recalcWindow();
+
+onMounted(() => {
+  focusNewRowInput();
+  updateVScroll();
+  initVirtual();
+  // 首屏：数据区整体从左往右弹入
+  playTableEnter();
+  // 整表 Enter 保存新增行：焦点不在输入框时按回车也触发保存
+  document.addEventListener('keydown', handleGlobalEnter);
+  // 筛选面板：点面板外部 / 按 Esc / 容器滚动时收起
+  document.addEventListener('click', onFilterDocClick);
+  document.addEventListener('keydown', handleFilterKeydown);
+  window.addEventListener('scroll', onFilterScroll, true);
+  // 列交换 FLIP 动画延迟就绪：等本页首次 table 滑入播完（350ms）、表头稳定后再启用，
+  // 否则挂载时 TransitionGroup 会对静态表头播放 move，造成进入页面时表头乱跳。
+  ctx._colAnimTimer = setTimeout(() => { colAnimDone.value = true; }, 400);
+})
+// KeepAlive：从其它状态栏/页签切换回来时重播数据区整体弹入动效
+// （取消新增行后「添加一行」重现的上浮动效由 hasNewRow 驱动，不在此处触发，
+//   否则它会和 tbody 整体滑入叠加造成闪动）
+onActivated(() => {
+  if (firstActivate.value) { firstActivate.value = false; return; }
+  playTableEnter();
+  // 从其它页签切回时也会重载数据/重建表头，同样延迟启用列 FLIP，避免表头乱跳
+  colAnimDone.value = false;
+  if (ctx._colAnimTimer) clearTimeout(ctx._colAnimTimer);
+  ctx._colAnimTimer = setTimeout(() => { colAnimDone.value = true; }, 400);
+  // 缓存的 DOM 尺寸可能已随页签切换变化，重新量一次窗口
+  nextTick(() => { initVirtual(); });
+})
+onBeforeUnmount(() => {
+  if (ctx._ro) { ctx._ro.disconnect(); ctx._ro = null; }
+  // 空态延迟定时器：卸载后还在跑会往已销毁的实例上写状态
+  if (ctx._emptyTimer) { clearTimeout(ctx._emptyTimer); ctx._emptyTimer = null; }
+  // 行动画窗定时器同理
+  if (ctx._rowsAnimTimer) { clearTimeout(ctx._rowsAnimTimer); ctx._rowsAnimTimer = null; }
+  // 取消新增行的 140ms 兜底定时器：卸载后触发会往已销毁的实例上 emit
+  if (ctx._cancelRowTimer) { clearTimeout(ctx._cancelRowTimer); ctx._cancelRowTimer = null; }
+  document.removeEventListener('click', handleClickOutside);
+  document.removeEventListener('keydown', handleGlobalEnter);
+  document.removeEventListener('click', onFilterDocClick);
+  document.removeEventListener('keydown', handleFilterKeydown);
+  window.removeEventListener('scroll', onFilterScroll, true);
+  // 拖拽中途被卸载：停掉自动滚动并清掉让位位移，避免残留定时器/内联样式
+  if (ctx._rowAutoScroll) { ctx._rowAutoScroll.stop(); ctx._rowAutoScroll = null; }
+  if (ctx._colAutoScroll) { ctx._colAutoScroll.stop(); ctx._colAutoScroll = null; }
+  ctx._clearRowShiftFx();
+  ctx._clearColShiftFx();
+  if (ctx._dragGhost) ctx._dragGhost.remove();
+  if (ctx._rowGhost) ctx._rowGhost.remove();
+  if (ctx._rowSlotGhost) ctx._rowSlotGhost.remove();
+  if (ctx._rowMove) window.removeEventListener('mousemove', ctx._rowMove);
+  if (ctx._rowUp) window.removeEventListener('mouseup', ctx._rowUp);
+  if (ctx._rowRaf) cancelAnimationFrame(ctx._rowRaf);
+  if (ctx._colGhost) ctx._colGhost.remove();
+  if (ctx._colSlotGhost) ctx._colSlotGhost.remove();
+  if (ctx._colMove) window.removeEventListener('mousemove', ctx._colMove);
+  if (ctx._colUp) window.removeEventListener('mouseup', ctx._colUp);
+  if (ctx._colRaf) cancelAnimationFrame(ctx._colRaf);
+  if (ctx._rowDropBox) ctx._rowDropBox.remove();
+  if (ctx._colDropBox) ctx._colDropBox.remove();
+  clearTimeout(ctx._snapshotTimer);
+  clearTimeout(ctx._filterAnimTimer);
+  if (ctx._colAnimTimer) clearTimeout(ctx._colAnimTimer);
+  if (ctx._snapshotRaf) cancelAnimationFrame(ctx._snapshotRaf);
+  if (ctx._tableEnterCleanup) ctx._tableEnterCleanup();
+})
+
 </script>
 
 <style scoped>

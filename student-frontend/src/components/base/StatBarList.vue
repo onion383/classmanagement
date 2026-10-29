@@ -14,49 +14,47 @@
   </div>
 </template>
 
-<script>
+<script setup>
 // 通用横向条状图：同时生长动画、夜间低浓度蓝、默认显示 5 行可滚动
-export default {
-  name: 'StatBarList',
-  props: {
-    rows: { type: Array, default: () => [] },
-    nameKey: { type: String, default: 'name' },
-    valueKey: { type: String, default: 'value' },
-    // (row) => 0-100 的条长百分比
-    barWidth: { type: Function, required: true },
-    // (row) => 颜色 class；不传时用主题蓝（夜间自动降低蓝色浓度）
-    barClass: { type: [Function, String], default: null },
-    // (row) => 右侧数值文案；默认取 valueKey
-    valueText: { type: Function, default: null },
-    valueClass: { type: [Function, String], default: 'text-text' },
-    // (row) => 唯一 key；默认取 nameKey
-    rowKey: { type: Function, default: null },
-    emptyText: { type: String, default: '暂无数据' },
-    maxVisible: { type: Number, default: 5 }
-  },
-  computed: {
-    // 每行 20px + 行间距 10px：正好显示 maxVisible 行
-    listMaxHeight() {
-      return this.maxVisible > 0 ? (this.maxVisible * 30 - 10) + 'px' : null
-    }
-  },
-  methods: {
-    barWidthFor(row) {
-      return this.barWidth(row)
-    },
-    barClassFor(row) {
-      return typeof this.barClass === 'function' ? this.barClass(row) : this.barClass
-    },
-    valueClassFor(row) {
-      return typeof this.valueClass === 'function' ? this.valueClass(row) : this.valueClass
-    },
-    valueTextFor(row) {
-      return this.valueText ? this.valueText(row) : row[this.valueKey]
-    },
-    rowKeyFor(row) {
-      return this.rowKey ? this.rowKey(row) : row[this.nameKey]
-    }
-  }
+import { computed } from 'vue'
+
+defineOptions({ name: 'StatBarList' })
+const props = defineProps({
+  rows: { type: Array, default: () => [] },
+  nameKey: { type: String, default: 'name' },
+  valueKey: { type: String, default: 'value' },
+  // (row) => 0-100 的条长百分比
+  barWidth: { type: Function, required: true },
+  // (row) => 颜色 class；不传时用主题蓝（夜间自动降低蓝色浓度）
+  barClass: { type: [Function, String], default: null },
+  // (row) => 右侧数值文案；默认取 valueKey
+  valueText: { type: Function, default: null },
+  valueClass: { type: [Function, String], default: 'text-text' },
+  // (row) => 唯一 key；默认取 nameKey
+  rowKey: { type: Function, default: null },
+  emptyText: { type: String, default: '暂无数据' },
+  maxVisible: { type: Number, default: 5 }
+})
+
+// 每行 20px + 行间距 10px：正好显示 maxVisible 行
+const listMaxHeight = computed(() => {
+  return props.maxVisible > 0 ? (props.maxVisible * 30 - 10) + 'px' : null
+})
+
+function barWidthFor(row) {
+  return props.barWidth(row)
+}
+function barClassFor(row) {
+  return typeof props.barClass === 'function' ? props.barClass(row) : props.barClass
+}
+function valueClassFor(row) {
+  return typeof props.valueClass === 'function' ? props.valueClass(row) : props.valueClass
+}
+function valueTextFor(row) {
+  return props.valueText ? props.valueText(row) : row[props.valueKey]
+}
+function rowKeyFor(row) {
+  return props.rowKey ? props.rowKey(row) : row[props.nameKey]
 }
 </script>
 

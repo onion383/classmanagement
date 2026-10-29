@@ -249,10 +249,10 @@
   </div>
 </template>
 
-<script>
+<script setup>
+import { ref, computed, watch, onMounted, onActivated, onDeactivated, onBeforeUnmount, defineAsyncComponent, getCurrentInstance } from 'vue'
 import { reportError } from '../utils/reportError.js'
 import axios from 'axios'
-import { defineAsyncComponent, getCurrentInstance } from 'vue'
 import Tabs from '../components/base/Tabs.vue'
 import ViewSwitch from '../components/base/ViewSwitch.vue'
 import AppSelect from '../components/base/AppSelect.vue'
@@ -275,579 +275,564 @@ const OverdueLeaveDialog = defineAsyncComponent(() => import('../components/dial
 
 const API = '/api'
 
-export default {
-  name: 'LeaveManagement',
-  components: {
-    Tabs, ViewSwitch, DynamicTable, AppSelect, AddLeaveDialog, LeaveTimeline, StatBarList, ExportExcel, ConfirmDialog, OverdueLeaveDialog
-  },
-  // Ctrl+Z / Ctrl+Shift+Z / Ctrl+Y 撤销、重做请假表
-  setup() {
-    const inst = getCurrentInstance()
-    const { success: n } = useNotification()
-    useUndoShortcut('leave_records', {
-      onAfterUndo: (label) => { inst.proxy.loadAll(); n(label ? `已撤销：${label}` : '已撤销') },
-      onAfterRedo: (label) => { inst.proxy.loadAll(); n(label ? `已重做：${label}` : '已重做') }
-    })
-    // 暴露给模板：v-preload 的绑值在渲染函数里求值，模块作用域的加载器不挂实例会告警
-    return { loadAddLeaveDialog, loadExportExcel }
-  },
-  // 懒加载弹窗保活：首次打开后保持挂载，关闭只降 visible，保留退出动画
-  watch: {
-    addDialogVisible(n) { if (n) this.addDialogMounted = true },
-    exportVisible(n) { if (n) this.exportMounted = true },
-    'confirm.visible'(n) { if (n) this.confirmMounted = true },
-    overdueDialogVisible(n) { if (n) this.overdueDialogMounted = true },
-    // 跨页定位：标题栏全局搜索点「请假记录」结果跳转 /leaves?focus=<id>
-    '$route.query.focus'() { this._applyRowFocus() }
-  },
-  data() {
-    return {
-      activeTab: 'today',
-      // 请假记录页签的视图：表格 / 时间轴
-      recordsView: 'table',
-      recordsViewOptions: [
-        { value: 'table', label: '表格' },
-        { value: 'timeline', label: '时间轴' }
-      ],
-      loading: false,
-      students: [],
-      leaves: [],
-      addDialogVisible: false,
-      addDialogMounted: false,
-      editingLeave: null,
-      editingCell: null,
-      newRow: null,
-      exportVisible: false,
-      exportMounted: false,
-      // 导出内容来源：today 今日到班 / records 请假记录 / stats 请假统计
-      exportKind: 'records',
-      confirm: { visible: false, message: '', ok: null },
-      confirmMounted: false,
-      leaveTypeOptions: ['病假', '事假', '其他'],
-      // 假期已结束未销假的提示弹窗
-      overdueDialogVisible: false,
-      overdueDialogMounted: false,
-      overdueList: [],
-      // 本次会话内已提醒过（无论处理与否）的记录 id，避免重复弹窗
-      promptedIds: new Set(),
-      todayExportFields: [
-        { name: '姓名' },
-        { name: '类型' },
-        { name: '开始时间' },
-        { name: '结束时间' },
-        { name: '家长联系电话' },
-        { name: '学生联系电话' },
-        { name: '状态' },
-        { name: '返校时间' }
-      ],
-      // 请假统计导出列
-      leaveStatExportFields: [
-        { name: '姓名' },
-        { name: '病假' },
-        { name: '事假' },
-        { name: '其他' },
-        { name: '合计' }
-      ],
-      leaveFields: [
-        { name: '姓名', type: '文字' },
-        { name: '类型', type: '文字', control: 'select', options: ['病假', '事假', '其他'] },
-        { name: '开始时间', type: '文字' },
-        { name: '结束时间', type: '文字' },
-        { name: '家长联系电话', type: '文字' },
-        { name: '学生联系电话', type: '文字' },
-        { name: '状态', type: '文字', control: 'select', options: ['请假中', '已返校', '已取消'] },
-        { name: '备注', type: '文字' }
-      ],
-      // 今日到班两张表的列定义（顺序可拖动并保存到后端；slot 指向模板里的自定义单元格）
-      activeLeaveFields: [
-        { name: 'position', label: '#' },
-        { name: '姓名' },
-        { name: '类型', slot: 'cell-type' },
-        { name: '请假时段', slot: 'cell-range' },
-        { name: '家长联系电话', slot: 'cell-dash' },
-        { name: '学生联系电话', slot: 'cell-dash' },
-        { name: '备注', slot: 'cell-dash' }
-      ],
-      returnedLeaveFields: [
-        { name: 'position', label: '#' },
-        { name: '姓名' },
-        { name: '请假时段', slot: 'cell-range' },
-        { name: '家长联系电话', slot: 'cell-dash' },
-        { name: '学生联系电话', slot: 'cell-dash' },
-        { name: '原因（类型）', slot: 'cell-type-info' },
-        { name: '返校时间' }
-      ],
-      tabs: [
-        { value: 'today', label: '今日到班' },
-        { value: 'records', label: '请假记录' }
-      ]
+defineOptions({ name: 'LeaveManagement' })
+
+const { success: notifySuccess, error: notifyError, info: notifyInfo } = useNotification()
+
+// applyRouteRowFocus 需要 $route/$router/$el 且对象身份稳定，经实例代理承载
+const inst = getCurrentInstance()
+
+// Ctrl+Z / Ctrl+Shift+Z / Ctrl+Y 撤销、重做请假表
+useUndoShortcut('leave_records', {
+  onAfterUndo: (label) => { loadAll(); notifySuccess(label ? `已撤销：${label}` : '已撤销') },
+  onAfterRedo: (label) => { loadAll(); notifySuccess(label ? `已重做：${label}` : '已重做') }
+})
+
+const activeTab = ref('today')
+// 请假记录页签的视图：表格 / 时间轴
+const recordsView = ref('table')
+const recordsViewOptions = [
+  { value: 'table', label: '表格' },
+  { value: 'timeline', label: '时间轴' }
+]
+const loading = ref(false)
+const students = ref([])
+const leaves = ref([])
+const addDialogVisible = ref(false)
+const addDialogMounted = ref(false)
+const editingLeave = ref(null)
+const editingCell = ref(null)
+const newRow = ref(null)
+const exportVisible = ref(false)
+const exportMounted = ref(false)
+// 导出内容来源：today 今日到班 / records 请假记录 / stats 请假统计
+const exportKind = ref('records')
+const confirm = ref({ visible: false, message: '', ok: null })
+const confirmMounted = ref(false)
+const leaveTypeOptions = ['病假', '事假', '其他']
+// 假期已结束未销假的提示弹窗
+const overdueDialogVisible = ref(false)
+const overdueDialogMounted = ref(false)
+const overdueList = ref([])
+// 本次会话内已提醒过（无论处理与否）的记录 id，避免重复弹窗
+const promptedIds = new Set()
+const todayExportFields = [
+  { name: '姓名' },
+  { name: '类型' },
+  { name: '开始时间' },
+  { name: '结束时间' },
+  { name: '家长联系电话' },
+  { name: '学生联系电话' },
+  { name: '状态' },
+  { name: '返校时间' }
+]
+// 请假统计导出列
+const leaveStatExportFields = [
+  { name: '姓名' },
+  { name: '病假' },
+  { name: '事假' },
+  { name: '其他' },
+  { name: '合计' }
+]
+const leaveFields = ref([
+  { name: '姓名', type: '文字' },
+  { name: '类型', type: '文字', control: 'select', options: ['病假', '事假', '其他'] },
+  { name: '开始时间', type: '文字' },
+  { name: '结束时间', type: '文字' },
+  { name: '家长联系电话', type: '文字' },
+  { name: '学生联系电话', type: '文字' },
+  { name: '状态', type: '文字', control: 'select', options: ['请假中', '已返校', '已取消'] },
+  { name: '备注', type: '文字' }
+])
+// 今日到班两张表的列定义（顺序可拖动并保存到后端；slot 指向模板里的自定义单元格）
+const activeLeaveFields = ref([
+  { name: 'position', label: '#' },
+  { name: '姓名' },
+  { name: '类型', slot: 'cell-type' },
+  { name: '请假时段', slot: 'cell-range' },
+  { name: '家长联系电话', slot: 'cell-dash' },
+  { name: '学生联系电话', slot: 'cell-dash' },
+  { name: '备注', slot: 'cell-dash' }
+])
+const returnedLeaveFields = ref([
+  { name: 'position', label: '#' },
+  { name: '姓名' },
+  { name: '请假时段', slot: 'cell-range' },
+  { name: '家长联系电话', slot: 'cell-dash' },
+  { name: '学生联系电话', slot: 'cell-dash' },
+  { name: '原因（类型）', slot: 'cell-type-info' },
+  { name: '返校时间' }
+])
+const tabs = [
+  { value: 'today', label: '今日到班' },
+  { value: 'records', label: '请假记录' }
+]
+
+const totalStudents = computed(() => students.value.length)
+const activeLeaves = computed(() => leaves.value.filter(l => l.状态 === '请假中'))
+const todayReturned = computed(() => {
+  const todayStr = formatDate(new Date())
+  return leaves.value.filter(l => l.状态 === '已返校' && l.返校时间 && l.返校时间.startsWith(todayStr))
+})
+// 只读表格行：补 DynamicTable 必需的 _rowKey/_displayIndex，并预算好请假时段文案
+const activeLeaveRows = computed(() => activeLeaves.value.map((l, i) => ({ ...l, _rowKey: l.id, _displayIndex: i + 1, _range: rangeOf(l) })))
+const returnedLeaveRows = computed(() => todayReturned.value.map((l, i) => ({ ...l, _rowKey: l.id, _displayIndex: i + 1, _range: rangeOf(l) })))
+const inSchool = computed(() => totalStudents.value - activeLeaves.value.length)
+const displayLeaves = computed(() => {
+  const list = leaves.value.map((r, i) => ({ ...r, _isNew: false, _rowKey: r.id, _displayIndex: i + 1, position: i + 1 }))
+  if (newRow.value) list.push(newRow.value)
+  return list
+})
+const todayExportRows = computed(() => {
+  const all = [...activeLeaves.value, ...todayReturned.value]
+  return all.map(l => ({
+    姓名: l.姓名 || '',
+    类型: l.类型 || '',
+    开始时间: l.开始时间 || '',
+    结束时间: l.结束时间 || '',
+    家长联系电话: l.家长联系电话 || '',
+    学生联系电话: l.学生联系电话 || '',
+    状态: l.状态 || '',
+    返校时间: l.返校时间 || ''
+  }))
+})
+const todayTableEl = computed(() => {
+  return null
+})
+// 导出内容随来源切换：今日到班 / 请假记录（排除未保存的新增行）/ 请假统计
+const exportRows = computed(() => {
+  if (exportKind.value === 'today') return todayExportRows.value
+  if (exportKind.value === 'stats') return leaveStatRows.value
+  return displayLeaves.value.filter(r => !r._isNew)
+})
+const exportFields = computed(() => {
+  if (exportKind.value === 'today') return todayExportFields
+  if (exportKind.value === 'stats') return leaveStatExportFields
+  return leaveFields.value
+})
+const exportFilename = computed(() => {
+  if (exportKind.value === 'today') return '今日请假表'
+  if (exportKind.value === 'stats') return '请假统计'
+  return '请假记录'
+})
+// 请假统计：按学生汇总请假次数（病假 / 事假 / 其他），合计降序、同数按姓名排
+const leaveStatRows = computed(() => {
+  const map = new Map()
+  leaves.value.forEach(l => {
+    const name = l.姓名 || '未知'
+    let row = map.get(name)
+    if (!row) {
+      row = { 姓名: name, 病假: 0, 事假: 0, 其他: 0, 合计: 0 }
+      map.set(name, row)
     }
-  },
-  computed: {
-    totalStudents() {
-      return this.students.length
-    },
-    activeLeaves() {
-      return this.leaves.filter(l => l.状态 === '请假中')
-    },
-    todayReturned() {
-      const todayStr = formatDate(new Date())
-      return this.leaves.filter(l => l.状态 === '已返校' && l.返校时间 && l.返校时间.startsWith(todayStr))
-    },
-    // 只读表格行：补 DynamicTable 必需的 _rowKey/_displayIndex，并预算好请假时段文案
-    activeLeaveRows() {
-      return this.activeLeaves.map((l, i) => ({ ...l, _rowKey: l.id, _displayIndex: i + 1, _range: this.rangeOf(l) }))
-    },
-    returnedLeaveRows() {
-      return this.todayReturned.map((l, i) => ({ ...l, _rowKey: l.id, _displayIndex: i + 1, _range: this.rangeOf(l) }))
-    },
-    inSchool() {
-      return this.totalStudents - this.activeLeaves.length
-    },
-    displayLeaves() {
-      const list = this.leaves.map((r, i) => ({ ...r, _isNew: false, _rowKey: r.id, _displayIndex: i + 1, position: i + 1 }))
-      if (this.newRow) list.push(this.newRow)
-      return list
-    },
-    todayExportRows() {
-      const all = [...this.activeLeaves, ...this.todayReturned]
-      return all.map(l => ({
-        姓名: l.姓名 || '',
-        类型: l.类型 || '',
-        开始时间: l.开始时间 || '',
-        结束时间: l.结束时间 || '',
-        家长联系电话: l.家长联系电话 || '',
-        学生联系电话: l.学生联系电话 || '',
-        状态: l.状态 || '',
-        返校时间: l.返校时间 || ''
-      }))
-    },
-    todayTableEl() {
-      return null
-    },
-    // 导出内容随来源切换：今日到班 / 请假记录（排除未保存的新增行）/ 请假统计
-    exportRows() {
-      if (this.exportKind === 'today') return this.todayExportRows
-      if (this.exportKind === 'stats') return this.leaveStatRows
-      return this.displayLeaves.filter(r => !r._isNew)
-    },
-    exportFields() {
-      if (this.exportKind === 'today') return this.todayExportFields
-      if (this.exportKind === 'stats') return this.leaveStatExportFields
-      return this.leaveFields
-    },
-    exportFilename() {
-      if (this.exportKind === 'today') return '今日请假表'
-      if (this.exportKind === 'stats') return '请假统计'
-      return '请假记录'
-    },
-    // 请假统计：按学生汇总请假次数（病假 / 事假 / 其他），合计降序、同数按姓名排
-    leaveStatRows() {
-      const map = new Map()
-      this.leaves.forEach(l => {
-        const name = l.姓名 || '未知'
-        let row = map.get(name)
-        if (!row) {
-          row = { 姓名: name, 病假: 0, 事假: 0, 其他: 0, 合计: 0 }
-          map.set(name, row)
-        }
-        if (l.类型 === '病假') row.病假++
-        else if (l.类型 === '事假') row.事假++
-        else row.其他++
-        row.合计++
-      })
-      return [...map.values()].sort((a, b) => b.合计 - a.合计 || zhCollator.compare(a.姓名, b.姓名))
-    },
-    // 统计条长度基准：出现次数最多的学生
-    maxLeaveStat() {
-      return this.leaveStatRows.reduce((m, r) => Math.max(m, r.合计), 0)
-    },
-    timelineNodes() {
-      const arr = []
-      this.leaves.forEach(l => {
-        const cat = l.类型 || '请假'
-        const name = l.姓名 || ''
-        if (l.created_at) {
-          arr.push({ key: `${l.id}-apply`, type: 'apply', time: l.created_at, text: `${name} 申请请假（${cat}）`, category: cat })
-        }
-        if (l.开始时间) {
-          arr.push({ key: `${l.id}-leave`, type: 'leave', time: l.开始时间, text: `${name} 请假（${cat}）离开校园`, category: cat })
-        }
-        if (l.状态 === '已返校' && l.返校时间) {
-          arr.push({ key: `${l.id}-return`, type: 'return', time: l.返校时间, text: `${name} 返校`, category: cat })
-        }
-      })
-      return arr
+    if (l.类型 === '病假') row.病假++
+    else if (l.类型 === '事假') row.事假++
+    else row.其他++
+    row.合计++
+  })
+  return [...map.values()].sort((a, b) => b.合计 - a.合计 || zhCollator.compare(a.姓名, b.姓名))
+})
+// 统计条长度基准：出现次数最多的学生
+const maxLeaveStat = computed(() => leaveStatRows.value.reduce((m, r) => Math.max(m, r.合计), 0))
+const timelineNodes = computed(() => {
+  const arr = []
+  leaves.value.forEach(l => {
+    const cat = l.类型 || '请假'
+    const name = l.姓名 || ''
+    if (l.created_at) {
+      arr.push({ key: `${l.id}-apply`, type: 'apply', time: l.created_at, text: `${name} 申请请假（${cat}）`, category: cat })
     }
-  },
-  async created() {
-    await this.loadAll()
-    await this.loadColumnOrder()
-    // 打开页面后检测一次超时未销假
-    this.checkOverdue()
-    // 每 10 分钟低频检测一次（纯前端比较时间，成本极低）
-    this._startOverdueTimer()
-  },
-  beforeUnmount() { this._stopOverdueTimer() },
-  mounted() { this._applyRowFocus() },
-  // 页面被 KeepAlive 缓存：切走时走 deactivated（不会 unmount），必须停表；
-  // 切回时重新启动，避免缓存页在后台每 10 分钟白跑一次。
-  activated() {
-    this._applyRowFocus()
-    this._startOverdueTimer()
-  },
-  deactivated() { this._stopOverdueTimer() },
-  methods: {
-    _startOverdueTimer() {
-      this._stopOverdueTimer()
-      this._overdueTimer = setInterval(() => this.checkOverdue(), 10 * 60 * 1000)
-    },
-    _stopOverdueTimer() {
-      if (this._overdueTimer) {
-        clearInterval(this._overdueTimer)
-        this._overdueTimer = null
-      }
-    },
-    // 跨页定位：切到「请假记录」页签后滚动到目标并高亮闪动。
-    // 裸 id 定位请假记录表格的整行；`tl:<节点key>` 定位请假时间轴上的那一项（如 tl:12-leave）。
-    _applyRowFocus() {
-      applyRouteRowFocus(this, {
-        parse: (key) => {
-          this.activeTab = 'records'
-          if (key.startsWith('tl:')) return key.slice('tl:'.length)
-          return key
-        }
-      })
-    },
-    // 时间段展示：同日显示 "M-D H:mm~H:mm"，跨天显示完整起止
-    formatRange(s, e) {
-      s = s || ''
-      e = e || ''
-      const short = (str) => {
-        if (!str) return ''
-        const [d, t] = str.split(' ')
-        const ps = d ? d.split('-') : []
-        return `${Number(ps[1])}-${Number(ps[2])} ${t}`
-      }
-      if (!s && !e) return '—'
-      if (!s) return short(e)
-      if (!e) return short(s)
-      const d1 = s.split(' ')[0]
-      const d2 = e.split(' ')[0]
-      if (d1 === d2) {
-        return `${short(s).split(' ')[0]} ${s.split(' ')[1]}~${e.split(' ')[1]}`
-      }
-      return `${short(s)} ~ ${short(e)}`
-    },
-    // 请假时段展示：按行对象缓存结果，避免每次重渲染都重做一遍字符串切分。
-    // 缓存挂在行对象上（WeakMap），行对象随每次加载重建，缓存自然失效；起止时间变了也会重算。
-    rangeOf(item) {
-      if (!this._rangeCache) this._rangeCache = new WeakMap()
-      const s = item.开始时间 || ''
-      const e = item.结束时间 || ''
-      const hit = this._rangeCache.get(item)
-      if (hit && hit.s === s && hit.e === e) return hit.text
-      const text = this.formatRange(s, e)
-      this._rangeCache.set(item, { s, e, text })
-      return text
-    },
-    async loadAll() {
-      this.loading = true
+    if (l.开始时间) {
+      arr.push({ key: `${l.id}-leave`, type: 'leave', time: l.开始时间, text: `${name} 请假（${cat}）离开校园`, category: cat })
+    }
+    if (l.状态 === '已返校' && l.返校时间) {
+      arr.push({ key: `${l.id}-return`, type: 'return', time: l.返校时间, text: `${name} 返校`, category: cat })
+    }
+  })
+  return arr
+})
+
+// 懒加载弹窗保活：首次打开后保持挂载，关闭只降 visible，保留退出动画
+watch(addDialogVisible, (n) => { if (n) addDialogMounted.value = true })
+watch(exportVisible, (n) => { if (n) exportMounted.value = true })
+watch(() => confirm.value.visible, (n) => { if (n) confirmMounted.value = true })
+watch(overdueDialogVisible, (n) => { if (n) overdueDialogMounted.value = true })
+// 跨页定位：标题栏全局搜索点「请假记录」结果跳转 /leaves?focus=<id>
+watch(() => inst.proxy.$route.query.focus, () => { _applyRowFocus() })
+
+// 非响应式实例状态
+let _overdueTimer = null
+// 请假时段展示的行对象缓存（WeakMap），行对象随每次加载重建，缓存自然失效
+let _rangeCache = null
+
+function _startOverdueTimer() {
+  _stopOverdueTimer()
+  _overdueTimer = setInterval(() => checkOverdue(), 10 * 60 * 1000)
+}
+function _stopOverdueTimer() {
+  if (_overdueTimer) {
+    clearInterval(_overdueTimer)
+    _overdueTimer = null
+  }
+}
+// 跨页定位：切到「请假记录」页签后滚动到目标并高亮闪动。
+// 裸 id 定位请假记录表格的整行；`tl:<节点key>` 定位请假时间轴上的那一项（如 tl:12-leave）。
+function _applyRowFocus() {
+  applyRouteRowFocus(inst.proxy, {
+    parse: (key) => {
+      activeTab.value = 'records'
+      if (key.startsWith('tl:')) return key.slice('tl:'.length)
+      return key
+    }
+  })
+}
+// 时间段展示：同日显示 "M-D H:mm~H:mm"，跨天显示完整起止
+function formatRange(s, e) {
+  s = s || ''
+  e = e || ''
+  const short = (str) => {
+    if (!str) return ''
+    const [d, t] = str.split(' ')
+    const ps = d ? d.split('-') : []
+    return `${Number(ps[1])}-${Number(ps[2])} ${t}`
+  }
+  if (!s && !e) return '—'
+  if (!s) return short(e)
+  if (!e) return short(s)
+  const d1 = s.split(' ')[0]
+  const d2 = e.split(' ')[0]
+  if (d1 === d2) {
+    return `${short(s).split(' ')[0]} ${s.split(' ')[1]}~${e.split(' ')[1]}`
+  }
+  return `${short(s)} ~ ${short(e)}`
+}
+// 请假时段展示：按行对象缓存结果，避免每次重渲染都重做一遍字符串切分。
+// 缓存挂在行对象上（WeakMap），行对象随每次加载重建，缓存自然失效；起止时间变了也会重算。
+function rangeOf(item) {
+  if (!_rangeCache) _rangeCache = new WeakMap()
+  const s = item.开始时间 || ''
+  const e = item.结束时间 || ''
+  const hit = _rangeCache.get(item)
+  if (hit && hit.s === s && hit.e === e) return hit.text
+  const text = formatRange(s, e)
+  _rangeCache.set(item, { s, e, text })
+  return text
+}
+async function loadAll() {
+  loading.value = true
+  try {
+    const [stuRes, leavesRes] = await Promise.all([
+      axios.get(`${API}/students`),
+      axios.get(`${API}/leaves`)
+    ])
+    students.value = stuRes.data.data || []
+    leaves.value = leavesRes.data.data || []
+    return true
+  } catch (err) {
+    notifyError('加载失败')
+    return false
+  } finally {
+    loading.value = false
+  }
+}
+async function refresh() {
+  // 失败时 loadAll 已提示「加载失败」，不能再走成功分支
+  if (!await loadAll()) return
+  notifySuccess(activeTab.value === 'today' ? '已刷新 今日请假 数据' : '已刷新 请假记录 数据')
+  checkOverdue()
+}
+// 当前时间字符串，格式与结束时间保持一致（YYYY-MM-DD HH:mm）
+function nowStr() {
+  return formatDateTime(new Date())
+}
+// 检测「假期已结束但尚未销假」的记录并弹出提示
+function checkOverdue() {
+  const now = nowStr()
+  // 状态为「请假中」且结束时间已到、且本会话未提醒过
+  const overdue = activeLeaves.value.filter(
+    (l) => l.结束时间 && l.结束时间 <= now && !promptedIds.has(l.id)
+  )
+  if (overdue.length === 0) return
+  // 本次会话记录已提醒，避免该同学反复弹出
+  overdue.forEach((l) => promptedIds.add(l.id))
+  overdueList.value = overdue.map((l) => ({
+    ...l,
+    _range: formatRange(l.开始时间, l.结束时间)
+  }))
+  overdueDialogVisible.value = true
+}
+// 「未返校」：保持请假中，仅从本次弹窗列表移除
+function handleOverdueNot(rec) {
+  removeOverdue(rec.id)
+}
+// 「已经返校并销假」：调用销假接口后从列表移除
+async function handleOverdueReturn(rec) {
+  try {
+    await axios.post(`${API}/leaves/${rec.id}/return`)
+    notifySuccess(`${rec.姓名} 已返校并销假`)
+    removeOverdue(rec.id)
+    await loadAll()
+  } catch (err) {
+    reportError(err, { action: '销假' })
+  }
+}
+function removeOverdue(id) {
+  overdueList.value = overdueList.value.filter((l) => l.id !== id)
+  if (overdueList.value.length === 0) overdueDialogVisible.value = false
+}
+async function submitAdd(payload) {
+  try {
+    await axios.post(`${API}/leaves`, payload)
+    addDialogVisible.value = false
+    notifySuccess('已添加请假')
+    await loadAll()
+  } catch (err) {
+    reportError(err, { action: '添加' })
+  }
+}
+function openAddLeave() {
+  editingLeave.value = null
+  addDialogVisible.value = true
+}
+function openEditLeave(item) {
+  editingLeave.value = item
+  addDialogVisible.value = true
+}
+async function updateLeave(payload) {
+  const { id, ...fields } = payload
+  try {
+    await axios.put(`${API}/leaves/${id}`, fields)
+    addDialogVisible.value = false
+    notifySuccess('已保存')
+    await loadAll()
+  } catch (err) {
+    reportError(err, { action: '保存' })
+  }
+}
+function unreturnLeave(item) {
+  confirm.value = {
+    visible: true,
+    message: `确认撤销「${item.姓名}」的销假，恢复为请假中吗？`,
+    ok: async () => {
+      confirm.value.visible = false
       try {
-        const [stuRes, leavesRes] = await Promise.all([
-          axios.get(`${API}/students`),
-          axios.get(`${API}/leaves`)
-        ])
-        this.students = stuRes.data.data || []
-        this.leaves = leavesRes.data.data || []
-        return true
+        await axios.post(`${API}/leaves/${item.id}/unreturn`)
+        notifySuccess('已撤销销假')
+        await loadAll()
       } catch (err) {
-        useNotification().error('加载失败')
-        return false
-      } finally {
-        this.loading = false
+        notifyError('撤销失败')
       }
-    },
-    async refresh() {
-      // 失败时 loadAll 已提示「加载失败」，不能再走成功分支
-      if (!await this.loadAll()) return
-      useNotification().success(this.activeTab === 'today' ? '已刷新 今日请假 数据' : '已刷新 请假记录 数据')
-      this.checkOverdue()
-    },
-    // 当前时间字符串，格式与结束时间保持一致（YYYY-MM-DD HH:mm）
-    nowStr() {
-      return formatDateTime(new Date())
-    },
-    // 检测「假期已结束但尚未销假」的记录并弹出提示
-    checkOverdue() {
-      const now = this.nowStr()
-      // 状态为「请假中」且结束时间已到、且本会话未提醒过
-      const overdue = this.activeLeaves.filter(
-        (l) => l.结束时间 && l.结束时间 <= now && !this.promptedIds.has(l.id)
-      )
-      if (overdue.length === 0) return
-      // 本次会话记录已提醒，避免该同学反复弹出
-      overdue.forEach((l) => this.promptedIds.add(l.id))
-      this.overdueList = overdue.map((l) => ({
-        ...l,
-        _range: this.formatRange(l.开始时间, l.结束时间)
-      }))
-      this.overdueDialogVisible = true
-    },
-    // 「未返校」：保持请假中，仅从本次弹窗列表移除
-    handleOverdueNot(rec) {
-      this.removeOverdue(rec.id)
-    },
-    // 「已经返校并销假」：调用销假接口后从列表移除
-    async handleOverdueReturn(rec) {
-      try {
-        await axios.post(`${API}/leaves/${rec.id}/return`)
-        useNotification().success(`${rec.姓名} 已返校并销假`)
-        this.removeOverdue(rec.id)
-        await this.loadAll()
-      } catch (err) {
-        reportError(err, { action: '销假' })
-      }
-    },
-    removeOverdue(id) {
-      this.overdueList = this.overdueList.filter((l) => l.id !== id)
-      if (this.overdueList.length === 0) this.overdueDialogVisible = false
-    },
-    async submitAdd(payload) {
-      try {
-        await axios.post(`${API}/leaves`, payload)
-        this.addDialogVisible = false
-        useNotification().success('已添加请假')
-        await this.loadAll()
-      } catch (err) {
-        reportError(err, { action: '添加' })
-      }
-    },
-    openAddLeave() {
-      this.editingLeave = null
-      this.addDialogVisible = true
-    },
-    openEditLeave(item) {
-      this.editingLeave = item
-      this.addDialogVisible = true
-    },
-    async updateLeave(payload) {
-      const { id, ...fields } = payload
-      try {
-        await axios.put(`${API}/leaves/${id}`, fields)
-        this.addDialogVisible = false
-        useNotification().success('已保存')
-        await this.loadAll()
-      } catch (err) {
-        reportError(err, { action: '保存' })
-      }
-    },
-    unreturnLeave(item) {
-      this.confirm = {
-        visible: true,
-        message: `确认撤销「${item.姓名}」的销假，恢复为请假中吗？`,
-        ok: async () => {
-          this.confirm.visible = false
-          try {
-            await axios.post(`${API}/leaves/${item.id}/unreturn`)
-            useNotification().success('已撤销销假')
-            await this.loadAll()
-          } catch (err) {
-            useNotification().error('撤销失败')
-          }
-        }
-      }
-    },
-    returnLeave(item) {
-      this.confirm = {
-        visible: true,
-        message: `确认 ${item.姓名} 已返校并销假吗？`,
-        ok: async () => {
-          this.confirm.visible = false
-          try {
-            await axios.post(`${API}/leaves/${item.id}/return`)
-            useNotification().success('已销假')
-            await this.loadAll()
-          } catch (err) {
-            useNotification().error('销假失败')
-          }
-        }
-      }
-    },
-    // 修改了联系方式后，询问是否同步保存到学生档案
-    askSavePhones(phoneUpdate) {
-      const keys = Object.keys(phoneUpdate).filter(k => k !== 'studentId')
-      const names = keys.join('、')
-      this.confirm = {
-        visible: true,
-        message: `检测到你修改了「${names}」，是否将联系方式保存到班级管理的学生档案，方便之后使用？`,
-        ok: async () => {
-          this.confirm.visible = false
-          try {
-            const { studentId, ...fields } = phoneUpdate
-            await axios.put(`${API}/students/${studentId}`, fields)
-            useNotification().success('联系方式已保存')
-            this.students = (await axios.get(`${API}/students`)).data.data || this.students
-          } catch (err) {
-            useNotification().error('联系方式保存失败')
-          }
-        }
-      }
-    },
-    startEdit(row, field) {
-      this.editingCell = { rowKey: row._rowKey, field: field.name }
-    },
-    // 行拖动：今日到班是筛选后的子集，先把被拖行按「目标位置相邻行」插回整表顺序，再整表保存
-    async saveRowOrder(table, from, to) {
-      const subset = table === 'active' ? this.activeLeaves : this.todayReturned
-      if (from === to || !subset[from]) return
-      const moved = subset[from]
-      const rest = subset.filter((_, i) => i !== from)
-      const ids = this.leaves.map(l => l.id).filter(id => id !== moved.id)
-      const neighbor = rest[to]
-      let insertAt
-      if (neighbor) insertAt = ids.indexOf(neighbor.id)
-      else {
-        const last = rest[rest.length - 1]
-        insertAt = last ? ids.indexOf(last.id) + 1 : ids.length
-      }
-      if (insertAt < 0) insertAt = ids.length
-      ids.splice(insertAt, 0, moved.id)
-      try {
-        await axios.post(`${API}/leaves/reorder`, { ids })
-        await this.loadAll()
-      } catch (err) {
-        useNotification().error('排序保存失败')
-      }
-    },
-    // 列拖动：本地立即重排，并把列顺序保存到后端（下次进入按保存的顺序渲染）
-    async saveColumnOrder(table, from, to) {
-      if (from === to) return
-      const keys = { active: 'activeLeaveFields', returned: 'returnedLeaveFields', records: 'leaveFields' }
-      const key = keys[table]
-      const arr = [...this[key]]
-      const [moved] = arr.splice(from, 1)
-      if (!moved) return
-      arr.splice(to, 0, moved)
-      this[key] = arr
-      try {
-        await axios.post(`${API}/leaves/today-columns`, { table, order: arr.map(f => f.name) })
-      } catch (err) {
-        useNotification().error('列顺序保存失败')
-      }
-    },
-    // 读取后端保存的列顺序；未登记过的列保持原有相对位置追加在末尾
-    async loadColumnOrder() {
-      try {
-        const { data } = await axios.get(`${API}/leaves/today-columns`)
-        const apply = (fields, order) => {
-          if (!Array.isArray(order) || order.length === 0) return fields
-          const map = new Map(fields.map(f => [f.name, f]))
-          const out = order.map(n => map.get(n)).filter(Boolean)
-          fields.forEach(f => { if (!order.includes(f.name)) out.push(f) })
-          return out
-        }
-        this.activeLeaveFields = apply(this.activeLeaveFields, data.active)
-        this.returnedLeaveFields = apply(this.returnedLeaveFields, data.returned)
-        this.leaveFields = apply(this.leaveFields, data.records)
-      } catch (_) { /* 读取失败时保持默认列顺序 */ }
-    },
-    async saveCell(row, field) {
-      const val = row[field.name]
-      // 旧值来源：编辑前的请假记录
-      const oldLeave = this.leaves.find(l => l.id === row.id)
-      const oldVal = oldLeave ? oldLeave[field.name] : undefined
-      try {
-        await axios.put(`${API}/leaves/${row.id}`, { [field.name]: val })
-        if (oldVal !== val) recordCellUndo('leave_records', row.id, field.name, oldVal, val)
-        useNotification().success('已保存')
-      } catch (err) {
-        useNotification().error('保存失败')
-      }
-      this.editingCell = null
-      await this.loadAll()
-    },
-    // ---------- 行内新增一行 ----------
-    addNewRowAtBottom() {
-      if (this.newRow) return
-      const empty = {}
-      this.leaveFields.forEach(f => {
-        if (f.name !== 'id' && f.name !== 'position') empty[f.name] = ''
-      })
-      this.newRow = { ...empty, _isNew: true, _rowKey: 'new' }
-    },
-    onUpdateNewRow(fieldName, value) {
-      if (this.newRow) this.newRow[fieldName] = value
-    },
-    cancelNewRow() {
-      this.newRow = null
-    },
-    async saveNewRow() {
-      if (!this.newRow) return
-      const data = {}
-      for (const f of this.leaveFields) {
-        if (f.name === 'id' || f.name === 'position') continue
-        data[f.name] = this.newRow[f.name] || ''
-      }
-      try {
-        await axios.post(`${API}/leaves`, data)
-        this.newRow = null
-        useNotification().success('已添加请假记录')
-        await this.loadAll()
-      } catch (err) {
-        reportError(err, { action: '添加' })
-      }
-    },
-    deleteLeave(id) {
-      this.confirm = {
-        visible: true,
-        message: '是否删除该条请假数据？',
-        ok: async () => {
-          this.confirm.visible = false
-          this.addDialogVisible = false // 关闭编辑弹窗
-          try {
-            await axios.delete(`${API}/leaves/${id}`)
-            useNotification().success('已删除')
-            await this.loadAll()
-          } catch (err) {
-            useNotification().error('删除失败')
-          }
-        }
-      }
-    },
-    // 导出今日请假表：无数据时直接提示，不弹导出选项弹窗
-    openExportToday() {
-      if (this.todayExportRows.length === 0) return useNotification().info('暂无请假数据可导出')
-      this.exportKind = 'today'
-      this.exportVisible = true
-    },
-    // 导出请假记录：无数据时直接提示，不弹导出选项弹窗
-    openRecordsExport() {
-      if (this.leaves.length === 0) return useNotification().info('暂无请假记录可导出')
-      this.exportKind = 'records'
-      this.exportVisible = true
-    },
-    // 统计条长度：按最大次数归一到百分之百，最小保留 4% 以便零头也可见
-    statBarWidth(row) {
-      if (!this.maxLeaveStat) return 0
-      return Math.max(4, Math.round(row.合计 / this.maxLeaveStat * 100))
-    },
-    // 刷新请假统计：与表格共用同一份请假数据
-    // loadAll 失败时内部已提示「加载失败」并 return false（不抛），所以不能用 try/catch 判断——
-    // 原来那个 catch 是死代码，失败时会同时弹「加载失败」和「已刷新 请假统计 数据」。
-    // 与同文件 refresh() 的写法保持一致。
-    async refreshStats() {
-      if (!await this.loadAll()) return
-      useNotification().success('已刷新 请假统计 数据')
-    },
-    // 导出请假统计：无数据时直接提示
-    openStatsExport() {
-      if (this.leaveStatRows.length === 0) return useNotification().info('暂无请假统计可导出')
-      this.exportKind = 'stats'
-      this.exportVisible = true
     }
   }
 }
+function returnLeave(item) {
+  confirm.value = {
+    visible: true,
+    message: `确认 ${item.姓名} 已返校并销假吗？`,
+    ok: async () => {
+      confirm.value.visible = false
+      try {
+        await axios.post(`${API}/leaves/${item.id}/return`)
+        notifySuccess('已销假')
+        await loadAll()
+      } catch (err) {
+        notifyError('销假失败')
+      }
+    }
+  }
+}
+// 修改了联系方式后，询问是否同步保存到学生档案
+function askSavePhones(phoneUpdate) {
+  const keys = Object.keys(phoneUpdate).filter(k => k !== 'studentId')
+  const names = keys.join('、')
+  confirm.value = {
+    visible: true,
+    message: `检测到你修改了「${names}」，是否将联系方式保存到班级管理的学生档案，方便之后使用？`,
+    ok: async () => {
+      confirm.value.visible = false
+      try {
+        const { studentId, ...fields } = phoneUpdate
+        await axios.put(`${API}/students/${studentId}`, fields)
+        notifySuccess('联系方式已保存')
+        students.value = (await axios.get(`${API}/students`)).data.data || students.value
+      } catch (err) {
+        notifyError('联系方式保存失败')
+      }
+    }
+  }
+}
+function startEdit(row, field) {
+  editingCell.value = { rowKey: row._rowKey, field: field.name }
+}
+// 行拖动：今日到班是筛选后的子集，先把被拖行按「目标位置相邻行」插回整表顺序，再整表保存
+async function saveRowOrder(table, from, to) {
+  const subset = table === 'active' ? activeLeaves.value : todayReturned.value
+  if (from === to || !subset[from]) return
+  const moved = subset[from]
+  const rest = subset.filter((_, i) => i !== from)
+  const ids = leaves.value.map(l => l.id).filter(id => id !== moved.id)
+  const neighbor = rest[to]
+  let insertAt
+  if (neighbor) insertAt = ids.indexOf(neighbor.id)
+  else {
+    const last = rest[rest.length - 1]
+    insertAt = last ? ids.indexOf(last.id) + 1 : ids.length
+  }
+  if (insertAt < 0) insertAt = ids.length
+  ids.splice(insertAt, 0, moved.id)
+  try {
+    await axios.post(`${API}/leaves/reorder`, { ids })
+    await loadAll()
+  } catch (err) {
+    notifyError('排序保存失败')
+  }
+}
+// 列拖动：本地立即重排，并把列顺序保存到后端（下次进入按保存的顺序渲染）
+async function saveColumnOrder(table, from, to) {
+  if (from === to) return
+  const keys = { active: activeLeaveFields, returned: returnedLeaveFields, records: leaveFields }
+  const key = keys[table]
+  const arr = [...key.value]
+  const [moved] = arr.splice(from, 1)
+  if (!moved) return
+  arr.splice(to, 0, moved)
+  key.value = arr
+  try {
+    await axios.post(`${API}/leaves/today-columns`, { table, order: arr.map(f => f.name) })
+  } catch (err) {
+    notifyError('列顺序保存失败')
+  }
+}
+// 读取后端保存的列顺序；未登记过的列保持原有相对位置追加在末尾
+async function loadColumnOrder() {
+  try {
+    const { data } = await axios.get(`${API}/leaves/today-columns`)
+    const apply = (fields, order) => {
+      if (!Array.isArray(order) || order.length === 0) return fields
+      const map = new Map(fields.map(f => [f.name, f]))
+      const out = order.map(n => map.get(n)).filter(Boolean)
+      fields.forEach(f => { if (!order.includes(f.name)) out.push(f) })
+      return out
+    }
+    activeLeaveFields.value = apply(activeLeaveFields.value, data.active)
+    returnedLeaveFields.value = apply(returnedLeaveFields.value, data.returned)
+    leaveFields.value = apply(leaveFields.value, data.records)
+  } catch (_) { /* 读取失败时保持默认列顺序 */ }
+}
+async function saveCell(row, field) {
+  const val = row[field.name]
+  // 旧值来源：编辑前的请假记录
+  const oldLeave = leaves.value.find(l => l.id === row.id)
+  const oldVal = oldLeave ? oldLeave[field.name] : undefined
+  try {
+    await axios.put(`${API}/leaves/${row.id}`, { [field.name]: val })
+    if (oldVal !== val) recordCellUndo('leave_records', row.id, field.name, oldVal, val)
+    notifySuccess('已保存')
+  } catch (err) {
+    notifyError('保存失败')
+  }
+  editingCell.value = null
+  await loadAll()
+}
+// ---------- 行内新增一行 ----------
+function addNewRowAtBottom() {
+  if (newRow.value) return
+  const empty = {}
+  leaveFields.value.forEach(f => {
+    if (f.name !== 'id' && f.name !== 'position') empty[f.name] = ''
+  })
+  newRow.value = { ...empty, _isNew: true, _rowKey: 'new' }
+}
+function onUpdateNewRow(fieldName, value) {
+  if (newRow.value) newRow.value[fieldName] = value
+}
+function cancelNewRow() {
+  newRow.value = null
+}
+async function saveNewRow() {
+  if (!newRow.value) return
+  const data = {}
+  for (const f of leaveFields.value) {
+    if (f.name === 'id' || f.name === 'position') continue
+    data[f.name] = newRow.value[f.name] || ''
+  }
+  try {
+    await axios.post(`${API}/leaves`, data)
+    newRow.value = null
+    notifySuccess('已添加请假记录')
+    await loadAll()
+  } catch (err) {
+    reportError(err, { action: '添加' })
+  }
+}
+function deleteLeave(id) {
+  confirm.value = {
+    visible: true,
+    message: '是否删除该条请假数据？',
+    ok: async () => {
+      confirm.value.visible = false
+      addDialogVisible.value = false // 关闭编辑弹窗
+      try {
+        await axios.delete(`${API}/leaves/${id}`)
+        notifySuccess('已删除')
+        await loadAll()
+      } catch (err) {
+        notifyError('删除失败')
+      }
+    }
+  }
+}
+// 导出今日请假表：无数据时直接提示，不弹导出选项弹窗
+function openExportToday() {
+  if (todayExportRows.value.length === 0) return notifyInfo('暂无请假数据可导出')
+  exportKind.value = 'today'
+  exportVisible.value = true
+}
+// 导出请假记录：无数据时直接提示，不弹导出选项弹窗
+function openRecordsExport() {
+  if (leaves.value.length === 0) return notifyInfo('暂无请假记录可导出')
+  exportKind.value = 'records'
+  exportVisible.value = true
+}
+// 统计条长度：按最大次数归一到百分之百，最小保留 4% 以便零头也可见
+function statBarWidth(row) {
+  if (!maxLeaveStat.value) return 0
+  return Math.max(4, Math.round(row.合计 / maxLeaveStat.value * 100))
+}
+// 刷新请假统计：与表格共用同一份请假数据
+// loadAll 失败时内部已提示「加载失败」并 return false（不抛），所以不能用 try/catch 判断——
+// 原来那个 catch 是死代码，失败时会同时弹「加载失败」和「已刷新 请假统计 数据」。
+// 与同文件 refresh() 的写法保持一致。
+async function refreshStats() {
+  if (!await loadAll()) return
+  notifySuccess('已刷新 请假统计 数据')
+}
+// 导出请假统计：无数据时直接提示
+function openStatsExport() {
+  if (leaveStatRows.value.length === 0) return notifyInfo('暂无请假统计可导出')
+  exportKind.value = 'stats'
+  exportVisible.value = true
+}
+
+// created 等价：数据加载与超时检测初始化（不阻塞渲染）
+;(async () => {
+  await loadAll()
+  await loadColumnOrder()
+  // 打开页面后检测一次超时未销假
+  checkOverdue()
+  // 每 10 分钟低频检测一次（纯前端比较时间，成本极低）
+  _startOverdueTimer()
+})()
+
+onMounted(() => { _applyRowFocus() })
+// 页面被 KeepAlive 缓存：切走时走 deactivated（不会 unmount），必须停表；
+// 切回时重新启动，避免缓存页在后台每 10 分钟白跑一次。
+onActivated(() => {
+  _applyRowFocus()
+  _startOverdueTimer()
+})
+onDeactivated(() => { _stopOverdueTimer() })
+onBeforeUnmount(() => { _stopOverdueTimer() })
 </script>
 
 <style scoped>

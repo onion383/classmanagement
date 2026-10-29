@@ -26,8 +26,8 @@ function createDynamicTableRouter(tableName, options = {}) {
         }
       });
     }
-    // 短时缓存：数据可能在 30 秒内不变，减少重复查询
-    res.set('Cache-Control', 'private, max-age=30');
+    // 不再设短时 HTTP 缓存：动态表响应在安全模式下是会话绑定的密文，
+    // 浏览器缓存跨会话无法解密；明文模式下这点查询也不值得引入陈旧数据。
     res.json(result);
   });
 

@@ -197,6 +197,11 @@ function cleanPath(value, name) {
 //         'classinfo' 班级信息对象       {}
 // 未命中的列退回按列类型清洗（见 sanitizeField）。
 const COLUMN_RULES = {
+  // —— 学生 ——
+  // 临时学生标记：0=正式 1=临时。它是「成员状态」，不是第二套身份（id 仍是 students.id）。
+  students: {
+    is_provisional: { kind: 'number', min: 0, max: 1, integer: true },
+  },
   // —— 班费记录 ——
   fee_records: {
     收支类型: { kind: 'enum', values: ['收入', '支出'] },
@@ -390,18 +395,15 @@ function assertDutyCellShape(cells, name) {
   });
 }
 
-// 值日 cells 校验（兼容两种存量结构）：
-//   ① 新版按模式打包 { daily: {...}, big: {...} }；② 旧版整块 { 项目: { 星期: [...] } }。
-// 顶层键全部是 daily/big 视为模式打包，逐模式校验；否则按旧版整块校验。
+// 值日 cells 校验：统一存「按模式分键」结构 { daily: {...}, big: {...} }，逐模式校验。
+// 单模式内容（{ 项目: { 星期: [...] } }）不再接受——读取侧只认打包结构，收下也读不回来。
 function cleanDutyCells(value, name) {
   const obj = parseJsonShape(value, 'object', name);
   const keys = Object.keys(obj);
-  const isModeMap = keys.length > 0 && keys.every((k) => k === 'daily' || k === 'big');
-  if (isModeMap) {
-    ['daily', 'big'].forEach((m) => { if (obj[m] !== undefined) assertDutyCellShape(obj[m], name); });
-  } else {
-    assertDutyCellShape(obj, name);
+  if (keys.length && !keys.every((k) => k === 'daily' || k === 'big')) {
+    throw new Error(`字段「${name}」需要是 { daily: {...}, big: {...} } 结构（按模式分键）`);
   }
+  ['daily', 'big'].forEach((m) => { if (obj[m] !== undefined) assertDutyCellShape(obj[m], name); });
   return obj;
 }
 

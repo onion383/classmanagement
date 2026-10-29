@@ -48,9 +48,8 @@ function assertSeatRefs(seats, name) {
   });
 }
 
-// —— 值日：解析 duty_settings 里的劳动项目 ——
-// 返回 { names:Set<项目名>, maps:{ daily:Map<项目名,人数>, big:Map<项目名,人数> }, packed }
-// packed=true 表示 items 按 daily/big 打包（此时按模式取人数）；否则为扁平数组（两种模式共用）。
+// —— 值日：解析 duty_settings 里的劳动项目（按模式分键 { daily: [...], big: [...] }）——
+// 返回 { names:Set<项目名>, maps:{ daily:Map<项目名,人数>, big:Map<项目名,人数> } }
 function parseDutyItems(raw) {
   let obj = raw;
   if (typeof raw === 'string') { try { obj = JSON.parse(raw); } catch (_) { obj = null; } }
@@ -67,16 +66,15 @@ function parseDutyItems(raw) {
       if (Number.isFinite(cnt) && cnt > 0) maps[mode].set(nm, cnt);
     });
   };
-  let packed = false;
-  if (Array.isArray(obj)) add('daily', obj);
-  else if (obj && typeof obj === 'object') { packed = true; add('daily', obj.daily); add('big', obj.big); }
-  return { names, maps, packed };
+  if (obj && typeof obj === 'object') { add('daily', obj.daily); add('big', obj.big); }
+  return { names, maps };
 }
 
 // 值日名单校验：项目名须属于已配置的劳动项目、星期须属于设置的星期、姓名须是班级学生，
 // 且每个「项目 · 星期」的人数须与设置里的 count 严格相等。
 // 仅在 settings 里确实配置了项目 / 人数时才校验（避免设置未初始化时误伤）。
-// 兼容 daily/big 打包与旧版整块两种结构。
+// 兼容两种提交形态：PUT /api/duty 传来的「单模式内容」（{项目:{星期:[...]}}）、
+// 整块写入（AI propose_json_write 等）传来的 {daily,big} 打包内容。
 function assertDutyRefs(cells, name) {
   const obj = toObj(cells);
   if (!obj || typeof obj !== 'object' || Array.isArray(obj)) return;
@@ -86,8 +84,8 @@ function assertDutyRefs(cells, name) {
   const s = db.prepare('SELECT days, items FROM duty_settings WHERE id = 1').get();
   const dayObj = toObj(s ? s.days : null);
   const dayList = Array.isArray(dayObj) ? dayObj.map(String) : [];
-  const { names: itemNames, maps, packed } = parseDutyItems(s ? s.items : null);
-  // 整块（非模式打包）时，人数取 daily 与 big 的并集（同名以 daily 优先）
+  const { names: itemNames, maps } = parseDutyItems(s ? s.items : null);
+  // 单模式提交（看不出是哪个模式）时，人数取 daily 与 big 的并集（同名以 daily 优先）
   const unionMap = new Map([...maps.big, ...maps.daily]);
   const names = studentNameSet();
 
@@ -96,8 +94,8 @@ function assertDutyRefs(cells, name) {
     : [{ mode: null, layer: obj }];
 
   layers.forEach(({ mode, layer }) => {
-    // 仅当「设置按模式打包」且「本次也按模式打包」时按模式取人数，否则共用并集
-    const countMap = packed && mode != null ? maps[mode] : unionMap;
+    // 打包提交按模式取人数；单模式提交共用并集
+    const countMap = mode != null ? maps[mode] : unionMap;
     Object.keys(layer).forEach((item) => {
       if (itemNames.size && !itemNames.has(item)) {
         throw new Error(`值日项目「${item}」不在设置的劳动项目里（字段「${name}」）`);

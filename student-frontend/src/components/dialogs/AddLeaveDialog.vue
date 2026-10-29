@@ -109,193 +109,188 @@
   </DialogShell>
 </template>
 
-<script>
+<script setup>
+import { ref, computed, watch, onBeforeUnmount } from 'vue'
 import '../../styles/dialog-transition.css'
 import DialogShell from '../base/DialogShell.vue'
 import { useNotification } from '../../composables/useNotification.js'
 import { formatDateTimeLocal, formatDateTime } from '../../utils/dateTime.js'
 
-export default {
-  name: 'AddLeaveDialog',
-  components: { DialogShell },
-  props: {
-    visible: { type: Boolean, default: false },
-    students: { type: Array, default: () => [] },
-    typeOptions: { type: Array, default: () => ['病假', '事假', '其他'] },
-    // 非空时进入编辑模式（传入一条请假记录）
-    editingRecord: { type: Object, default: null }
-  },
-  data() {
-    return {
-      keyword: '',
-      listVisible: false,
-      selected: null,
-      hideTimer: null,
-      quickButtons: ['今日全天', '今日上午', '今日下午', '今日晚修', '今日不过夜', '明天全天', '连续两天', '连续三天'],
-      form: {
-        type: this.typeOptions[0] || '病假',
-        startLocal: '',
-        endLocal: '',
-        parentPhone: '',
-        studentPhone: '',
-        remark: ''
-      }
-    };
-  },
-  computed: {
-    filteredStudents() {
-      const kw = this.keyword.toLowerCase();
-      const list = this.students.filter(s => !kw || String(s.姓名 || '').toLowerCase().includes(kw));
-      return list;
-    },
-    isEdit() {
-      return !!(this.editingRecord && this.editingRecord.id != null)
-    }
-  },
-  watch: {
-    visible(v) {
-      if (v) {
-        if (this.isEdit) this.presetFromRecord(this.editingRecord)
-        else this.reset()
-      }
-    }
-  },
-  // 下拉延迟收起定时器：弹窗关掉（组件卸载）后仍在跑就会往已销毁的实例上写状态
-  beforeUnmount() { clearTimeout(this.hideTimer) },
-  methods: {
-    // datetime-local 输入值格式
-    toInput(d) {
-      return formatDateTimeLocal(d);
-    },
-    // 存储展示格式：YYYY-MM-DD HH:mm
-    toFmt(d) {
-      return formatDateTime(d);
-    },
-    reset() {
-      this.keyword = '';
-      this.selected = null;
-      this.listVisible = false;
-      this.form = {
-        type: this.typeOptions[0] || '病假',
-        startLocal: '',
-        endLocal: '',
-        parentPhone: '',
-        studentPhone: '',
-        remark: ''
-      };
-      // 默认填充今日全天，方便直接提交
-      this.applyQuick('今日全天');
-    },
-    // 编辑模式：用原记录预填
-    presetFromRecord(r) {
-      this.form = {
-        type: r.类型 || this.typeOptions[0],
-        startLocal: r.开始时间 ? this.toInput(new Date(r.开始时间.replace(' ', 'T'))) : '',
-        endLocal: r.结束时间 ? this.toInput(new Date(r.结束时间.replace(' ', 'T'))) : '',
-        parentPhone: r.家长联系电话 || '',
-        studentPhone: r.学生联系电话 || '',
-        remark: r.备注 || ''
-      };
-    },
-    applyQuick(name) {
-      const now = new Date();
-      const y = now.getFullYear();
-      const m = now.getMonth();
-      const d = now.getDate();
-      const at = (dd, hh, mm) => new Date(y, m, d + dd, hh, mm, 0, 0);
-      let start, end;
-      if (name === '今日全天') {
-        start = at(0, 0, 0); end = at(1, 0, 0);
-      } else if (name === '今日上午') {
-        start = at(0, 7, 0); end = at(0, 13, 0);
-      } else if (name === '今日下午') {
-        start = at(0, 13, 0); end = at(0, 18, 0);
-      } else if (name === '今日晚修') {
-        start = at(0, 18, 0); end = at(0, 22, 0);
-      } else if (name === '今日不过夜') {
-        start = at(0, 18, 0); end = at(1, 7, 0);
-      } else if (name === '明天全天') {
-        start = now; end = at(2, 7, 0); // 当前时刻 → 第三天(后天)早上7点
-      } else if (name === '连续两天') {
-        start = now; end = new Date(now.getTime() + 48 * 3600 * 1000);
-      } else if (name === '连续三天') {
-        start = now; end = new Date(now.getTime() + 72 * 3600 * 1000);
-      }
-      if (start && end) {
-        this.form.startLocal = this.toInput(start);
-        this.form.endLocal = this.toInput(end);
-      }
-    },
-    selectStudent(s) {
-      this.selected = s;
-      this.keyword = s.姓名 || '';
-      this.listVisible = false;
-      this.form.parentPhone = s.家长联系电话 || '';
-      this.form.studentPhone = s.学生联系电话 || '';
-    },
-    delayHide() {
-      clearTimeout(this.hideTimer);
-      this.hideTimer = setTimeout(() => {
-        this.listVisible = false;
-      }, 150);
-    },
-    submit() {
-      if (!this.form.type) {
-        useNotification().warning('请选择请假类型');
-        return;
-      }
-      if (!this.form.startLocal || !this.form.endLocal) {
-        useNotification().warning('请选择请假时段（可点击上方快捷按钮）');
-        return;
-      }
-      const startD = new Date(this.form.startLocal);
-      const endD = new Date(this.form.endLocal);
-      if (startD >= endD) {
-        useNotification().warning('开始时间需早于结束时间');
-        return;
-      }
+defineOptions({ name: 'AddLeaveDialog' })
 
-      const common = {
-        类型: this.form.type,
-        开始时间: this.toFmt(startD),
-        结束时间: this.toFmt(endD),
-        备注: this.form.remark,
-        家长联系电话: this.form.parentPhone.trim(),
-        学生联系电话: this.form.studentPhone.trim()
-      };
+const props = defineProps({
+  visible: { type: Boolean, default: false },
+  students: { type: Array, default: () => [] },
+  typeOptions: { type: Array, default: () => ['病假', '事假', '其他'] },
+  // 非空时进入编辑模式（传入一条请假记录）
+  editingRecord: { type: Object, default: null }
+})
+const emit = defineEmits(['cancel', 'delete', 'update', 'ask-save-phones', 'confirm'])
 
-      // 编辑模式
-      if (this.isEdit) {
-        const base = this.editingRecord
-        this.$emit('update', { id: base.id, ...common })
-        const changed = {}
-        if (common.家长联系电话 !== (base.家长联系电话 || '')) changed.家长联系电话 = common.家长联系电话
-        if (common.学生联系电话 !== (base.学生联系电话 || '')) changed.学生联系电话 = common.学生联系电话
-        if (Object.keys(changed).length) {
-          this.$emit('ask-save-phones', { studentId: base.student_id, ...changed })
-        }
-        return
-      }
+const keyword = ref('');
+const listVisible = ref(false);
+const selected = ref(null);
+const hideTimer = ref(null);
+const quickButtons = ref(['今日全天', '今日上午', '今日下午', '今日晚修', '今日不过夜', '明天全天', '连续两天', '连续三天']);
+const form = ref({
+  type: props.typeOptions[0] || '病假',
+  startLocal: '',
+  endLocal: '',
+  parentPhone: '',
+  studentPhone: '',
+  remark: ''
+});
 
-      // 新增模式
-      if (!this.selected) {
-        useNotification().warning('请选择学生');
-        return;
-      }
-      this.$emit('confirm', {
-        studentId: this.selected.id,
-        姓名: this.selected.姓名,
-        ...common
-      });
+const filteredStudents = computed(() => {
+  const kw = keyword.value.toLowerCase();
+  const list = props.students.filter(s => !kw || String(s.姓名 || '').toLowerCase().includes(kw));
+  return list;
+})
+const isEdit = computed(() => {
+  return !!(props.editingRecord && props.editingRecord.id != null)
+})
 
-      // 若用户修改了联系方式，询问是否同步保存到班级管理的学生表
-      const changed = {}
-      if (common.家长联系电话 !== (this.selected.家长联系电话 || '')) changed.家长联系电话 = common.家长联系电话
-      if (common.学生联系电话 !== (this.selected.学生联系电话 || '')) changed.学生联系电话 = common.学生联系电话
-      if (Object.keys(changed).length) {
-        this.$emit('ask-save-phones', { studentId: this.selected.id, ...changed })
-      }
-    }
+watch(() => props.visible, (v) => {
+  if (v) {
+    if (isEdit.value) presetFromRecord(props.editingRecord)
+    else reset()
   }
-};
+})
+
+// 下拉延迟收起定时器：弹窗关掉（组件卸载）后仍在跑就会往已销毁的实例上写状态
+onBeforeUnmount(() => clearTimeout(hideTimer.value))
+
+// datetime-local 输入值格式
+function toInput(d) {
+  return formatDateTimeLocal(d);
+}
+// 存储展示格式：YYYY-MM-DD HH:mm
+function toFmt(d) {
+  return formatDateTime(d);
+}
+function reset() {
+  keyword.value = '';
+  selected.value = null;
+  listVisible.value = false;
+  form.value = {
+    type: props.typeOptions[0] || '病假',
+    startLocal: '',
+    endLocal: '',
+    parentPhone: '',
+    studentPhone: '',
+    remark: ''
+  };
+  // 默认填充今日全天，方便直接提交
+  applyQuick('今日全天');
+}
+// 编辑模式：用原记录预填
+function presetFromRecord(r) {
+  form.value = {
+    type: r.类型 || props.typeOptions[0],
+    startLocal: r.开始时间 ? toInput(new Date(r.开始时间.replace(' ', 'T'))) : '',
+    endLocal: r.结束时间 ? toInput(new Date(r.结束时间.replace(' ', 'T'))) : '',
+    parentPhone: r.家长联系电话 || '',
+    studentPhone: r.学生联系电话 || '',
+    remark: r.备注 || ''
+  };
+}
+function applyQuick(name) {
+  const now = new Date();
+  const y = now.getFullYear();
+  const m = now.getMonth();
+  const d = now.getDate();
+  const at = (dd, hh, mm) => new Date(y, m, d + dd, hh, mm, 0, 0);
+  let start, end;
+  if (name === '今日全天') {
+    start = at(0, 0, 0); end = at(1, 0, 0);
+  } else if (name === '今日上午') {
+    start = at(0, 7, 0); end = at(0, 13, 0);
+  } else if (name === '今日下午') {
+    start = at(0, 13, 0); end = at(0, 18, 0);
+  } else if (name === '今日晚修') {
+    start = at(0, 18, 0); end = at(0, 22, 0);
+  } else if (name === '今日不过夜') {
+    start = at(0, 18, 0); end = at(1, 7, 0);
+  } else if (name === '明天全天') {
+    start = now; end = at(2, 7, 0); // 当前时刻 → 第三天(后天)早上7点
+  } else if (name === '连续两天') {
+    start = now; end = new Date(now.getTime() + 48 * 3600 * 1000);
+  } else if (name === '连续三天') {
+    start = now; end = new Date(now.getTime() + 72 * 3600 * 1000);
+  }
+  if (start && end) {
+    form.value.startLocal = toInput(start);
+    form.value.endLocal = toInput(end);
+  }
+}
+function selectStudent(s) {
+  selected.value = s;
+  keyword.value = s.姓名 || '';
+  listVisible.value = false;
+  form.value.parentPhone = s.家长联系电话 || '';
+  form.value.studentPhone = s.学生联系电话 || '';
+}
+function delayHide() {
+  clearTimeout(hideTimer.value);
+  hideTimer.value = setTimeout(() => {
+    listVisible.value = false;
+  }, 150);
+}
+function submit() {
+  if (!form.value.type) {
+    useNotification().warning('请选择请假类型');
+    return;
+  }
+  if (!form.value.startLocal || !form.value.endLocal) {
+    useNotification().warning('请选择请假时段（可点击上方快捷按钮）');
+    return;
+  }
+  const startD = new Date(form.value.startLocal);
+  const endD = new Date(form.value.endLocal);
+  if (startD >= endD) {
+    useNotification().warning('开始时间需早于结束时间');
+    return;
+  }
+
+  const common = {
+    类型: form.value.type,
+    开始时间: toFmt(startD),
+    结束时间: toFmt(endD),
+    备注: form.value.remark,
+    家长联系电话: form.value.parentPhone.trim(),
+    学生联系电话: form.value.studentPhone.trim()
+  };
+
+  // 编辑模式
+  if (isEdit.value) {
+    const base = props.editingRecord
+    emit('update', { id: base.id, ...common })
+    const changed = {}
+    if (common.家长联系电话 !== (base.家长联系电话 || '')) changed.家长联系电话 = common.家长联系电话
+    if (common.学生联系电话 !== (base.学生联系电话 || '')) changed.学生联系电话 = common.学生联系电话
+    if (Object.keys(changed).length) {
+      emit('ask-save-phones', { studentId: base.student_id, ...changed })
+    }
+    return
+  }
+
+  // 新增模式
+  if (!selected.value) {
+    useNotification().warning('请选择学生');
+    return;
+  }
+  emit('confirm', {
+    studentId: selected.value.id,
+    姓名: selected.value.姓名,
+    ...common
+  });
+
+  // 若用户修改了联系方式，询问是否同步保存到班级管理的学生表
+  const changed = {}
+  if (common.家长联系电话 !== (selected.value.家长联系电话 || '')) changed.家长联系电话 = common.家长联系电话
+  if (common.学生联系电话 !== (selected.value.学生联系电话 || '')) changed.学生联系电话 = common.学生联系电话
+  if (Object.keys(changed).length) {
+    emit('ask-save-phones', { studentId: selected.value.id, ...changed })
+  }
+}
 </script>

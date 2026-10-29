@@ -777,7 +777,7 @@ router.get('/photo/:photoId/thumb', async (req, res) => {
     }
     res.setHeader('Content-Type', 'image/jpeg');
     res.setHeader('Content-Length', buf.length);
-    res.setHeader('Cache-Control', 'public, max-age=86400');
+    res.setHeader('Cache-Control', 'private, max-age=86400');
     return res.end(buf);
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -884,7 +884,7 @@ router.post('/photo/thumbs', async (req, res) => {
     res.setHeader('Content-Type', 'application/octet-stream');
     res.setHeader('Content-Length', body2.length);
     res.setHeader('X-Thumb-Ids', gotIds.join(','));
-    res.setHeader('Cache-Control', 'public, max-age=86400');
+    res.setHeader('Cache-Control', 'private, max-age=86400');
     return res.end(body2);
   } catch (err) {
     res.status(500).json({ error: err.message });

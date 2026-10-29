@@ -218,20 +218,6 @@ function getRect(win) {
   }
 }
 
-// 兼容旧调用方：只改位置、不动尺寸（SWP_NOSIZE 不会触发尺寸重算）
-function moveWindow(win, x, y) {
-  const a = init()
-  if (!a) return false
-  const self = hwndOf(win)
-  if (!self) return false
-  try {
-    return !!a.SetWindowPos(self, null, Math.round(x), Math.round(y), 0, 0,
-      SWP_NOSIZE | SWP_NOACTIVATE)
-  } catch (_) {
-    return false
-  }
-}
-
 module.exports = {
   attach,
   detach,
@@ -239,6 +225,5 @@ module.exports = {
   placeAboveDesktop,
   isJustAboveDesktop,
   getRect,
-  moveWindow,
   isAvailable: () => !!init(),
 }

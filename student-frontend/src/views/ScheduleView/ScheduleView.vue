@@ -204,8 +204,9 @@
 </template>
 
 
-<script>
-import { getCurrentInstance, defineAsyncComponent } from 'vue';
+<script setup>
+import { ref, computed, watch, onMounted, onActivated, getCurrentInstance, defineAsyncComponent } from 'vue';
+import { useRoute } from 'vue-router';
 import EmptySnapshot from '../../components/base/EmptySnapshot.vue';
 import GridView from '../../components/tables/GridView/GridView.vue';
 import Tabs from '../../components/base/Tabs.vue';
@@ -218,6 +219,8 @@ import { useScheduleCommon } from './ScheduleView.common.js';
 import { useScheduleMaster } from './ScheduleView.master.js';
 import { useScheduleActive } from './ScheduleView.active.js';
 import { useScheduleHistory } from './ScheduleView.history.js';
+
+defineOptions({ name: 'ScheduleView' })
 
 // 弹窗类组件懒加载：打开时才加载对应 chunk。loader 抽出为命名函数，
 // 可用 v-preload="loadXxx" 在悬停按钮时预取，点击时即时弹出。
@@ -265,235 +268,256 @@ const COURSE_CANDIDATES = [
   '历史', '政治', '地理', '体育', '信息', '音乐', '美术', '班会'
 ].map((name, idx) => ({ id: idx, label: name, value: name }));
 
-export default {
-  name: 'ScheduleView',
-  components: { GridView, SettingsDialog, ExportExcel,Tabs,WeekSwitcher,EmptySnapshot, ConfirmDialog },
-  setup() {
-    const { success, error } = useNotification()
-    const inst = getCurrentInstance()
-    // Ctrl+Z / Ctrl+Shift+Z / Ctrl+Y 撤销/重做课表（当前页，含实行+一般两张表）
-    useUndoShortcut('课程表', {
-      onAfterUndo: async (label) => { await Promise.all([inst.proxy.loadMaster(), inst.proxy.loadActive()]); success(label ? `已撤销：${label}` : '已撤销') },
-      onAfterRedo: async (label) => { await Promise.all([inst.proxy.loadMaster(), inst.proxy.loadActive()]); success(label ? `已重做：${label}` : '已重做') }
-    })
-    // loadSettingsDialog 一并暴露：v-preload 的绑值在渲染函数里求值，模块作用域的加载器不挂实例会告警
-    return { notifySuccess: success, notifyError: error, loadSettingsDialog }
-  },
-  data() {
-    return {
-      // 行对象复用缓存（非响应式实例状态）：编辑一格时只重建真正变化的那一行，避免整表重画
-      masterRowReuse: createRowReuseCache(),
-      activeRowReuse: createRowReuseCache(),
-      // ========== 一般课表 ==========
-      masterColHeaders: ['周一', '周二', '周三', '周四', '周五'],
-      masterCells: [],
-      masterSettings: {
-        sections: null,
-        periods: [],
-        days: ['周一', '周二', '周三', '周四', '周五']
-      },
-      masterSettingsVisible: false,
-      masterSettingsMounted: false,
-      masterExportVisible: false,
-      masterExportMounted: false,
+const route = useRoute()
+// applyRouteRowFocus 的 host 契约：需要 $route/$router/$el 且对象身份稳定（内部按 host 记签名）
+const inst = getCurrentInstance()
+const { success: notifySuccess, error: notifyError } = useNotification()
 
-      // ========== 实行课表 ==========
-      activeColHeaders: ['周一', '周二', '周三', '周四', '周五'],
-      activeCells: [],
-      activeSettings: {
-        sections: null,
-        periods: [],
-        days: ['周一', '周二', '周三', '周四', '周五']
-      },
-      activeSettingsVisible: false,
-      activeSettingsMounted: false,
-      activeExportVisible: false,
-      activeExportMounted: false,
+// 行对象复用缓存（非响应式）：编辑一格时只重建真正变化的那一行，避免整表重画
+const masterRowReuse = createRowReuseCache();
+const activeRowReuse = createRowReuseCache();
 
-      // ========== 全局 ==========
-      semesterStart: '',
-      // 注：这里原来有个 `loaded: false`，但全项目没有任何地方把它置 true，
-      // 属于死变量（当初 GridView 空态绑它 → 空态永远不显示）。已删除：
-      // 空态的就绪判定改用 _activeLoadOk / _masterLoadOk。
-      // 加载状态：_xxInFlight 防重复请求；_xxLoadOk 记录是否成功，供重进页面时补拉失败项
-      _activeInFlight: 0,
-      _activeLoadOk: false,
-      // 驱动表格「加载失败态」（告警 + 重试）。和 _activeLoadOk 的区别：
-      // 那个是「最近一次拉取是否成功」，这个只在失败时亮起、成功即熄灭，
-      // 用来区分「还没加载过」和「加载失败了」。
-      activeError: false,
-      masterError: false,
-      _masterInFlight: 0,
-      _masterLoadOk: false,
-      activeTab: 'schedule',
-      tabItems: [
-        { label: '课程表管理', value: 'schedule' },
-        { label: '历史课程表记录', value: 'history' }
-      ],
-      historyWeeks: [],
-      historyCurrentWeek: '',
-      historySnapshot: null,
-      historyCells: [],
-      historySettings: { sections: null, periods: [], days: ['周一','周二','周三','周四','周五'] },
-      historyColHeaders: ['周一','周二','周三','周四','周五'],
-      historyLoading: false,
-      // 周切换滑动方向：上一周="prev" 从右滑入，下一周="next" 从左滑入（应用于历史表格）
-      slideDir: 'next',
-      deleteSnapshotVisible: false,
-      deleteSnapshotMounted: false,
-      applyMasterVisible: false,
-      applyMasterMounted: false,
-      applyActiveVisible: false,
-      applyActiveMounted: false,
-      courseCandidates: COURSE_CANDIDATES,
-    };
-  },
-  watch: {
-    activeTab(newTab) {
-      if (newTab === 'history') {
-        if (this.historyWeeks.length === 0) {
-          this.fetchHistoryWeeks();
-        } else {
-          // 确保当前周存在，若不存在则重载
-          if (!this.historyCurrentWeek || !this.historyWeeks.some(w => w.week_start === this.historyCurrentWeek)) {
-            if (this.historyWeeks.length > 0) {
-              this.historyCurrentWeek = this.historyWeeks[0].week_start;
-            }
-            this.loadHistorySnapshot();
-          }
-        }
+// ========== 一般课表 ==========
+const masterColHeaders = ref(['周一', '周二', '周三', '周四', '周五'])
+const masterCells = ref([])
+const masterSettings = ref({
+  sections: null,
+  periods: [],
+  days: ['周一', '周二', '周三', '周四', '周五']
+})
+const masterSettingsVisible = ref(false)
+const masterSettingsMounted = ref(false)
+const masterExportVisible = ref(false)
+const masterExportMounted = ref(false)
+
+// ========== 实行课表 ==========
+const activeColHeaders = ref(['周一', '周二', '周三', '周四', '周五'])
+const activeCells = ref([])
+const activeSettings = ref({
+  sections: null,
+  periods: [],
+  days: ['周一', '周二', '周三', '周四', '周五']
+})
+const activeSettingsVisible = ref(false)
+const activeSettingsMounted = ref(false)
+const activeExportVisible = ref(false)
+const activeExportMounted = ref(false)
+
+// ========== 全局 ==========
+const semesterStart = ref('')
+// 加载状态：_xxInFlight 防重复请求；_xxLoadOk 记录是否成功，供重进页面时补拉失败项
+// 驱动表格「加载失败态」（告警 + 重试）。和 _xxLoadOk 的区别：
+// 那个是「最近一次拉取是否成功」，这个只在失败时亮起、成功即熄灭，
+// 用来区分「还没加载过」和「加载失败了」。
+const activeError = ref(false)
+const masterError = ref(false)
+const activeTab = ref('schedule')
+const tabItems = [
+  { label: '课程表管理', value: 'schedule' },
+  { label: '历史课程表记录', value: 'history' }
+]
+const historyWeeks = ref([])
+const historyCurrentWeek = ref('')
+const historySnapshot = ref(null)
+const historyCells = ref([])
+const historySettings = ref({ sections: null, periods: [], days: ['周一','周二','周三','周四','周五'] })
+const historyColHeaders = ref(['周一','周二','周三','周四','周五'])
+const historyLoading = ref(false)
+// 周切换滑动方向：上一周="prev" 从右滑入，下一周="next" 从左滑入（应用于历史表格）
+const slideDir = ref('next')
+const deleteSnapshotVisible = ref(false)
+const deleteSnapshotMounted = ref(false)
+const applyMasterVisible = ref(false)
+const applyMasterMounted = ref(false)
+const applyActiveVisible = ref(false)
+const applyActiveMounted = ref(false)
+const courseCandidates = COURSE_CANDIDATES;
+// 空态就绪标记（模板绑定；由加载流程置位）
+const _activeLoadOk = ref(false)
+const _masterLoadOk = ref(false)
+
+// 跨模块共享的上下文：状态为 ref（模块内 .value 访问），临时字段与方法直接挂上；
+// 四个 useXxx 的返回方法在下方 Object.assign 回填，模块间经 ctx 互相调用（运行时解析）
+const ctx = {
+  masterColHeaders, masterCells, masterSettings,
+  masterSettingsVisible, masterSettingsMounted, masterExportVisible, masterExportMounted,
+  activeColHeaders, activeCells, activeSettings,
+  activeSettingsVisible, activeSettingsMounted, activeExportVisible, activeExportMounted,
+  semesterStart, activeError, masterError, activeTab,
+  historyWeeks, historyCurrentWeek, historySnapshot, historyCells, historySettings, historyColHeaders,
+  historyLoading, slideDir,
+  deleteSnapshotVisible, deleteSnapshotMounted,
+  applyMasterVisible, applyMasterMounted, applyActiveVisible, applyActiveMounted,
+  _activeLoadOk, _masterLoadOk,
+  // 非响应式实例状态（加载防重 / 串行保存器 / 错误提示去重）
+  _activeInFlight: 0,
+  _masterInFlight: 0,
+  _activeSaver: null,
+  _masterSaver: null,
+  _activeSaveErrorShown: false,
+  _masterSaveErrorShown: false,
+  masterRowReuse, activeRowReuse,
+  notifySuccess, notifyError,
+  host: inst.proxy,
+  emit: () => {},
+}
+const common = useScheduleCommon(ctx, { SECTION_NAMES })
+const master = useScheduleMaster(ctx, { API_BASE, DEFAULT_SECTIONS })
+const active = useScheduleActive(ctx, { API_BASE, DEFAULT_SECTIONS })
+const history = useScheduleHistory(ctx, API_BASE)
+Object.assign(ctx, common, master, active, history)
+
+// 供模板调用的顶层绑定
+const {
+  loadMaster, loadActive, refreshMaster, refreshActive,
+  saveMasterSettings, saveActiveSettings, openMasterExport, openActiveExport,
+  onMasterCellsUpdate, onActiveCellsUpdate, onMasterRowMeta, onActiveRowMeta,
+  applyMasterToActive, applyActiveToMaster,
+} = { ...master, ...active }
+const {
+  captureHistorySnapshot, requestDeleteHistorySnapshot, confirmDeleteHistorySnapshot, onSwitchWeek,
+} = history
+const { retryFailedLoads, _applyRowFocus } = common
+
+// ---- 一般课表显示行 ----
+const masterDisplayRows = computed(() =>
+  masterRowReuse(ctx.buildDisplayRows(masterCells.value, masterSettings.value)));
+const masterExportFields = computed(() => {
+  const fields = [{ name: '行号' }];
+  masterColHeaders.value.forEach(h => fields.push({ name: h }));
+  return fields;
+});
+const masterExportRows = computed(() => {
+  const headers = masterColHeaders.value;
+  const rows = masterDisplayRows.value;
+  return rows.map(row => {
+    if (row._isPodium) {
+      return {
+        '行号': '讲台',
+        _isPodium: true,
+        label: '讲  台'
+      };
+    }
+    const obj = { '行号': row.label };
+    row.cells.forEach((cell, idx) => {
+      const headerName = headers[idx] || `列${idx+1}`;
+      if (cell._isAisle) {
+        obj[headerName] = '走廊';
+        obj._aisleCell = true;
+      } else if (cell._isAisleHidden) {
+        obj[headerName] = '';
+      } else {
+        obj[headerName] = cell.course || '';
       }
-    },
-    // 跨页定位：/schedule?focus=s:节次:周几（s=实行课表，m=一般课表）→ 切到课程表页签并高亮该格
-    '$route.query.focus'() { this._applyRowFocus() },
-    // 懒加载弹窗保活：首次打开后保持挂载，关闭只降 visible，保留退出动画
-    masterSettingsVisible(n) { if (n) this.masterSettingsMounted = true },
-    masterExportVisible(n) { if (n) this.masterExportMounted = true },
-    activeSettingsVisible(n) { if (n) this.activeSettingsMounted = true },
-    activeExportVisible(n) { if (n) this.activeExportMounted = true },
-    deleteSnapshotVisible(n) { if (n) this.deleteSnapshotMounted = true },
-    applyMasterVisible(n) { if (n) this.applyMasterMounted = true },
-    applyActiveVisible(n) { if (n) this.applyActiveMounted = true }
-  },
-  computed: {
-    // ---- 一般课表显示行 ----
-    masterDisplayRows() {
-      return this.masterRowReuse(this.buildDisplayRows(this.masterCells, this.masterSettings));
-    },
-    masterExportFields() {
-      const fields = [{ name: '行号' }];
-      this.masterColHeaders.forEach(h => fields.push({ name: h }));
-      return fields;
-    },
-    masterExportRows() {
-      const headers = this.masterColHeaders;
-      const rows = this.masterDisplayRows;
-      return rows.map(row => {
-        if (row._isPodium) {
-          return {
-            '行号': '讲台',
-            _isPodium: true,
-            label: '讲  台'
-          };
-        }
-        const obj = { '行号': row.label };
-        row.cells.forEach((cell, idx) => {
-          const headerName = headers[idx] || `列${idx+1}`;
-          if (cell._isAisle) {
-            obj[headerName] = '走廊';
-            obj._aisleCell = true;
-          } else if (cell._isAisleHidden) {
-            obj[headerName] = '';
-          } else {
-            obj[headerName] = cell.course || '';
-          }
-        });
-        return obj;
-      });
-    },
+    });
+    return obj;
+  });
+});
 
-    // ---- 实行课表显示行（顶部自动添加周数标题行） ----
-    activeDisplayRows() {
-      return this.activeRowReuse(this.buildDisplayRows(this.activeCells, this.activeSettings));
-    },
+// ---- 实行课表显示行（顶部自动添加周数标题行） ----
+const activeDisplayRows = computed(() =>
+  activeRowReuse(ctx.buildDisplayRows(activeCells.value, activeSettings.value)));
 
-    activeExportFields() {
-      const fields = [{ name: '行号' }];
-      // 将当前显示的列头（包括“走廊”）都作为导出列
-      this.activeColHeaders.forEach(h => fields.push({ name: h }));
-      return fields;
-    },
-    activeExportRows() {
-      const headers = this.activeColHeaders; // 包含“走廊”的列头数组
-      const rows = this.activeDisplayRows;   // 包含讲台行和普通行
-      return rows.map(row => {
-        if (row._isPodium) {
-          return {
-            '行号': '讲台',
-            _isPodium: true,
-            label: '讲  台'
-          };
+const activeExportFields = computed(() => {
+  const fields = [{ name: '行号' }];
+  // 将当前显示的列头（包括“走廊”）都作为导出列
+  activeColHeaders.value.forEach(h => fields.push({ name: h }));
+  return fields;
+});
+const activeExportRows = computed(() => {
+  const headers = activeColHeaders.value; // 包含“走廊”的列头数组
+  const rows = activeDisplayRows.value;   // 包含讲台行和普通行
+  return rows.map(row => {
+    if (row._isPodium) {
+      return {
+        '行号': '讲台',
+        _isPodium: true,
+        label: '讲  台'
+      };
+    }
+    // 普通行：行号列是 row.label（例如“第1行”），其他列按 cells 顺序填充
+    const obj = { '行号': row.label };
+    row.cells.forEach((cell, idx) => {
+      const headerName = headers[idx] || `列${idx+1}`;
+      if (cell._isAisle) {
+        obj[headerName] = '走廊';
+        obj._aisleCell = true; // 标记为走廊单元格
+      } else if (cell._isAisleHidden) {
+        obj[headerName] = ''; // 隐藏的占位列
+      } else {
+        obj[headerName] = cell.course || '';
+      }
+    });
+    return obj;
+  });
+});
+const historyDisplayRows = computed(() => {
+  const rows = ctx.buildDisplayRows(historyCells.value, historySettings.value);
+  return rows.map(row => ({ ...row, _isReadonly: true }));
+});
+const weekNumber = computed(() => {
+  if (!semesterStart.value) return '';
+  const start = new Date(semesterStart.value);
+  const now = new Date();
+  const diff = now - start;
+  if (diff < 0) return '未开始';
+  return Math.floor(diff / (7 * 24 * 60 * 60 * 1000)) + 1;
+});
+const activeTitle = computed(() =>
+  semesterStart.value ? `第 ${weekNumber.value} 周 课程表` : '课程表');
+const canDeleteHistorySnapshot = computed(() =>
+  !!historyCurrentWeek.value && historyWeeks.value.some(w => w.week_start === historyCurrentWeek.value));
+const deleteSnapshotMessage = computed(() => {
+  const w = historyCurrentWeek.value;
+  if (!w) return '';
+  // 日期区间用字符串级偏移：week_start 本身已是 YYYY-MM-DD。
+  // 不要绕 new Date + toISOString —— 那是 UTC 口径，UTC 以西的时区会差一天。
+  return `确定删除 ${String(w).slice(0, 10)} ~ ${shiftDateStr(w, 6)} 的历史快照吗？删除后不可恢复。`;
+});
+
+watch(activeTab, (newTab) => {
+  if (newTab === 'history') {
+    if (historyWeeks.value.length === 0) {
+      ctx.fetchHistoryWeeks();
+    } else {
+      // 确保当前周存在，若不存在则重载
+      if (!historyCurrentWeek.value || !historyWeeks.value.some(w => w.week_start === historyCurrentWeek.value)) {
+        if (historyWeeks.value.length > 0) {
+          historyCurrentWeek.value = historyWeeks.value[0].week_start;
         }
-        // 普通行：行号列是 row.label（例如“第1行”），其他列按 cells 顺序填充
-        const obj = { '行号': row.label };
-        row.cells.forEach((cell, idx) => {
-          const headerName = headers[idx] || `列${idx+1}`;
-          if (cell._isAisle) {
-            obj[headerName] = '走廊';
-            obj._aisleCell = true; // 标记为走廊单元格
-          } else if (cell._isAisleHidden) {
-            obj[headerName] = ''; // 隐藏的占位列
-          } else {
-            obj[headerName] = cell.course || '';
-          }
-        });
-        return obj;
-      });
-    },
-    historyDisplayRows() {
-      const rows = this.buildDisplayRows(this.historyCells, this.historySettings);
-      return rows.map(row => ({ ...row, _isReadonly: true }));
-    },
-    weekNumber() {
-      if (!this.semesterStart) return '';
-      const start = new Date(this.semesterStart);
-      const now = new Date();
-      const diff = now - start;
-      if (diff < 0) return '未开始';
-      return Math.floor(diff / (7 * 24 * 60 * 60 * 1000)) + 1;
-    },
-    activeTitle() {
-      return this.semesterStart ? `第 ${this.weekNumber} 周 课程表` : '课程表';
-    },
-    canDeleteHistorySnapshot() {
-      return !!this.historyCurrentWeek && this.historyWeeks.some(w => w.week_start === this.historyCurrentWeek);
-    },
-    deleteSnapshotMessage() {
-      const w = this.historyCurrentWeek;
-      if (!w) return '';
-      // 日期区间用字符串级偏移：week_start 本身已是 YYYY-MM-DD。
-      // 不要绕 new Date + toISOString —— 那是 UTC 口径，UTC 以西的时区会差一天。
-      return `确定删除 ${String(w).slice(0, 10)} ~ ${shiftDateStr(w, 6)} 的历史快照吗？删除后不可恢复。`;
-    },
-  },
-  methods: {
-    ...useScheduleCommon({ SECTION_NAMES }),
-    ...useScheduleMaster({ API_BASE, DEFAULT_SECTIONS }),
-    ...useScheduleActive({ API_BASE, DEFAULT_SECTIONS }),
-    ...useScheduleHistory(API_BASE),
-  },
-  mounted() {
-    this.loadMaster();
-    this.loadActive();
-    this.fetchHistoryWeeks();
-    this._applyRowFocus();
-  },
-  activated() {
-    this._applyRowFocus();
-    // KeepAlive 缓存：再次进入页面时补拉上次失败的表，避免一次失败后长期空白
-    this.retryFailedLoads();
+        ctx.loadHistorySnapshot();
+      }
+    }
   }
-};
+})
+// 跨页定位：/schedule?focus=s:节次:周几（s=实行课表，m=一般课表）→ 切到课程表页签并高亮该格
+watch(() => route.query.focus, () => { _applyRowFocus() })
+// 懒加载弹窗保活：首次打开后保持挂载，关闭只降 visible，保留退出动画
+watch(masterSettingsVisible, (n) => { if (n) masterSettingsMounted.value = true })
+watch(masterExportVisible, (n) => { if (n) masterExportMounted.value = true })
+watch(activeSettingsVisible, (n) => { if (n) activeSettingsMounted.value = true })
+watch(activeExportVisible, (n) => { if (n) activeExportMounted.value = true })
+watch(deleteSnapshotVisible, (n) => { if (n) deleteSnapshotMounted.value = true })
+watch(applyMasterVisible, (n) => { if (n) applyMasterMounted.value = true })
+watch(applyActiveVisible, (n) => { if (n) applyActiveMounted.value = true })
+
+// Ctrl+Z / Ctrl+Shift+Z / Ctrl+Y 撤销/重做课表（当前页，含实行+一般两张表）
+useUndoShortcut('课程表', {
+  onAfterUndo: async (label) => { await Promise.all([ctx.loadMaster(), ctx.loadActive()]); notifySuccess(label ? `已撤销：${label}` : '已撤销') },
+  onAfterRedo: async (label) => { await Promise.all([ctx.loadMaster(), ctx.loadActive()]); notifySuccess(label ? `已重做：${label}` : '已重做') }
+})
+
+onMounted(() => {
+  loadMaster();
+  loadActive();
+  ctx.fetchHistoryWeeks();
+  _applyRowFocus();
+})
+onActivated(() => {
+  _applyRowFocus();
+  // KeepAlive 缓存：再次进入页面时补拉上次失败的表，避免一次失败后长期空白
+  retryFailedLoads();
+})
 </script>
 
 <style scoped>

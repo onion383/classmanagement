@@ -72,82 +72,85 @@
   </div>
 </template>
 
-<script>
+<script setup>
 // 表头筛选面板（DynamicTable 专用）
 // 职责：展示「排序 / 值搜索 / 值复选」三块，并把用户操作抛给 DynamicTable 处理；
 // 自身只负责定位、关键字过滤与过渡动画，不持有筛选状态。
 // 样式不走独立 css：基础样式在 styles/index.css，毛玻璃/夜间覆盖在各主题 css 里。
 import { Search, Check, ArrowUp, ArrowDown, X } from '@lucide/vue'
+import { ref, computed, onMounted, onBeforeUnmount, nextTick } from 'vue'
 
 const PANEL_W = 268
 
-export default {
-  name: 'ColumnFilter',
-  components: { Search, Check, ArrowUp, ArrowDown, X },
-  props: {
-    field: { type: String, default: '' },
-    // [{ value, count, selected }]
-    options: { type: Array, default: () => [] },
-    sortOrder: { type: String, default: '' },
-    readonly: { type: Boolean, default: false },
-    anchorEl: { type: Object, default: null }
-  },
-  emits: ['sort', 'toggle', 'clear', 'close'],
-  data() {
-    // 先放在屏幕外：mounted 里量出真实高度后再定位，避免出现一帧贴在左上角
-    return { keyword: '', pos: { left: -9999, top: -9999 }, z: 10020 }
-  },
-  computed: {
-    // 关键字只过滤「值列表」，纯前端过滤，不触发数据筛选
-    shownOptions() {
-      const kw = this.keyword.trim().toLowerCase()
-      if (!kw) return this.options
-      return this.options.filter(o => this.displayValue(o.value).toLowerCase().includes(kw))
-    },
-    selectedCount() { return this.options.filter(o => o.selected).length },
-    posStyle() { return { left: this.pos.left + 'px', top: this.pos.top + 'px', zIndex: this.z } }
-  },
-  mounted() {
-    this.place()
-    // 打开即聚焦搜索框：直接开打要筛的值
-    this.$nextTick(() => { if (this.$refs.kw) this.$refs.kw.focus() })
-    window.addEventListener('resize', this.onViewportChange)
-  },
-  beforeUnmount() { window.removeEventListener('resize', this.onViewportChange) },
-  methods: {
-    displayValue(v) { return v === '' ? '（空白）' : v },
-    // 面板贴在触发按钮下方；下方空间不足则翻到上方，左右夹在视口内
-    place() {
-      const el = this.$refs.panel
-      const h = el ? el.offsetHeight : 260
-      const a = this.anchorEl
-      let left = Math.round((window.innerWidth - PANEL_W) / 2)
-      let top = 96
-      if (a && typeof a.getBoundingClientRect === 'function') {
-        const r = a.getBoundingClientRect()
-        left = Math.min(Math.max(8, r.right - PANEL_W), Math.max(8, window.innerWidth - PANEL_W - 8))
-        top = r.bottom + 6
-        if (top + h > window.innerHeight - 8) top = Math.max(8, r.top - h - 6)
-      }
-      this.pos = { left, top }
-      this.z = this._layerZ()
-    },
-    // 层级：从触发按钮往上取祖先里最大的 z-index 再叠一层，保证压过包住表格的弹窗/浮层
-    _layerZ() {
-      let max = 0
-      let el = this.anchorEl
-      while (el && el !== document.body && el !== document.documentElement) {
-        const z = parseInt(window.getComputedStyle(el).zIndex, 10)
-        if (!Number.isNaN(z) && z > max) max = z
-        el = el.parentElement
-      }
-      return Math.max(10020, max + 10)
-    },
-    onViewportChange() { this.$emit('close') },
-    // 只剩一个匹配值时，回车直接勾选，省一次点击
-    onEnter() {
-      if (this.shownOptions.length === 1) this.$emit('toggle', this.shownOptions[0].value)
-    }
+defineOptions({ name: 'ColumnFilter' })
+
+const props = defineProps({
+  field: { type: String, default: '' },
+  // [{ value, count, selected }]
+  options: { type: Array, default: () => [] },
+  sortOrder: { type: String, default: '' },
+  readonly: { type: Boolean, default: false },
+  anchorEl: { type: Object, default: null }
+})
+
+const emit = defineEmits(['sort', 'toggle', 'clear', 'close'])
+
+const keyword = ref('')
+// 先放在屏幕外：mounted 里量出真实高度后再定位，避免出现一帧贴在左上角
+const pos = ref({ left: -9999, top: -9999 })
+const z = ref(10020)
+
+const panel = ref(null)
+const kw = ref(null)
+
+// 关键字只过滤「值列表」，纯前端过滤，不触发数据筛选
+const shownOptions = computed(() => {
+  const kw = keyword.value.trim().toLowerCase()
+  if (!kw) return props.options
+  return props.options.filter(o => displayValue(o.value).toLowerCase().includes(kw))
+})
+const selectedCount = computed(() => { return props.options.filter(o => o.selected).length })
+const posStyle = computed(() => { return { left: pos.value.left + 'px', top: pos.value.top + 'px', zIndex: z.value } })
+
+function displayValue(v) { return v === '' ? '（空白）' : v }
+// 面板贴在触发按钮下方；下方空间不足则翻到上方，左右夹在视口内
+function place() {
+  const el = panel.value
+  const h = el ? el.offsetHeight : 260
+  const a = props.anchorEl
+  let left = Math.round((window.innerWidth - PANEL_W) / 2)
+  let top = 96
+  if (a && typeof a.getBoundingClientRect === 'function') {
+    const r = a.getBoundingClientRect()
+    left = Math.min(Math.max(8, r.right - PANEL_W), Math.max(8, window.innerWidth - PANEL_W - 8))
+    top = r.bottom + 6
+    if (top + h > window.innerHeight - 8) top = Math.max(8, r.top - h - 6)
   }
+  pos.value = { left, top }
+  z.value = _layerZ()
 }
+// 层级：从触发按钮往上取祖先里最大的 z-index 再叠一层，保证压过包住表格的弹窗/浮层
+function _layerZ() {
+  let max = 0
+  let el = props.anchorEl
+  while (el && el !== document.body && el !== document.documentElement) {
+    const z = parseInt(window.getComputedStyle(el).zIndex, 10)
+    if (!Number.isNaN(z) && z > max) max = z
+    el = el.parentElement
+  }
+  return Math.max(10020, max + 10)
+}
+function onViewportChange() { emit('close') }
+// 只剩一个匹配值时，回车直接勾选，省一次点击
+function onEnter() {
+  if (shownOptions.value.length === 1) emit('toggle', shownOptions.value[0].value)
+}
+
+onMounted(() => {
+  place()
+  // 打开即聚焦搜索框：直接开打要筛的值
+  nextTick(() => { if (kw.value) kw.value.focus() })
+  window.addEventListener('resize', onViewportChange)
+})
+onBeforeUnmount(() => { window.removeEventListener('resize', onViewportChange) })
 </script>

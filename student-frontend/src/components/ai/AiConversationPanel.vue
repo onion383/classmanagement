@@ -55,28 +55,23 @@
   </div>
 </template>
 
-<script>
+<script setup>
+import { computed } from 'vue'
 import { formatTime } from '../../composables/ai/aiMessages.js'
 
-export default {
-  name: 'AiConversationPanel',
-  props: {
-    conversations: { type: Array, default: () => [] },
-    activeId: { type: [Number, String], default: null },
-    busy: { type: Boolean, default: false },
-    hiddenCount: { type: Number, default: 0 },
-  },
-  emits: ['new', 'select', 'delete', 'close', 'load-more'],
-  computed: {
-    // 会话总数（列表 + 尚未渲染的更早会话）：用于「暂无历史对话」空态判断
-    totalCount() {
-      return this.conversations.length + this.hiddenCount
-    },
-  },
-  methods: {
-    formatTime,
-  },
-}
+defineOptions({ name: 'AiConversationPanel' })
+const props = defineProps({
+  conversations: { type: Array, default: () => [] },
+  activeId: { type: [Number, String], default: null },
+  busy: { type: Boolean, default: false },
+  hiddenCount: { type: Number, default: 0 },
+})
+defineEmits(['new', 'select', 'delete', 'close', 'load-more'])
+
+// 会话总数（列表 + 尚未渲染的更早会话）：用于「暂无历史对话」空态判断
+const totalCount = computed(() => {
+  return props.conversations.length + props.hiddenCount
+})
 </script>
 
 <style scoped>

@@ -320,7 +320,8 @@
   />
 </template>
 
-<script>
+<script setup>
+import { ref, computed, watch, onMounted, onBeforeUnmount, nextTick } from 'vue'
 import axios from 'axios'
 import { useThemeStore } from '../../stores/theme'
 import { waitForBackendReady } from '../../utils/backendReady'
@@ -357,429 +358,425 @@ const SECURITY_LEVELS = [
   { value: 'privacy', label: '超级隐私模式（密码 + 恢复词才能解锁）' },
 ]
 
-export default {
-  name: 'Setup',
-  components: { AppSelect, AppSwitch, ViewSwitch, ConfirmDialog },
-  props: {
-    // 首屏画面，由 src/setup/main.js 依据主进程 launch-plan / URL 参数解析后传入
-    initialScreen: { type: String, default: 'welcome' },
-    // 本次启动计划：warn=提示画面，setup=是否还需走首次引导（决定「忽略」后去哪）
-    plan: { type: Object, default: () => ({ warn: false, setup: true }) },
-  },
-  data() {
-    return {
-      // 当前画面：'warning'（低版本提示）| 'welcome'（欢迎）| 'wizard'（引导步骤）
-      screen: this.initialScreen, // 首屏由主进程计划决定
-      warnRemember: false, // 低版本提示页「不再提示」勾选
-      step: 0,
-      sub: 0,
-      dir: 1, // 1=下一步（新卡片从右进）| -1=上一步（新卡片从左进）
-      registered: false,
-      busy: false,
-      errorMsg: '',
-      storageHint: '',
-      account: {
-        username: '',
-        password: '',
-        confirm: '',
-        securityLevel: 'password', // plain=明文 | nopass=加密免密 | password=加密+密码 | privacy=超级隐私
-      },
-      // 安全等级风险说明弹窗（超级隐私模式的「取消」回退到普通密码）
-      levelTipVisible: false,
-      levelTipType: 'password',
-      levelTipSuppress: false,
-      recovery: {
-        phrase: '',
-        draftId: '',
-        copyWords: '',
-        saved: false,
-      },
-      classInfo: { name: '', mottoStyle: '', xuefeng: '' },
-      // 日夜模式切换：与设置页同一套控件（仅 glass / glass2 支持夜间配色）
-      modeSwitchOptions: [
-        { value: 'day', label: '日间', icon: Sun },
-        { value: 'night', label: '夜间', icon: Moon },
-      ],
-      dirs: { dataDir: '', thumbsDir: '' },
-      busyDataDir: false,
-      busyThumbsDir: false,
-      warmup: { phase: '', detail: '', percent: 0, done: false },
-      _onMain: null,
-    }
-  },
-  computed: {
-    themeStore() { return useThemeStore() },
-    totalSteps() { return STEPS.length },
-    current() { return STEPS[this.step].key },
-    // 安全等级说明弹窗文案（与登录页注册保持一致）
-    levelTipMessage() {
-      return this.levelTipType === 'privacy'
-        ? '请您妥善保管好您的密钥，如果丢失，任何人将无法打开您的数据（包括开发者），若担心密码丢失，请使用其他模式'
-        : '普通密码模式只能保证其他 Windows 用户无法访问，并且能保证自己复制数据库到其他电脑无法打开。同一个 Windows 用户仍然可以通过数据恢复打开，如果需要严格的保护隐私，请使用超级隐私模式'
-    },
-    activeNo() { return this.step + 1 },
-    // 总能「上一步」：即使在第一步，也会回到最前面的欢迎页
-    canPrev() { return true },
-    // 切换动画的 key：步骤或子步骤变化都会重新触发过渡
-    paneKey() { return `${this.current}-${this.subKey}` },
-    transitionName() { return this.dir < 0 ? 'slide-prev' : 'slide-next' },
-    // 有密码时账户设置分 2 个子步骤，否则 1 个（无需抄写恢复密钥）
-    subSteps() {
-      const arr = [
-        { key: 'info', label: '账户信息' },
-      ]
-      if (this.recovery.phrase) arr.push({ key: 'recovery', label: '恢复密钥' })
-      return arr
-    },
-    subKey() { return this.subSteps[Math.min(this.sub, this.subSteps.length - 1)].key },
-    canSetPassword() { return this.account.securityLevel === 'password' || this.account.securityLevel === 'privacy' },
-    securityLevels() { return SECURITY_LEVELS },
-    nightSupported() { return this.themeStore.nightSupported },
-    pendingMode() { return this.themeStore.pendingMode },
-    securityLevelLabel() {
-      return {
-        plain: '明文模式',
-        nopass: '无密码模式',
-        password: '普通密码模式',
-        privacy: '超级隐私模式',
-      }[this.account.securityLevel] || '—'
-    },
-    nextLabel() {
-      if (this.current === 'perf') return this.busy ? '处理中…' : '完成'
-      return this.busy ? '处理中…' : '下一步'
-    },
-    // 左栏进度：已过步骤为 done、当前为 active、其后为 pending
-    list() {
-      return STEPS.map((s, i) => ({
-        key: s.key,
-        label: s.label,
-        no: i + 1,
-        state: i < this.step ? 'done' : (i === this.step ? 'active' : 'pending'),
-      }))
-    },
-  },
-  watch: {
-    // 安全等级变化：清理不适用的密码与旧草稿，避免用上一等级的草稿完成注册
-    'account.securityLevel'(v) {
-      if (v === 'plain' || v === 'nopass') {
-        this.account.password = ''
-        this.account.confirm = ''
-      }
-      this.recovery.phrase = ''
-      this.recovery.draftId = ''
-      this.recovery.copyWords = ''
-      this.recovery.saved = false
-      // 取消隐私模式后回退到普通密码是程序化赋值，不再弹一次普通密码说明
-      if (!this.levelTipSuppress) this.tipSecurityLevel(v)
-    },
-    // 首次进入账户设置步骤时，先对默认等级（普通密码模式）做一次说明
-    current(v) {
-      if (v === 'account') this.tipSecurityLevel(this.account.securityLevel)
-    },
-    // 子步骤数量变化（密码清空 → 恢复密钥子步骤消失）时收敛下标
-    subSteps() {
-      if (this.sub > this.subSteps.length - 1) this.sub = this.subSteps.length - 1
-    },
-  },
-  mounted() {
-    const api = window.electron
-    if (api) {
-      this._onMain = (payload) => { if (payload && payload.type === 'setup-warmup') this.applyWarmup(payload) }
-      api.on(RECEIVE.FROM_MAIN, this._onMain)
-      // 通知主进程渲染层已就绪
-      api.send(SEND.SETUP_READY)
-      this.loadWarmup()
-      this.loadDirs()
-    }
-    // 同步当前主题（新装默认毛玻璃）
-    if (this.themeStore.currentTheme !== 'glass') this.themeStore.setTheme('glass')
-  },
-  beforeUnmount() {
-    const api = window.electron
-    if (api && this._onMain) api.off(RECEIVE.FROM_MAIN, this._onMain)
-  },
-  methods: {
-    // 选择安全等级时的风险说明弹窗（与登录页注册一致）：普通密码只有「确定」，超级隐私「确认 / 取消」
-    tipSecurityLevel(v) {
-      if (v !== 'password' && v !== 'privacy') return
-      this.levelTipType = v
-      this.levelTipVisible = true
-    },
-    // 超级隐私模式的「取消」：回退到默认的普通密码模式，且不再连锁弹出普通密码说明
-    onLevelTipCancel() {
-      this.levelTipVisible = false
-      this.levelTipSuppress = true
-      this.account.securityLevel = 'password'
-      this.$nextTick(() => { this.levelTipSuppress = false })
-    },
-    // ---------- 主题 ----------
-    previewStyle(id) {
-      const p = PREVIEW[id] || PREVIEW.glass
-      return { background: p.bg, '--tp-side': p.side, '--tp-bar': p.bar }
-    },
-    pickTheme(id) {
-      this.themeStore.setTheme(id)
-      // 切到不支持夜间配色的主题时，立即回落到日间
-      if (!this.themeStore.nightSupported && this.themeStore.pendingMode === 'night') {
-        this.themeStore.setMode('day')
-      }
-    },
-    // 日夜模式：仅支持夜间配色的主题可切换
-    onSelectMode(value) {
-      if (!this.nightSupported) return
-      this.themeStore.setMode(value)
-    },
-    // 动画效果总开关：立即生效
-    onAnimationsChange(value) {
-      this.themeStore.setAnimationsEnabled(!!value)
-    },
-    // ---------- 预热进度 ----------
-    applyWarmup(w) {
-      this.warmup = {
-        phase: w.phase || '',
-        detail: w.detail || '',
-        percent: typeof w.percent === 'number' ? w.percent : 0,
-        done: !!w.done,
-      }
-    },
-    async loadWarmup() {
-      try {
-        const w = await window.electron?.invoke(INVOKE.GET_SETUP_WARMUP)
-        if (w) this.applyWarmup(w)
-      } catch (_) {}
-    },
-    // ---------- 储存设置 ----------
-    async loadDirs() {
-      try {
-        const res = await window.electron?.invoke(INVOKE.GET_DATA_DIRECTORIES)
-        if (res) this.dirs = { dataDir: res.dataDir || '', thumbsDir: res.thumbsDir || '' }
-      } catch (_) {}
-    },
-    async pickDir() {
-      try {
-        const res = await window.electron?.invoke(INVOKE.SELECT_FOLDER)
-        if (res && res.filePaths && res.filePaths.length) return res.filePaths[0]
-      } catch (_) {}
-      return ''
-    },
-    openDir(p) {
-      if (p) window.electron?.invoke(INVOKE.OPEN_FOLDER, p)
-    },
-    async changeDataDir() {
-      const picked = await this.pickDir()
-      if (!picked) return
-      this.errorMsg = ''
-      this.storageHint = ''
-      this.busyDataDir = true
-      try {
-        const res = await window.electron.invoke(INVOKE.SET_INITIAL_DATA_DIR, { dataDir: picked })
-        if (res && res.ok) {
-          this.dirs = { dataDir: res.dataDir, thumbsDir: res.thumbsDir }
-          this.storageHint = res.changed ? '数据库目录已更新' : '目录未变化'
-        }
-      } catch (err) {
-        this.errorMsg = err?.message || '数据库目录修改失败'
-      } finally {
-        this.busyDataDir = false
-      }
-    },
-    async changeThumbsDir() {
-      const picked = await this.pickDir()
-      if (!picked) return
-      this.errorMsg = ''
-      this.storageHint = ''
-      this.busyThumbsDir = true
-      try {
-        const res = await window.electron.invoke(INVOKE.SET_INITIAL_DATA_DIR, { thumbsDir: picked })
-        if (res && res.ok) {
-          this.dirs = { dataDir: res.dataDir, thumbsDir: res.thumbsDir }
-          this.storageHint = res.changed ? '缩略图缓存目录已更新' : '目录未变化'
-        }
-      } catch (err) {
-        this.errorMsg = err?.message || '缩略图缓存目录修改失败'
-      } finally {
-        this.busyThumbsDir = false
-      }
-    },
-    // ---------- 导航 ----------
-    next() {
-      this.errorMsg = ''
-      this.dir = 1
-      if (this.current === 'notice') { this.step += 1; return }
-      if (this.current === 'account') return this.nextAccount()
-      if (this.current === 'class') {
-        if (!this.classInfo.name) { this.errorMsg = '请填写班级名称'; return }
-        this.step += 1
-        return
-      }
-      if (this.current === 'theme') { this.step += 1; return }
-      if (this.current === 'storage') { this.step += 1; return }
-      return this.finish()
-    },
-    prev() {
-      this.errorMsg = ''
-      this.storageHint = ''
-      this.dir = -1
-      if (this.current === 'account' && this.sub > 0) { this.sub -= 1; return }
-      // 已在第一步：返回欢迎页（整个引导的最前面）
-      if (this.step === 0 && this.sub === 0) { this.screen = 'welcome'; return }
-      this.step -= 1
-      if (this.current === 'account') this.sub = this.subSteps.length - 1
-    },
-    // ---------- 账户设置 ----------
-    async nextAccount() {
-      if (this.registered) { this.step += 1; this.sub = 0; return }
-      const key = this.subKey
-      if (key === 'info') return this.submitAccountInfo()
-      return this.confirmRegister()
-    },
-    validateAccountInfo() {
-      const { username, password, confirm } = this.account
-      if (!username || username.length < 2 || username.length > 30) return '用户名需在 2-30 个字符之间'
-      if (this.canSetPassword) {
-        if (!password) return '请设置登录密码'
-        if (password.length < 6) return '密码长度至少 6 位'
-        if (password !== confirm) return '两次输入的密码不一致'
-      }
-      return ''
-    },
-    async submitAccountInfo() {
-      const bad = this.validateAccountInfo()
-      if (bad) { this.errorMsg = bad; return }
-      this.busy = true
-      try {
-        const level = this.account.securityLevel
-        const payload = {
-          username: this.account.username,
-          role: 'teacher',
-          encrypted: level !== 'plain',
-        }
-        if (level === 'privacy') payload.privacy = true
-        if (this.canSetPassword) payload.password = this.account.password
-        const { data } = await axios.post('/api/register', payload)
-        if (data.draftId) {
-          // 有密码：后端先返回草稿与恢复密钥，进入抄写确认子步骤
-          this.recovery.draftId = data.draftId
-          this.recovery.phrase = data.recovery?.phrase || ''
-          this.recovery.copyWords = ''
-          this.recovery.saved = false
-          this.sub = 1
-        } else {
-          this.onRegistered(data)
-        }
-      } catch (err) {
-        this.errorMsg = err?.response?.data?.error || err?.message || '注册失败，请重试'
-      } finally {
-        this.busy = false
-      }
-    },
-    async confirmRegister() {
-      if (!this.recovery.saved) { this.errorMsg = '请先下载或复制恢复密钥'; return }
-      if (!this.checkCopyWords()) { this.errorMsg = '抄写的前 3 个词不正确，请核对'; return }
-      this.busy = true
-      try {
-        // 超级隐私模式：复用这份恢复词作为隐私恢复词，确认时一并提交密码与恢复词
-        const body = { draftId: this.recovery.draftId }
-        if (this.account.securityLevel === 'privacy') {
-          body.password = this.account.password
-          body.phrase = this.recovery.phrase
-        }
-        const { data } = await axios.post('/api/register/confirm', body)
-        this.onRegistered(data)
-      } catch (err) {
-        this.errorMsg = err?.response?.data?.error || err?.message || '注册失败，请重试'
-      } finally {
-        this.busy = false
-      }
-    },
-    onRegistered(data) {
-      if (data && data.token) localStorage.setItem('token', data.token)
-      storeMediaToken(data && data.mediaToken)
-      if (data && data.user) localStorage.setItem('currentUser', JSON.stringify(data.user))
-      this.registered = true
-      this.sub = 0
-      this.step += 1
-    },
-    // 前端比对前 3 词：兼容序号、空格、连写（与登录页一致）
-    checkCopyWords() {
-      const norm = (s) => String(s || '').replace(/[\s\d.、,，]/g, '')
-      const words = String(this.recovery.phrase || '').split(/\s+/).filter(Boolean).slice(0, 3).map(norm)
-      return words.length === 3 && norm(this.recovery.copyWords) === words.join('')
-    },
-    downloadPhrase() {
-      const blob = new Blob([this.recovery.phrase], { type: 'text/plain;charset=utf-8' })
-      const url = URL.createObjectURL(blob)
-      const a = document.createElement('a')
-      a.href = url
-      a.download = `恢复密钥-${this.account.username || 'account'}.txt`
-      // 挂到 DOM 再点击，且延迟回收 URL：立即 revokeObjectURL 可能让下载拿到空文件
-      document.body.appendChild(a)
-      a.click()
-      document.body.removeChild(a)
-      setTimeout(() => URL.revokeObjectURL(url), 1000)
-      this.recovery.saved = true
-      this.errorMsg = ''
-    },
-    async copyPhrase() {
-      try {
-        await navigator.clipboard.writeText(this.recovery.phrase)
-        this.recovery.saved = true
-        this.errorMsg = ''
-      } catch (_) {
-        this.errorMsg = '复制失败，请手动选择文本复制'
-      }
-    },
-    // ---------- 关闭引导 ----------
-    // 关闭按钮（欢迎页与各步骤页）：通知主进程完全退出软件（前端窗口 + 后端子进程），
-    // 且不写「引导完成」标记——下次启动仍会重新进入引导，不会直接进入主窗口。
-    quitSetup() {
-      window.electron?.send(SEND.SETUP_QUIT)
-    },
-    // ---------- 低版本系统提示 ----------
-    // 忽略：记录「不再提示」（如勾选），随即从提示画面进入下一屏。
-    // 还需引导时本页自行切到欢迎画面；纯提示时主进程会直接开主窗口并关闭本窗口。
-    ignoreWarn() {
-      window.electron?.send(SEND.LAUNCH_SKIP_WARN, { remember: this.warnRemember })
-      if (!this.plan || this.plan.setup) this.screen = 'welcome'
-    },
-    // 获取最新的 Windows：默认浏览器打开系统下载页，随后主进程退出班集
-    openDownload() {
-      window.electron?.send(SEND.LAUNCH_OPEN_DOWNLOAD)
-    },
-    // ---------- 完成 ----------
-    async finish() {
-      this.busy = true
-      this.errorMsg = ''
-      try {
-        await this.waitBackend()
-        await axios.put('/api/widget-settings/class-info', {
-          name: this.classInfo.name,
-          mottoStyle: this.classInfo.mottoStyle,
-          xuefeng: this.classInfo.xuefeng,
-        })
-      } catch (err) {
-        // 班级信息保存失败不阻塞进入系统，仅记录
-        console.error('[setup] 保存班级信息失败:', err)
-      } finally {
-        this.busy = false
-        window.electron?.send(SEND.SETUP_COMPLETE)
-      }
-    },
-    // 储存目录变更会重启后端，等待其恢复后再写入班级信息
-    async waitBackend(timeout = 15000) {
-      const start = Date.now()
-      for (;;) {
-        try {
-          await axios.get('/api/accounts')
-          return true
-        } catch (_) {}
-        if (Date.now() - start > timeout) return false
-        // 优先等就绪信号：后端一就绪立即重试；信号缺失时退化为 300ms 退避
-        await waitForBackendReady(300)
-      }
-    },
-  },
+defineOptions({ name: 'Setup' })
+
+const props = defineProps({
+  // 首屏画面，由 src/setup/main.js 依据主进程 launch-plan / URL 参数解析后传入
+  initialScreen: { type: String, default: 'welcome' },
+  // 本次启动计划：warn=提示画面，setup=是否还需走首次引导（决定「忽略」后去哪）
+  plan: { type: Object, default: () => ({ warn: false, setup: true }) },
+})
+
+const themeStore = useThemeStore()
+
+// 当前画面：'warning'（低版本提示）| 'welcome'（欢迎）| 'wizard'（引导步骤）
+const screen = ref(props.initialScreen) // 首屏由主进程计划决定
+const warnRemember = ref(false) // 低版本提示页「不再提示」勾选
+const step = ref(0)
+const sub = ref(0)
+const dir = ref(1) // 1=下一步（新卡片从右进）| -1=上一步（新卡片从左进）
+const registered = ref(false)
+const busy = ref(false)
+const errorMsg = ref('')
+const storageHint = ref('')
+const account = ref({
+  username: '',
+  password: '',
+  confirm: '',
+  securityLevel: 'password', // plain=明文 | nopass=加密免密 | password=加密+密码 | privacy=超级隐私
+})
+// 安全等级风险说明弹窗（超级隐私模式的「取消」回退到普通密码）
+const levelTipVisible = ref(false)
+const levelTipType = ref('password')
+const levelTipSuppress = ref(false)
+const recovery = ref({
+  phrase: '',
+  draftId: '',
+  copyWords: '',
+  saved: false,
+})
+const classInfo = ref({ name: '', mottoStyle: '', xuefeng: '' })
+// 日夜模式切换：与设置页同一套控件（仅 glass / glass2 支持夜间配色）
+const modeSwitchOptions = [
+  { value: 'day', label: '日间', icon: Sun },
+  { value: 'night', label: '夜间', icon: Moon },
+]
+const dirs = ref({ dataDir: '', thumbsDir: '' })
+const busyDataDir = ref(false)
+const busyThumbsDir = ref(false)
+const warmup = ref({ phase: '', detail: '', percent: 0, done: false })
+// on() 返回的订阅句柄（非响应式），卸载时按句柄退订
+let _onMain = null
+
+const totalSteps = computed(() => STEPS.length)
+const current = computed(() => STEPS[step.value].key)
+// 安全等级说明弹窗文案（与登录页注册保持一致）
+const levelTipMessage = computed(() => {
+  return levelTipType.value === 'privacy'
+    ? '请您妥善保管好您的密钥，如果丢失，任何人将无法打开您的数据（包括开发者），若担心密码丢失，请使用其他模式'
+    : '普通密码模式只能保证其他 Windows 用户无法访问，并且能保证自己复制数据库到其他电脑无法打开。同一个 Windows 用户仍然可以通过数据恢复打开，如果需要严格的保护隐私，请使用超级隐私模式'
+})
+const activeNo = computed(() => step.value + 1)
+// 总能「上一步」：即使在第一步，也会回到最前面的欢迎页
+const canPrev = computed(() => {
+  return true
+})
+// 切换动画的 key：步骤或子步骤变化都会重新触发过渡
+const paneKey = computed(() => `${current.value}-${subKey.value}`)
+const transitionName = computed(() => dir.value < 0 ? 'slide-prev' : 'slide-next')
+// 有密码时账户设置分 2 个子步骤，否则 1 个（无需抄写恢复密钥）
+const subSteps = computed(() => {
+  const arr = [
+    { key: 'info', label: '账户信息' },
+  ]
+  if (recovery.value.phrase) arr.push({ key: 'recovery', label: '恢复密钥' })
+  return arr
+})
+const subKey = computed(() => subSteps.value[Math.min(sub.value, subSteps.value.length - 1)].key)
+const canSetPassword = computed(() => account.value.securityLevel === 'password' || account.value.securityLevel === 'privacy')
+const securityLevels = SECURITY_LEVELS
+const nightSupported = computed(() => themeStore.nightSupported)
+const pendingMode = computed(() => themeStore.pendingMode)
+const securityLevelLabel = computed(() => {
+  return {
+    plain: '明文模式',
+    nopass: '无密码模式',
+    password: '普通密码模式',
+    privacy: '超级隐私模式',
+  }[account.value.securityLevel] || '—'
+})
+const nextLabel = computed(() => {
+  if (current.value === 'perf') return busy.value ? '处理中…' : '完成'
+  return busy.value ? '处理中…' : '下一步'
+})
+// 左栏进度：已过步骤为 done、当前为 active、其后为 pending
+const list = computed(() => {
+  return STEPS.map((s, i) => ({
+    key: s.key,
+    label: s.label,
+    no: i + 1,
+    state: i < step.value ? 'done' : (i === step.value ? 'active' : 'pending'),
+  }))
+})
+
+// 安全等级变化：清理不适用的密码与旧草稿，避免用上一等级的草稿完成注册
+watch(() => account.value.securityLevel, (v) => {
+  if (v === 'plain' || v === 'nopass') {
+    account.value.password = ''
+    account.value.confirm = ''
+  }
+  recovery.value.phrase = ''
+  recovery.value.draftId = ''
+  recovery.value.copyWords = ''
+  recovery.value.saved = false
+  // 取消隐私模式后回退到普通密码是程序化赋值，不再弹一次普通密码说明
+  if (!levelTipSuppress.value) tipSecurityLevel(v)
+})
+// 首次进入账户设置步骤时，先对默认等级（普通密码模式）做一次说明
+watch(current, (v) => {
+  if (v === 'account') tipSecurityLevel(account.value.securityLevel)
+})
+// 子步骤数量变化（密码清空 → 恢复密钥子步骤消失）时收敛下标
+watch(subSteps, () => {
+  if (sub.value > subSteps.value.length - 1) sub.value = subSteps.value.length - 1
+})
+
+// 选择安全等级时的风险说明弹窗（与登录页注册一致）：普通密码只有「确定」，超级隐私「确认 / 取消」
+function tipSecurityLevel(v) {
+  if (v !== 'password' && v !== 'privacy') return
+  levelTipType.value = v
+  levelTipVisible.value = true
 }
+// 超级隐私模式的「取消」：回退到默认的普通密码模式，且不再连锁弹出普通密码说明
+function onLevelTipCancel() {
+  levelTipVisible.value = false
+  levelTipSuppress.value = true
+  account.value.securityLevel = 'password'
+  nextTick(() => { levelTipSuppress.value = false })
+}
+// ---------- 主题 ----------
+function previewStyle(id) {
+  const p = PREVIEW[id] || PREVIEW.glass
+  return { background: p.bg, '--tp-side': p.side, '--tp-bar': p.bar }
+}
+function pickTheme(id) {
+  themeStore.setTheme(id)
+  // 切到不支持夜间配色的主题时，立即回落到日间
+  if (!themeStore.nightSupported && themeStore.pendingMode === 'night') {
+    themeStore.setMode('day')
+  }
+}
+// 日夜模式：仅支持夜间配色的主题可切换
+function onSelectMode(value) {
+  if (!nightSupported.value) return
+  themeStore.setMode(value)
+}
+// 动画效果总开关：立即生效
+function onAnimationsChange(value) {
+  themeStore.setAnimationsEnabled(!!value)
+}
+// ---------- 预热进度 ----------
+function applyWarmup(w) {
+  warmup.value = {
+    phase: w.phase || '',
+    detail: w.detail || '',
+    percent: typeof w.percent === 'number' ? w.percent : 0,
+    done: !!w.done,
+  }
+}
+async function loadWarmup() {
+  try {
+    const w = await window.electron?.invoke(INVOKE.GET_SETUP_WARMUP)
+    if (w) applyWarmup(w)
+  } catch (_) {}
+}
+// ---------- 储存设置 ----------
+async function loadDirs() {
+  try {
+    const res = await window.electron?.invoke(INVOKE.GET_DATA_DIRECTORIES)
+    if (res) dirs.value = { dataDir: res.dataDir || '', thumbsDir: res.thumbsDir || '' }
+  } catch (_) {}
+}
+async function pickDir() {
+  try {
+    const res = await window.electron?.invoke(INVOKE.SELECT_FOLDER)
+    if (res && res.filePaths && res.filePaths.length) return res.filePaths[0]
+  } catch (_) {}
+  return ''
+}
+function openDir(p) {
+  if (p) window.electron?.invoke(INVOKE.OPEN_FOLDER, p)
+}
+async function changeDataDir() {
+  const picked = await pickDir()
+  if (!picked) return
+  errorMsg.value = ''
+  storageHint.value = ''
+  busyDataDir.value = true
+  try {
+    const res = await window.electron.invoke(INVOKE.SET_INITIAL_DATA_DIR, { dataDir: picked })
+    if (res && res.ok) {
+      dirs.value = { dataDir: res.dataDir, thumbsDir: res.thumbsDir }
+      storageHint.value = res.changed ? '数据库目录已更新' : '目录未变化'
+    }
+  } catch (err) {
+    errorMsg.value = err?.message || '数据库目录修改失败'
+  } finally {
+    busyDataDir.value = false
+  }
+}
+async function changeThumbsDir() {
+  const picked = await pickDir()
+  if (!picked) return
+  errorMsg.value = ''
+  storageHint.value = ''
+  busyThumbsDir.value = true
+  try {
+    const res = await window.electron.invoke(INVOKE.SET_INITIAL_DATA_DIR, { thumbsDir: picked })
+    if (res && res.ok) {
+      dirs.value = { dataDir: res.dataDir, thumbsDir: res.thumbsDir }
+      storageHint.value = res.changed ? '缩略图缓存目录已更新' : '目录未变化'
+    }
+  } catch (err) {
+    errorMsg.value = err?.message || '缩略图缓存目录修改失败'
+  } finally {
+    busyThumbsDir.value = false
+  }
+}
+// ---------- 导航 ----------
+function next() {
+  errorMsg.value = ''
+  dir.value = 1
+  if (current.value === 'notice') { step.value += 1; return }
+  if (current.value === 'account') return nextAccount()
+  if (current.value === 'class') {
+    if (!classInfo.value.name) { errorMsg.value = '请填写班级名称'; return }
+    step.value += 1
+    return
+  }
+  if (current.value === 'theme') { step.value += 1; return }
+  if (current.value === 'storage') { step.value += 1; return }
+  return finish()
+}
+function prev() {
+  errorMsg.value = ''
+  storageHint.value = ''
+  dir.value = -1
+  if (current.value === 'account' && sub.value > 0) { sub.value -= 1; return }
+  // 已在第一步：返回欢迎页（整个引导的最前面）
+  if (step.value === 0 && sub.value === 0) { screen.value = 'welcome'; return }
+  step.value -= 1
+  if (current.value === 'account') sub.value = subSteps.value.length - 1
+}
+// ---------- 账户设置 ----------
+async function nextAccount() {
+  if (registered.value) { step.value += 1; sub.value = 0; return }
+  const key = subKey.value
+  if (key === 'info') return submitAccountInfo()
+  return confirmRegister()
+}
+function validateAccountInfo() {
+  const { username, password, confirm } = account.value
+  if (!username || username.length < 2 || username.length > 30) return '用户名需在 2-30 个字符之间'
+  if (canSetPassword.value) {
+    if (!password) return '请设置登录密码'
+    if (password.length < 6) return '密码长度至少 6 位'
+    if (password !== confirm) return '两次输入的密码不一致'
+  }
+  return ''
+}
+async function submitAccountInfo() {
+  const bad = validateAccountInfo()
+  if (bad) { errorMsg.value = bad; return }
+  busy.value = true
+  try {
+    const level = account.value.securityLevel
+    const payload = {
+      username: account.value.username,
+      role: 'teacher',
+      encrypted: level !== 'plain',
+    }
+    if (level === 'privacy') payload.privacy = true
+    if (canSetPassword.value) payload.password = account.value.password
+    const { data } = await axios.post('/api/register', payload)
+    if (data.draftId) {
+      // 有密码：后端先返回草稿与恢复密钥，进入抄写确认子步骤
+      recovery.value.draftId = data.draftId
+      recovery.value.phrase = data.recovery?.phrase || ''
+      recovery.value.copyWords = ''
+      recovery.value.saved = false
+      sub.value = 1
+    } else {
+      onRegistered(data)
+    }
+  } catch (err) {
+    errorMsg.value = err?.response?.data?.error || err?.message || '注册失败，请重试'
+  } finally {
+    busy.value = false
+  }
+}
+async function confirmRegister() {
+  if (!recovery.value.saved) { errorMsg.value = '请先下载或复制恢复密钥'; return }
+  if (!checkCopyWords()) { errorMsg.value = '抄写的前 3 个词不正确，请核对'; return }
+  busy.value = true
+  try {
+    // 超级隐私模式：复用这份恢复词作为隐私恢复词，确认时一并提交密码与恢复词
+    const body = { draftId: recovery.value.draftId }
+    if (account.value.securityLevel === 'privacy') {
+      body.password = account.value.password
+      body.phrase = recovery.value.phrase
+    }
+    const { data } = await axios.post('/api/register/confirm', body)
+    onRegistered(data)
+  } catch (err) {
+    errorMsg.value = err?.response?.data?.error || err?.message || '注册失败，请重试'
+  } finally {
+    busy.value = false
+  }
+}
+function onRegistered(data) {
+  if (data && data.token) localStorage.setItem('token', data.token)
+  storeMediaToken(data && data.mediaToken)
+  if (data && data.user) localStorage.setItem('currentUser', JSON.stringify(data.user))
+  registered.value = true
+  sub.value = 0
+  step.value += 1
+}
+// 前端比对前 3 词：兼容序号、空格、连写（与登录页一致）
+function checkCopyWords() {
+  const norm = (s) => String(s || '').replace(/[\s\d.、,，]/g, '')
+  const words = String(recovery.value.phrase || '').split(/\s+/).filter(Boolean).slice(0, 3).map(norm)
+  return words.length === 3 && norm(recovery.value.copyWords) === words.join('')
+}
+function downloadPhrase() {
+  const blob = new Blob([recovery.value.phrase], { type: 'text/plain;charset=utf-8' })
+  const url = URL.createObjectURL(blob)
+  const a = document.createElement('a')
+  a.href = url
+  a.download = `恢复密钥-${account.value.username || 'account'}.txt`
+  // 挂到 DOM 再点击，且延迟回收 URL：立即 revokeObjectURL 可能让下载拿到空文件
+  document.body.appendChild(a)
+  a.click()
+  document.body.removeChild(a)
+  setTimeout(() => URL.revokeObjectURL(url), 1000)
+  recovery.value.saved = true
+  errorMsg.value = ''
+}
+async function copyPhrase() {
+  try {
+    await navigator.clipboard.writeText(recovery.value.phrase)
+    recovery.value.saved = true
+    errorMsg.value = ''
+  } catch (_) {
+    errorMsg.value = '复制失败，请手动选择文本复制'
+  }
+}
+// ---------- 关闭引导 ----------
+// 关闭按钮（欢迎页与各步骤页）：通知主进程完全退出软件（前端窗口 + 后端子进程），
+// 且不写「引导完成」标记——下次启动仍会重新进入引导，不会直接进入主窗口。
+function quitSetup() {
+  window.electron?.send(SEND.SETUP_QUIT)
+}
+// ---------- 低版本系统提示 ----------
+// 忽略：记录「不再提示」（如勾选），随即从提示画面进入下一屏。
+// 还需引导时本页自行切到欢迎画面；纯提示时主进程会直接开主窗口并关闭本窗口。
+function ignoreWarn() {
+  window.electron?.send(SEND.LAUNCH_SKIP_WARN, { remember: warnRemember.value })
+  if (!props.plan || props.plan.setup) screen.value = 'welcome'
+}
+// 获取最新的 Windows：默认浏览器打开系统下载页，随后主进程退出班集
+function openDownload() {
+  window.electron?.send(SEND.LAUNCH_OPEN_DOWNLOAD)
+}
+// ---------- 完成 ----------
+async function finish() {
+  busy.value = true
+  errorMsg.value = ''
+  try {
+    await waitBackend()
+    await axios.put('/api/widget-settings/class-info', {
+      name: classInfo.value.name,
+      mottoStyle: classInfo.value.mottoStyle,
+      xuefeng: classInfo.value.xuefeng,
+    })
+  } catch (err) {
+    // 班级信息保存失败不阻塞进入系统，仅记录
+    console.error('[setup] 保存班级信息失败:', err)
+  } finally {
+    busy.value = false
+    window.electron?.send(SEND.SETUP_COMPLETE)
+  }
+}
+// 储存目录变更会重启后端，等待其恢复后再写入班级信息
+async function waitBackend(timeout = 15000) {
+  const start = Date.now()
+  for (;;) {
+    try {
+      await axios.get('/api/accounts')
+      return true
+    } catch (_) {}
+    if (Date.now() - start > timeout) return false
+    // 优先等就绪信号：后端一就绪立即重试；信号缺失时退化为 300ms 退避
+    await waitForBackendReady(300)
+  }
+}
+
+onMounted(() => {
+  const api = window.electron
+  // 存下 on() 返回的 wrapper 作为订阅句柄，卸载时按句柄退订
+  _onMain = api.on(RECEIVE.FROM_MAIN, (payload) => {
+    if (payload && payload.type === 'setup-warmup') applyWarmup(payload)
+  })
+  // 通知主进程渲染层已就绪
+  api.send(SEND.SETUP_READY)
+  loadWarmup()
+  loadDirs()
+  // 同步当前主题（新装默认毛玻璃）
+  if (themeStore.currentTheme !== 'glass') themeStore.setTheme('glass')
+})
+onBeforeUnmount(() => {
+  if (_onMain) window.electron.off(RECEIVE.FROM_MAIN, _onMain)
+})
 </script>
 
 <style scoped>

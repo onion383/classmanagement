@@ -34,6 +34,7 @@ const dbManager = require('./dbManager/dbManager');
 const secureChannel = require('./services/secureChannel');
 const { deleteRow } = require('./services/tableService');
 const { studentRelations, purgeStudentRelations } = require('./services/studentRelations');
+const { resolveNames } = require('./services/provisionalStudents');
 
 // 关键路由：启动时立即加载（登录必需）
 const authRoutes = require('./routes/auth');
@@ -109,6 +110,53 @@ app.use('/api/students', auth(['teacher']), createDynamicTableRouter('students',
   minCount: 1,
   protectedColumns: ['学号', '姓名'],
   extraRoutes: (router) => {
+    // 姓名解析：值日/座位/小组成员里直接输入的名字 → 稳定的 students.id。
+    // 正式学生唯一同名直接复用；没有就建一条临时学生（is_provisional=1）；
+    // 正式名单里本来就有多个同名时返回 candidates，让前端自己让用户选，绝不新建。
+    // body: { names: string[], create?: boolean } → { results: [{ name, id, created, is_provisional, ambiguous?, candidates? }] }
+    router.post('/resolve', (req, res) => {
+      try {
+        const names = Array.isArray(req.body && req.body.names) ? req.body.names : [];
+        if (!names.length) return res.status(400).json({ error: '缺少姓名' });
+        const create = !(req.body && req.body.create === false);
+        res.json({ results: resolveNames(names, { create }) });
+      } catch (err) {
+        res.status(400).json({ error: err.message });
+      }
+    });
+
+    // 临时学生列表：在其他表格里直接输入的新名字先落成 is_provisional=1 的学生，
+    // 由「学生管理 → 数据管理」统一转正。引用数量复用删除前的关联统计，
+    // 让老师在转换前看到「这个人还挂在哪些表里」。
+    router.get('/provisional', (req, res) => {
+      try {
+        const rows = db.prepare('SELECT * FROM students WHERE is_provisional = 1 ORDER BY position, id').all();
+        res.json({ data: rows.map((s) => ({ ...s, relations: studentRelations(s) })) });
+      } catch (err) {
+        res.status(400).json({ error: err.message });
+      }
+    });
+
+    // 批量转正：只改成员状态位，id 与所有引用保持不变（转正不需要迁移任何数据）。
+    router.post('/provisional/convert', (req, res) => {
+      try {
+        const raw = Array.isArray(req.body && req.body.ids) ? req.body.ids : [];
+        const ids = raw.map(Number).filter((n) => Number.isInteger(n) && n > 0);
+        if (!ids.length) return res.status(400).json({ error: '请选择要转换的临时学生' });
+        let converted = 0;
+        db.transaction(() => {
+          const upd = db.prepare('UPDATE students SET is_provisional = 0 WHERE id = ? AND is_provisional = 1');
+          for (const id of ids) converted += upd.run(id).changes;
+        })();
+        res.json({
+          message: converted ? `已转换 ${converted} 名临时学生为正式学生` : '所选学生已经是正式学生',
+          converted,
+        });
+      } catch (err) {
+        res.status(400).json({ error: err.message });
+      }
+    });
+
     // 删前影响预览：返回该生关联的 请假/加分/座位/值日 数量（学生本身不与它们建外键，靠 id/姓名弱关联）
     router.get('/:id/relations', (req, res) => {
             const id = Number(req.params.id);

@@ -32,58 +32,51 @@
   </DialogShell>
 </template>
 
-<script>
+<script setup>
+import { ref, computed, watch } from 'vue'
 import '../../styles/dialog-transition.css'
 import DialogShell from '../base/DialogShell.vue'
 import { useNotification } from '../../composables/useNotification.js'
 import { formatDate } from '../../utils/dateTime.js'
 
-export default {
-  name: 'AddCountdownDialog',
-  components: { DialogShell },
-  props: {
-    visible: { type: Boolean, default: false },
-    editingRecord: { type: Object, default: null }
-  },
-  data() {
-    return {
-      form: { name: '', deadline: formatDate(new Date()), includeDay: false }
-    }
-  },
-  computed: {
-    isEdit() { return !!(this.editingRecord && this.editingRecord.id != null) },
-    title() { return this.isEdit ? '编辑倒计时' : '添加倒计时' }
-  },
-  watch: {
-    visible(v) {
-      if (v) this.form = this.isEdit ? this.presetFromRecord(this.editingRecord) : this.reset()
-    }
-  },
-  methods: {
-    reset() {
-      return { name: '', deadline: formatDate(new Date()), includeDay: false }
-    },
-    presetFromRecord(r) {
-      return {
-        name: r.名称 || '',
-        deadline: r.截止日 || '',
-        includeDay: !!r.包含这一天
-      }
-    },
-    submit() {
-      if (!this.form.name.trim()) { useNotification().warning('请填写名称'); return }
-      if (!this.form.deadline) { useNotification().warning('请选择截止日'); return }
-      const payload = {
-        名称: this.form.name.trim(),
-        截止日: this.form.deadline,
-        包含这一天: this.form.includeDay ? 1 : 0
-      }
-      if (this.isEdit) {
-        this.$emit('update', { id: this.editingRecord.id, ...payload })
-      } else {
-        this.$emit('confirm', payload)
-      }
-    }
+defineOptions({ name: 'AddCountdownDialog' })
+const props = defineProps({
+  visible: { type: Boolean, default: false },
+  editingRecord: { type: Object, default: null }
+})
+const emit = defineEmits(['cancel', 'delete', 'update', 'confirm'])
+
+const form = ref({ name: '', deadline: formatDate(new Date()), includeDay: false })
+
+const isEdit = computed(() => !!(props.editingRecord && props.editingRecord.id != null))
+const title = computed(() => isEdit.value ? '编辑倒计时' : '添加倒计时')
+
+watch(() => props.visible, (v) => {
+  if (v) form.value = isEdit.value ? presetFromRecord(props.editingRecord) : reset()
+})
+
+function reset() {
+  return { name: '', deadline: formatDate(new Date()), includeDay: false }
+}
+function presetFromRecord(r) {
+  return {
+    name: r.名称 || '',
+    deadline: r.截止日 || '',
+    includeDay: !!r.包含这一天
+  }
+}
+function submit() {
+  if (!form.value.name.trim()) { useNotification().warning('请填写名称'); return }
+  if (!form.value.deadline) { useNotification().warning('请选择截止日'); return }
+  const payload = {
+    名称: form.value.name.trim(),
+    截止日: form.value.deadline,
+    包含这一天: form.value.includeDay ? 1 : 0
+  }
+  if (isEdit.value) {
+    emit('update', { id: props.editingRecord.id, ...payload })
+  } else {
+    emit('confirm', payload)
   }
 }
 </script>

@@ -1,9 +1,10 @@
 // ===== 课程表：公共构建（显示行/导出行/行列调整、导出入口、跨页定位） =====
-// 纯代码搬运自 ScheduleView.vue 的 methods，未改写逻辑；通过展开注册到组件 methods。
+// 纯代码搬运自 ScheduleView.vue 的 methods，未改写逻辑；经 ctx 闭包调用（script setup）。
 import { useNotification } from '../../composables/useNotification.js'
 import { applyRouteRowFocus } from '../../composables/useRowFocus.js'
 
-export function useScheduleCommon({ SECTION_NAMES }) {
+// ctx 契约：状态 ref（.value 访问）、临时字段、notify* 函数、host（applyRouteRowFocus 的 $el/$route 载体）与跨模块方法。
+export function useScheduleCommon(ctx, { SECTION_NAMES }) {
   return {
     // ============= 公共：构建显示行 =============
     buildDisplayRows(cells, settings) {
@@ -12,7 +13,7 @@ export function useScheduleCommon({ SECTION_NAMES }) {
       let lessonIdx = 0;
       const rows = [];
       const order = ['morning', 'noon', 'afternoon', 'evening', 'night'];
-      const days = settings.days || this.masterColHeaders;
+      const days = settings.days || ctx.masterColHeaders.value;
 
       order.forEach(secKey => {
         const items = sections[secKey] || [];
@@ -54,7 +55,7 @@ export function useScheduleCommon({ SECTION_NAMES }) {
       const order = ['morning', 'noon', 'afternoon', 'evening', 'night'];
       let lessonIdx = 0;
       const output = [];
-      const days = settings.days || this.masterColHeaders;
+      const days = settings.days || ctx.masterColHeaders.value;
 
       order.forEach(secKey => {
         const items = sections[secKey] || [];
@@ -163,16 +164,16 @@ export function useScheduleCommon({ SECTION_NAMES }) {
     // 重进页面（KeepAlive activated）时只补拉「上次失败」的表；
     // 已加载成功的表不再重复请求，保持原有行为，避免多余往返
     retryFailedLoads() {
-      if (!this._activeLoadOk && !this._activeInFlight) this.loadActive();
-      if (!this._masterLoadOk && !this._masterInFlight) this.loadMaster();
+      if (!ctx._activeLoadOk.value && !ctx._activeInFlight) ctx.loadActive();
+      if (!ctx._masterLoadOk.value && !ctx._masterInFlight) ctx.loadMaster();
     },
 
     // 课表单元格里是否有实际课程内容（行结构始终存在，不能用行数判空）
     _applyRowFocus() {
-      applyRouteRowFocus(this, {
+      applyRouteRowFocus(ctx.host, {
         parse: (key) => {
           if (!/^[sm]:\d+:\d+$/.test(key)) return null
-          if (this.activeTab !== 'schedule') this.activeTab = 'schedule'
+          if (ctx.activeTab.value !== 'schedule') ctx.activeTab.value = 'schedule'
           return key
         },
       })
@@ -185,12 +186,12 @@ export function useScheduleCommon({ SECTION_NAMES }) {
     },
     // 导出课表：无数据时直接提示，不弹导出选项弹窗
     openActiveExport() {
-      if (!this.hasScheduleData(this.activeCells)) return useNotification().info('暂无课表数据可导出')
-      this.activeExportVisible = true
+      if (!ctx.hasScheduleData(ctx.activeCells.value)) return useNotification().info('暂无课表数据可导出')
+      ctx.activeExportVisible.value = true
     },
     openMasterExport() {
-      if (!this.hasScheduleData(this.masterCells)) return useNotification().info('课表模板为空，无法导出')
-      this.masterExportVisible = true
+      if (!ctx.hasScheduleData(ctx.masterCells.value)) return useNotification().info('课表模板为空，无法导出')
+      ctx.masterExportVisible.value = true
     },
   }
 }

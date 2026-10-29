@@ -92,8 +92,7 @@ function dateKey(date) {
  * photo_date 留空，由前端归到时间轴**最底部**的「未知时间」分组。
  *
  * 返回 { date, exif, src }：date 是写库的 photo_date（YYYY-MM-DD 日键，读不到为空串），
- * src 取 'exif' / 'none' —— 'none' 表示「已核过但没有 EXIF」，与老库的 ''
- * （还没核过）区分开，增量扫描据此决定要不要再读一次盘。*/
+ * src 取 'exif' / 'none' —— 'none' 表示「已核过但没有 EXIF」。*/
 async function resolvePhotoDate(filePath, mtime, isVideo) {
   // 视频没有 EXIF：ffprobe 取拍摄时间要起子进程，扫描时每张都调不划算。
   // 视频一律归「未知时间」，不拿文件时间冒充。
@@ -739,21 +738,16 @@ async function incrementalScan(conn, albumId, resumeFrom, slug, onProgress, toke
         const old = existing.get(full);
 
         if (old) {
-          // 文件已存在：mtime 变了要重算日期；mtime 没变但还没按 EXIF 核过
-          // （老库在改用 EXIF 之前建的索引，date_src 为空串）也补读一次，把日期纠正回来。
-          // date_src 是 'exif' / 'none' 的行不再重复读盘 —— 每张图一次 metadata() 不便宜。
-          // 'mtime' 是早期版本用文件时间兜底时写的值，现在不再采用，也要重新核一遍。
-          if (old.mtime !== mtime || !old.date_src || old.date_src === 'mtime') {
+          // 文件已存在：mtime 变了要重算日期（缩略图也只在 mtime 真的变了才重建：
+          // 图没变时重建是白费 CPU）
+          if (old.mtime !== mtime) {
             const isVideo = VIDEO_EXT.test(name);
             const when = await resolvePhotoDate(full, mtime, isVideo);
             updateMeta.run(name, st.size, mtime, when.date, when.exif, when.src, old.id);
-            // 缩略图只在 mtime 真的变了才重建：仅补日期时图没变，重建是白费 CPU
-            if (old.mtime !== mtime) {
-              const tp = await genThumb(old.id, full, isVideo, slug);
-              if (tp) thumbWriter.add(old.id, tp);
-            }
+            const tp = await genThumb(old.id, full, isVideo, slug);
+            if (tp) thumbWriter.add(old.id, tp);
           }
-          // mtime 相同且已核过 EXIF 则跳过
+          // mtime 相同则跳过
         } else {
           // 新文件：插入索引 + 生成缩略图
           const isVideo = VIDEO_EXT.test(name);
@@ -877,13 +871,11 @@ async function refreshVirtual(conn, albumId, resumeFrom, slug, onProgress, token
         const isVideo = VIDEO_EXT.test(r.file_name || '');
         const mtime = st.mtime.toISOString();
         const metaChanged = r.mtime !== mtime || r.file_size !== st.size || r.file_name !== path.basename(r.file_path);
-        const needDate = !r.date_src || r.date_src === 'mtime'; // 没核过 / 早期 mtime 兜底值
         const needThumb = !r.thumb_path || (r.thumb_v || 0) < THUMB_VERSION;
-        // 三样都没差就别读盘也别写库（这一步决定了重复点刷新会不会白跑一遍全表）
-        if (metaChanged || needDate || needThumb) {
-          const when = needDate ? await resolvePhotoDate(r.file_path, mtime, isVideo) : { date: r.photo_date, exif: r.exif_date, src: r.date_src };
-          if (metaChanged || needDate) {
-            updateMeta.run(path.basename(r.file_path), st.size, mtime, when.date, when.exif, when.src, r.id);
+        // 都没差就别读盘也别写库（这一步决定了重复点刷新会不会白跑一遍全表）
+        if (metaChanged || needThumb) {
+          if (metaChanged) {
+            updateMeta.run(path.basename(r.file_path), st.size, mtime, r.photo_date, r.exif_date, r.date_src, r.id);
           }
           // 缩略图按**当前行 id** 生成（路径是 {slug}/{id}.jpg），与源相册各自一份，互不覆盖
           if (needThumb) {

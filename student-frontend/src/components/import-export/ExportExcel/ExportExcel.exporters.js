@@ -2,45 +2,18 @@
 // ExportExcel.exporters.js —— ExportExcel 的各格式导出与字符串构建（方法模块）
 //
 // 逐字搬运自 ExportExcel.vue 的 methods，未改写任何逻辑与注释；
-// 方法体内部仍使用 this，主组件以 methods: { ...useExportFormats() } 展开注册。
+// 方法体内部经 ctx 闭包调用（script setup），ctx 承载组件状态与跨模块方法。
 // 仅 doExport / open / close / cancel 留在主组件。
 // =========================================================================
-import { INVOKE } from '../../../electronChannels.js'
 import { loadPdfFontBase64, collectPdfText } from '../../../utils/pdfFont.js'
-import { sanitizeFileName } from '../../../utils/fileName.js'
+import { saveBlobWithDialog } from '../../../utils/saveFile.js'
 import { csvCell } from '../../../utils/csvCell.js'
 import { toRaw } from 'vue'
 
 const SECTION_NAMES = { morning: '上午', noon: '中午', afternoon: '下午', evening: '傍晚', night: '晚上' };
 
-export function useExportFormats() {
+export function useExportFormats(ctx) {
   return {
-
-    // 保存文件：Electron 下弹系统保存对话框，用户确认后才写入；浏览器则直接下载
-    async saveFileWithDialog(defaultName, blob) {
-      // 文件名来自用户输入，落盘前统一清洗（非法字符 / 末尾点空格 / 超长）
-      const safeName = sanitizeFileName(defaultName)
-      if (window.electron && typeof window.electron.invoke === 'function') {
-        const arrayBuffer = await blob.arrayBuffer()
-        const result = await window.electron.invoke(INVOKE.SAVE_FILE, {
-          defaultName: safeName,
-          data: arrayBuffer
-        })
-        if (result && !result.canceled && result.filePath) {
-          // 导出成功后用系统默认应用打开文件
-          window.electron.invoke(INVOKE.OPEN_FILE, { filePath: result.filePath }).catch(() => {})
-        }
-        return !!result && !result.canceled
-      }
-      // 浏览器环境：直接触发下载
-      const url = URL.createObjectURL(blob)
-      const a = document.createElement('a')
-      a.href = url
-      a.download = safeName
-      a.click()
-      URL.revokeObjectURL(url)
-      return true
-    },
 
     getSectionName(key) {
       return SECTION_NAMES[key] || '';
@@ -52,7 +25,7 @@ export function useExportFormats() {
     },
 
     getCellValue(row, headerName, headers) {
-      if (headerName === '时段') return this.getSectionName(row.section);
+      if (headerName === '时段') return ctx.getSectionName(row.section);
       if (headerName === '节次') return row.label || '';
       if (headerName === '时间') return row.time || '';
       if (row[headerName] !== undefined) return row[headerName];
@@ -79,13 +52,13 @@ export function useExportFormats() {
     // ==================== 分组导出（groupSource 模式） ====================
     // 按小组下标取小组对象
     groupObjects(idxList) {
-      return idxList.map(i => this.groupSource.groups[i]);
+      return idxList.map(i => ctx.groupSource.value.groups[i]);
     },
     // 拉平为二维表（用于 CSV / HTML / XLSX 标题行）
     groupFlatRows(idxList) {
-      const leaderTitle = this.groupSource.leaderTitle || '组长';
+      const leaderTitle = ctx.groupSource.value.leaderTitle || '组长';
       const rows = [['小组', '成员', '备注', '职务']];
-      this.groupObjects(idxList).forEach(g => {
+      ctx.groupObjects(idxList).forEach(g => {
         let first = true;
         for (const m of g.members || []) {
           rows.push([first ? g.name : '', m.member_name || '', m.remark || '', first ? leaderTitle : '']);
@@ -96,10 +69,10 @@ export function useExportFormats() {
     },
     // 生成带标题、可截图/打印的分组 HTML 表格串
     groupTableHTML(idxList, filename) {
-      const rows = this.groupFlatRows(idxList);
+      const rows = ctx.groupFlatRows(idxList);
       const head = rows[0];
       const body = rows.slice(1);
-      let html = `<div style="text-align:center; font-size:20px; font-weight:bold; margin-bottom:12px;">${this.escapeHtml(filename)}</div>`;
+      let html = `<div style="text-align:center; font-size:20px; font-weight:bold; margin-bottom:12px;">${ctx.escapeHtml(filename)}</div>`;
       html += '<table style="border-collapse:collapse; margin:0 auto;">';
       html += `<thead><tr style="background-color:#4CAF50; color:white;">${head.map(h => `<th style="border:1px solid #ccc; padding:6px 12px;">${h}</th>`).join('')}</tr></thead><tbody>`;
       for (const r of body) {
@@ -115,38 +88,38 @@ export function useExportFormats() {
       return html;
     },
     async exportGroupCSV(idxList, filename) {
-      const rows = this.groupFlatRows(idxList);
+      const rows = ctx.groupFlatRows(idxList);
       const csv = '\uFEFF' + rows.map(r => r.map(csvCell).join(',')).join('\r\n');
       const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
-      return await this.saveFileWithDialog(`${filename}.csv`, blob);
+      return await saveBlobWithDialog(`${filename}.csv`, blob);
     },
     async exportGroupHTML(idxList, filename) {
-      const html = `<!DOCTYPE html><html><head><meta charset="UTF-8"><title>${this.escapeHtml(filename)}</title></head><body>${this.groupTableHTML(idxList, filename)}</body></html>`;
+      const html = `<!DOCTYPE html><html><head><meta charset="UTF-8"><title>${ctx.escapeHtml(filename)}</title></head><body>${ctx.groupTableHTML(idxList, filename)}</body></html>`;
       const blob = new Blob([html], { type: 'text/html' });
-      return await this.saveFileWithDialog(`${filename}.html`, blob);
+      return await saveBlobWithDialog(`${filename}.html`, blob);
     },
     async exportGroupMD(idxList, filename) {
-      const rows = this.groupFlatRows(idxList);
-      const md = this.buildMarkdown(rows[0], rows.slice(1), filename);
+      const rows = ctx.groupFlatRows(idxList);
+      const md = ctx.buildMarkdown(rows[0], rows.slice(1), filename);
       const blob = new Blob([md], { type: 'text/markdown;charset=utf-8;' });
-      return await this.saveFileWithDialog(`${filename}.md`, blob);
+      return await saveBlobWithDialog(`${filename}.md`, blob);
     },
     async exportGroupTXT(idxList, filename) {
-      const rows = this.groupFlatRows(idxList);
-      const txt = this.buildTxt(rows[0], rows.slice(1));
+      const rows = ctx.groupFlatRows(idxList);
+      const txt = ctx.buildTxt(rows[0], rows.slice(1));
       const blob = new Blob([txt], { type: 'text/plain;charset=utf-8;' });
-      return await this.saveFileWithDialog(`${filename}.txt`, blob);
+      return await saveBlobWithDialog(`${filename}.txt`, blob);
     },
     async exportGroupJSON(idxList, filename) {
-      const rows = this.groupFlatRows(idxList);
-      const json = this.buildJson(rows[0], rows.slice(1));
+      const rows = ctx.groupFlatRows(idxList);
+      const json = ctx.buildJson(rows[0], rows.slice(1));
       const blob = new Blob([json], { type: 'application/json;charset=utf-8;' });
-      return await this.saveFileWithDialog(`${filename}.json`, blob);
+      return await saveBlobWithDialog(`${filename}.json`, blob);
     },
     async exportGroupImage(idxList, filename) {
       const { default: html2canvas } = await import('html2canvas');
       const tempDiv = document.createElement('div');
-      tempDiv.innerHTML = this.groupTableHTML(idxList, filename);
+      tempDiv.innerHTML = ctx.groupTableHTML(idxList, filename);
       tempDiv.style.position = 'absolute';
       tempDiv.style.left = '-9999px';
       document.body.appendChild(tempDiv);
@@ -154,14 +127,14 @@ export function useExportFormats() {
         const canvas = await html2canvas(tempDiv, { scale: 2 });
         const blob = await new Promise(resolve => canvas.toBlob(resolve, 'image/png'));
         if (!blob) return false;
-        return await this.saveFileWithDialog(`${filename}.png`, blob);
+        return await saveBlobWithDialog(`${filename}.png`, blob);
       } finally { document.body.removeChild(tempDiv); }
     },
     async exportGroupPDF(idxList, filename) {
       const { default: html2canvas } = await import('html2canvas');
       const { default: jsPDF } = await import('jspdf');
       const tempDiv = document.createElement('div');
-      tempDiv.innerHTML = this.groupTableHTML(idxList, filename);
+      tempDiv.innerHTML = ctx.groupTableHTML(idxList, filename);
       tempDiv.style.position = 'absolute';
       tempDiv.style.left = '-9999px';
       document.body.appendChild(tempDiv);
@@ -177,13 +150,13 @@ export function useExportFormats() {
         if (h > pageH - 20) { h = pageH - 20; w = h * ratio; }
         doc.addImage(img, 'PNG', (pageW - w) / 2, (pageH - h) / 2, w, h);
         // 不能 doc.save()：它会直接触发下载，既绕过系统保存对话框，也绕过
-        // sanitizeFileName（其余 7 种格式都走 saveFileWithDialog，只有这里漏了）。
-        return await this.saveFileWithDialog(`${filename}.pdf`, doc.output('blob'));
+        // 文件名清洗（所有格式都必须走 saveBlobWithDialog，这里曾经漏过）。
+        return await saveBlobWithDialog(`${filename}.pdf`, doc.output('blob'));
       } finally { document.body.removeChild(tempDiv); }
     },
     async exportGroupXLSX(idxList, filename) {
       const { default: ExcelJS } = await import('exceljs');
-      const gs = this.groupSource;
+      const gs = ctx.groupSource.value;
       const leaderTitle = gs.leaderTitle || '组长';
       const workbook = new ExcelJS.Workbook();
       const sheet = workbook.addWorksheet('分组表');
@@ -199,7 +172,7 @@ export function useExportFormats() {
       });
       titleRow.height = 24;
       let r = 2;
-      this.groupObjects(idxList).forEach(g => {
+      ctx.groupObjects(idxList).forEach(g => {
         // 组名行（合并全列）
         sheet.addRow([]);
         sheet.mergeCells(r, 1, r, headers.length);
@@ -235,7 +208,7 @@ export function useExportFormats() {
       for (let i = 1; i <= headers.length; i++) sheet.getColumn(i).width = 20;
       const buffer = await workbook.xlsx.writeBuffer();
       const blob = new Blob([buffer], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
-      return await this.saveFileWithDialog(`${filename}.xlsx`, blob);
+      return await saveBlobWithDialog(`${filename}.xlsx`, blob);
     },
 
     // ==================== XLSX ====================
@@ -244,7 +217,7 @@ export function useExportFormats() {
       const workbook = new ExcelJS.Workbook();
       const sheet = workbook.addWorksheet('Sheet1');
       const headers = fields.map(f => f.name);
-      const isSchedule = this.isScheduleData(rows);
+      const isSchedule = ctx.isScheduleData(rows);
       const periodCol = headers.indexOf('时段') + 1;
 
       // 标题行
@@ -274,7 +247,7 @@ export function useExportFormats() {
 
         // ---------- 讲台行处理 ----------
         if (row._isPodium) {
-          const isRowNumTable = this.isPodiumRowWithRowNum(row, headers);
+          const isRowNumTable = ctx.isPodiumRowWithRowNum(row, headers);
           const rowData = new Array(headers.length).fill('');
           if (isRowNumTable) {
             rowData[0] = '讲台';
@@ -373,10 +346,10 @@ export function useExportFormats() {
             cell.border = { top: { style: 'thin' }, left: { style: 'thin' }, bottom: { style: 'thin' }, right: { style: 'thin' } };
             cell.alignment = { horizontal: 'center', vertical: 'middle' };
             // 行号列样式
-            if (this.isRowNumColumn(headerName)) {
+            if (ctx.isRowNumColumn(headerName)) {
               cell.font = { bold: true, color: { argb: 'FFFFFFFF' } };
               cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF4CAF50' } };
-            } else if (this.isAisleColumn(headerName)) {
+            } else if (ctx.isAisleColumn(headerName)) {
               cell.font = { color: { argb: 'FF000000' } };
               cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFD9D9D9' } }; // 灰色
             } else {
@@ -415,7 +388,7 @@ export function useExportFormats() {
 
       const buffer = await workbook.xlsx.writeBuffer();
       const blob = new Blob([buffer], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
-      return await this.saveFileWithDialog(`${filename}.xlsx`, blob);
+      return await saveBlobWithDialog(`${filename}.xlsx`, blob);
     },
 
     // ==================== HTML ====================
@@ -423,15 +396,15 @@ export function useExportFormats() {
       const headers = fields.map(f => f.name);
       const periodColIdx = headers.indexOf('时段');
 
-      let html = `<!DOCTYPE html><html><head><meta charset="UTF-8"><title>${this.escapeHtml(filename)}</title></head><body>
-        <h2 style="text-align:center;">${this.escapeHtml(filename)}</h2>
+      let html = `<!DOCTYPE html><html><head><meta charset="UTF-8"><title>${ctx.escapeHtml(filename)}</title></head><body>
+        <h2 style="text-align:center;">${ctx.escapeHtml(filename)}</h2>
         <table border="2" style="border-collapse:collapse; border-color:black;">
-          <thead><tr>${headers.map(h => `<th>${this.escapeHtml(h)}</th>`).join('')}</tr></thead><tbody>`;
+          <thead><tr>${headers.map(h => `<th>${ctx.escapeHtml(h)}</th>`).join('')}</tr></thead><tbody>`;
 
       for (const row of rows) {
         // ---------- 讲台行 ----------
         if (row._isPodium) {
-          const isRowNumTable = this.isPodiumRowWithRowNum(row, headers);
+          const isRowNumTable = ctx.isPodiumRowWithRowNum(row, headers);
           html += '<tr>';
           if (isRowNumTable) {
             html += '<td style="text-align:center; font-weight:bold; background-color:#4CAF50; color:white;">讲台</td>';
@@ -447,15 +420,15 @@ export function useExportFormats() {
 
         if (row.type === 'globalRest') {
           const displayText = row.label ? `${row.label} ${row.time}` : '';
-          html += `<tr><td colspan="${headers.length}" style="text-align:center; font-weight:bold; background-color:#D9D9D9;">${this.escapeHtml(displayText)}</td></tr>`;
+          html += `<tr><td colspan="${headers.length}" style="text-align:center; font-weight:bold; background-color:#D9D9D9;">${ctx.escapeHtml(displayText)}</td></tr>`;
         } else if (row.type === 'innerRest') {
           const displayText = row.label ? `${row.label} ${row.time}` : '';
           html += '<tr>';
           if (periodColIdx >= 0) {
             const remainingCols = headers.length - periodColIdx - 1;
-            html += `<td colspan="${remainingCols}" style="text-align:center; font-weight:bold; background-color:#D9D9D9;">${this.escapeHtml(displayText)}</td>`;
+            html += `<td colspan="${remainingCols}" style="text-align:center; font-weight:bold; background-color:#D9D9D9;">${ctx.escapeHtml(displayText)}</td>`;
           } else {
-            html += `<td colspan="${headers.length}" style="text-align:center; font-weight:bold; background-color:#D9D9D9;">${this.escapeHtml(displayText)}</td>`;
+            html += `<td colspan="${headers.length}" style="text-align:center; font-weight:bold; background-color:#D9D9D9;">${ctx.escapeHtml(displayText)}</td>`;
           }
           html += '</tr>';
         } else {
@@ -471,7 +444,7 @@ export function useExportFormats() {
             } else {
               style = 'text-align:center;';
             }
-            html += `<td style="${style}">${this.escapeHtml(cellVal)}</td>`;
+            html += `<td style="${style}">${ctx.escapeHtml(cellVal)}</td>`;
           }
           html += '</tr>';
         }
@@ -479,7 +452,7 @@ export function useExportFormats() {
 
       html += '</tbody></table></body></html>';
       const blob = new Blob([html], { type: 'text/html' });
-      return await this.saveFileWithDialog(`${filename}.html`, blob);
+      return await saveBlobWithDialog(`${filename}.html`, blob);
     },
 
     // ==================== CSV ====================
@@ -490,7 +463,7 @@ export function useExportFormats() {
       let csv = '\uFEFF' + headers.join(',') + '\n';
       rows.forEach(row => {
         if (row._isPodium) {
-          const isRowNumTable = this.isPodiumRowWithRowNum(row, headers);
+          const isRowNumTable = ctx.isPodiumRowWithRowNum(row, headers);
           if (isRowNumTable) {
             csv += '讲台,讲  台,'.repeat(headers.length - 1).slice(0, -1) + '\n';
           } else {
@@ -506,7 +479,7 @@ export function useExportFormats() {
         csv += line + '\n';
       });
       const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
-      return await this.saveFileWithDialog(`${filename}.csv`, blob);
+      return await saveBlobWithDialog(`${filename}.csv`, blob);
     },
 
     // ==================== Markdown ====================
@@ -516,9 +489,9 @@ export function useExportFormats() {
       return s.replace(/\\/g, '\\\\').replace(/\|/g, '\\|').replace(/\r?\n/g, '<br>');
     },
     buildMarkdown(headers, bodyRows, filename) {
-      const rowLine = cells => `| ${cells.map(c => this.mdEscape(c)).join(' | ')} |`;
+      const rowLine = cells => `| ${cells.map(c => ctx.mdEscape(c)).join(' | ')} |`;
       const lines = [
-        `# ${this.mdEscape(filename)}`,
+        `# ${ctx.mdEscape(filename)}`,
         '',
         rowLine(headers),
         `| ${headers.map(() => '---').join(' | ')} |`,
@@ -529,12 +502,12 @@ export function useExportFormats() {
     // 将 rows+fields 规整为 { headers, bodyRows }（bodyRows 为「数组的数组」），供 md/txt/json 复用
     buildTableArrays(rows, fields) {
       const headers = fields.map(f => f.name);
-      const isSchedule = this.isScheduleData(rows);
+      const isSchedule = ctx.isScheduleData(rows);
       const bodyRows = [];
       for (const row of rows) {
         // ---------- 讲台行 ----------
         if (row._isPodium) {
-          const isRowNumTable = this.isPodiumRowWithRowNum(row, headers);
+          const isRowNumTable = ctx.isPodiumRowWithRowNum(row, headers);
           const arr = new Array(headers.length).fill('');
           if (isRowNumTable && headers.length > 1) {
             arr[0] = '讲台';
@@ -566,10 +539,10 @@ export function useExportFormats() {
       return { headers, bodyRows };
     },
     async exportMD(rows, fields, filename) {
-      const { headers, bodyRows } = this.buildTableArrays(rows, fields);
-      const md = this.buildMarkdown(headers, bodyRows, filename);
+      const { headers, bodyRows } = ctx.buildTableArrays(rows, fields);
+      const md = ctx.buildMarkdown(headers, bodyRows, filename);
       const blob = new Blob([md], { type: 'text/markdown;charset=utf-8;' });
-      return await this.saveFileWithDialog(`${filename}.md`, blob);
+      return await saveBlobWithDialog(`${filename}.md`, blob);
     },
 
     // ==================== 纯文本 (TXT) ====================
@@ -579,10 +552,10 @@ export function useExportFormats() {
       return [line(headers), ...bodyRows.map(line)].join('\r\n') + '\r\n';
     },
     async exportTXT(rows, fields, filename) {
-      const { headers, bodyRows } = this.buildTableArrays(rows, fields);
-      const txt = this.buildTxt(headers, bodyRows);
+      const { headers, bodyRows } = ctx.buildTableArrays(rows, fields);
+      const txt = ctx.buildTxt(headers, bodyRows);
       const blob = new Blob([txt], { type: 'text/plain;charset=utf-8;' });
-      return await this.saveFileWithDialog(`${filename}.txt`, blob);
+      return await saveBlobWithDialog(`${filename}.txt`, blob);
     },
 
     // ==================== JSON ====================
@@ -596,26 +569,29 @@ export function useExportFormats() {
       return JSON.stringify(data, null, 2) + '\n';
     },
     async exportJSON(rows, fields, filename) {
-      const { headers, bodyRows } = this.buildTableArrays(rows, fields);
-      const json = this.buildJson(headers, bodyRows);
+      const { headers, bodyRows } = ctx.buildTableArrays(rows, fields);
+      const json = ctx.buildJson(headers, bodyRows);
       const blob = new Blob([json], { type: 'application/json;charset=utf-8;' });
-      return await this.saveFileWithDialog(`${filename}.json`, blob);
+      return await saveBlobWithDialog(`${filename}.json`, blob);
     },
 
     // ==================== 图片 ====================
     async exportImage(rows, fields, filename) {
       const { default: html2canvas } = await import('html2canvas');
-      const el = this.tableElement instanceof Element ? this.tableElement : null;
+      const el = ctx.tableElement.value instanceof Element ? ctx.tableElement.value : null;
       if (el && el.offsetParent !== null) {
         try {
           const canvas = await html2canvas(el, { scale: 2 });
           const blob = await new Promise(resolve => canvas.toBlob(resolve, 'image/png'));
-          if (blob) return await this.saveFileWithDialog(`${filename}.png`, blob);
-        } catch (e) {}
+          if (blob) return await saveBlobWithDialog(`${filename}.png`, blob);
+        } catch (e) {
+          // 截图失败（canvas 污染、元素不可渲染等）：退回下面的离屏渲染再试一次
+          console.warn('[export] 表格截图失败，退回离屏渲染：', e);
+        }
       }
 
       const tempDiv = document.createElement('div');
-      tempDiv.innerHTML = this.buildHTMLString(rows, fields, filename);
+      tempDiv.innerHTML = ctx.buildHTMLString(rows, fields, filename);
       tempDiv.style.position = 'absolute';
       tempDiv.style.left = '-9999px';
       document.body.appendChild(tempDiv);
@@ -628,7 +604,7 @@ export function useExportFormats() {
         document.body.removeChild(tempDiv);
       }
       const blob = await new Promise(resolve => canvas.toBlob(resolve, 'image/png'));
-      return await this.saveFileWithDialog(`${filename}.png`, blob);
+      return await saveBlobWithDialog(`${filename}.png`, blob);
     },
 
     escapeHtml(str) {
@@ -640,16 +616,16 @@ export function useExportFormats() {
       const headers = fields.map(f => f.name);
       const periodColIdx = headers.indexOf('时段');
 
-      let html = `<div style="text-align:center; font-size:20px; font-weight:bold; margin-bottom:12px;">${this.escapeHtml(filename)}</div>
+      let html = `<div style="text-align:center; font-size:20px; font-weight:bold; margin-bottom:12px;">${ctx.escapeHtml(filename)}</div>
         <table style="border-collapse:collapse; margin:0 auto;">
           <thead><tr style="background-color:#4CAF50; color:white;">
-            ${headers.map(h => `<th style="border:1px solid #ccc; padding:6px 12px; text-align:center; vertical-align:middle;">${this.escapeHtml(h)}</th>`).join('')}
+            ${headers.map(h => `<th style="border:1px solid #ccc; padding:6px 12px; text-align:center; vertical-align:middle;">${ctx.escapeHtml(h)}</th>`).join('')}
           </tr></thead><tbody>`;
 
       for (const row of rows) {
         // ---------- 讲台行 ----------
         if (row._isPodium) {
-          const isRowNumTable = this.isPodiumRowWithRowNum(row, headers);
+          const isRowNumTable = ctx.isPodiumRowWithRowNum(row, headers);
           html += '<tr>';
           if (isRowNumTable) {
             html += '<td style="border:1px solid #ccc; padding:6px 12px; text-align:center; font-weight:bold; background-color:#4CAF50; color:white;">讲台</td>';
@@ -665,15 +641,15 @@ export function useExportFormats() {
 
         if (row.type === 'globalRest') {
           const displayText = row.label ? `${row.label} ${row.time}` : '';
-          html += `<tr><td colspan="${headers.length}" style="border:1px solid #ccc; padding:6px 12px; text-align:center; vertical-align:middle; font-weight:bold; background-color:#D9D9D9;">${this.escapeHtml(displayText)}</td></tr>`;
+          html += `<tr><td colspan="${headers.length}" style="border:1px solid #ccc; padding:6px 12px; text-align:center; vertical-align:middle; font-weight:bold; background-color:#D9D9D9;">${ctx.escapeHtml(displayText)}</td></tr>`;
         } else if (row.type === 'innerRest') {
           const displayText = row.label ? `${row.label} ${row.time}` : '';
           html += '<tr>';
           if (periodColIdx >= 0) {
             const remainingCols = headers.length - periodColIdx - 1;
-            html += `<td colspan="${remainingCols}" style="border:1px solid #ccc; padding:6px 12px; text-align:center; vertical-align:middle; font-weight:bold; background-color:#D9D9D9;">${this.escapeHtml(displayText)}</td>`;
+            html += `<td colspan="${remainingCols}" style="border:1px solid #ccc; padding:6px 12px; text-align:center; vertical-align:middle; font-weight:bold; background-color:#D9D9D9;">${ctx.escapeHtml(displayText)}</td>`;
           } else {
-            html += `<td colspan="${headers.length}" style="border:1px solid #ccc; padding:6px 12px; text-align:center; vertical-align:middle; font-weight:bold; background-color:#D9D9D9;">${this.escapeHtml(displayText)}</td>`;
+            html += `<td colspan="${headers.length}" style="border:1px solid #ccc; padding:6px 12px; text-align:center; vertical-align:middle; font-weight:bold; background-color:#D9D9D9;">${ctx.escapeHtml(displayText)}</td>`;
           }
           html += '</tr>';
         } else {
@@ -687,7 +663,7 @@ export function useExportFormats() {
             } else if (h === '走廊') {
               style += ' background-color:#D9D9D9;';
             }
-            html += `<td style="${style}">${this.escapeHtml(cellVal)}</td>`;
+            html += `<td style="${style}">${ctx.escapeHtml(cellVal)}</td>`;
           }
           html += '</tr>';
         }
@@ -726,14 +702,14 @@ export function useExportFormats() {
       doc.text(filename, pageWidth / 2, 15, { align: 'center' });
 
       const headers = fields.map(f => f.name);
-      const isSchedule = this.isScheduleData(rows);
+      const isSchedule = ctx.isScheduleData(rows);
       const periodColIdx = headers.indexOf('时段');
 
       const body = [];
       for (const row of rows) {
         // ---------- 讲台行 ----------
         if (row._isPodium) {
-          const isRowNumTable = this.isPodiumRowWithRowNum(row, headers);
+          const isRowNumTable = ctx.isPodiumRowWithRowNum(row, headers);
           const arr = new Array(headers.length).fill('');
           if (isRowNumTable) {
             arr[0] = '讲台';
@@ -895,7 +871,7 @@ export function useExportFormats() {
       });
 
       const blob = doc.output('blob');
-      return await this.saveFileWithDialog(`${filename}.pdf`, blob);
+      return await saveBlobWithDialog(`${filename}.pdf`, blob);
     }
   };
 }

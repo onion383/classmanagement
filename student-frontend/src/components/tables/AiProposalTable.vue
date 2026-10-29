@@ -117,7 +117,8 @@
   </div>
 </template>
 
-<script>
+<script setup>
+import { computed } from 'vue'
 import DynamicTable from './DynamicTable/DynamicTable.vue'
 import AiRecordTable from './AiRecordTable.vue'
 import AiGridPreview, { GRID_TABLES } from './AiGridPreview.vue'
@@ -143,155 +144,151 @@ const TABLE_LABELS = {
 }
 
 // 写提案预览：新增/修改展示「将要写入的值」，删除展示「将被删除的那条记录」
-export default {
-  name: 'AiProposalTable',
-  components: { DynamicTable, AiRecordTable, AiGridPreview },
-  props: {
-    proposal: { type: Object, required: true },
-  },
-  computed: {
-    // 整库快照还原提案（kind=snapshot_restore）：覆盖全部数据，须强警示
-    isSnapshotRestore() { return this.proposal.kind === 'snapshot_restore' },
-    // 跨表批量操作提案（kind=batch_ops）：按表分组列出每一项动作
-    isBatchOps() { return this.proposal.kind === 'batch_ops' },
-    batchOpGroups() {
-      const ops = Array.isArray(this.proposal.ops) ? this.proposal.ops : []
-      const order = []
-      const groups = new Map()
-      for (const op of ops) {
-        const table = (op && op.table) || ''
-        if (!groups.has(table)) { groups.set(table, []); order.push(table) }
-        groups.get(table).push(this._opItem(op || {}))
-      }
-      return order.map((t) => ({ table: t, tableLabel: TABLE_LABELS[t] || t, items: groups.get(t) }))
-    },
-    isDelete() { return this.proposal.operation === 'delete' },
-    // 技能提案（kind=skill）：新建/更新/删除技能库里的 md 指令文件
-    isSkill() { return this.proposal.kind === 'skill' },
-    // 将要写入的新正文（删除无正文）
-    skillContent() { return this.isSkill && this.proposal.operation !== 'delete' ? String(this.proposal.content || '') : '' },
-    // 原正文（更新/删除时后端附带 before）
-    skillBefore() { return this.isSkill && this.proposal.before ? String(this.proposal.before) : '' },
-    // 更新技能（markdown）：原正文与新正文都存在，改为按行计算的行级 diff 展示
-    isSkillUpdate() {
-      return this.isSkill && this.proposal.operation === 'update' && !!this.skillBefore && !!this.skillContent
-    },
-    // 行级 diff 结果：{ added, removed, lines:[{type,text}] }
-    skillDiff() { return this.isSkillUpdate ? lineDiff(this.skillBefore, this.skillContent) : null },
-    // 只展示「变更的行」（新增/删除），未改动的上下文行不再铺开，避免又贴一遍全文
-    skillDiffLines() { return this.skillDiff ? this.skillDiff.lines.filter((l) => l.type !== 'ctx') : [] },
-    // 前端设置提案（主题/日夜模式等）
-    isFront() { return this.proposal.kind === 'front' },
-    frontLabel() { return FRONT_LABELS[this.proposal.key] || this.proposal.key || '设置' },
-    frontValue() {
-      const v = this.proposal.value
-      if (typeof v === 'boolean') return v ? '开启' : '关闭'
-      if (v == null) return '空'
-      return FRONT_VALUE_LABELS[v] || String(v)
-    },
-    // 整块写入提案（非行式表）：values 为「列名 → 该列完整新值」
-    isJson() { return this.proposal.kind === 'json' },
-    // 整块写入且表属于网格家族时，用 GridView 网格预览
-    isGrid() { return this.isJson && GRID_TABLES.includes(this.proposal.table) },
-    jsonValues() {
-      const v = this.proposal.values
-      return v && typeof v === 'object' ? v : {}
-    },
-    isBatch() { return !!this.proposal.batch },
-    // 批量修改提案（operation=update 且 batch，后端附 diffs:[{id,diff}]）：逐行展示对照
-    isBatchUpdate() {
-      return this.proposal.operation === 'update' && this.proposal.batch === true
-        && Array.isArray(this.proposal.diffs) && this.proposal.diffs.length > 0
-    },
-    batchUpdateDiffs() { return this.isBatchUpdate ? this.proposal.diffs : [] },
-    // 修改提案的「旧值 → 新值」对照（后端在 update 提案里附带 diff）
-    isUpdateDiff() { return this.proposal.operation === 'update' && Array.isArray(this.proposal.diff) && this.proposal.diff.length > 0 },
-    updateDiff() { return this.isUpdateDiff ? this.proposal.diff : [] },
-    payload() {
-      const d = this.proposal.data
-      return d && typeof d === 'object' ? d : {}
-    },
-    // update 的提案数据是 { id, changes }，只展示 id 与要改的字段
-    changedFields() {
-      const c = this.payload.changes
-      return c && typeof c === 'object' ? c : {}
-    },
-    batchRows() {
-      return Array.isArray(this.payload.rows) ? this.payload.rows : []
-    },
-    fields() {
-      if (this.proposal.operation === 'update') {
-        return ['id', ...Object.keys(this.changedFields)].map((name) => ({ name }))
-      }
-      // 批量新增：各行列可能不同，取并集并保持首次出现的顺序
-      if (this.isBatch) {
-        const keys = []
-        for (const r of this.batchRows) {
-          for (const k of Object.keys(r || {})) if (!keys.includes(k)) keys.push(k)
-        }
-        return keys.map((name) => ({ name }))
-      }
-      return Object.keys(this.payload).map((name) => ({ name }))
-    },
-    rows() {
-      if (this.proposal.operation === 'update') {
-        return [{ ...this.changedFields, id: this.payload.id, _rowKey: this.payload.id }]
-      }
-      if (this.isBatch) {
-        return this.batchRows.map((r, i) => ({ ...r, _rowKey: i }))
-      }
-      return [{ ...this.payload, _rowKey: 1 }]
-    },
-    deleteIds() {
-      // 批量删除：data.ids 为待删除的 id 列表，全部列出让用户看清将被删掉的记录
-      if (this.isBatch && Array.isArray(this.payload.ids)) {
-        return this.payload.ids.map(Number).filter((n) => Number.isInteger(n) && n > 0)
-      }
-      const id = Number(this.payload.id)
-      return Number.isInteger(id) && id > 0 ? [id] : []
-    },
-    tableHeight() { return Math.min(400, 36 + this.rows.length * 32) },
-  },
-  methods: {
-    // 把一个批量操作 op 归一为「动作标签 + 色调 + 详情文本」供列表展示
-    _opItem(op) {
-      const id = op.id != null ? op.id : (op.data && op.data.id)
-      if (op.action === 'add') return { actionLabel: '新增', tone: 'text-success', detail: this._valuesSummary(op.data) }
-      if (op.action === 'delete') return { actionLabel: '删除', tone: 'text-danger', detail: `#${id}` }
-      if (op.action === 'update') {
-        const changes = (op.data && op.data.changes) || {}
-        return { actionLabel: '修改', tone: 'text-info', detail: `#${id}  ${this._changesSummary(changes)}` }
-      }
-      return { actionLabel: '整块写入', tone: 'text-info', detail: this._valuesSummary(op.values) }
-    },
-    // 「字段=值」摘要（新增行 / 整块写入用）
-    _valuesSummary(v) {
-      if (!v || typeof v !== 'object' || Array.isArray(v)) return '空'
-      const ks = Object.keys(v)
-      if (!ks.length) return '空'
-      return ks.map((k) => `${k}=${this._short(v[k])}`).join('  ')
-    },
-    // 「字段→新值」摘要（修改用）
-    _changesSummary(c) {
-      const ks = Object.keys(c || {})
-      if (!ks.length) return '（无改动字段）'
-      return ks.map((k) => `${k}→${this._short(c[k])}`).join('  ')
-    },
-    _short(v) {
-      const s = v == null ? '空' : (typeof v === 'object' ? JSON.stringify(v) : String(v))
-      return s.length > 40 ? s.slice(0, 40) + '…' : s
-    },
-    // 整块写入的值预览：对象/数组转紧凑 JSON，过长则截断
-    preview(v) {
-      if (v == null) return '空'
-      const s = typeof v === 'object' ? JSON.stringify(v) : String(v)
-      return s.length > 300 ? s.slice(0, 300) + '…' : s
-    },
-    // 修改对照的单值展示：空值显示为「空」，对象/数组转 JSON
-    fmt(v) {
-      if (v == null || v === '') return '空'
-      return typeof v === 'object' ? JSON.stringify(v) : String(v)
-    },
-  },
+defineOptions({ name: 'AiProposalTable' })
+
+const props = defineProps({
+  proposal: { type: Object, required: true },
+})
+
+// 整库快照还原提案（kind=snapshot_restore）：覆盖全部数据，须强警示
+const isSnapshotRestore = computed(() => props.proposal.kind === 'snapshot_restore')
+// 跨表批量操作提案（kind=batch_ops）：按表分组列出每一项动作
+const isBatchOps = computed(() => props.proposal.kind === 'batch_ops')
+const batchOpGroups = computed(() => {
+  const ops = Array.isArray(props.proposal.ops) ? props.proposal.ops : []
+  const order = []
+  const groups = new Map()
+  for (const op of ops) {
+    const table = (op && op.table) || ''
+    if (!groups.has(table)) { groups.set(table, []); order.push(table) }
+    groups.get(table).push(_opItem(op || {}))
+  }
+  return order.map((t) => ({ table: t, tableLabel: TABLE_LABELS[t] || t, items: groups.get(t) }))
+})
+const isDelete = computed(() => props.proposal.operation === 'delete')
+// 技能提案（kind=skill）：新建/更新/删除技能库里的 md 指令文件
+const isSkill = computed(() => props.proposal.kind === 'skill')
+// 将要写入的新正文（删除无正文）
+const skillContent = computed(() => isSkill.value && props.proposal.operation !== 'delete' ? String(props.proposal.content || '') : '')
+// 原正文（更新/删除时后端附带 before）
+const skillBefore = computed(() => isSkill.value && props.proposal.before ? String(props.proposal.before) : '')
+// 更新技能（markdown）：原正文与新正文都存在，改为按行计算的行级 diff 展示
+const isSkillUpdate = computed(() => {
+  return isSkill.value && props.proposal.operation === 'update' && !!skillBefore.value && !!skillContent.value
+})
+// 行级 diff 结果：{ added, removed, lines:[{type,text}] }
+const skillDiff = computed(() => isSkillUpdate.value ? lineDiff(skillBefore.value, skillContent.value) : null)
+// 只展示「变更的行」（新增/删除），未改动的上下文行不再铺开，避免又贴一遍全文
+const skillDiffLines = computed(() => skillDiff.value ? skillDiff.value.lines.filter((l) => l.type !== 'ctx') : [])
+// 前端设置提案（主题/日夜模式等）
+const isFront = computed(() => props.proposal.kind === 'front')
+const frontLabel = computed(() => FRONT_LABELS[props.proposal.key] || props.proposal.key || '设置')
+const frontValue = computed(() => {
+  const v = props.proposal.value
+  if (typeof v === 'boolean') return v ? '开启' : '关闭'
+  if (v == null) return '空'
+  return FRONT_VALUE_LABELS[v] || String(v)
+})
+// 整块写入提案（非行式表）：values 为「列名 → 该列完整新值」
+const isJson = computed(() => props.proposal.kind === 'json')
+// 整块写入且表属于网格家族时，用 GridView 网格预览
+const isGrid = computed(() => isJson.value && GRID_TABLES.includes(props.proposal.table))
+const jsonValues = computed(() => {
+  const v = props.proposal.values
+  return v && typeof v === 'object' ? v : {}
+})
+const isBatch = computed(() => !!props.proposal.batch)
+// 批量修改提案（operation=update 且 batch，后端附 diffs:[{id,diff}]）：逐行展示对照
+const isBatchUpdate = computed(() => {
+  return props.proposal.operation === 'update' && props.proposal.batch === true
+    && Array.isArray(props.proposal.diffs) && props.proposal.diffs.length > 0
+})
+const batchUpdateDiffs = computed(() => isBatchUpdate.value ? props.proposal.diffs : [])
+// 修改提案的「旧值 → 新值」对照（后端在 update 提案里附带 diff）
+const isUpdateDiff = computed(() => props.proposal.operation === 'update' && Array.isArray(props.proposal.diff) && props.proposal.diff.length > 0)
+const updateDiff = computed(() => isUpdateDiff.value ? props.proposal.diff : [])
+const payload = computed(() => {
+  const d = props.proposal.data
+  return d && typeof d === 'object' ? d : {}
+})
+// update 的提案数据是 { id, changes }，只展示 id 与要改的字段
+const changedFields = computed(() => {
+  const c = payload.value.changes
+  return c && typeof c === 'object' ? c : {}
+})
+const batchRows = computed(() => {
+  return Array.isArray(payload.value.rows) ? payload.value.rows : []
+})
+const fields = computed(() => {
+  if (props.proposal.operation === 'update') {
+    return ['id', ...Object.keys(changedFields.value)].map((name) => ({ name }))
+  }
+  // 批量新增：各行列可能不同，取并集并保持首次出现的顺序
+  if (isBatch.value) {
+    const keys = []
+    for (const r of batchRows.value) {
+      for (const k of Object.keys(r || {})) if (!keys.includes(k)) keys.push(k)
+    }
+    return keys.map((name) => ({ name }))
+  }
+  return Object.keys(payload.value).map((name) => ({ name }))
+})
+const rows = computed(() => {
+  if (props.proposal.operation === 'update') {
+    return [{ ...changedFields.value, id: payload.value.id, _rowKey: payload.value.id }]
+  }
+  if (isBatch.value) {
+    return batchRows.value.map((r, i) => ({ ...r, _rowKey: i }))
+  }
+  return [{ ...payload.value, _rowKey: 1 }]
+})
+const deleteIds = computed(() => {
+  // 批量删除：data.ids 为待删除的 id 列表，全部列出让用户看清将被删掉的记录
+  if (isBatch.value && Array.isArray(payload.value.ids)) {
+    return payload.value.ids.map(Number).filter((n) => Number.isInteger(n) && n > 0)
+  }
+  const id = Number(payload.value.id)
+  return Number.isInteger(id) && id > 0 ? [id] : []
+})
+const tableHeight = computed(() => Math.min(400, 36 + rows.value.length * 32))
+
+// 把一个批量操作 op 归一为「动作标签 + 色调 + 详情文本」供列表展示
+function _opItem(op) {
+  const id = op.id != null ? op.id : (op.data && op.data.id)
+  if (op.action === 'add') return { actionLabel: '新增', tone: 'text-success', detail: _valuesSummary(op.data) }
+  if (op.action === 'delete') return { actionLabel: '删除', tone: 'text-danger', detail: `#${id}` }
+  if (op.action === 'update') {
+    const changes = (op.data && op.data.changes) || {}
+    return { actionLabel: '修改', tone: 'text-info', detail: `#${id}  ${_changesSummary(changes)}` }
+  }
+  return { actionLabel: '整块写入', tone: 'text-info', detail: _valuesSummary(op.values) }
+}
+// 「字段=值」摘要（新增行 / 整块写入用）
+function _valuesSummary(v) {
+  if (!v || typeof v !== 'object' || Array.isArray(v)) return '空'
+  const ks = Object.keys(v)
+  if (!ks.length) return '空'
+  return ks.map((k) => `${k}=${_short(v[k])}`).join('  ')
+}
+// 「字段→新值」摘要（修改用）
+function _changesSummary(c) {
+  const ks = Object.keys(c || {})
+  if (!ks.length) return '（无改动字段）'
+  return ks.map((k) => `${k}→${_short(c[k])}`).join('  ')
+}
+function _short(v) {
+  const s = v == null ? '空' : (typeof v === 'object' ? JSON.stringify(v) : String(v))
+  return s.length > 40 ? s.slice(0, 40) + '…' : s
+}
+// 整块写入的值预览：对象/数组转紧凑 JSON，过长则截断
+function preview(v) {
+  if (v == null) return '空'
+  const s = typeof v === 'object' ? JSON.stringify(v) : String(v)
+  return s.length > 300 ? s.slice(0, 300) + '…' : s
+}
+// 修改对照的单值展示：空值显示为「空」，对象/数组转 JSON
+function fmt(v) {
+  if (v == null || v === '') return '空'
+  return typeof v === 'object' ? JSON.stringify(v) : String(v)
 }
 </script>

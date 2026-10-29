@@ -721,8 +721,9 @@
   </div>
 </template>
 
-<script>
-import { defineAsyncComponent } from 'vue'
+<script setup>
+import { ref, computed, watch, onMounted, onActivated, onDeactivated, onBeforeUnmount, defineAsyncComponent } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
 import AppHelp from '../../components/base/AppHelp.vue'
 import AppSelect from '../../components/base/AppSelect.vue'
 import AppSwitch from '../../components/base/AppSwitch.vue'
@@ -740,403 +741,437 @@ import { RECEIVE } from '../../electronChannels.js'
 // 弹窗类组件懒加载：打开时才加载对应 chunk
 const ConfirmDialog = defineAsyncComponent(() => import('../../components/base/ConfirmDialog.vue'))
 
-export default {
-  components: { AppHelp, AppSelect, AppSwitch, ConfirmDialog, ViewSwitch },
-  // 懒加载弹窗保活：首次打开后保持挂载，关闭只降 visible，保留退出动画
-  watch: {
-    'dialog.visible'(n) { if (n) this.dialogMounted = true },
-    // 关键字变化时高亮回到第一条（回车默认跳第一个）
-    settingsSearch() { this.searchActiveIndex = 0 },
-    // 跨页定位：其他页面（如标题栏全局搜索）跳转到 /settings?focus=... 时定位到目标设置
-    '$route.query.focus'() { this._applyRouteFocus() }
-  },
-  data() {
-    const themeStore = useThemeStore()
-    const { currentTheme, bgMaskOpacity, glassOpacity, iconStyle, topbarColor, animationsEnabled, pendingMode, nightSupported, followSystem } = storeToRefs(themeStore)
+const route = useRoute()
+const router = useRouter()
+const themeStore = useThemeStore()
+const { currentTheme, bgMaskOpacity, glassOpacity, iconStyle, topbarColor, animationsEnabled, pendingMode, nightSupported, followSystem } = storeToRefs(themeStore)
 
-    return {
-      themeStore,
-      currentTheme,
-      bgMaskOpacity,
-      glassOpacity,
-      iconStyle,
-      topbarColor,
-      animationsEnabled,
-      pendingMode,
-      nightSupported,
-      followSystem,
-      // 设置项搜索：输入即匹配，结果以悬浮弹窗显示在搜索框下方，点击滚动到对应设置区
-      settingsSearch: '',
-      settingsSearchOpen: false,
-      // 悬浮弹窗的视口坐标（Teleport 到 body 后用 fixed 定位，需要手动计算）
-      searchPopup: { left: 0, top: 0, width: 0 },
-      // 搜索弹窗当前高亮项下标（方向键上下切换、回车跳转）
-      searchActiveIndex: 0,
-      // py 为标题拼音首字母，让单个字母（如 z → 主题设置）也能命中
-      settingsSections: [
-        { key: 'account',  label: '账号管理',       py: 'zhgl' },
-        { key: 'semester', label: '学期设置',       py: 'xqsz' },
-        { key: 'undo',     label: '撤销记录',       py: 'cxjl' },
-        { key: 'theme',    label: '主题设置',       py: 'ztsz' },
-        { key: 'toolbox',  label: '工具箱设置',     py: 'gjxsz' },
-        { key: 'widget',   label: '桌面小组件设置', py: 'zmxjjsz' },
-        { key: 'perf',     label: '性能',           py: 'xn' },
-        { key: 'savepath', label: '保存路径设置',   py: 'bcljsz' },
-        { key: 'datadir',  label: '数据目录设置',   py: 'sjmlsz' },
-        { key: 'danger',   label: '危险操作',       py: 'wxcz' },
-      ],
-      // 分区内的具体设置项：命中后滚动到该设置行（py 为标签拼音首字母）
-      settingsItems: [
-        { label: '选择学期',                 section: 'semester', py: 'xzq' },
-        { label: '学期开始时间',             section: 'semester', py: 'xqkssj' },
-        { label: '学期结束时间',             section: 'semester', py: 'xqjssj' },
-        { label: '本学期时长',               section: 'semester', py: 'bxqsc' },
-        { label: '主题',                     section: 'theme',    py: 'zt' },
-        { label: '图标样式',                 section: 'theme',    py: 'tbys' },
-        { label: '顶栏配色',                 section: 'theme',    py: 'dlps' },
-        { label: '日夜模式',                 section: 'theme',    py: 'ryms' },
-        { label: '跟随系统',                 section: 'theme',    py: 'gsxt' },
-        { label: '提示合并',                 section: 'theme',    py: 'tshb' },
-        { label: '动画效果',                 section: 'theme',    py: 'dhxg' },
-        { label: '背景遮罩层（有自定义背景图时）', section: 'theme', py: 'bjzzc' },
-        { label: '组件透明玻璃层',           section: 'theme',    py: 'zjtmlbl' },
-        { label: '是否启用工具箱',           section: 'toolbox',  py: 'sfqygjx' },
-        { label: '本次启用工具箱',           section: 'toolbox',  py: 'bcqygjx' },
-        { label: '新U盘插入自动打开',        section: 'toolbox',  py: 'xupcrzddk' },
-        { label: '启用桌面小组件',           section: 'widget',   py: 'qyzmxjjs' },
-        { label: '注释截屏保存位置',         section: 'savepath', py: 'zsjpbcwz' },
-        { label: '一键截屏保存位置',         section: 'savepath', py: 'yjjpbcwz' },
-        { label: '数据库目录',               section: 'datadir',  py: 'sjkml' },
-        { label: '相册缩略图缓存',           section: 'datadir',  py: 'xcsltch' },
-        { label: '技能文件目录',             section: 'datadir',  py: 'jnwjml' },
-        { label: '安全等级',                 section: 'account',  py: 'aqdj' },
-      ],
-      // 图标样式选项：彩色图标 / Emoji
-      iconStyleOptions: [
-        { value: 'color', label: '彩色图标' },
-        { value: 'emoji', label: 'Emoji' },
-      ],
-      // 标题栏/侧边栏毛玻璃配色：深蓝（旧款）/ 白色调
-      topbarColorOptions: [
-        { value: 'blue', label: '深蓝' },
-        { value: 'light', label: '白色调' },
-      ],
-      // 日夜模式切换：日间 / 夜间（图标为标题栏同款太阳 / 月亮）
-      modeSwitchOptions: [
-        { value: 'day', label: '日间', icon: Sun },
-        { value: 'night', label: '夜间', icon: Moon },
-      ],
-      // Modal
-      modalType: '',
-      newUsername: '',
-      usernamePassword: '',
-      oldPassword: '',
-      newPassword: '',
-      // 修改密码的三件配套：二次确认输入、弹窗内联错误、提交中锁。
-      // 密码改错没有退路（恢复词只有「超级隐私」等级才有），这三样缺一都会让手误变成锁死。
-      confirmPassword: '',
-      pwdError: '',
-      busyPwd: false,
-      // 修改用户名同样缺提交锁：点了没反应时用户会连点，请求发两次
-      usernameError: '',
-      busyUsername: false,
-      // Export database
-      exportPassword: '',
-      exportEncrypt: true,
-      exportDbPwd: '',
-      busyExport: false,
-      // 学期设置（多学期列表 + 当前学期；起止日期供座位快照按天结算）
-      semesters: [],
-      semesterId: null,
-      semesterNameDraft: '',
-      showRenameSemester: false,
-      newSemesterName: '',
-      showAddSemester: false,
-      showDeleteSemester: false,
-      busySemester: false,
-      // 保存学期日期的独立 busy 标志：与 busySemester（增删学期）分开，
-      // 否则「保存日期」和「删除学期」会互相把对方的按钮置灰
-      busySemesterDate: false,
-      semesterStart: '',
-      semesterEnd: '',
-      // 学期日期的内联错误文案（保存失败时显示在输入框下方，不只靠 toast）
-      semesterDateErrorText: '',
-      // Dialog
-      dialog: {
-        visible: false,
-        message: '',
-        type: 'alert',
-        showCancel: false,
-      },
-      dialogMounted: false,
-      dialogCallback: null,
-      // 「删除账号」倒计时定时器
-      deleteTimer: null,
-      // 工具箱设置
-      toolboxEnabled: true,
-      noteSavePath: '',
-      screenshotSavePath: '',
-      screenshotDir: '',
-      usbAutoOpen: false,
-      // 桌面小组件启用状态：localStorage 持久化，默认启用（主进程据此按需创建桌面小组件窗口）
-      desktopWidgetEnabled: (localStorage.getItem('desktopWidgetEnabled') ?? '1') !== '0',
-     loaded: false,
-      _fromMainHandler: null,
-      // 数据目录 / 缓存目录
-      dataDir: '',
-      thumbsDir: '',
-      skillsDir: '',
-      busyDataDir: false,
-      busyThumbsDir: false,
-      busySkillsDir: false,
-      // 安全等级（仅当前账号）：plain / nopass / password / privacy
-      securityLevel: '',
-      securityLevelLoading: true,
-      busySecurityLevel: false,
-      securityDialog: { open: false, target: '', password: '', newPassword: '', error: '' },
-      privacyPhrase: '',
-      // 撤销记录
-      undoGroups: [],
-      busyUndo: false,
-      // Theme
-      selectedThemeId: '',
-      // 是否合并相同内容的重复提示
-      mergeNotifications: true,
-      // Background image
-      bgImageUrl: '',
-      bgImageFileName: '',
-      // 性能面板：逐进程内存列表 + 三个重启目标的存活状态
-      perfProcs: [],
-      // 首位进程条形的目标占比（0.85~0.95）：让最高占用不固定满格，每次采样小幅跳动更自然
-      perfTopRatio: 0.9,
-      perfAlive: { front: false, backend: false, widget: false },
-      // 性能面板：内存总计 / 近一分钟平均 / 自启动最高（均来自主进程采样，单位 KB）
-      // null 表示尚无数据，展示为占位符，避免出现误导性的 0 MB
-      perfTotal: null,
-      perfAvg: null,
-      perfMax: null,
-      // 按用途分组：前端（主窗口渲染进程）/ 后端 / 其他
-      perfFront: null,
-      perfBackend: null,
-      perfOther: null,
-      perfStartupTotal: 0,
-      busyGc: false,
-      busyRestartBackend: false,
-      busyRestartWidget: false,
-      busyRestartAll: false,
-      _perfTimer: null,
-      // 主题下拉的候选项（这份列表是独立硬编码的副本，不走 store 的 allThemes）。
-      // 「Win11 主题」暂时移除：它的背景模糊依赖 DWM 系统亚克力，效果不可控
-      // （本机实测连原生 Win32 都只渲染出均匀中性灰，壁纸完全透不出），
-      // 故先从选择入口去掉。实现代码保留，恢复见 stores/theme.js 的 HIDDEN_THEME_IDS。
-      presetThemes: [
-        { id: 'base', name: '彩色色块主题' },
-        { id: 'glass', name: '毛玻璃主题' },
-        { id: 'glass2', name: '新毛玻璃主题' },
-        { id: 'minimal', name: '极简主题' },
-      ],
-    }
-  },
-  computed: {
-    user() {
-      return JSON.parse(localStorage.getItem('currentUser') || '{}')
-    },
-    // 安全等级下拉选项（与引导页同一套文案）
-    securityLevelOptions() {
-      return [
-        { value: 'plain', label: '明文模式（不加密）' },
-        { value: 'nopass', label: '无密码模式（加密，免密登录）' },
-        { value: 'password', label: '普通密码模式（加密 + 登录密码）' },
-        { value: 'privacy', label: '超级隐私模式（密码 + 恢复词）' },
-      ]
-    },
-    securityLevelHint() {
-      if (this.securityLevelLoading) return '加载中…'
-      if (this.busySecurityLevel) return '切换中…'
-      if (this.securityLevel === 'plain') return '当前为明文，可升级为加密'
+// 模板 ref（搜索输入/弹窗、背景图 file input）
+const settingsSearchInput = ref(null)
+const settingsSearchPopup = ref(null)
+const bgImageInput = ref(null)
+
+// 设置项搜索：输入即匹配，结果以悬浮弹窗显示在搜索框下方，点击滚动到对应设置区
+const settingsSearch = ref('')
+const settingsSearchOpen = ref(false)
+// 悬浮弹窗的视口坐标（Teleport 到 body 后用 fixed 定位，需要手动计算）
+const searchPopup = ref({ left: 0, top: 0, width: 0 })
+// 搜索弹窗当前高亮项下标（方向键上下切换、回车跳转）
+const searchActiveIndex = ref(0)
+// py 为标题拼音首字母，让单个字母（如 z → 主题设置）也能命中
+const settingsSections = ref([
+  { key: 'account',  label: '账号管理',       py: 'zhgl' },
+  { key: 'semester', label: '学期设置',       py: 'xqsz' },
+  { key: 'undo',     label: '撤销记录',       py: 'cxjl' },
+  { key: 'theme',    label: '主题设置',       py: 'ztsz' },
+  { key: 'toolbox',  label: '工具箱设置',     py: 'gjxsz' },
+  { key: 'widget',   label: '桌面小组件设置', py: 'zmxjjsz' },
+  { key: 'perf',     label: '性能',           py: 'xn' },
+  { key: 'savepath', label: '保存路径设置',   py: 'bcljsz' },
+  { key: 'datadir',  label: '数据目录设置',   py: 'sjmlsz' },
+  { key: 'danger',   label: '危险操作',       py: 'wxcz' },
+])
+// 分区内的具体设置项：命中后滚动到该设置行（py 为标签拼音首字母）
+const settingsItems = ref([
+  { label: '选择学期',                 section: 'semester', py: 'xzq' },
+  { label: '学期开始时间',             section: 'semester', py: 'xqkssj' },
+  { label: '学期结束时间',             section: 'semester', py: 'xqjssj' },
+  { label: '本学期时长',               section: 'semester', py: 'bxqsc' },
+  { label: '主题',                     section: 'theme',    py: 'zt' },
+  { label: '图标样式',                 section: 'theme',    py: 'tbys' },
+  { label: '顶栏配色',                 section: 'theme',    py: 'dlps' },
+  { label: '日夜模式',                 section: 'theme',    py: 'ryms' },
+  { label: '跟随系统',                 section: 'theme',    py: 'gsxt' },
+  { label: '提示合并',                 section: 'theme',    py: 'tshb' },
+  { label: '动画效果',                 section: 'theme',    py: 'dhxg' },
+  { label: '背景遮罩层（有自定义背景图时）', section: 'theme', py: 'bjzzc' },
+  { label: '组件透明玻璃层',           section: 'theme',    py: 'zjtmlbl' },
+  { label: '是否启用工具箱',           section: 'toolbox',  py: 'sfqygjx' },
+  { label: '本次启用工具箱',           section: 'toolbox',  py: 'bcqygjx' },
+  { label: '新U盘插入自动打开',        section: 'toolbox',  py: 'xupcrzddk' },
+  { label: '启用桌面小组件',           section: 'widget',   py: 'qyzmxjjs' },
+  { label: '注释截屏保存位置',         section: 'savepath', py: 'zsjpbcwz' },
+  { label: '一键截屏保存位置',         section: 'savepath', py: 'yjjpbcwz' },
+  { label: '数据库目录',               section: 'datadir',  py: 'sjkml' },
+  { label: '相册缩略图缓存',           section: 'datadir',  py: 'xcsltch' },
+  { label: '技能文件目录',             section: 'datadir',  py: 'jnwjml' },
+  { label: '安全等级',                 section: 'account',  py: 'aqdj' },
+])
+// 图标样式选项：彩色图标 / Emoji
+const iconStyleOptions = [
+  { value: 'color', label: '彩色图标' },
+  { value: 'emoji', label: 'Emoji' },
+]
+// 标题栏/侧边栏毛玻璃配色：深蓝（旧款）/ 白色调
+const topbarColorOptions = [
+  { value: 'blue', label: '深蓝' },
+  { value: 'light', label: '白色调' },
+]
+// 日夜模式切换：日间 / 夜间（图标为标题栏同款太阳 / 月亮）
+const modeSwitchOptions = [
+  { value: 'day', label: '日间', icon: Sun },
+  { value: 'night', label: '夜间', icon: Moon },
+]
+// Modal
+const modalType = ref('')
+const newUsername = ref('')
+const usernamePassword = ref('')
+const oldPassword = ref('')
+const newPassword = ref('')
+// 修改密码的三件配套：二次确认输入、弹窗内联错误、提交中锁。
+// 密码改错没有退路（恢复词只有「超级隐私」等级才有），这三样缺一都会让手误变成锁死。
+const confirmPassword = ref('')
+const pwdError = ref('')
+const busyPwd = ref(false)
+// 修改用户名同样缺提交锁：点了没反应时用户会连点，请求发两次
+const usernameError = ref('')
+const busyUsername = ref(false)
+// Export database
+const exportPassword = ref('')
+const exportEncrypt = ref(true)
+const exportDbPwd = ref('')
+const busyExport = ref(false)
+// 学期设置（多学期列表 + 当前学期；起止日期供座位快照按天结算）
+const semesters = ref([])
+const semesterId = ref(null)
+const semesterNameDraft = ref('')
+const showRenameSemester = ref(false)
+const newSemesterName = ref('')
+const showAddSemester = ref(false)
+const showDeleteSemester = ref(false)
+const busySemester = ref(false)
+// 保存学期日期的独立 busy 标志：与 busySemester（增删学期）分开，
+// 否则「保存日期」和「删除学期」会互相把对方的按钮置灰
+const busySemesterDate = ref(false)
+const semesterStart = ref('')
+const semesterEnd = ref('')
+// 学期日期的内联错误文案（保存失败时显示在输入框下方，不只靠 toast）
+const semesterDateErrorText = ref('')
+// Dialog
+const dialog = ref({
+  visible: false,
+  message: '',
+  type: 'alert',
+  showCancel: false,
+})
+const dialogMounted = ref(false)
+const dialogCallback = ref(null)
+// 「删除账号」倒计时定时器
+const deleteTimer = ref(null)
+// 工具箱设置
+const toolboxEnabled = ref(true)
+const noteSavePath = ref('')
+const screenshotSavePath = ref('')
+const screenshotDir = ref('')
+const usbAutoOpen = ref(false)
+// 桌面小组件启用状态：localStorage 持久化，默认启用（主进程据此按需创建桌面小组件窗口）
+const desktopWidgetEnabled = ref((localStorage.getItem('desktopWidgetEnabled') ?? '1') !== '0')
+const loaded = ref(false)
+const _fromMainHandler = ref(null)
+// 数据目录 / 缓存目录
+const dataDir = ref('')
+const thumbsDir = ref('')
+const skillsDir = ref('')
+const busyDataDir = ref(false)
+const busyThumbsDir = ref(false)
+const busySkillsDir = ref(false)
+// 安全等级（仅当前账号）：plain / nopass / password / privacy
+const securityLevel = ref('')
+const securityLevelLoading = ref(true)
+const busySecurityLevel = ref(false)
+const securityDialog = ref({ open: false, target: '', password: '', newPassword: '', error: '' })
+const privacyPhrase = ref('')
+// 撤销记录
+const undoGroups = ref([])
+const busyUndo = ref(false)
+// Theme
+const selectedThemeId = ref('')
+// 是否合并相同内容的重复提示
+const mergeNotifications = ref(true)
+// Background image
+const bgImageUrl = ref('')
+const bgImageFileName = ref('')
+// 性能面板：逐进程内存列表 + 三个重启目标的存活状态
+const perfProcs = ref([])
+// 首位进程条形的目标占比（0.85~0.95）：让最高占用不固定满格，每次采样小幅跳动更自然
+const perfTopRatio = ref(0.9)
+const perfAlive = ref({ front: false, backend: false, widget: false })
+// 性能面板：内存总计 / 近一分钟平均 / 自启动最高（均来自主进程采样，单位 KB）
+// null 表示尚无数据，展示为占位符，避免出现误导性的 0 MB
+const perfTotal = ref(null)
+const perfAvg = ref(null)
+const perfMax = ref(null)
+// 按用途分组：前端（主窗口渲染进程）/ 后端 / 其他
+const perfFront = ref(null)
+const perfBackend = ref(null)
+const perfOther = ref(null)
+const perfStartupTotal = ref(0)
+const busyGc = ref(false)
+const busyRestartBackend = ref(false)
+const busyRestartWidget = ref(false)
+const busyRestartAll = ref(false)
+const _perfTimer = ref(null)
+// 主题下拉的候选项（这份列表是独立硬编码的副本，不走 store 的 allThemes）。
+// 「Win11 主题」暂时移除：它的背景模糊依赖 DWM 系统亚克力，效果不可控
+// （本机实测连原生 Win32 都只渲染出均匀中性灰，壁纸完全透不出），
+// 故先从选择入口去掉。实现代码保留，恢复见 stores/theme.js 的 HIDDEN_THEME_IDS。
+const presetThemes = ref([
+  { id: 'base', name: '彩色色块主题' },
+  { id: 'glass', name: '毛玻璃主题' },
+  { id: 'glass2', name: '新毛玻璃主题' },
+  { id: 'minimal', name: '极简主题' },
+])
+
+// 非响应式实例状态（动画帧/定时器句柄与搜索闪动标记）挂在 ctx 上单源共享
+
+const user = computed(() => {
+  return JSON.parse(localStorage.getItem('currentUser') || '{}')
+})
+// 安全等级下拉选项（与引导页同一套文案）
+const securityLevelOptions = computed(() => {
+  return [
+    { value: 'plain', label: '明文模式（不加密）' },
+    { value: 'nopass', label: '无密码模式（加密，免密登录）' },
+    { value: 'password', label: '普通密码模式（加密 + 登录密码）' },
+    { value: 'privacy', label: '超级隐私模式（密码 + 恢复词）' },
+  ]
+})
+const securityLevelHint = computed(() => {
+  if (securityLevelLoading.value) return '加载中…'
+  if (busySecurityLevel.value) return '切换中…'
+  if (securityLevel.value === 'plain') return '当前为明文，可升级为加密'
+  return ''
+})
+// 兼容导出弹窗：除明文外都视为加密库
+const dbEncrypted = computed(() => {
+  return securityLevel.value !== 'plain'
+})
+const securityNeedsCurrent = computed(() => {
+  return securityLevel.value === 'password' || securityLevel.value === 'privacy'
+})
+const securityNeedsNew = computed(() => {
+  const t = securityDialog.value.target
+  return !securityNeedsCurrent.value && (t === 'password' || t === 'privacy')
+})
+const securityDialogMessage = computed(() => {
+  switch (securityDialog.value.target) {
+    case 'plain':
+      return '关闭加密后，数据库将以明文保存，任何能访问该文件的程序都能直接读取其中数据；此操作不可逆。'
+    case 'nopass':
+      return '改为无密码模式：数据库仍然加密，但登录不再需要密码，换机或换 Windows 账户后仍无法打开。'
+    case 'password':
+      return '改为普通密码模式：使用登录密码登录，数据库由本机主密钥自动解锁，不再需要恢复词。'
+    case 'privacy':
+      return '开启超级隐私模式后，库密钥只由「登录密码 + 12 词恢复词」包裹，忘记两者将永久无法恢复数据。'
+    default:
       return ''
-    },
-    // 兼容导出弹窗：除明文外都视为加密库
-    dbEncrypted() {
-      return this.securityLevel !== 'plain'
-    },
-    securityNeedsCurrent() {
-      return this.securityLevel === 'password' || this.securityLevel === 'privacy'
-    },
-    securityNeedsNew() {
-      const t = this.securityDialog.target
-      return !this.securityNeedsCurrent && (t === 'password' || t === 'privacy')
-    },
-    securityDialogMessage() {
-      switch (this.securityDialog.target) {
-        case 'plain':
-          return '关闭加密后，数据库将以明文保存，任何能访问该文件的程序都能直接读取其中数据；此操作不可逆。'
-        case 'nopass':
-          return '改为无密码模式：数据库仍然加密，但登录不再需要密码，换机或换 Windows 账户后仍无法打开。'
-        case 'password':
-          return '改为普通密码模式：使用登录密码登录，数据库由本机主密钥自动解锁，不再需要恢复词。'
-        case 'privacy':
-          return '开启超级隐私模式后，库密钥只由「登录密码 + 12 词恢复词」包裹，忘记两者将永久无法恢复数据。'
-        default:
-          return ''
-      }
-    },
-    themeOptions() {
-      return this.presetThemes.map(t => ({ value: t.id, label: t.name }))
-    },
-    // 玻璃系主题（旧毛玻璃 / 新毛玻璃）共用「背景图片 + 透明度」两组设置
-    isGlassTheme() {
-      return this.currentTheme === 'glass' || this.currentTheme === 'glass2'
-    },
-    // 设置项搜索结果：分区标题 + 分区内的具体设置项；关键字为空时全部列出
-    // 关键字按「标题文本 / 拼音首字母」匹配，单个汉字或单个字母都会即时搜索
-    // 渲染顺序为「先分区标题、再设置项」，逐条错开延迟直接取渲染下标 idx（见模板），
-    // 这样整份结果是一条连续的错开序列；行的 key 带关键字，每次搜索整批重新挂载，不会重启个别行。
-    settingsSearchResults() {
-      const q = this.settingsSearch.trim().toLowerCase()
-      const hit = (label, py) => !q || label.toLowerCase().includes(q) || py.includes(q)
-      const sections = this.settingsSections
-        .filter(s => hit(s.label, s.py))
-        .map(s => ({ id: 'section:' + s.key, label: s.label, key: s.key, section: '' }))
-      const items = this.settingsItems
-        .filter(i => hit(i.label, i.py))
-        .map(i => ({ id: 'item:' + i.section + ':' + i.label, label: i.label, key: i.section, section: i.section }))
-      return [...sections, ...items]
-    },
-    // 学期下拉：值为学期 id，标签为学期名
-    semesterOptions() {
-      return this.semesters.map(s => ({ value: s.id, label: s.name || '未命名学期' }))
-    },
-    // 当前选中的学期对象（未选中时取列表第一条）
-    activeSemester() {
-      return this.semesters.find(s => s.id === this.semesterId) || this.semesters[0] || null
-    },
-    // 删除学期确认文案：点明删的是哪个学期，删的是当前学期时额外提示会自动切到其它学期
-    deleteSemesterMessage() {
-      const cur = this.activeSemester
-      if (!cur) return ''
-      const name = cur.name || '未命名学期'
-      // ConfirmDialog 用 whitespace-pre-line 渲染纯文本：换行用 \n，不能写 <br>
-      const tail = cur.is_current && this.semesters.length > 1
-        ? '\n它是当前学期，删除后会自动切换到其它学期。'
-        : ''
-      return `确定删除学期「${name}」吗？删除后不可恢复。${tail}`
-    },
-    // 本学期时长（按天数折算周数，只读展示）
-    semesterWeeks() {
-      if (!this.semesterStart || !this.semesterEnd) return 0
-      const days = Math.round((new Date(this.semesterEnd) - new Date(this.semesterStart)) / 86400000) + 1
-      return days > 0 ? Math.round(days / 7) : 0
-    },
-    // 学期起止日期的合法性：结束不能早于开始。
-    // 存反了不是显示问题 —— 值日/座位的快照补存拿 semesterRange() 当范围上界，
-    // 上界小于下界时那边会直接判「学期范围外」整段跳过，用户看到的是「历史记录一直是空的」。
-    // 两端都留空是允许的（表示不限），只有一端有值也不校验。
-    semesterDateError() {
-      const s = this.semesterStart
-      const e = this.semesterEnd
-      if (!s || !e) return ''
-      // YYYY-MM-DD 字典序即时间序，直接比字符串
-      if (e < s) return '结束日期不能早于开始日期'
-      return ''
-    },
-    // 有没有改动过日期（决定「保存」按钮是否可点）
-    semesterDatesDirty() {
-      const cur = this.activeSemester
-      if (!cur) return false
-      return (cur.start_date || '') !== this.semesterStart || (cur.end_date || '') !== this.semesterEnd
-    },
-    // 预览图走 resourceUrl：补完整后端地址并追加 ?token=，保证打包版 file:// 下能通过鉴权
-    bgImagePreviewUrl() {
-      return this.bgImageUrl ? resourceUrl(this.bgImageUrl) : ''
-    },
-    hasUndoRecords() {
-      return this.undoGroups.length > 0
-    },
-    _undoKeyLabels() {
-      return { students: '学生表', fee_records: '收费记录', leave_records: '请假记录', score_records: '成绩记录', group_manage: '分组管理', album: '班级相册' }
-    },
-    // 性能面板：全局存活状态——三个目标全部存活才算「正常」，否则「部分未启动」
-    perfAllAlive() {
-      const a = this.perfAlive
-      return !!(a.front && a.backend && a.widget)
-    },
-    // 性能面板：逐进程内存行，按占用从高到低排序
-    // 占用优先取 privWsKB（专用工作集，与任务管理器「进程」页口径一致）；
-    // 取不到（非 Windows / 计数器不可用）时回退到 privateKB（私有提交量）
-    perfRows() {
-      const rows = this.perfProcs.map(p => ({
-        key: p.key,
-        name: p.name,
-        memKB: typeof p.privWsKB === 'number'
-          ? p.privWsKB
-          : (typeof p.privateKB === 'number' ? p.privateKB : null),
-      }))
-      rows.sort((a, b) => (b.memKB || 0) - (a.memKB || 0))
-      return rows
-    },
-    // 条形相对比例的分母：让占用最高的进程对应 perfTopRatio（85%~95%）而非满格，
-    // 其余进程按同比例缩放；分母取 top/ratio 保证首位不恒定 100%
-    perfMaxKB() {
-      const top = this.perfRows[0]
-      const topKB = Math.max(1, (top && top.memKB) || 0)
-      return topKB / (this.perfTopRatio || 0.9)
-    },
-  },
-  mounted() {
-    this.selectedThemeId = this.currentTheme
-    this.bgImageUrl = this.themeStore.backgroundImage
-    this.mergeNotifications = (localStorage.getItem('mergeNotifications') ?? '1') === '1'
-    this.loadUndo()
-    this.loadSemesterSettings()
-    this.loadWidgetSettings()
-    this.loadUsbAutoOpen()
-    this.loadDataDirs()
-    this.loadSecurityLevel()
-    // 性能面板：先取一次启动耗时，轮询由 _startPerfPolling 负责
-    this.loadStartup()
-    this._startPerfPolling()
-    this._fromMainHandler = window.electron?.on(RECEIVE.FROM_MAIN, (data) => {
-      // 浮窗右键「关闭工具箱」会把持久化开关置 false，这里刷新一下开关状态
-      if (data && data.type === 'toolbox-close-request') this.loadWidgetSettings()
-   })
-  },
-  // 设置页被 KeepAlive 缓存：切走页面走 deactivated 而非 beforeUnmount，
-  // 必须在这里停掉轮询，否则离开设置页后仍会每 1.8s 采样一次（常驻开销）。
-  activated() {
-    this._startPerfPolling()
-    // KeepAlive 恢复时若恢复词仍在展示，重新开启屏幕捕获保护
-    this.syncPrivacyPhraseGuard(!!this.privacyPhrase)
-    // 首次进入（或被缓存的页被重新激活）时若 URL 带 focus，定位到目标设置
-    this._applyRouteFocus()
-  },
-  deactivated() {
-    this._stopPerfPolling()
-    // 离开设置页时关闭屏幕捕获保护（恢复词区块已不可见）
-    this.syncPrivacyPhraseGuard(false)
-    // 离开设置页时收起搜索弹窗并解除滚动监听，避免弹窗残留在 body 上
-    this._removeSearchPopupListeners()
-    this.settingsSearchOpen = false
-    clearTimeout(this._flashTimer)
-    cancelAnimationFrame(this._flashRaf)
-  },
-  beforeUnmount() {
-    this.syncPrivacyPhraseGuard(false)
-    this.clearDeleteTimer()
-    this._stopPerfPolling()
-    this._removeSearchPopupListeners()
-    clearTimeout(this._flashTimer)
-    cancelAnimationFrame(this._flashRaf)
-    if (this._fromMainHandler) {
-      window.electron?.off(RECEIVE.FROM_MAIN, this._fromMainHandler)
-    }
-  },
-  methods: {
-    ...useSettingsSearch(),
-    ...useSettingsData(),
-    ...useSettingsAppearance(),
-  },
+  }
+})
+const themeOptions = computed(() => {
+  return presetThemes.value.map(t => ({ value: t.id, label: t.name }))
+})
+// 玻璃系主题（旧毛玻璃 / 新毛玻璃）共用「背景图片 + 透明度」两组设置
+const isGlassTheme = computed(() => {
+  return currentTheme.value === 'glass' || currentTheme.value === 'glass2'
+})
+// 设置项搜索结果：分区标题 + 分区内的具体设置项；关键字为空时全部列出
+// 关键字按「标题文本 / 拼音首字母」匹配，单个汉字或单个字母都会即时搜索
+// 渲染顺序为「先分区标题、再设置项」，逐条错开延迟直接取渲染下标 idx（见模板），
+// 这样整份结果是一条连续的错开序列；行的 key 带关键字，每次搜索整批重新挂载，不会重启个别行。
+const settingsSearchResults = computed(() => {
+  const q = settingsSearch.value.trim().toLowerCase()
+  const hit = (label, py) => !q || label.toLowerCase().includes(q) || py.includes(q)
+  const sections = settingsSections.value
+    .filter(s => hit(s.label, s.py))
+    .map(s => ({ id: 'section:' + s.key, label: s.label, key: s.key, section: '' }))
+  const items = settingsItems.value
+    .filter(i => hit(i.label, i.py))
+    .map(i => ({ id: 'item:' + i.section + ':' + i.label, label: i.label, key: i.section, section: i.section }))
+  return [...sections, ...items]
+})
+// 学期下拉：值为学期 id，标签为学期名
+const semesterOptions = computed(() => {
+  return semesters.value.map(s => ({ value: s.id, label: s.name || '未命名学期' }))
+})
+// 当前选中的学期对象（未选中时取列表第一条）
+const activeSemester = computed(() => {
+  return semesters.value.find(s => s.id === semesterId.value) || semesters.value[0] || null
+})
+// 删除学期确认文案：点明删的是哪个学期，删的是当前学期时额外提示会自动切到其它学期
+const deleteSemesterMessage = computed(() => {
+  const cur = activeSemester.value
+  if (!cur) return ''
+  const name = cur.name || '未命名学期'
+  // ConfirmDialog 用 whitespace-pre-line 渲染纯文本：换行用 \n，不能写 <br>
+  const tail = cur.is_current && semesters.value.length > 1
+    ? '\n它是当前学期，删除后会自动切换到其它学期。'
+    : ''
+  return `确定删除学期「${name}」吗？删除后不可恢复。${tail}`
+})
+// 本学期时长（按天数折算周数，只读展示）
+const semesterWeeks = computed(() => {
+  if (!semesterStart.value || !semesterEnd.value) return 0
+  const days = Math.round((new Date(semesterEnd.value) - new Date(semesterStart.value)) / 86400000) + 1
+  return days > 0 ? Math.round(days / 7) : 0
+})
+// 学期起止日期的合法性：结束不能早于开始。
+// 存反了不是显示问题 —— 值日/座位的快照补存拿 semesterRange() 当范围上界，
+// 上界小于下界时那边会直接判「学期范围外」整段跳过，用户看到的是「历史记录一直是空的」。
+// 两端都留空是允许的（表示不限），只有一端有值也不校验。
+const semesterDateError = computed(() => {
+  const s = semesterStart.value
+  const e = semesterEnd.value
+  if (!s || !e) return ''
+  if (e < s) return '结束日期不能早于开始日期'
+  return ''
+})
+// 有没有改动过日期（决定「保存」按钮是否可点）
+const semesterDatesDirty = computed(() => {
+  const cur = activeSemester.value
+  if (!cur) return false
+  return (cur.start_date || '') !== semesterStart.value || (cur.end_date || '') !== semesterEnd.value
+})
+// 预览图走 resourceUrl：补完整后端地址并追加 ?token=，保证打包版 file:// 下能通过鉴权
+const bgImagePreviewUrl = computed(() => {
+  return bgImageUrl.value ? resourceUrl(bgImageUrl.value) : ''
+})
+const hasUndoRecords = computed(() => {
+  return undoGroups.value.length > 0
+})
+const _undoKeyLabels = computed(() => {
+  return { students: '学生表', fee_records: '收费记录', leave_records: '请假记录', score_records: '成绩记录', group_manage: '分组管理', album: '班级相册' }
+})
+// 性能面板：全局存活状态——三个目标全部存活才算「正常」，否则「部分未启动」
+const perfAllAlive = computed(() => {
+  const a = perfAlive.value
+  return !!(a.front && a.backend && a.widget)
+})
+// 性能面板：逐进程内存行，按占用从高到低排序
+// 占用优先取 privWsKB（专用工作集，与任务管理器「进程」页口径一致）；
+// 取不到（非 Windows / 计数器不可用）时回退到 privateKB（私有提交量）
+const perfRows = computed(() => {
+  const rows = perfProcs.value.map(p => ({
+    key: p.key,
+    name: p.name,
+    memKB: typeof p.privWsKB === 'number'
+      ? p.privWsKB
+      : (typeof p.privateKB === 'number' ? p.privateKB : null),
+  }))
+  rows.sort((a, b) => (b.memKB || 0) - (a.memKB || 0))
+  return rows
+})
+// 条形相对比例的分母：让占用最高的进程对应 perfTopRatio（85%~95%）而非满格，
+// 其余进程按同比例缩放；分母取 top/ratio 保证首位不恒定 100%
+const perfMaxKB = computed(() => {
+  const top = perfRows.value[0]
+  const topKB = Math.max(1, (top && top.memKB) || 0)
+  return topKB / (perfTopRatio.value || 0.9)
+})
+
+// ===== ctx 袋：三个逻辑模块经它互调 =====
+const ctx = {
+  // 状态 ref（.value 访问）
+  settingsSearch, settingsSearchOpen, searchPopup, searchActiveIndex, settingsSections, settingsItems,
+  modalType, newUsername, usernamePassword, oldPassword, newPassword, confirmPassword, pwdError, busyPwd,
+  usernameError, busyUsername, exportPassword, exportEncrypt, exportDbPwd, busyExport,
+  semesters, semesterId, semesterNameDraft, showRenameSemester, newSemesterName, showAddSemester,
+  showDeleteSemester, busySemester, busySemesterDate, semesterStart, semesterEnd, semesterDateErrorText,
+  dialog, dialogMounted, dialogCallback, deleteTimer, toolboxEnabled, noteSavePath, screenshotSavePath,
+  screenshotDir, usbAutoOpen, desktopWidgetEnabled, loaded, _fromMainHandler, dataDir, thumbsDir, skillsDir,
+  busyDataDir, busyThumbsDir, busySkillsDir, securityLevel, securityLevelLoading, busySecurityLevel,
+  securityDialog, privacyPhrase, undoGroups, busyUndo, selectedThemeId, mergeNotifications,
+  bgImageUrl, bgImageFileName, perfProcs, perfTopRatio, perfAlive, perfTotal, perfAvg, perfMax,
+  perfFront, perfBackend, perfOther, perfStartupTotal, busyGc, busyRestartBackend, busyRestartWidget,
+  busyRestartAll, _perfTimer, presetThemes,
+  // storeToRefs（也是 ref）
+  currentTheme, bgMaskOpacity, glassOpacity, iconStyle, topbarColor, animationsEnabled, pendingMode,
+  nightSupported, followSystem,
+  // computed（ref）
+  user, securityLevelOptions, securityLevelHint, dbEncrypted, securityNeedsCurrent, securityNeedsNew,
+  securityDialogMessage, themeOptions, isGlassTheme, settingsSearchResults, semesterOptions, activeSemester,
+  deleteSemesterMessage, semesterWeeks, semesterDateError, semesterDatesDirty, bgImagePreviewUrl,
+  hasUndoRecords, _undoKeyLabels, perfAllAlive, perfRows, perfMaxKB,
+  // store / router（普通对象）
+  themeStore, route, router,
+  // 模板 ref
+  settingsSearchInput, settingsSearchPopup, bgImageInput,
+  // 非响应式临时字段
+  _flashTimer: null, _flashRaf: null, _focusSig: null,
 }
+
+// 迟绑定：三个逻辑模块的方法回填进 ctx（互相调用在运行时经 ctx 解析）
+Object.assign(ctx, useSettingsSearch(ctx), useSettingsData(ctx), useSettingsAppearance(ctx))
+
+// ===== 模板顶层绑定：由逻辑模块提供、模板用到的方法 =====
+const {
+  changeDataDir, changePassword, changeSkillsDir, changeThumbsDir, changeUsername,
+  clearBgImage, clearPrivacyPhrase, clearUndo, closeModal, closeSecurityDialog,
+  confirmAddSemester, confirmDeleteSemester, confirmLogout, confirmSearchActive, confirmSecurityLevel,
+  copyPrivacyPhrase, exportDb, fmtMem, fmtTs, goToSettingsSection, groupLabel, moveSearchActive,
+  onAnimationsChange, onBgImageFileChange, onBgMaskOpacityChange, onDesktopWidgetChange,
+  onDialogCancel, onDialogConfirm, onFollowSystemChange, onGlassOpacityChange, onIconStyleChange,
+  onMergeNotificationsChange, onSecurityLevelChange, onSelectMode, onSelectSemester,
+  onSettingsSearchBlur, onSettingsSearchFocus, onThemeSelect, onToolboxChange, onTopbarColorChange,
+  onUsbAutoOpenChange, openAddSemester, openDeleteAccount, openDir, openModal, openRenameSemester,
+  recycleAll, redoOne, requestDeleteSemester, restartAll, restartBackend, restartFrontend,
+  restartWidget, saveSemesterName, saveSemesterSettings, selectFolder, undoableCount, undoOne,
+} = ctx
+
+// 懒加载弹窗保活：首次打开后保持挂载，关闭只降 visible，保留退出动画
+watch(() => dialog.value.visible, (n) => { if (n) dialogMounted.value = true })
+// 关键字变化时高亮回到第一条（回车默认跳第一个）
+watch(settingsSearch, () => { searchActiveIndex.value = 0 })
+// 跨页定位：其他页面（如标题栏全局搜索）跳转到 /settings?focus=... 时定位到目标设置
+watch(() => route.query.focus, () => { ctx._applyRouteFocus() })
+
+onMounted(() => {
+  selectedThemeId.value = currentTheme.value
+  bgImageUrl.value = themeStore.backgroundImage
+  mergeNotifications.value = (localStorage.getItem('mergeNotifications') ?? '1') === '1'
+  ctx.loadUndo()
+  ctx.loadSemesterSettings()
+  ctx.loadWidgetSettings()
+  ctx.loadUsbAutoOpen()
+  ctx.loadDataDirs()
+  ctx.loadSecurityLevel()
+  // 性能面板：先取一次启动耗时，轮询由 _startPerfPolling 负责
+  ctx.loadStartup()
+  ctx._startPerfPolling()
+  _fromMainHandler.value = window.electron?.on(RECEIVE.FROM_MAIN, (data) => {
+    // 浮窗右键「关闭工具箱」会把持久化开关置 false，这里刷新一下开关状态
+    if (data && data.type === 'toolbox-close-request') ctx.loadWidgetSettings()
+  })
+})
+// 设置页被 KeepAlive 缓存：切走页面走 deactivated 而非 beforeUnmount，
+// 必须在这里停掉轮询，否则离开设置页后仍会每 1.8s 采样一次（常驻开销）。
+onActivated(() => {
+  ctx._startPerfPolling()
+  // KeepAlive 恢复时若恢复词仍在展示，重新开启屏幕捕获保护
+  ctx.syncPrivacyPhraseGuard(!!privacyPhrase.value)
+  // 首次进入（或被缓存的页被重新激活）时若 URL 带 focus，定位到目标设置
+  ctx._applyRouteFocus()
+})
+onDeactivated(() => {
+  ctx._stopPerfPolling()
+  // 离开设置页时关闭屏幕捕获保护（恢复词区块已不可见）
+  ctx.syncPrivacyPhraseGuard(false)
+  // 离开设置页时收起搜索弹窗并解除滚动监听，避免弹窗残留在 body 上
+  ctx._removeSearchPopupListeners()
+  settingsSearchOpen.value = false
+  clearTimeout(ctx._flashTimer)
+  cancelAnimationFrame(ctx._flashRaf)
+})
+onBeforeUnmount(() => {
+  ctx.syncPrivacyPhraseGuard(false)
+  ctx.clearDeleteTimer()
+  ctx._stopPerfPolling()
+  ctx._removeSearchPopupListeners()
+  clearTimeout(ctx._flashTimer)
+  cancelAnimationFrame(ctx._flashRaf)
+  if (_fromMainHandler.value) {
+    window.electron?.off(RECEIVE.FROM_MAIN, _fromMainHandler.value)
+  }
+})
 </script>
 
 <style scoped>

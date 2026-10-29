@@ -194,18 +194,20 @@
         <div
           v-if="showCandidatePopup"
           class="candidate-popup fixed z-[10002] bg-surface border border-info shadow-lg rounded"
-          :style="{ left: candidatePopupX + 'px', top: candidatePopupY + 'px', width: '180px', maxHeight: '200px', overflow: 'auto' }"
+          :style="{ left: candidatePopupX + 'px', top: candidatePopupY + 'px', width: '210px', maxHeight: '200px', overflow: 'auto' }"
           @mousedown.stop
         >
           <div v-if="filteredCandidates.length > 0">
             <div
               v-for="(item, idx) in filteredCandidates"
               :key="item.id"
-              :class="['px-3 py-2 text-sm cursor-pointer hover:bg-info/10', { 'bg-info/20': idx === candidateHighlightIndex }]"
+              :class="['px-3 py-2 text-sm cursor-pointer hover:bg-info/10 flex items-center gap-2', { 'bg-info/20': idx === candidateHighlightIndex }]"
               @mousedown.prevent="candidateSelect(item)"
               @mouseenter="candidateHighlightIndex = idx"
             >
-              {{ getCandidateLabel(item) }}
+              <span class="flex-1 min-w-0 truncate">{{ getCandidateLabel(item) }}</span>
+              <!-- 临时学生：只是「成员状态」，与正式学生共用同一个 id，这里标出来便于选中它本身而不是重敲一遍 -->
+              <span v-if="item.is_provisional" class="shrink-0 text-[10px] leading-4 px-1 rounded bg-warning/15 text-warning">临时</span>
             </div>
           </div>
           <div v-else class="px-3 py-2 text-sm text-text-muted">无匹配项</div>
@@ -215,9 +217,11 @@
   </div>
 </template>
 
-<script>
-import { TransitionGroup } from 'vue';
+<script setup>
+import { ref, computed, watch, onMounted, onActivated, onBeforeUnmount, nextTick, getCurrentInstance, toRef, TransitionGroup } from 'vue';
 import { useGridViewDrag } from './GridView.drag.js';
+
+defineOptions({ name: 'GridView' })
 
 // 无动画时的「透明包裹」组件：只把默认插槽原样渲染成 Fragment，不产生任何真实 DOM 元素，
 // 保证 <tr> 仍是 <tbody> 的直接子节点。
@@ -242,9 +246,7 @@ const COURSE_COLORS = {
   '音乐': '#F8BBD0', '美术': '#C8E6C9', '信息技术': '#BBDEFB', '自习': '#F5F5F5',
 };
 
-export default {
-  name: 'GridView',
-  props: {
+const props = defineProps({
     colHeaders: { type: Array, required: true },
     rows: { type: Array, required: true },
     showPeriodColumn: { type: Boolean, default: false },
@@ -259,6 +261,11 @@ export default {
     candidateExcludeIds: { type: Array, default: () => [] },
     candidateLabelField: { type: String, default: '姓名' },
     candidateValueField: { type: String, default: '' },
+    // 候选对象里「学生 id」的字段名。只有座位这类会落库学生 id 的表传 'id'：
+    // 选中候选后把 id 记到单元格 _studentId 上，保存时优先按它绑定，
+    // 避免「正式张三 / 临时张三」同名时又回头按姓名猜。
+    // 课表候选是课程（label/value），不传即完全不产生 _studentId。
+    candidateIdField: { type: String, default: '' },
     candidatePlaceholder: { type: String, default: '' },
     allowDuplicate: { type: Boolean, default: false },
     minTableHeight: { type: Number, default: 400 },
@@ -281,183 +288,252 @@ export default {
     maxHeight: { type: Number, default: 560 },
     rowHeaderLabel: { type: String, default: '行号' },  // 新增：行号/首列表头文案（座位用「行号」，值日用「劳动项目」）
     disableRowDrag: { type: Boolean, default: false },  // 新增：禁用行号列的整行拖拽排序（值日多行分组时关闭，避免拖单个子行）
-  },
-  // retry：加载失败态里的「重试」被按下，由父组件重新拉数据。
-  emits: ['update:cells', 'swapRows', 'swapColumns', 'update:row-meta', 'cell-dblclick', 'retry'],
-  data() {
-    return {
-      selecting: false, selectionStart: null, selectionEnd: null, longPressTimer: null, longPressActive: false,
-      dragSource: null, dragTarget: null, _cellGhost: null,
-      rowDragIdx: null, rowDragOverIdx: null, _rowGhost: null, _rowGrab: null, _rowMove: null, _rowUp: null, _rowDropBox: null,
-      colDragIdx: null, colDragOverIdx: null, _colGhost: null, _colGrab: null, _colMove: null, _colUp: null, _colDropBox: null,
-      firstActivate: true, _tableEnterCleanup: null,
-      // 行过渡容器是否启用（见模板说明）：只在行集合真正变化的短窗口内为 true，
-      // 日常编辑/键入/框选时退化成 Fragment，避免 TransitionGroup 每次更新的强制同步布局。
-      rowsAnimEnabled: false, _rowsAnimTimer: null,
-      // 内容是否超出 maxHeight（超出才内部滚动 + 预留滚动条槽位，见模板内层容器说明）
-      vScroll: false,
-      editingCell: null, editingCellData: { course: '' },
-      candidateHighlightIndex: 0, showCandidatePopup: false, candidatePopupX: 0, candidatePopupY: 0,
-      cellRefs: {},
-    };
-  },
-  computed: {
-    totalColumns() {
-      let count = this.colHeaders.length;
-      if (!this.hideMetaColumns) count += 2;
-      if (this.showPeriodColumn && !this.hideMetaColumns) count += 1;
-      if (this.hideMetaColumns && this.showRowNumber) count += 1;
+})
+// retry：加载失败态里的「重试」被按下，由父组件重新拉数据。
+const emit = defineEmits(['update:cells', 'swapRows', 'swapColumns', 'update:row-meta', 'cell-dblclick', 'retry'])
+
+// 模板 ref（与模板 ref="xxx" 同名自动绑定；gridTable 也挂在 ctx 上供拖拽模块取矩形）
+const gridTable = ref(null)
+const gridContainer = ref(null)
+
+const selecting = ref(false)
+const selectionStart = ref(null)
+const selectionEnd = ref(null)
+const longPressTimer = ref(null)
+const longPressActive = ref(false)
+const dragSource = ref(null)
+const dragTarget = ref(null)
+const rowDragIdx = ref(null)
+const rowDragOverIdx = ref(null)
+const colDragIdx = ref(null)
+const colDragOverIdx = ref(null)
+const firstActivate = ref(true)
+// 行过渡容器是否启用（见模板说明）：只在行集合真正变化的短窗口内为 true，
+// 日常编辑/键入/框选时退化成 Fragment，避免 TransitionGroup 每次更新的强制同步布局。
+const rowsAnimEnabled = ref(false)
+// 内容是否超出 maxHeight（超出才内部滚动 + 预留滚动条槽位，见模板内层容器说明）
+const vScroll = ref(false)
+const editingCell = ref(null)
+const editingCellData = ref({ course: '' })
+const candidateHighlightIndex = ref(0)
+const showCandidatePopup = ref(false)
+const candidatePopupX = ref(0)
+const candidatePopupY = ref(0)
+const cellRefs = ref({})
+
+// applyRouteRowFocus 类 host 契约之外的实例访问：$el 经 getter 取（拖拽模块 29 处用到）
+const inst = getCurrentInstance()
+
+// 跨模块共享的上下文：状态为 ref（模块内 .value 访问），DOM 挂载句柄等临时字段非响应式；
+// 拖拽模块的方法与本组件 methods 在下方 Object.assign 回填，彼此经 ctx 互相调用（运行时解析）
+const ctx = {
+  gridTable,
+  gridContainer,
+  selecting, selectionStart, selectionEnd, longPressTimer, longPressActive,
+  dragSource, dragTarget, rowDragIdx, rowDragOverIdx, colDragIdx, colDragOverIdx,
+  firstActivate, rowsAnimEnabled, vScroll, editingCell, editingCellData,
+  candidateHighlightIndex, showCandidatePopup, candidatePopupX, candidatePopupY, cellRefs,
+  colHeaders: toRef(props, 'colHeaders'),
+  rows: toRef(props, 'rows'),
+  showPeriodColumn: toRef(props, 'showPeriodColumn'),
+  anchorPrefix: toRef(props, 'anchorPrefix'),
+  title: toRef(props, 'title'),
+  hideMetaColumns: toRef(props, 'hideMetaColumns'),
+  showRowNumber: toRef(props, 'showRowNumber'),
+  enableCandidate: toRef(props, 'enableCandidate'),
+  candidateItems: toRef(props, 'candidateItems'),
+  candidateExcludeIds: toRef(props, 'candidateExcludeIds'),
+  candidateLabelField: toRef(props, 'candidateLabelField'),
+  candidateValueField: toRef(props, 'candidateValueField'),
+  candidateIdField: toRef(props, 'candidateIdField'),
+  candidatePlaceholder: toRef(props, 'candidatePlaceholder'),
+  allowDuplicate: toRef(props, 'allowDuplicate'),
+  minTableHeight: toRef(props, 'minTableHeight'),
+  emptyReady: toRef(props, 'emptyReady'),
+  loadError: toRef(props, 'loadError'),
+  errorText: toRef(props, 'errorText'),
+  maxHeight: toRef(props, 'maxHeight'),
+  rowHeaderLabel: toRef(props, 'rowHeaderLabel'),
+  disableRowDrag: toRef(props, 'disableRowDrag'),
+  // 单元格拖拽虚影 / 行列拖拽挂载句柄 / 测量与动画定时器（原挂在实例 data 上，无响应式需求）
+  _cellGhost: null,
+  _cellGhostMoveHandler: null,
+  _rowGhost: null, _rowGrab: null, _rowMove: null, _rowUp: null, _rowDropBox: null,
+  _colGhost: null, _colGrab: null, _colMove: null, _colUp: null, _colDropBox: null,
+  _tableEnterCleanup: null,
+  _rowsAnimTimer: null,
+  _measureTimer: null,
+  _measureRaf: null,
+  _titleHeadH: 0,
+  _rowSlotGhost: null, _colSlotGhost: null, _rowRaf: 0, _colRaf: 0,
+  _rowGeom: null, _colGeom: null, _rowPending: null, _colPending: null,
+  _rowAutoScroll: null, _colAutoScroll: null,
+  emit,
+  get $el() { return inst.proxy.$el },
+}
+
+const totalColumns = computed(() => {
+      let count = ctx.colHeaders.value.length;
+      if (!ctx.hideMetaColumns.value) count += 2;
+      if (ctx.showPeriodColumn.value && !ctx.hideMetaColumns.value) count += 1;
+      if (ctx.hideMetaColumns.value && ctx.showRowNumber.value) count += 1;
       return count;
-    },
+})
     // 行容器组件：开动画窗时用 TransitionGroup，否则用 RowsFragment 做「透明包裹」，
     // 让 <tr> 始终是 <tbody> 的直接子节点。两者都必须能在实例上取到（模板表达式不会
     // 自动解析 components 选项，直接写 TransitionGroup 会得到 undefined 而整表不渲染）。
-    rowsWrapper() { return this.rowsAnimEnabled ? TransitionGroup : RowsFragment; },
+const rowsWrapper = computed(() => { return ctx.rowsAnimEnabled.value ? TransitionGroup : RowsFragment; })
     // 行集合指纹（只看 _rowKey 序列）：行增删/换表才会变，改格子内容不变。
     // 用它驱动「动画窗」的开关，避免每次数据变化都白白启用 TransitionGroup。
-    rowsKeySig() { return (this.rows || []).map(r => (r._rowKey != null ? r._rowKey : '')).join('|'); },
-    filteredCandidates() {
-      if (!this.enableCandidate || !this.editingCell) return [];
-      const list = this.candidateBaseList;
-      const text = this.editingCellData.course?.trim() || '';
+const rowsKeySig = computed(() => { return (ctx.rows.value || []).map(r => (r._rowKey != null ? r._rowKey : '')).join('|'); })
+const filteredCandidates = computed(() => {
+      if (!ctx.enableCandidate.value || !ctx.editingCell.value) return [];
+      const list = ctx.candidateBaseList.value;
+      const text = ctx.editingCellData.value.course?.trim() || '';
       if (text) {
         const kw = text.toLowerCase();
         // 用预缓存的标签小写，避免每次击键都对每个候选现场 String+toLowerCase 分配（同行为、更快）
-        const cache = this.candidateLabelCache;
+        const cache = ctx.candidateLabelCache.value;
         return list.filter(s => cache.get(s).includes(kw));
       }
       return list;
-    },
+})
     // 候选基础列表（已剔除已被占用的学生）：只在候选数据/排除集合变化时重建一次。
     // 进入编辑时编辑框每次按键都会重算 filteredCandidates，这里把「造数组 + 逐个 includes」
     // 挪出击键路径（排除集合改成 Set 命中，也不再复制一遍整个候选数组）。
-    candidateBaseList() {
-      if (!this.enableCandidate) return [];
-      if (this.allowDuplicate) return this.candidateItems;
-      const exclude = new Set(this.candidateExcludeIds);
-      return this.candidateItems.filter(s => !exclude.has(s.id));
-    },
+const candidateBaseList = computed(() => {
+      if (!ctx.enableCandidate.value) return [];
+      if (ctx.allowDuplicate.value) return ctx.candidateItems.value;
+      const exclude = new Set(ctx.candidateExcludeIds.value);
+      return ctx.candidateItems.value.filter(s => !exclude.has(s.id));
+})
     // 候选标签小写缓存：仅当候选列表变更时重建一次，供过滤 O(1) 命中，避免击键时逐项构造字符串。
-    candidateLabelCache() {
-      const field = this.candidateLabelField;
+const candidateLabelCache = computed(() => {
+      const field = ctx.candidateLabelField.value;
       const map = new Map();
-      for (const item of this.candidateItems) {
+      for (const item of ctx.candidateItems.value) {
         map.set(item, String(item[field] ?? item.姓名 ?? '').toLowerCase());
       }
       return map;
-    },
+})
     // 选中坐标缓存：框选/拖拽时 mouseenter/重渲染会高频触发，预构造成 Set 供 isCellSelected O(1) 判断，
     // 避免每个单元格每次渲染都重建整个选区数组做线性查找（INP 优化）。
-    selectionCoords() {
+const selectionCoords = computed(() => {
       const set = new Set();
-      if (!this.selectionStart || !this.selectionEnd || this.longPressActive) return set;
-      const minR = Math.min(this.selectionStart.row, this.selectionEnd.row), maxR = Math.max(this.selectionStart.row, this.selectionEnd.row);
-      const minC = Math.min(this.selectionStart.col, this.selectionEnd.col), maxC = Math.max(this.selectionStart.col, this.selectionEnd.col);
+      if (!ctx.selectionStart.value || !ctx.selectionEnd.value || ctx.longPressActive.value) return set;
+      const minR = Math.min(ctx.selectionStart.value.row, ctx.selectionEnd.value.row), maxR = Math.max(ctx.selectionStart.value.row, ctx.selectionEnd.value.row);
+      const minC = Math.min(ctx.selectionStart.value.col, ctx.selectionEnd.value.col), maxC = Math.max(ctx.selectionStart.value.col, ctx.selectionEnd.value.col);
       for (let r = minR; r <= maxR; r++) {
-        const row = this.rows[r]; if (!row || row._isSeparator || row._mergeCells || row._isPodium) continue;
+        const row = ctx.rows.value[r]; if (!row || row._isSeparator || row._mergeCells || row._isPodium) continue;
         for (let c = minC; c <= maxC; c++) set.add(r + ',' + c);
       }
       return set;
-    },
+})
     // 单元格编辑中：行拖动手柄保留展示但锁定（不再随编辑消失）
-    rowDragLocked() { return !!this.editingCell },
-  },
-  methods: {
-    ...useGridViewDrag(),
+const rowDragLocked = computed(() => { return !!ctx.editingCell.value })
+
+// 计算属性同样挂上 ctx：拖拽模块与彼此间经 ctx.X.value 读取（运行时解析）
+Object.assign(ctx, {
+  totalColumns, rowsWrapper, rowsKeySig, filteredCandidates,
+  candidateBaseList, candidateLabelCache, selectionCoords, rowDragLocked,
+})
+
+const methods = {
+    ...useGridViewDrag(ctx),
     // 测量表格完整内容高度（scrollHeight 不被容器裁剪），判断是否超出 maxHeight。
     // 只写一个布尔值给 vScroll，不参与滚动位置计算，代价可忽略。
     measureScrollState() {
-      const wrap = this.$refs.gridTable;
+      const wrap = gridTable.value;
       const tbl = wrap && wrap.querySelector('table');
       // 表格挂在 Teleport/过渡尚未完成时可能拿不到，退回「不确定」：保持旧值，下一帧再测
       if (!tbl) return;
-      if (this.maxHeight > 0) this.vScroll = tbl.scrollHeight > this.maxHeight;
-      else if (this.vScroll) this.vScroll = false;
+      if (ctx.maxHeight.value > 0) ctx.vScroll.value = tbl.scrollHeight > ctx.maxHeight.value;
+      else if (ctx.vScroll.value) ctx.vScroll.value = false;
       // 标题行（课表在用）若存在，量出它的高度给列头行的 sticky top，让两行吸顶不重叠。
       // 与 maxHeight 无关：即使不限制高度，吸顶偏移也得对。
       const titleTh = tbl.querySelector('thead .grid-head-title');
       const h = titleTh ? Math.round(titleTh.getBoundingClientRect().height) : 0;
-      if (h !== this._titleHeadH) {
-        this._titleHeadH = h;
+      if (h !== ctx._titleHeadH) {
+        ctx._titleHeadH = h;
         tbl.style.setProperty('--grid-title-h', h + 'px');
       }
     },
     // 排到「DOM 落地之后」再量：行是 TransitionGroup 挂载的，watch 触发时表格还没画完。
     // 双保险 = nextTick（等 Vue patch 完）+ rAF（等浏览器完成布局，量到的才是真实高度）。
     scheduleMeasure() {
-      if (this._measureTimer) clearTimeout(this._measureTimer);
-      if (this._measureRaf) cancelAnimationFrame(this._measureRaf);
-      this.$nextTick(() => {
-        this._measureRaf = requestAnimationFrame(() => {
-          this._measureRaf = 0;
-          this.measureScrollState();
+      if (ctx._measureTimer) clearTimeout(ctx._measureTimer);
+      if (ctx._measureRaf) cancelAnimationFrame(ctx._measureRaf);
+      nextTick(() => {
+        ctx._measureRaf = requestAnimationFrame(() => {
+          ctx._measureRaf = 0;
+          ctx.measureScrollState();
         });
       });
     },
     onWindowResize() {
       // resize 高频，用 120ms 尾巴合并；只为了重判 vScroll，无需逐帧跟手
-      if (this._measureTimer) clearTimeout(this._measureTimer);
-      this._measureTimer = setTimeout(() => { this._measureTimer = null; this.measureScrollState(); }, 120);
+      if (ctx._measureTimer) clearTimeout(ctx._measureTimer);
+      ctx._measureTimer = setTimeout(() => { ctx._measureTimer = null; ctx.measureScrollState(); }, 120);
     },
-    setCellRef(rowIdx, colIdx, el) { if (el) { if (!this.cellRefs[rowIdx]) this.cellRefs[rowIdx] = {}; this.cellRefs[rowIdx][colIdx] = el; } },
+    setCellRef(rowIdx, colIdx, el) { if (el) { if (!ctx.cellRefs.value[rowIdx]) ctx.cellRefs.value[rowIdx] = {}; ctx.cellRefs.value[rowIdx][colIdx] = el; } },
     // 行是否可拖（只看行本身类型；编辑中与否由 rowDragLocked 决定「锁定」而非「隐藏」）
     canDragRow(row) {
       return !row._isSeparator && !row._mergeCells && !row._isReadonly && !row._isPodium;
     },
     onCellMouseDown(event, rowIdx, colIdx) {
       if (event.button !== 0) return;
-      const row = this.rows[rowIdx];
-      if (this.editingCell || row._isSeparator || row._mergeCells || row._isPodium) return;
-      this.selecting = true; this.selectionStart = { row: rowIdx, col: colIdx }; this.selectionEnd = { row: rowIdx, col: colIdx };
-      this.longPressActive = false; this.clearLongPress();
-      this.longPressTimer = setTimeout(() => {
-        this.longPressActive = true; this.dragSource = { row: rowIdx, col: colIdx }; this.dragTarget = null;
-        this.createCellGhost(rowIdx, colIdx); this.selecting = false; this.selectionStart = null; this.selectionEnd = null;
+      const row = ctx.rows.value[rowIdx];
+      if (ctx.editingCell.value || row._isSeparator || row._mergeCells || row._isPodium) return;
+      ctx.selecting.value = true; ctx.selectionStart.value = { row: rowIdx, col: colIdx }; ctx.selectionEnd.value = { row: rowIdx, col: colIdx };
+      ctx.longPressActive.value = false; ctx.clearLongPress();
+      ctx.longPressTimer.value = setTimeout(() => {
+        ctx.longPressActive.value = true; ctx.dragSource.value = { row: rowIdx, col: colIdx }; ctx.dragTarget.value = null;
+        ctx.createCellGhost(rowIdx, colIdx); ctx.selecting.value = false; ctx.selectionStart.value = null; ctx.selectionEnd.value = null;
       }, 400);
     },
     onCellMouseEnter(rowIdx, colIdx) {
-      const row = this.rows[rowIdx]; if (!row || row._isSeparator || row._mergeCells || row._isPodium) return;
-      if (this.selecting) this.selectionEnd = { row: rowIdx, col: colIdx };
-      else if (this.longPressActive && this.dragSource) {
-        if (this.dragSource.row !== rowIdx || this.dragSource.col !== colIdx) this.dragTarget = { row: rowIdx, col: colIdx };
-        else this.dragTarget = null;
+      const row = ctx.rows.value[rowIdx]; if (!row || row._isSeparator || row._mergeCells || row._isPodium) return;
+      if (ctx.selecting.value) ctx.selectionEnd.value = { row: rowIdx, col: colIdx };
+      else if (ctx.longPressActive.value && ctx.dragSource.value) {
+        if (ctx.dragSource.value.row !== rowIdx || ctx.dragSource.value.col !== colIdx) ctx.dragTarget.value = { row: rowIdx, col: colIdx };
+        else ctx.dragTarget.value = null;
       }
     },
     handleGlobalMouseUp() {
-      if (this.longPressActive && this.dragSource && this.dragTarget) this.swapCells(this.dragSource.row, this.dragSource.col, this.dragTarget.row, this.dragTarget.col);
-      this.selecting = false; this.longPressActive = false; this.clearLongPress(); this.dragSource = null; this.dragTarget = null; this.removeCellGhost();
+      if (ctx.longPressActive.value && ctx.dragSource.value && ctx.dragTarget.value) ctx.swapCells(ctx.dragSource.value.row, ctx.dragSource.value.col, ctx.dragTarget.value.row, ctx.dragTarget.value.col);
+      ctx.selecting.value = false; ctx.longPressActive.value = false; ctx.clearLongPress(); ctx.dragSource.value = null; ctx.dragTarget.value = null; ctx.removeCellGhost();
     },
-    clearLongPress() { if (this.longPressTimer) { clearTimeout(this.longPressTimer); this.longPressTimer = null; } },
+    clearLongPress() { if (ctx.longPressTimer.value) { clearTimeout(ctx.longPressTimer.value); ctx.longPressTimer.value = null; } },
     createCellGhost(rowIdx, colIdx) {
-      const cell = this.rows[rowIdx].cells[colIdx];
+      const cell = ctx.rows.value[rowIdx].cells[colIdx];
       const ghost = document.createElement('div');
       ghost.style.cssText = 'position:fixed;pointer-events:none;z-index:10000;padding:4px 10px;background:#eff6ff;color:#1e3a8a;border:1px solid #93c5fd;border-radius:var(--radius-xs,4px);font-size:14px;';
-      ghost.textContent = cell.course || '(空)'; document.body.appendChild(ghost); this._cellGhost = ghost;
+      ghost.textContent = cell.course || '(空)'; document.body.appendChild(ghost); ctx._cellGhost = ghost;
       const moveHandler = (e) => { ghost.style.left = (e.clientX + 15) + 'px'; ghost.style.top = (e.clientY - 25) + 'px'; };
-      document.addEventListener('mousemove', moveHandler); this._cellGhostMoveHandler = moveHandler;
+      document.addEventListener('mousemove', moveHandler); ctx._cellGhostMoveHandler = moveHandler;
     },
-    removeCellGhost() { if (this._cellGhost) { document.body.removeChild(this._cellGhost); this._cellGhost = null; } if (this._cellGhostMoveHandler) { document.removeEventListener('mousemove', this._cellGhostMoveHandler); } },
-    isCellSelected(rowIdx, colIdx) { return this.longPressActive ? false : this.selectionCoords.has(String(rowIdx) + ',' + String(colIdx)); },
-    isDragTarget(rowIdx, colIdx) { return this.dragTarget && this.dragTarget.row === rowIdx && this.dragTarget.col === colIdx; },
+    removeCellGhost() { if (ctx._cellGhost) { document.body.removeChild(ctx._cellGhost); ctx._cellGhost = null; } if (ctx._cellGhostMoveHandler) { document.removeEventListener('mousemove', ctx._cellGhostMoveHandler); } },
+    isCellSelected(rowIdx, colIdx) { return ctx.longPressActive.value ? false : ctx.selectionCoords.value.has(String(rowIdx) + ',' + String(colIdx)); },
+    isDragTarget(rowIdx, colIdx) { return ctx.dragTarget.value && ctx.dragTarget.value.row === rowIdx && ctx.dragTarget.value.col === colIdx; },
     swapCells(r1, c1, r2, c2) {
       if (r1 === r2 && c1 === c2) return;
-      const newRows = this.rows.map(r => (r._isSeparator || r._mergeCells || r._isPodium) ? r : { ...r, cells: [...r.cells] });
+      const newRows = ctx.rows.value.map(r => (r._isSeparator || r._mergeCells || r._isPodium) ? r : { ...r, cells: [...r.cells] });
       [newRows[r1].cells[c1], newRows[r2].cells[c2]] = [{ ...newRows[r2].cells[c2] }, { ...newRows[r1].cells[c1] }];
-      this.$emit('update:cells', newRows);
+      emit('update:cells', newRows);
     },
     onCellDoubleClick(event, rowIdx, colIdx) {
-      const row = this.rows[rowIdx]; if (!row || row._isSeparator || row._mergeCells || row._isReadonly || row._isPodium) return;
-      if (this.editingCell) requestAnimationFrame(() => this.saveEditCell());
-      this.$emit('cell-dblclick', { rowIdx, colIdx, row, cell: row.cells[colIdx] });
-      this.clearLongPress(); this.selectionStart = null; this.selectionEnd = null;
-      this.editingCell = { row: rowIdx, col: colIdx }; this.editingCellData = { ...row.cells[colIdx] };
-      this.candidateHighlightIndex = 0; this.showCandidatePopup = this.enableCandidate;
+      const row = ctx.rows.value[rowIdx]; if (!row || row._isSeparator || row._mergeCells || row._isReadonly || row._isPodium) return;
+      if (ctx.editingCell.value) requestAnimationFrame(() => ctx.saveEditCell());
+      emit('cell-dblclick', { rowIdx, colIdx, row, cell: row.cells[colIdx] });
+      ctx.clearLongPress(); ctx.selectionStart.value = null; ctx.selectionEnd.value = null;
+      ctx.editingCell.value = { row: rowIdx, col: colIdx }; ctx.editingCellData.value = { ...row.cells[colIdx] };
+      ctx.candidateHighlightIndex.value = 0; ctx.showCandidatePopup.value = ctx.enableCandidate.value;
       // 关键：用 event.currentTarget 拿到用户实际双击的 td（避免 cellRefs 错位）。
       // event.currentTarget 在同步代码中有效，保存到 cellEl 供 nextTick 使用。
-      const cellEl = event && event.currentTarget ? event.currentTarget : this.cellRefs[rowIdx]?.[colIdx];
-      this.$nextTick(() => {
+      const cellEl = event && event.currentTarget ? event.currentTarget : ctx.cellRefs.value[rowIdx]?.[colIdx];
+      nextTick(() => {
         if (cellEl) { const input = cellEl.querySelector('input'); if (input) input.focus(); }
-        if (this.enableCandidate) this.positionPopupFromEl(cellEl);
+        if (ctx.enableCandidate.value) ctx.positionPopupFromEl(cellEl);
       });
     },
     positionPopupFromEl(cellEl) {
@@ -465,133 +541,162 @@ export default {
       // 用 cellEl 的 getBoundingClientRect() 拿视口坐标，pop 用 position: fixed 相对视口定位。
       // cellEl 是 event.currentTarget（用户实际双击的 td），rect 一定反映该 cell 的真实视口位置。
       const cellRect = cellEl.getBoundingClientRect();
-      const popupW = 180;
+      const popupW = 210;
       const popupH = 200;
       let x = cellRect.left;
       let y = cellRect.bottom + 2;
       // 防止超出视口右/下边缘
       if (x + popupW > window.innerWidth) x = Math.max(0, window.innerWidth - popupW - 8);
       if (y + popupH > window.innerHeight) y = Math.max(0, window.innerHeight - popupH - 8);
-      this.candidatePopupX = x;
-      this.candidatePopupY = y;
+      ctx.candidatePopupX.value = x;
+      ctx.candidatePopupY.value = y;
     },
     positionPopup(rowIdx, colIdx) { /* 兼容保留：内部已用 event.currentTarget 路径 */ },
-    onEditInput(rowIdx, colIdx) { this.candidateHighlightIndex = 0; if (this.showCandidatePopup) this.positionPopup(rowIdx, colIdx); },
+    onEditInput(rowIdx, colIdx) {
+      // 手改了文字就不再保留上次选中的 id：文字与 id 必须对得上，
+      // 否则会把 A 的学生 id 绑到 B 的姓名上（比按姓名猜更糟）。
+      ctx.editingCellData.value._studentId = null;
+      ctx.candidateHighlightIndex.value = 0;
+      if (ctx.showCandidatePopup.value) ctx.positionPopup(rowIdx, colIdx);
+    },
     // ---------- 保存编辑 ----------
     saveEditCell() {
-      if (!this.editingCell) return;
+      if (!ctx.editingCell.value) return;
 
       // 候选模式：若输入姓名不在全部学生列表中，则还原原值（防止清空或错误输入）
-      // if (this.enableCandidate) {
-      //   const name = this.editingCellData.course.trim();
-      //   if (name && !this.candidateItems.some(s => s.姓名 === name)) {
-      //     const originalCell = this.rows[this.editingCell.row].cells[this.editingCell.col];
-      //     this.editingCellData.course = originalCell?.course || '';
+      // if (ctx.enableCandidate.value) {
+      //   const name = ctx.editingCellData.value.course.trim();
+      //   if (name && !ctx.candidateItems.value.some(s => s.姓名 === name)) {
+      //     const originalCell = ctx.rows.value[ctx.editingCell.value.row].cells[ctx.editingCell.value.col];
+      //     ctx.editingCellData.value.course = originalCell?.course || '';
       //   }
       // }
 
-      const { row, col } = this.editingCell;
-      const newRows = this.rows.map(r => (r._isSeparator || r._mergeCells || r._isPodium) ? r : { ...r, cells: [...r.cells] });
-      newRows[row].cells[col] = { course: this.editingCellData.course || '' };
-      this.$emit('update:cells', newRows);
-      this.closeEditor();
+      const { row, col } = ctx.editingCell.value;
+      const newRows = ctx.rows.value.map(r => (r._isSeparator || r._mergeCells || r._isPodium) ? r : { ...r, cells: [...r.cells] });
+      const cell = { course: ctx.editingCellData.value.course || '' };
+      // 候选选中的学生 id 随格子保存：调用方（如座位）优先按 id 落库。
+      // 格子被清空时不保留，避免留下「空名字 + 旧 id」的孤儿格。
+      if (ctx.candidateIdField.value && cell.course && ctx.editingCellData.value._studentId != null) {
+        cell._studentId = ctx.editingCellData.value._studentId;
+      }
+      newRows[row].cells[col] = cell;
+      emit('update:cells', newRows);
+      ctx.closeEditor();
     },
-    cancelEdit() { this.closeEditor(); },
+    cancelEdit() { ctx.closeEditor(); },
     closeEditor() {
-      this.editingCell = null;
-      this.showCandidatePopup = false;
-      this.candidateHighlightIndex = 0;
+      ctx.editingCell.value = null;
+      ctx.showCandidatePopup.value = false;
+      ctx.candidateHighlightIndex.value = 0;
     },
     onEditBlur() {
       // 保护：若编辑器已关闭，直接返回
-      if (!this.editingCell) return;
-      this.saveEditCell();
+      if (!ctx.editingCell.value) return;
+      ctx.saveEditCell();
     },
     // ---------- 候选键盘操作 ----------
     candidateHighlightNext() {
-      if (this.candidateHighlightIndex < this.filteredCandidates.length - 1) {
-        this.candidateHighlightIndex++;
+      if (ctx.candidateHighlightIndex.value < ctx.filteredCandidates.value.length - 1) {
+        ctx.candidateHighlightIndex.value++;
       }
     },
     candidateHighlightPrev() {
-      if (this.candidateHighlightIndex > 0) {
-        this.candidateHighlightIndex--;
+      if (ctx.candidateHighlightIndex.value > 0) {
+        ctx.candidateHighlightIndex.value--;
       }
     },
     candidateSelectHighlighted() {
-      if (this.filteredCandidates.length > 0) {
-        this.candidateSelect(this.filteredCandidates[this.candidateHighlightIndex]);
+      if (ctx.filteredCandidates.value.length > 0) {
+        ctx.candidateSelect(ctx.filteredCandidates.value[ctx.candidateHighlightIndex.value]);
       } else {
-        this.saveEditCell();
+        ctx.saveEditCell();
       }
     },
     candidateSelect(item) {
-      if (item) this.editingCellData.course = this.getCandidateValue(item);
-      this.saveEditCell();
+      if (item) {
+        ctx.editingCellData.value.course = ctx.getCandidateValue(item);
+        // 把选中学生的 id 一起带进单元格（仅声明了 candidateIdField 的表）。
+        // 同名（正式/临时）时，这一格点的是谁就绑谁，不再靠姓名二次解析。
+        if (ctx.candidateIdField.value) {
+          const id = item[ctx.candidateIdField.value];
+          ctx.editingCellData.value._studentId = Number.isInteger(id) ? id : null;
+        }
+      }
+      ctx.saveEditCell();
     },
     getCandidateLabel(item) {
-      return item[this.candidateLabelField] ?? item.姓名 ?? '';
+      return item[ctx.candidateLabelField.value] ?? item.姓名 ?? '';
     },
     getCandidateValue(item) {
-      const field = this.candidateValueField || this.candidateLabelField;
+      const field = ctx.candidateValueField.value || ctx.candidateLabelField.value;
       return item[field] ?? item.姓名 ?? '';
     },
-    isEditing(rowIdx, colIdx) { return this.editingCell?.row === rowIdx && this.editingCell?.col === colIdx; },
+    isEditing(rowIdx, colIdx) { return ctx.editingCell.value?.row === rowIdx && ctx.editingCell.value?.col === colIdx; },
     // 节次/时间元数据列目前只读（历史搬运时编辑实现未带上，已移除失效的编辑入口）
     // 单元格底色：走廊固定灰；若调用方在 cell 上给了 _bg（热力图等）则优先；否则按课程名配色
     getCellColor(cell) { if (cell._isAisle) return '#d1d5db'; if (cell._bg != null) return cell._bg; return COURSE_COLORS[cell.course] || '#FFFFFF'; },
     // 单元格文字色：调用方在 cell 上给了 _fg（深底白字）才覆盖，否则继承主题文字色
     getCellTextColor(cell) { return cell._fg || ''; },
-  },
-  watch: {
-    // 行集合变化（数据初载、增删行、换行集）才开动画窗；改格子内容不会触发
-    rowsKeySig() { this.openRowsAnimWindow(); this.scheduleMeasure(); },
-    // 列头变化：讲台/时段/节次列的显隐会改总列数，进而改单元格宽度、可能改行高（换行）
-    colHeaders() { this.scheduleMeasure(); },
-  },
-  mounted() {
-    document.addEventListener('mouseup', this.handleGlobalMouseUp);
-    // 首屏：数据区整体从左往右弹入
-    this.playTableEnter();
-    this.scheduleMeasure();
-    // 窗口缩放会改列宽 → 可能改行高 → 重新判定是否超高（与 DynamicTable 同款监听时机）
-    window.addEventListener('resize', this.onWindowResize);
-  },
-  // KeepAlive：从其它状态栏/页签切回来时重播数据区弹入动效
-  activated() {
-    if (this.firstActivate) { this.firstActivate = false; this.scheduleMeasure(); return; }
-    this.playTableEnter();
-    this.scheduleMeasure();
-  },
-  beforeUnmount() {
-    document.removeEventListener('mouseup', this.handleGlobalMouseUp);
-    window.removeEventListener('resize', this.onWindowResize);
-    if (this._measureRaf) cancelAnimationFrame(this._measureRaf);
-    if (this._measureTimer) clearTimeout(this._measureTimer);
-    this.clearLongPress();
-    this.removeCellGhost();
-    // 拖拽中途被卸载：停掉自动滚动并清掉让位位移
-    if (this._rowAutoScroll) { this._rowAutoScroll.stop(); this._rowAutoScroll = null; }
-    if (this._colAutoScroll) { this._colAutoScroll.stop(); this._colAutoScroll = null; }
-    this._clearRowShiftFx();
-    this._clearColShiftFx();
-    if (this._rowGhost) this._rowGhost.remove();
-    if (this._rowSlotGhost) this._rowSlotGhost.remove();
-    if (this._rowMove) window.removeEventListener('mousemove', this._rowMove);
-    if (this._rowUp) window.removeEventListener('mouseup', this._rowUp);
-    if (this._rowRaf) cancelAnimationFrame(this._rowRaf);
-    if (this._colGhost) this._colGhost.remove();
-    if (this._colSlotGhost) this._colSlotGhost.remove();
-    if (this._colMove) window.removeEventListener('mousemove', this._colMove);
-    if (this._colUp) window.removeEventListener('mouseup', this._colUp);
-    if (this._colRaf) cancelAnimationFrame(this._colRaf);
-    if (this._rowDropBox) this._rowDropBox.remove();
-    if (this._colDropBox) this._colDropBox.remove();
-    if (this._tableEnterCleanup) this._tableEnterCleanup();
-    if (this._rowsAnimTimer) clearTimeout(this._rowsAnimTimer);
-    this.cellRefs = {}; // 清除 DOM 引用，避免内存泄漏
-  },
-};
+}
+
+Object.assign(ctx, methods)
+
+// 供模板调用的顶层绑定
+const {
+  setCellRef, canDragRow, onCellMouseDown, onCellMouseEnter, onCellDoubleClick,
+  onEditInput, onEditBlur, cancelEdit, candidateSelect,
+  candidateHighlightNext, candidateHighlightPrev, candidateSelectHighlighted,
+  isCellSelected, isDragTarget, isEditing, getCandidateLabel,
+  getCellColor, getCellTextColor, onRowHandleDown, onColHandleDown,
+} = methods
+
+watch(rowsKeySig, () => { ctx.openRowsAnimWindow(); ctx.scheduleMeasure(); })
+// 列头变化：讲台/时段/节次列的显隐会改总列数，进而改单元格宽度、可能改行高（换行）
+watch(ctx.colHeaders, () => { ctx.scheduleMeasure(); })
+
+onMounted(() => {
+  document.addEventListener('mouseup', ctx.handleGlobalMouseUp);
+  // 首屏：数据区整体从左往右弹入
+  ctx.playTableEnter();
+  ctx.scheduleMeasure();
+  // 窗口缩放会改列宽 → 可能改行高 → 重新判定是否超高（与 DynamicTable 同款监听时机）
+  window.addEventListener('resize', ctx.onWindowResize);
+})
+// KeepAlive：从其它状态栏/页签切回来时重播数据区弹入动效
+onActivated(() => {
+  if (firstActivate.value) { firstActivate.value = false; ctx.scheduleMeasure(); return; }
+  ctx.playTableEnter();
+  ctx.scheduleMeasure();
+})
+onBeforeUnmount(() => {
+  document.removeEventListener('mouseup', ctx.handleGlobalMouseUp);
+  window.removeEventListener('resize', ctx.onWindowResize);
+  if (ctx._measureRaf) cancelAnimationFrame(ctx._measureRaf);
+  if (ctx._measureTimer) clearTimeout(ctx._measureTimer);
+  ctx.clearLongPress();
+  ctx.removeCellGhost();
+  // 拖拽中途被卸载：停掉自动滚动并清掉让位位移
+  if (ctx._rowAutoScroll) { ctx._rowAutoScroll.stop(); ctx._rowAutoScroll = null; }
+  if (ctx._colAutoScroll) { ctx._colAutoScroll.stop(); ctx._colAutoScroll = null; }
+  ctx._clearRowShiftFx();
+  ctx._clearColShiftFx();
+  if (ctx._rowGhost) ctx._rowGhost.remove();
+  if (ctx._rowSlotGhost) ctx._rowSlotGhost.remove();
+  if (ctx._rowMove) window.removeEventListener('mousemove', ctx._rowMove);
+  if (ctx._rowUp) window.removeEventListener('mouseup', ctx._rowUp);
+  if (ctx._rowRaf) cancelAnimationFrame(ctx._rowRaf);
+  if (ctx._colGhost) ctx._colGhost.remove();
+  if (ctx._colSlotGhost) ctx._colSlotGhost.remove();
+  if (ctx._colMove) window.removeEventListener('mousemove', ctx._colMove);
+  if (ctx._colUp) window.removeEventListener('mouseup', ctx._colUp);
+  if (ctx._colRaf) cancelAnimationFrame(ctx._colRaf);
+  if (ctx._rowDropBox) ctx._rowDropBox.remove();
+  if (ctx._colDropBox) ctx._colDropBox.remove();
+  if (ctx._tableEnterCleanup) ctx._tableEnterCleanup();
+  if (ctx._rowsAnimTimer) clearTimeout(ctx._rowsAnimTimer);
+  cellRefs.value = {}; // 清除 DOM 引用，避免内存泄漏
+})
 </script>
 
 <style scoped>

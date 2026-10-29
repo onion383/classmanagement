@@ -162,8 +162,7 @@ export const useThemeStore = defineStore('theme', () => {
       // 预热时若用户已切到夜间，则无需再预热（函数内部会自行判断）
       warmNightMode(currentTheme.value, mode.value)
     }
-    if (typeof window.requestIdleCallback === 'function') window.requestIdleCallback(run, { timeout: 3000 })
-    else setTimeout(run, 1000)
+    window.requestIdleCallback(run, { timeout: 3000 })
   }
 
   // 关闭动画时延迟给根元素打 no-animations 的定时器（见 setAnimationsEnabled）

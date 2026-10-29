@@ -162,6 +162,11 @@ function responseEncrypt(req, res, next) {
   res.json = (data) => {
     const sid = req.sessionId;
     if (!!sid && hasMaster() && !pathExempt(req.path)) {
+      // 加密响应与会话密钥绑定，绝不能进浏览器缓存：
+      // 页面刷新会重新握手换一把会话密钥，此时若命中旧缓存，
+      // 客户端拿旧密文去解必然失败 —— 直接表现为「接口返回了对象、字段全是 undefined」。
+      // 统一加 no-store：即使将来某个接口又加了 max-age，也不会把密文写进缓存。
+      res.set('Cache-Control', 'no-store');
       const buf = Buffer.from(JSON.stringify(data), 'utf8');
       const key = getSessionKey(sid); // 取会话的密钥本身（sessions.get 返回的是 { key, createdAt } 对象）
       if (key) {

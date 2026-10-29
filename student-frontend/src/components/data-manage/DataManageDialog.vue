@@ -122,7 +122,8 @@
   </Teleport>
 </template>
 
-<script>
+<script setup>
+import { ref, watch } from 'vue'
 import axios from 'axios'
 import AppHelp from '../base/AppHelp.vue'
 import ConfirmDialog from '../base/ConfirmDialog.vue'
@@ -134,170 +135,155 @@ import { formatTime } from '../../composables/ai/aiMessages.js'
 import '../../styles/dialog-transition.css'
 import { INVOKE } from '../../electronChannels.js'
 
-export default {
-  name: 'DataManageDialog',
-  components: { AppHelp, ConfirmDialog, MarkdownEditDialog, ExportChatDialog, ExportMarkdownDialog },
-  props: {
-    visible: { type: Boolean, default: false },
-  },
-  emits: ['update:visible'],
-  setup() {
-    const { success, error } = useNotification()
-    return { notifySuccess: success, notifyError: error }
-  },
-  data() {
-    return {
-      conversations: [],
-      skills: [],
-      memoryContent: '',
-      // 技能 md 文件所在目录（来自主进程配置，供展示与打开）
-      skillsDir: '',
-      loadingConv: false,
-      loadingSkill: false,
-      // 通用确认弹窗（删除等破坏性操作）
-      confirm: { visible: false, title: '', message: '', action: null },
-      // Markdown 编辑窗口
-      mdDlg: { visible: false, isNew: false, nameDisabled: false, originalName: '', initialName: '', initialContent: '', target: 'skill' },
-      // 聊天记录导出弹窗
-      chatDlg: { visible: false, id: null, name: '' },
-      // Markdown 导出弹窗
-      mdExportDlg: { visible: false, content: '', filename: '' },
+defineOptions({ name: 'DataManageDialog' })
+const props = defineProps({
+  visible: { type: Boolean, default: false },
+})
+const emit = defineEmits(['update:visible'])
+const { success: notifySuccess, error: notifyError } = useNotification()
+
+const conversations = ref([])
+const skills = ref([])
+const memoryContent = ref('')
+// 技能 md 文件所在目录（来自主进程配置，供展示与打开）
+const skillsDir = ref('')
+const loadingConv = ref(false)
+const loadingSkill = ref(false)
+// 通用确认弹窗（删除等破坏性操作）
+const confirm = ref({ visible: false, title: '', message: '', action: null })
+// Markdown 编辑窗口
+const mdDlg = ref({ visible: false, isNew: false, nameDisabled: false, originalName: '', initialName: '', initialContent: '', target: 'skill' })
+// 聊天记录导出弹窗
+const chatDlg = ref({ visible: false, id: null, name: '' })
+// Markdown 导出弹窗
+const mdExportDlg = ref({ visible: false, content: '', filename: '' })
+
+// 每次打开弹窗都重新拉一遍数据，保证与「数据管理」页维护的内容一致
+watch(() => props.visible, (v) => { if (v) loadAll() }, { immediate: true })
+
+function close() { emit('update:visible', false) }
+function sizeText(size) {
+  const n = Number(size) || 0
+  return n > 1024 ? (n / 1024).toFixed(1) + ' KB' : n + ' B'
+}
+function errMsg(err) { return (err && err.response && err.response.data && err.response.data.error) || (err && err.message) || '操作失败' }
+
+// ---------- 数据加载 ----------
+function loadAll() {
+  loadConversations()
+  loadSkills()
+  loadMemory()
+  loadSkillsDir()
+}
+// 技能 md 文件目录：取主进程配置（与系统设置「技能文件目录」一致）
+async function loadSkillsDir() {
+  try {
+    const res = await window.electron?.invoke(INVOKE.GET_DATA_DIRECTORIES)
+    skillsDir.value = (res && res.skillsDir) || ''
+  } catch (_) { skillsDir.value = '' }
+}
+// 在资源管理器中打开技能文件目录
+async function openSkillsDir() {
+  if (!skillsDir.value) return
+  try { await window.electron?.invoke(INVOKE.OPEN_FOLDER, skillsDir.value) } catch (_) { /* 忽略 */ }
+}
+async function loadConversations() {
+  loadingConv.value = true
+  try {
+    const { data } = await axios.get('/api/ai/conversations')
+    conversations.value = data.data || []
+  } catch (_) { conversations.value = [] }
+  finally { loadingConv.value = false }
+}
+async function loadSkills() {
+  loadingSkill.value = true
+  try {
+    const { data } = await axios.get('/api/ai/skills')
+    skills.value = data.data || []
+  } catch (_) { skills.value = [] }
+  finally { loadingSkill.value = false }
+}
+async function loadMemory() {
+  try {
+    const { data } = await axios.get('/api/ai/memory')
+    memoryContent.value = (data.data && data.data.content) || ''
+  } catch (_) { memoryContent.value = '' }
+}
+
+// ---------- 确认弹窗 ----------
+function confirmAsk(title, message, action) {
+  confirm.value = { visible: true, title, message, action }
+}
+async function runConfirm() {
+  const action = confirm.value.action
+  confirm.value.visible = false
+  confirm.value.action = null
+  if (action) await action()
+}
+
+// ---------- 聊天记录 ----------
+function askDeleteConversation(c) {
+  confirmAsk('删除聊天记录', `确定删除「${c.title || '未命名对话'}」吗？删除后不可恢复。`, async () => {
+    try {
+      await axios.delete(`/api/ai/conversations/${c.id}`)
+      await loadConversations()
+      notifySuccess('已删除聊天记录')
+    } catch (err) { notifyError(errMsg(err)) }
+  })
+}
+function openChatExport(c) {
+  chatDlg.value = { visible: true, id: c.id, name: c.title || '聊天记录' }
+}
+
+// ---------- Markdown 文件 ----------
+function openNewSkill() {
+  mdDlg.value = { visible: true, isNew: true, nameDisabled: false, originalName: '', initialName: '', initialContent: '', target: 'skill' }
+}
+function openEditMemory() {
+  mdDlg.value = { visible: true, isNew: false, nameDisabled: true, originalName: '', initialName: 'AI 记忆文件', initialContent: memoryContent.value, target: 'memory' }
+}
+async function openEditSkill(s) {
+  try {
+    const { data } = await axios.get(`/api/ai/skills/${encodeURIComponent(s.name)}`)
+    mdDlg.value = { visible: true, isNew: false, nameDisabled: false, originalName: s.name, initialName: s.name, initialContent: (data.data && data.data.content) || '', target: 'skill' }
+  } catch (err) { notifyError(errMsg(err)) }
+}
+async function onMdSave(payload) {
+  const dlg = mdDlg.value
+  try {
+    if (dlg.target === 'memory') {
+      await axios.put('/api/ai/memory', { content: payload.content })
+      await loadMemory()
+      notifySuccess('已保存记忆文件')
+    } else if (dlg.isNew) {
+      await axios.post('/api/ai/skills', { name: payload.name, content: payload.content })
+      await loadSkills()
+      notifySuccess('已新增文件')
+    } else {
+      await axios.put(`/api/ai/skills/${encodeURIComponent(payload.original)}`, { name: payload.name, content: payload.content })
+      await loadSkills()
+      notifySuccess('已保存文件')
     }
-  },
-  watch: {
-    // 每次打开弹窗都重新拉一遍数据，保证与「数据管理」页维护的内容一致
-    visible: {
-      immediate: true,
-      handler(v) { if (v) this.loadAll() },
-    },
-  },
-  methods: {
-    formatTime,
-    close() { this.$emit('update:visible', false) },
-    sizeText(size) {
-      const n = Number(size) || 0
-      return n > 1024 ? (n / 1024).toFixed(1) + ' KB' : n + ' B'
-    },
-    errMsg(err) { return (err && err.response && err.response.data && err.response.data.error) || (err && err.message) || '操作失败' },
-
-    // ---------- 数据加载 ----------
-    loadAll() {
-      this.loadConversations()
-      this.loadSkills()
-      this.loadMemory()
-      this.loadSkillsDir()
-    },
-    // 技能 md 文件目录：取主进程配置（与系统设置「技能文件目录」一致）
-    async loadSkillsDir() {
-      try {
-        const res = await window.electron?.invoke(INVOKE.GET_DATA_DIRECTORIES)
-        this.skillsDir = (res && res.skillsDir) || ''
-      } catch (_) { this.skillsDir = '' }
-    },
-    // 在资源管理器中打开技能文件目录
-    async openSkillsDir() {
-      if (!this.skillsDir) return
-      try { await window.electron?.invoke(INVOKE.OPEN_FOLDER, this.skillsDir) } catch (_) { /* 忽略 */ }
-    },
-    async loadConversations() {
-      this.loadingConv = true
-      try {
-        const { data } = await axios.get('/api/ai/conversations')
-        this.conversations = data.data || []
-      } catch (_) { this.conversations = [] }
-      finally { this.loadingConv = false }
-    },
-    async loadSkills() {
-      this.loadingSkill = true
-      try {
-        const { data } = await axios.get('/api/ai/skills')
-        this.skills = data.data || []
-      } catch (_) { this.skills = [] }
-      finally { this.loadingSkill = false }
-    },
-    async loadMemory() {
-      try {
-        const { data } = await axios.get('/api/ai/memory')
-        this.memoryContent = (data.data && data.data.content) || ''
-      } catch (_) { this.memoryContent = '' }
-    },
-
-    // ---------- 确认弹窗 ----------
-    confirmAsk(title, message, action) {
-      this.confirm = { visible: true, title, message, action }
-    },
-    async runConfirm() {
-      const action = this.confirm.action
-      this.confirm.visible = false
-      this.confirm.action = null
-      if (action) await action()
-    },
-
-    // ---------- 聊天记录 ----------
-    askDeleteConversation(c) {
-      this.confirmAsk('删除聊天记录', `确定删除「${c.title || '未命名对话'}」吗？删除后不可恢复。`, async () => {
-        try {
-          await axios.delete(`/api/ai/conversations/${c.id}`)
-          await this.loadConversations()
-          this.notifySuccess('已删除聊天记录')
-        } catch (err) { this.notifyError(this.errMsg(err)) }
-      })
-    },
-    openChatExport(c) {
-      this.chatDlg = { visible: true, id: c.id, name: c.title || '聊天记录' }
-    },
-
-    // ---------- Markdown 文件 ----------
-    openNewSkill() {
-      this.mdDlg = { visible: true, isNew: true, nameDisabled: false, originalName: '', initialName: '', initialContent: '', target: 'skill' }
-    },
-    openEditMemory() {
-      this.mdDlg = { visible: true, isNew: false, nameDisabled: true, originalName: '', initialName: 'AI 记忆文件', initialContent: this.memoryContent, target: 'memory' }
-    },
-    async openEditSkill(s) {
-      try {
-        const { data } = await axios.get(`/api/ai/skills/${encodeURIComponent(s.name)}`)
-        this.mdDlg = { visible: true, isNew: false, nameDisabled: false, originalName: s.name, initialName: s.name, initialContent: (data.data && data.data.content) || '', target: 'skill' }
-      } catch (err) { this.notifyError(this.errMsg(err)) }
-    },
-    async onMdSave(payload) {
-      const dlg = this.mdDlg
-      try {
-        if (dlg.target === 'memory') {
-          await axios.put('/api/ai/memory', { content: payload.content })
-          await this.loadMemory()
-          this.notifySuccess('已保存记忆文件')
-        } else if (dlg.isNew) {
-          await axios.post('/api/ai/skills', { name: payload.name, content: payload.content })
-          await this.loadSkills()
-          this.notifySuccess('已新增文件')
-        } else {
-          await axios.put(`/api/ai/skills/${encodeURIComponent(payload.original)}`, { name: payload.name, content: payload.content })
-          await this.loadSkills()
-          this.notifySuccess('已保存文件')
-        }
-        this.mdDlg.visible = false
-      } catch (err) { this.notifyError(this.errMsg(err)) }
-    },
-    askDeleteSkill(s) {
-      this.confirmAsk('删除技能文件', `确定删除「${s.name}」吗？删除后不可恢复。`, async () => {
-        try {
-          await axios.delete(`/api/ai/skills/${encodeURIComponent(s.name)}`)
-          await this.loadSkills()
-          this.notifySuccess('已删除技能文件')
-        } catch (err) { this.notifyError(this.errMsg(err)) }
-      })
-    },
-    openExportMemory() {
-      this.mdExportDlg = { visible: true, content: this.memoryContent, filename: 'AI 记忆文件' }
-    },
-    async openExportSkill(s) {
-      try {
-        const { data } = await axios.get(`/api/ai/skills/${encodeURIComponent(s.name)}`)
-        this.mdExportDlg = { visible: true, content: (data.data && data.data.content) || '', filename: s.name }
-      } catch (err) { this.notifyError(this.errMsg(err)) }
-    },
-  },
+    mdDlg.value.visible = false
+  } catch (err) { notifyError(errMsg(err)) }
+}
+function askDeleteSkill(s) {
+  confirmAsk('删除技能文件', `确定删除「${s.name}」吗？删除后不可恢复。`, async () => {
+    try {
+      await axios.delete(`/api/ai/skills/${encodeURIComponent(s.name)}`)
+      await loadSkills()
+      notifySuccess('已删除技能文件')
+    } catch (err) { notifyError(errMsg(err)) }
+  })
+}
+function openExportMemory() {
+  mdExportDlg.value = { visible: true, content: memoryContent.value, filename: 'AI 记忆文件' }
+}
+async function openExportSkill(s) {
+  try {
+    const { data } = await axios.get(`/api/ai/skills/${encodeURIComponent(s.name)}`)
+    mdExportDlg.value = { visible: true, content: (data.data && data.data.content) || '', filename: s.name }
+  } catch (err) { notifyError(errMsg(err)) }
 }
 </script>
 

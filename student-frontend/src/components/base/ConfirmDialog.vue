@@ -44,9 +44,9 @@
   </DialogShell>
 </template>
 
-<script>
+<script setup>
 import '../../styles/dialog-transition.css'
-import { defineAsyncComponent } from 'vue'
+import { defineAsyncComponent, onMounted } from 'vue'
 import DialogShell from './DialogShell.vue'
 
 // 下拉组件只在「添加列」弹窗（type === 'columnAdd'）里用到，属业务页操作触发，
@@ -56,31 +56,28 @@ import DialogShell from './DialogShell.vue'
 const loadAppSelect = () => import('./AppSelect.vue')
 const AppSelect = defineAsyncComponent(loadAppSelect)
 
-export default {
-  name: 'ConfirmDialog',
-  components: { AppSelect, DialogShell },
-  mounted() { loadAppSelect().catch(() => {}) },
-  props: {
-    visible: Boolean,
-    message: String,
-    title: String,
-    type: String,
-    showCancel: Boolean,
-    // 确定按钮禁用（如倒计时未结束时置灰不可点）
-    confirmDisabled: Boolean,
-    confirmText: { type: String, default: '确定' },
-    cancelText: { type: String, default: '取消' },
-    // 可选的第三个按钮（如「仅删学生/保留记录」）；为空则不显示
-    extraText: { type: String, default: '' },
-    columnName: String,
-    columnType: String,
-    errorMsg: String,
-  },
-  emits: ['confirm', 'cancel', 'extra', 'update:columnName', 'update:columnType'],
-  methods: {
-    handleOverlayClick() {
-      if (this.showCancel) this.$emit('cancel');
-    },
-  },
-};
+defineOptions({ name: 'ConfirmDialog' })
+const props = defineProps({
+  visible: Boolean,
+  message: String,
+  title: String,
+  type: String,
+  showCancel: Boolean,
+  // 确定按钮禁用（如倒计时未结束时置灰不可点）
+  confirmDisabled: Boolean,
+  confirmText: { type: String, default: '确定' },
+  cancelText: { type: String, default: '取消' },
+  // 可选的第三个按钮（如「仅删学生/保留记录」）；为空则不显示
+  extraText: { type: String, default: '' },
+  columnName: String,
+  columnType: String,
+  errorMsg: String,
+})
+const emit = defineEmits(['confirm', 'cancel', 'extra', 'update:columnName', 'update:columnType'])
+
+function handleOverlayClick() {
+  if (props.showCancel) emit('cancel');
+}
+
+onMounted(() => { loadAppSelect().catch(() => {}) })
 </script>

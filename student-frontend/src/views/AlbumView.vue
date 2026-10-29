@@ -786,10 +786,6 @@ function openFolderViewer() {
   const idx = Math.max(fp.lastIndexOf('\\'), fp.lastIndexOf('/'))
   if (idx === -1) { useNotification().error('无法获取文件路径'); return }
   const dir = fp.substring(0, idx)
-  if (!window.electron || typeof window.electron.invoke !== 'function') {
-    useNotification().warning('请使用桌面客户端打开文件夹')
-    return
-  }
   window.electron.invoke(INVOKE.OPEN_FOLDER, dir).catch(() => useNotification().error('打开文件夹失败'))
 }
 

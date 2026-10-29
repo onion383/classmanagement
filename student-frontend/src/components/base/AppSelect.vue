@@ -37,127 +37,139 @@
   </div>
 </template>
 
-<script>
+<script setup>
 // 自定义下拉框：替代原生 <select>，适配圆角 + 毛玻璃 + 点击过渡动画。
 // 用法：
 //   <AppSelect v-model="xxx" :options="[{value:'a', label:'A'}, 'B']" placeholder="请选择" />
 import '../../styles/select.css'
 import { ChevronDown, Check } from '@lucide/vue'
+import { ref, computed, onMounted, onBeforeUnmount } from 'vue'
 
-export default {
-  name: 'AppSelect',
-  components: { ChevronDown, Check },
-  props: {
-    modelValue: { type: [String, Number], default: '' },
-    // 支持字符串数组：['A','B']；或对象数组：[{value, label, disabled}]，省略 value 时取 label 本身。
-    options: { type: Array, default: () => [] },
-    placeholder: { type: String, default: '请选择' },
-    disabled: { type: Boolean, default: false },
-    // 紧凑模式：缩小 trigger 高度，用于标题条等高度受限场景
-    compact: { type: Boolean, default: false }
-  },
-  emits: ['update:modelValue', 'change'],
-  data() {
-    // menuZ：下拉菜单的层级。菜单 Teleport 到 body 后自成一层，必须压过"包住触发器的浮层"，
-    // 否则会被弹窗遮罩/AI 悬浮窗盖住（点开看不到或只看到一角）。
-    return { open: false, hoverIdx: -1, menuPos: { left: 0, top: 0, width: 0 }, menuZ: 10010 }
-  },
-  computed: {
-    list() {
-      return this.options.map(o => {
-        if (o && typeof o === 'object') return { value: o.value ?? o.label, label: o.label, disabled: !!o.disabled }
-        return { value: o, label: String(o), disabled: false }
-      })
-    },
-    resolved() {
-      return this.list.find(o => o.value === this.modelValue) || null
-    },
-    display() {
-      if (this.resolved) return this.resolved.label
-      if (this.modelValue !== '' && this.modelValue != null) return String(this.modelValue)
-      return this.placeholder
-    },
-    menuStyle() {
-      if (!this.open) return {}
-      // Teleport 到 body 后无法继承父级字号，主动读取组件自身字号同步给菜单
-      const fs = this.$refs.rootRef && getComputedStyle(this.$refs.rootRef).fontSize
-      const style = {
-        position: 'fixed',
-        left: this.menuPos.left + 'px',
-        top: this.menuPos.top + 'px',
-        width: this.menuPos.width + 'px',
-        minWidth: '120px',
-        zIndex: this.menuZ,
-      }
-      if (fs) style.fontSize = fs
-      return style
+defineOptions({ name: 'AppSelect' })
+
+const props = defineProps({
+  modelValue: { type: [String, Number], default: '' },
+  // 支持字符串数组：['A','B']；或对象数组：[{value, label, disabled}]，省略 value 时取 label 本身。
+  options: { type: Array, default: () => [] },
+  placeholder: { type: String, default: '请选择' },
+  disabled: { type: Boolean, default: false },
+  // 紧凑模式：缩小 trigger 高度，用于标题条等高度受限场景
+  compact: { type: Boolean, default: false }
+})
+
+const emit = defineEmits(['update:modelValue', 'change'])
+
+const open = ref(false)
+const hoverIdx = ref(-1)
+const menuPos = ref({ left: 0, top: 0, width: 0 })
+// menuZ：下拉菜单的层级。菜单 Teleport 到 body 后自成一层，必须压过"包住触发器的浮层"，
+// 否则会被弹窗遮罩/AI 悬浮窗盖住（点开看不到或只看到一角）。
+const menuZ = ref(10010)
+
+const rootRef = ref(null)
+
+const list = computed(() => {
+  return props.options.map(o => {
+    if (o && typeof o === 'object') return { value: o.value ?? o.label, label: o.label, disabled: !!o.disabled }
+    return { value: o, label: String(o), disabled: false }
+  })
+})
+
+const resolved = computed(() => {
+  return list.value.find(o => o.value === props.modelValue) || null
+})
+
+const display = computed(() => {
+  if (resolved.value) return resolved.value.label
+  if (props.modelValue !== '' && props.modelValue != null) return String(props.modelValue)
+  return props.placeholder
+})
+
+const menuStyle = computed(() => {
+  if (!open.value) return {}
+  // Teleport 到 body 后无法继承父级字号，主动读取组件自身字号同步给菜单
+  const fs = rootRef.value && getComputedStyle(rootRef.value).fontSize
+  const style = {
+    position: 'fixed',
+    left: menuPos.value.left + 'px',
+    top: menuPos.value.top + 'px',
+    width: menuPos.value.width + 'px',
+    minWidth: '120px',
+    zIndex: menuZ.value,
+  }
+  if (fs) style.fontSize = fs
+  return style
+})
+
+function toggle() {
+  if (props.disabled) return
+  open.value = !open.value
+  hoverIdx.value = open.value ? list.value.findIndex(o => o.value === props.modelValue) : -1
+  if (open.value) {
+    const rect = rootRef.value?.getBoundingClientRect()
+    if (rect) {
+      menuPos.value = { left: rect.left, top: rect.bottom + 4, width: rect.width }
     }
-  },
-  methods: {
-    toggle() {
-      if (this.disabled) return
-      this.open = !this.open
-      this.hoverIdx = this.open ? this.list.findIndex(o => o.value === this.modelValue) : -1
-      if (this.open) {
-        const rect = this.$refs.rootRef?.getBoundingClientRect()
-        if (rect) {
-          this.menuPos = { left: rect.left, top: rect.bottom + 4, width: rect.width }
-        }
-        this.menuZ = this._layerZ()
-      }
-    },
-    // 菜单层级：从触发器往上取祖先里最大的 z-index 再叠一层，保证压过包住它的浮层。
-    // 这样同一个下拉放在普通页面（无浮层，用 10010 兜底）、z-[10070] 的「添加模型」弹窗、
-    // z-[20001] 的 AI 悬浮窗里都能正常显示，不用每处浮层各写一个魔法数字。
-    _layerZ() {
-      let max = 0
-      let el = this.$refs.rootRef
-      while (el && el !== document.body && el !== document.documentElement) {
-        const z = parseInt(window.getComputedStyle(el).zIndex, 10)
-        if (!Number.isNaN(z) && z > max) max = z
-        el = el.parentElement
-      }
-      return Math.max(10010, max + 10)
-    },
-    move(step) {
-      if (!this.open) { this.open = true; return }
-      const n = this.list.length
-      if (!n) return
-      let i = this.hoverIdx
-      do { i = (i + step + n) % n } while (this.list[i].disabled && i !== this.hoverIdx)
-      this.hoverIdx = i
-    },
-    commit(i) {
-      const opt = this.list[i]
-      if (!opt || opt.disabled) return
-      this.$emit('update:modelValue', opt.value)
-      this.$emit('change', opt.value)
-      this.open = false
-    },
-    onDocClick(e) {
-      if (this.open && this.$refs.rootRef && !this.$refs.rootRef.contains(e.target)) this.open = false
-    },
-    // 滚动/resize 后按触发器新位置重排菜单；触发器滚出视口则直接收起
-    onViewportChange() {
-      if (!this.open) return
-      const rect = this.$refs.rootRef?.getBoundingClientRect()
-      if (!rect) return
-      if (rect.bottom < 0 || rect.top > window.innerHeight || rect.right < 0 || rect.left > window.innerWidth) {
-        this.open = false
-        return
-      }
-      this.menuPos = { left: rect.left, top: rect.bottom + 4, width: rect.width }
-    }
-  },
-  mounted() {
-    document.addEventListener('click', this.onDocClick)
-    window.addEventListener('scroll', this.onViewportChange, true)
-    window.addEventListener('resize', this.onViewportChange)
-  },
-  beforeUnmount() {
-    document.removeEventListener('click', this.onDocClick)
-    window.removeEventListener('scroll', this.onViewportChange, true)
-    window.removeEventListener('resize', this.onViewportChange)
+    menuZ.value = _layerZ()
   }
 }
+
+// 菜单层级：从触发器往上取祖先里最大的 z-index 再叠一层，保证压过包住它的浮层。
+// 这样同一个下拉放在普通页面（无浮层，用 10010 兜底）、z-[10070] 的「添加模型」弹窗、
+// z-[20001] 的 AI 悬浮窗里都能正常显示，不用每处浮层各写一个魔法数字。
+function _layerZ() {
+  let max = 0
+  let el = rootRef.value
+  while (el && el !== document.body && el !== document.documentElement) {
+    const z = parseInt(window.getComputedStyle(el).zIndex, 10)
+    if (!Number.isNaN(z) && z > max) max = z
+    el = el.parentElement
+  }
+  return Math.max(10010, max + 10)
+}
+
+function move(step) {
+  if (!open.value) { open.value = true; return }
+  const n = list.value.length
+  if (!n) return
+  let i = hoverIdx.value
+  do { i = (i + step + n) % n } while (list.value[i].disabled && i !== hoverIdx.value)
+  hoverIdx.value = i
+}
+
+function commit(i) {
+  const opt = list.value[i]
+  if (!opt || opt.disabled) return
+  emit('update:modelValue', opt.value)
+  emit('change', opt.value)
+  open.value = false
+}
+
+function onDocClick(e) {
+  if (open.value && rootRef.value && !rootRef.value.contains(e.target)) open.value = false
+}
+
+// 滚动/resize 后按触发器新位置重排菜单；触发器滚出视口则直接收起
+function onViewportChange() {
+  if (!open.value) return
+  const rect = rootRef.value?.getBoundingClientRect()
+  if (!rect) return
+  if (rect.bottom < 0 || rect.top > window.innerHeight || rect.right < 0 || rect.left > window.innerWidth) {
+    open.value = false
+    return
+  }
+  menuPos.value = { left: rect.left, top: rect.bottom + 4, width: rect.width }
+}
+
+onMounted(() => {
+  document.addEventListener('click', onDocClick)
+  window.addEventListener('scroll', onViewportChange, true)
+  window.addEventListener('resize', onViewportChange)
+})
+
+onBeforeUnmount(() => {
+  document.removeEventListener('click', onDocClick)
+  window.removeEventListener('scroll', onViewportChange, true)
+  window.removeEventListener('resize', onViewportChange)
+})
 </script>

@@ -12,21 +12,21 @@ const readFrontNum = (key, fallback) => {
   return Number.isFinite(v) ? v : fallback
 }
 
-// 提案执行 + undo 登记 + 前端设置读写 相关的方法组（Options API mixin）。
-// 方法体保留 this.xxx 写法。
-export default {
-  methods: {
+// 提案执行 + undo 登记 + 前端设置读写 相关的方法组（原 Options API mixin，现为 ctx 闭包 composable）。
+// ctx 契约：状态 ref 用 .value 访问，跨模块方法经 ctx 运行时解析。
+export function useAiExec(ctx) {
+  return {
     // 浮窗内点「确认执行」：找到当前待确认提案所属的消息并执行
     confirmProposal() {
-      const m = this._lastAssistant()
-      if (m && m.proposal) this.executeProposal(m)
+      const m = ctx._lastAssistant()
+      if (m && m.proposal) ctx.executeProposal(m)
     },
     // 取消写入：标记已取消，把「已取消」接着发起下一轮（写入思维链），让 AI 继续回应
     dismissProposal() {
-      const m = this._lastAssistant()
-      if (!m || !m.proposal || m.proposal.executing || m.proposal.executed || m.proposal.dismissed || this.busy) return
+      const m = ctx._lastAssistant()
+      if (!m || !m.proposal || m.proposal.executing || m.proposal.executed || m.proposal.dismissed || ctx.busy.value) return
       m.proposal.dismissed = true
-      this._sendFeedback(
+      ctx._sendFeedback(
         `已取消：${m.proposal.label}。（数据未发生任何变更。请勿重复生成同一提案；如需调整方案，请先说明修改点或询问用户。）`,
         `已取消：${m.proposal.label}`,
         m
@@ -35,17 +35,17 @@ export default {
     // 把「用户反馈」写回原助手消息的思维链，并作为用户消息发给模型续跑（不新增用户输入气泡）
     // 续写目标即这条原助手消息：本轮输出继续写回它，时间轴保持连续
     _sendFeedback(content, stepText, sourceMsg) {
-      const msg = sourceMsg || this._lastAssistant()
+      const msg = sourceMsg || ctx._lastAssistant()
       const isAssistant = msg && msg.role === 'assistant'
       if (isAssistant) {
         if (!msg.steps) msg.steps = []
         msg.steps.push({ id: 'fb' + msg.steps.length + '_' + Date.now(), kind: 'text', text: stepText, status: 'done' })
         // 此刻提案/提问状态已被改写（已执行 / 已取消 / 已回答）：立即回写落库，
         // 避免续跑期间刷新时又还原成「待确认」，造成重复执行同一笔数据更改。
-        if (msg._id != null) this.updateMessage(msg._id, msg.content || '', this._buildProc(msg))
+        if (msg._id != null) ctx.updateMessage(msg._id, msg.content || '', ctx._buildProc(msg))
       }
-      this.input = content
-      return this.send(true, stepText, isAssistant ? msg : null)
+      ctx.input.value = content
+      return ctx.send(true, stepText, isAssistant ? msg : null)
     },
     async executeProposal(m) {
       if (m.proposal.executing || m.proposal.executed) return
@@ -63,9 +63,9 @@ export default {
           // 前端设置提案：读旧值 → 经主题 store 立即应用 → 记下前后值供撤销
           const p = m.proposal
           const store = useThemeStore()
-          const before = this._readFrontSetting(p.key)
-          this._setFrontSetting(store, p.key, p.value)
-          const after = this._readFrontSetting(p.key)
+          const before = ctx._readFrontSetting(p.key)
+          ctx._setFrontSetting(store, p.key, p.value)
+          const after = ctx._readFrontSetting(p.key)
           m.proposal.frontUndo = { key: p.key, before, after, label: p.label }
           m.proposal.executing = false
           m.proposal.executed = true
@@ -83,7 +83,7 @@ export default {
           } else {
             await axios.post('/api/ai/skills', { name, content: p.content })
           }
-          await this.loadSkillOptions()
+          await ctx.loadSkillOptions()
           m.proposal.executing = false
           m.proposal.executed = true
           notify(p.label + ' 已执行')
@@ -95,7 +95,7 @@ export default {
           const d = resp.data || {}
           // 存下写入前的原始行：供「改动总结」统计被覆盖掉的原有非空格数，并在明细抽屉里对照
           m.proposal.gridBefore = d.before == null ? null : d.before
-          const uid = await this._pushUndo('doc_update', DOC_UNDO_KEY[p.table] || p.table, p.label, { table: p.table, id: p.id, before: d.before, after: d.after, label: p.label }, origin)
+          const uid = await ctx._pushUndo('doc_update', DOC_UNDO_KEY[p.table] || p.table, p.label, { table: p.table, id: p.id, before: d.before, after: d.after, label: p.label }, origin)
           m.proposal.undoIds = uid != null ? [uid] : []
           m.proposal.executing = false
           m.proposal.executed = true
@@ -111,7 +111,7 @@ export default {
           const results = (res.data && res.data.results) || []
           const undoIds = []
           for (const r of results) {
-            const uid = await this._pushUndoForBatch(r, p.label, origin)
+            const uid = await ctx._pushUndoForBatch(r, p.label, origin)
             if (uid != null) undoIds.push(uid)
           }
           m.proposal.undoIds = undoIds
@@ -138,11 +138,11 @@ export default {
           const rows = Array.isArray(data && data.rows) ? data.rows : []
           let ok = 0
           for (const r of rows) {
-            const payload = this.cleanPayload(r)
+            const payload = ctx.cleanPayload(r)
             const res = await axios.post(end.url, payload)
             const added = { id: res.data?.id ?? res.data?.row?.id, ...payload }
             if (added.id != null) {
-              const uid = await this._pushUndo('row_insert', end.undoKey, this._rowName(added), { table: end.undoKey, row: added }, origin)
+              const uid = await ctx._pushUndo('row_insert', end.undoKey, ctx._rowName(added), { table: end.undoKey, row: added }, origin)
               if (uid != null) undoIds.push(uid)
             }
             ok++
@@ -159,11 +159,11 @@ export default {
           // 删除后记录在库里就查不到了，这里把原始行一并存下供「改动明细」展示
           const deletedRows = []
           for (const id of ids) {
-            const oldRow = await this._fetchRow(end.undoKey, id)
+            const oldRow = await ctx._fetchRow(end.undoKey, id)
             await axios.delete(`${end.url}/${id}`)
             if (oldRow) {
               deletedRows.push(oldRow)
-              const uid = await this._pushUndo('row_delete', end.undoKey, this._rowName(oldRow), { table: end.undoKey, row: oldRow }, origin)
+              const uid = await ctx._pushUndo('row_delete', end.undoKey, ctx._rowName(oldRow), { table: end.undoKey, row: oldRow }, origin)
               if (uid != null) undoIds.push(uid)
             }
             ok++
@@ -176,29 +176,29 @@ export default {
           executedLabel = `${m.proposal.label}（${ok} 条）`
         } else {
           if (operation === 'add') {
-            const payload = this.cleanPayload(data)
+            const payload = ctx.cleanPayload(data)
             const res = await axios.post(end.url, payload)
             const added = { id: res.data?.id ?? res.data?.row?.id, ...payload }
             if (added.id != null) {
-              const uid = await this._pushUndo('row_insert', end.undoKey, this._rowName(added), { table: end.undoKey, row: added }, origin)
+              const uid = await ctx._pushUndo('row_insert', end.undoKey, ctx._rowName(added), { table: end.undoKey, row: added }, origin)
               if (uid != null) undoIds.push(uid)
             }
           } else if (operation === 'update') {
             // 先取旧值，再写入，撤销时可还原到旧值
-            const oldRow = await this._fetchRow(end.undoKey, data.id)
+            const oldRow = await ctx._fetchRow(end.undoKey, data.id)
             // 拿不到旧值就无法登记撤销：宁可中止这条修改，也不留下「改了但撤不回」的状态（B12-03）
             if (!oldRow) throw new Error(`没有找到要修改的记录（id=${data.id}），已取消该修改`)
-            await axios.put(`${end.url}/${data.id}`, this.cleanPayload(data.changes || {}))
+            await axios.put(`${end.url}/${data.id}`, ctx.cleanPayload(data.changes || {}))
             const newRow = { ...oldRow, ...(data.changes || {}) }
-            const uid = await this._pushUndo('row_update', end.undoKey, this._rowName(newRow), { table: end.undoKey, rowId: data.id, oldRow, newRow }, origin)
+            const uid = await ctx._pushUndo('row_update', end.undoKey, ctx._rowName(newRow), { table: end.undoKey, rowId: data.id, oldRow, newRow }, origin)
             if (uid != null) undoIds.push(uid)
           } else if (operation === 'delete') {
             // 先取整条记录，再删除，撤销时可整条恢复
-            const oldRow = await this._fetchRow(end.undoKey, data.id)
+            const oldRow = await ctx._fetchRow(end.undoKey, data.id)
             await axios.delete(`${end.url}/${data.id}`)
             m.proposal.deletedRows = oldRow ? [oldRow] : []
             if (oldRow) {
-              const uid = await this._pushUndo('row_delete', end.undoKey, this._rowName(oldRow), { table: end.undoKey, row: oldRow }, origin)
+              const uid = await ctx._pushUndo('row_delete', end.undoKey, ctx._rowName(oldRow), { table: end.undoKey, row: oldRow }, origin)
               if (uid != null) undoIds.push(uid)
             }
           } else {
@@ -218,7 +218,7 @@ export default {
         m.proposal.dismissed = true
         const msg = err.response?.data?.error || err.message || '未知错误'
         notifyError('执行失败：' + msg)
-        await this._sendFeedback(
+        await ctx._sendFeedback(
           `执行失败：${m.proposal.label}（原因：${msg}），请分析后告诉我怎么处理。`,
           `执行失败：${m.proposal.label}（原因：${msg}）`,
           m
@@ -228,7 +228,7 @@ export default {
       // 无论成功或失败都接着发起下一轮：把结果写入思维链并作为用户消息发回，让 AI 继续，工具不结束对话
       // 明确告诉模型「该项已落盘」：提案轮的助手正文与工具调用不会进入后续上下文，
       // 若不点明已完成，模型会因看不到自己的提案记录而反复重复生成同一提案（尤其新建技能后再被报「已存在」）
-      await this._sendFeedback(
+      await ctx._sendFeedback(
         `已执行：${executedLabel}。（该项已由系统成功完成并落盘。请勿重复调用同一写入/提案工具，也不要重复生成同一提案；如无其它事项，用一两句话简短确认即可。）`,
         `已执行：${executedLabel}`,
         m
@@ -244,7 +244,7 @@ export default {
     },
     // 撤回这条回复已执行的数据更改：按登记的撤销记录逐条精确回退
     async undoChange(m) {
-      if (!this.canUndoChange(m) || this.busy) return
+      if (!ctx.canUndoChange(m) || ctx.busy.value) return
       const p = m.proposal
       const { success: notify } = useNotification()
       p.reverting = true
@@ -252,10 +252,10 @@ export default {
         if (p.kind === 'front' && p.frontUndo) {
           // 前端设置：直接把设置写回执行前的值（不经过 /api/undo）
           const store = useThemeStore()
-          this._setFrontSetting(store, p.frontUndo.key, p.frontUndo.before)
+          ctx._setFrontSetting(store, p.frontUndo.key, p.frontUndo.before)
           p.reverted = true
           notify(`已还原：${p.frontUndo.label || '设置'}`)
-          if (m._id != null) this.updateMessage(m._id, m.content || '', this._buildProc(m))
+          if (m._id != null) ctx.updateMessage(m._id, m.content || '', ctx._buildProc(m))
           return
         }
         let label = ''
@@ -268,7 +268,7 @@ export default {
         p.reverted = true
         notify(label ? `已撤回：${label}` : '已撤回更改')
         // 回写「已撤回」状态：避免刷新后按钮又还原成可撤回，导致对同一笔更改二次撤回
-        if (m._id != null) this.updateMessage(m._id, m.content || '', this._buildProc(m))
+        if (m._id != null) ctx.updateMessage(m._id, m.content || '', ctx._buildProc(m))
       } catch (err) {
         reportError(err, { action: '撤回' })
       } finally {
@@ -328,17 +328,17 @@ export default {
     async _pushUndoForBatch(r, label, origin) {
       if (!r || !r.action) return null
       if (r.action === 'add') {
-        return this._pushUndo('row_insert', r.table, this._rowName(r.row), { table: r.table, row: r.row }, origin)
+        return ctx._pushUndo('row_insert', r.table, ctx._rowName(r.row), { table: r.table, row: r.row }, origin)
       }
       if (r.action === 'update') {
         const row = r.after || r.before || {}
-        return this._pushUndo('row_update', r.table, this._rowName(row), { table: r.table, rowId: r.id, oldRow: r.before, newRow: r.after }, origin)
+        return ctx._pushUndo('row_update', r.table, ctx._rowName(row), { table: r.table, rowId: r.id, oldRow: r.before, newRow: r.after }, origin)
       }
       if (r.action === 'delete') {
-        return this._pushUndo('row_delete', r.table, this._rowName(r.row), { table: r.table, row: r.row }, origin)
+        return ctx._pushUndo('row_delete', r.table, ctx._rowName(r.row), { table: r.table, row: r.row }, origin)
       }
       if (r.action === 'doc') {
-        return this._pushUndo('doc_update', DOC_UNDO_KEY[r.table] || r.table, label, { table: r.table, id: r.id, before: r.before, after: r.after, label }, origin)
+        return ctx._pushUndo('doc_update', DOC_UNDO_KEY[r.table] || r.table, label, { table: r.table, id: r.id, before: r.before, after: r.after, label }, origin)
       }
       return null
     },
@@ -363,5 +363,5 @@ export default {
       }
       return out
     },
-  },
+  }
 }

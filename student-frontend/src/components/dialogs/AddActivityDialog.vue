@@ -42,70 +42,63 @@
   </DialogShell>
 </template>
 
-<script>
+<script setup>
+import { ref, computed, watch } from 'vue'
 import '../../styles/dialog-transition.css'
 import DialogShell from '../base/DialogShell.vue'
 import { useNotification } from '../../composables/useNotification.js'
 import { formatDateTimeLocal } from '../../utils/dateTime.js'
 
-export default {
-  name: 'AddActivityDialog',
-  components: { DialogShell },
-  props: {
-    visible: { type: Boolean, default: false },
-    editingRecord: { type: Object, default: null }
-  },
-  data() {
-    return {
-      form: { time: formatDateTimeLocal(new Date()), theme: '', location: '', participants: '', summary: '' }
-    }
-  },
-  computed: {
-    isEdit() { return !!(this.editingRecord && this.editingRecord.id != null) },
-    title() { return this.isEdit ? '编辑活动' : '新增活动' }
-  },
-  watch: {
-    visible(v) {
-      if (v) {
-        if (this.isEdit) this.presetFromRecord(this.editingRecord)
-        else this.reset()
-      }
-    }
-  },
-  methods: {
-    reset() {
-      this.form = { time: formatDateTimeLocal(new Date()), theme: '', location: '', participants: '', summary: '' }
-    },
-    presetFromRecord(r) {
-      let time = ''
-      if (r.时间) {
-        const d = r.时间.includes('T') ? new Date(r.时间) : new Date(r.时间.replace(' ', 'T'))
-        if (!isNaN(d.getTime())) time = formatDateTimeLocal(d)
-      }
-      this.form = {
-        time,
-        theme: r.主题 || '',
-        location: r.地点 || '',
-        participants: r.参与人员 || '',
-        summary: r.简介 || ''
-      }
-    },
-    submit() {
-      if (!this.form.time) { useNotification().warning('请选择时间'); return }
-      if (!this.form.theme.trim()) { useNotification().warning('请填写主题'); return }
-      const payload = {
-        时间: this.form.time.replace('T', ' '),
-        主题: this.form.theme.trim(),
-        地点: this.form.location.trim(),
-        参与人员: this.form.participants.trim(),
-        简介: this.form.summary.trim()
-      }
-      if (this.isEdit) {
-        this.$emit('update', { id: this.editingRecord.id, ...payload })
-      } else {
-        this.$emit('confirm', payload)
-      }
-    }
+defineOptions({ name: 'AddActivityDialog' })
+const props = defineProps({
+  visible: { type: Boolean, default: false },
+  editingRecord: { type: Object, default: null }
+})
+const emit = defineEmits(['cancel', 'delete', 'update', 'confirm'])
+
+const form = ref({ time: formatDateTimeLocal(new Date()), theme: '', location: '', participants: '', summary: '' })
+
+const isEdit = computed(() => !!(props.editingRecord && props.editingRecord.id != null))
+const title = computed(() => isEdit.value ? '编辑活动' : '新增活动')
+
+watch(() => props.visible, (v) => {
+  if (v) {
+    if (isEdit.value) presetFromRecord(props.editingRecord)
+    else reset()
+  }
+})
+
+function reset() {
+  form.value = { time: formatDateTimeLocal(new Date()), theme: '', location: '', participants: '', summary: '' }
+}
+function presetFromRecord(r) {
+  let time = ''
+  if (r.时间) {
+    const d = r.时间.includes('T') ? new Date(r.时间) : new Date(r.时间.replace(' ', 'T'))
+    if (!isNaN(d.getTime())) time = formatDateTimeLocal(d)
+  }
+  form.value = {
+    time,
+    theme: r.主题 || '',
+    location: r.地点 || '',
+    participants: r.参与人员 || '',
+    summary: r.简介 || ''
+  }
+}
+function submit() {
+  if (!form.value.time) { useNotification().warning('请选择时间'); return }
+  if (!form.value.theme.trim()) { useNotification().warning('请填写主题'); return }
+  const payload = {
+    时间: form.value.time.replace('T', ' '),
+    主题: form.value.theme.trim(),
+    地点: form.value.location.trim(),
+    参与人员: form.value.participants.trim(),
+    简介: form.value.summary.trim()
+  }
+  if (isEdit.value) {
+    emit('update', { id: props.editingRecord.id, ...payload })
+  } else {
+    emit('confirm', payload)
   }
 }
 </script>

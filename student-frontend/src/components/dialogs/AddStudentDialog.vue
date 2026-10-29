@@ -62,70 +62,65 @@
   </DialogShell>
 </template>
 
-<script>
+<script setup>
 import AppSelect from '../base/AppSelect.vue'
 import DialogShell from '../base/DialogShell.vue'
 import '../../styles/dialog-transition.css'
 import { useNotification } from '../../composables/useNotification.js'
-export default {
-  name: 'AddStudentDialog',
-  components: { AppSelect, DialogShell },
-  props: {
-    visible: { type: Boolean, default: false },
-    fields: { type: Array, default: () => [] },
-    requiredField: { type: String, default: '' },
-    title: { type: String, default: '添加学生' },
-    // 编辑模式：传入要修改的那一行，打开弹窗时用它预填表单。
-    // 不传（或传空对象）= 新增模式，表单保持空白。
-    initialValues: { type: Object, default: () => ({}) }
-  },
-  data() {
-    return { form: {} }
-  },
-  watch: {
-    visible: {
-      immediate: true,
-      handler(v) {
-        if (v) this.reset()
-      }
-    }
-  },
-  methods: {
-    selectOptions(f) {
-      return ['', ...(f.options || [])].map(v => ({ value: v, label: v || '未选择' }))
-    },
-    reset() {
-      const form = {}
-      this.fields.forEach(f => {
-        form[f.name] = (f.type === '整数' || f.type === '小数') ? '' : ''
-      })
-      // 编辑模式：用传入行的值覆盖（只覆盖表单里真实存在的字段，多出来的键忽略）。
-      // 数字型统一转字符串，交给 v-model.number 在输入时转回来 —— 这里若给 number，
-      // 空值 '' 会被 v-model.number 渲染成空，两者行为一致，但混用类型容易出「1 变 '1'」的比较问题。
-      const src = this.initialValues || {}
-      Object.keys(form).forEach(k => {
-        const v = src[k]
-        if (v !== null && v !== undefined && v !== '') form[k] = String(v)
-      })
-      this.form = form
-    },
-    submit() {
-      if (this.requiredField && !String(this.form[this.requiredField] || '').trim()) {
-        useNotification().warning(`请填写${this.requiredField}`)
-        return
-      }
-      const data = {}
-      this.fields.forEach(f => {
-        let v = this.form[f.name]
-        if (f.type === '整数' || f.type === '小数') {
-          v = v === '' || v == null ? '' : String(v)
-        } else {
-          v = v == null ? '' : String(v)
-        }
-        data[f.name] = v
-      })
-      this.$emit('confirm', data)
-    }
+import { ref, watch } from 'vue'
+
+defineOptions({ name: 'AddStudentDialog' })
+
+const props = defineProps({
+  visible: { type: Boolean, default: false },
+  fields: { type: Array, default: () => [] },
+  requiredField: { type: String, default: '' },
+  title: { type: String, default: '添加学生' },
+  // 编辑模式：传入要修改的那一行，打开弹窗时用它预填表单。
+  // 不传（或传空对象）= 新增模式，表单保持空白。
+  initialValues: { type: Object, default: () => ({}) }
+})
+const emit = defineEmits(['confirm', 'cancel'])
+
+const form = ref({})
+
+watch(() => props.visible, (v) => {
+  if (v) reset()
+}, { immediate: true })
+
+function selectOptions(f) {
+  return ['', ...(f.options || [])].map(v => ({ value: v, label: v || '未选择' }))
+}
+function reset() {
+  const nextForm = {}
+  props.fields.forEach(f => {
+    nextForm[f.name] = (f.type === '整数' || f.type === '小数') ? '' : ''
+  })
+  // 编辑模式：用传入行的值覆盖（只覆盖表单里真实存在的字段，多出来的键忽略）。
+  // 数字型统一转字符串，交给 v-model.number 在输入时转回来 —— 这里若给 number，
+  // 空值 '' 会被 v-model.number 渲染成空，两者行为一致，但混用类型容易出「1 变 '1'」的比较问题。
+  const src = props.initialValues || {}
+  Object.keys(nextForm).forEach(k => {
+    const v = src[k]
+    if (v !== null && v !== undefined && v !== '') nextForm[k] = String(v)
+  })
+  form.value = nextForm
+}
+function submit() {
+  if (props.requiredField && !String(form.value[props.requiredField] || '').trim()) {
+    useNotification().warning(`请填写${props.requiredField}`)
+    return
   }
+  const data = {}
+  props.fields.forEach(f => {
+    let v = form.value[f.name]
+    if (f.type === '整数' || f.type === '小数') {
+      v = v === '' || v == null ? '' : String(v)
+    } else {
+      v = v == null ? '' : String(v)
+    }
+    data[f.name] = v
+  })
+  emit('confirm', data)
 }
 </script>

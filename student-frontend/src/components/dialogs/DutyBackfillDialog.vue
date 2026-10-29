@@ -82,7 +82,8 @@
   </DialogShell>
 </template>
 
-<script>
+<script setup>
+import { ref, computed, watch } from 'vue'
 import '../../styles/dialog-transition.css'
 import DialogShell from '../base/DialogShell.vue'
 import axios from 'axios'
@@ -90,209 +91,201 @@ import WeekSwitcher from '../base/WeekSwitcher.vue'
 import { useNotification } from '../../composables/useNotification.js'
 import { mondayOf, shiftDateStr, diffDays } from '../../utils/dateTime.js'
 
-export default {
-  name: 'DutyBackfillDialog',
-  components: { WeekSwitcher, DialogShell },
-  props: {
-    visible: { type: Boolean, default: false },
-    // 值日模式：daily 日常值日 / big 大扫除
-    mode: { type: String, default: 'daily' }
-  },
-  emits: ['close', 'changed'],
-  data() {
-    return {
-      // 周列表：元素含 week_start（该周周一）
-      weeks: [],
-      // 当前选中的周（该周周一，YYYY-MM-DD）
-      currentWeek: '',
-      // 「选择周数」输入值
-      weekCount: null,
-      // 日期区间输入值（始终被吸附为完整一周 周一~周日）
-      startDate: '',
-      endDate: '',
-      // 增加周记录表单是否展开
-      formOpen: false,
-      // 当前周每天的记录（后端返回，元素含 snap_date）
-      dailyRows: [],
-      // 学期起始周的周一（用于周数换算）；学期未填日期时为空
-      semesterMonday: ''
-    }
-  },
-  computed: {
-    weekLabel() {
-      return this.weekCount ? `第${this.weekCount}周` : '第—周'
-    },
-    // 所选周的 7 天明细：日期 / 星期 / 是否已有记录
-    dailyTableRows() {
-      const base = this.currentWeek
-      if (!base) return []
-      const recorded = new Set((this.dailyRows || []).map(d => d && d.snap_date).filter(Boolean))
-      const WEEKDAYS = ['星期日', '星期一', '星期二', '星期三', '星期四', '星期五', '星期六']
-      const rows = []
-      for (let i = 0; i < 7; i++) {
-        const date = shiftDateStr(base, i)
-        const day = new Date(`${date}T00:00:00`).getDay()
-        rows.push({ date, weekday: WEEKDAYS[day] || '', recorded: recorded.has(date) })
-      }
-      return rows
-    }
-  },
-  watch: {
-    // 打开弹窗时才拉取数据
-    visible(v) { if (v) this.onOpen() }
-  },
-  methods: {
-    // 每次打开重置状态并加载周列表
-    async onOpen() {
-      this.formOpen = false
-      this.dailyRows = []
-      this.weekCount = null
-      this.startDate = ''
-      this.endDate = ''
-      this.currentWeek = ''
-      this.semesterMonday = ''
-      await this.loadWeeks()
-    },
-    // 周列表：优先用当前学期的起止日期生成；学期没填日期则退化为历史快照的周列表
-    async loadWeeks() {
-      let list = []
-      let semesterMonday = ''
-      try {
-        const res = await axios.get('/api/schedule/semesters')
-        const cur = res.data && res.data.current
-        const startDate = cur && cur.start_date
-        const endDate = cur && cur.end_date
-        if (startDate && endDate) {
-          semesterMonday = mondayOf(startDate)
-          const endMonday = mondayOf(endDate)
-          let ws = semesterMonday
-          let guard = 0
-          // 从学期起始的周一算起，每周 +7 天，直到超过学期结束所在周（最多 60 周）
-          while (ws && endMonday && ws <= endMonday && guard < 60) {
-            list.push({ week_start: ws })
-            ws = shiftDateStr(ws, 7)
-            guard++
-          }
-        }
-      } catch (e) { console.error(e) }
+defineOptions({ name: 'DutyBackfillDialog' })
 
-      if (!list.length) {
-        // 学期未填日期：用历史快照的 week_start 列表（倒序返回，这里重排为升序）
-        semesterMonday = ''
-        try {
-          const h = await axios.get(`/api/duty/history?mode=${this.mode}`)
-          const arr = (h.data || []).map(w => w.week_start).filter(Boolean)
-          arr.sort()
-          list = Array.from(new Set(arr)).map(ws => ({ week_start: ws }))
-        } catch (e) { console.error(e) }
-      }
+const props = defineProps({
+  visible: { type: Boolean, default: false },
+  // 值日模式：daily 日常值日 / big 大扫除
+  mode: { type: String, default: 'daily' }
+})
+const emit = defineEmits(['close', 'changed'])
 
-      this.semesterMonday = semesterMonday
-      this.weeks = list
+// 周列表：元素含 week_start（该周周一）
+const weeks = ref([]);
+// 当前选中的周（该周周一，YYYY-MM-DD）
+const currentWeek = ref('');
+// 「选择周数」输入值
+const weekCount = ref(null);
+// 日期区间输入值（始终被吸附为完整一周 周一~周日）
+const startDate = ref('');
+const endDate = ref('');
+// 增加周记录表单是否展开
+const formOpen = ref(false);
+// 当前周每天的记录（后端返回，元素含 snap_date）
+const dailyRows = ref([]);
+// 学期起始周的周一（用于周数换算）；学期未填日期时为空
+const semesterMonday = ref('');
 
-      // 默认选中「包含今天的周」，不在列表内则选第一项
-      const d = new Date()
-      const today = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
-      const todayMonday = mondayOf(today)
-      let def = ''
-      if (this.weeks.some(w => w.week_start === todayMonday)) def = todayMonday
-      else if (this.weeks.length) def = this.weeks[0].week_start
+const weekLabel = computed(() => {
+  return weekCount.value ? `第${weekCount.value}周` : '第—周'
+})
+// 所选周的 7 天明细：日期 / 星期 / 是否已有记录
+const dailyTableRows = computed(() => {
+  const base = currentWeek.value
+  if (!base) return []
+  const recorded = new Set((dailyRows.value || []).map(d => d && d.snap_date).filter(Boolean))
+  const WEEKDAYS = ['星期日', '星期一', '星期二', '星期三', '星期四', '星期五', '星期六']
+  const rows = []
+  for (let i = 0; i < 7; i++) {
+    const date = shiftDateStr(base, i)
+    const day = new Date(`${date}T00:00:00`).getDay()
+    rows.push({ date, weekday: WEEKDAYS[day] || '', recorded: recorded.has(date) })
+  }
+  return rows
+})
 
-      this.applyWeek(def)
-    },
-    // 选中某一周：同步周数、日期区间，并拉取该周明细
-    applyWeek(weekStart) {
-      if (!weekStart) {
-        this.currentWeek = ''
-        this.startDate = ''
-        this.endDate = ''
-        this.dailyRows = []
-        this.weekCount = null
-        return
-      }
-      this.currentWeek = weekStart
-      this.startDate = weekStart
-      this.endDate = shiftDateStr(weekStart, 6)
-      if (this.semesterMonday) {
-        // 周数 = (该周周一 - 学期起始周一) / 7 + 1
-        const n = Math.round(diffDays(this.semesterMonday, weekStart) / 7) + 1
-        this.weekCount = n >= 1 ? n : null
-      } else {
-        const idx = this.weeks.findIndex(w => w.week_start === weekStart)
-        this.weekCount = idx >= 0 ? idx + 1 : null
-      }
-      this.loadDaily()
-    },
-    // 拉取当前周每天的记录
-    async loadDaily() {
-      const from = this.currentWeek
-      if (!from) { this.dailyRows = []; return }
-      const to = shiftDateStr(from, 6)
-      try {
-        const res = await axios.get('/api/duty/daily', { params: { mode: this.mode, from, to } })
-        this.dailyRows = Array.isArray(res.data) ? res.data : ((res.data && res.data.data) || [])
-      } catch (e) {
-        console.error(e)
-        this.dailyRows = []
-      }
-    },
-    toggleForm() { this.formOpen = !this.formOpen },
-    // 周数 -> 日期：weekStart = 学期起始周一 + (N-1)*7，weekEnd = weekStart + 6
-    onWeekCountChange() {
-      let n = Math.round(Number(this.weekCount))
-      if (!Number.isFinite(n)) n = 1
-      const maxNo = this.weeks.length || 60
-      n = Math.max(1, Math.min(maxNo, n))
-      this.weekCount = n
+// 打开弹窗时才拉取数据
+watch(() => props.visible, (v) => { if (v) onOpen() })
 
-      let weekStart = ''
-      if (this.semesterMonday) weekStart = shiftDateStr(this.semesterMonday, (n - 1) * 7)
-      else {
-        const w = this.weeks[n - 1]
-        weekStart = w ? w.week_start : ''
-      }
-      if (!weekStart) return
-
-      this.currentWeek = weekStart
-      this.startDate = weekStart
-      this.endDate = shiftDateStr(weekStart, 6)
-      this.loadDaily()
-    },
-    // 日期 -> 周数：以开始日期所在周的周一为准；结束日期跨到别的周时，默认改回「第一周」（即开始日期所在周）
-    onDateChange() {
-      let weekStart = mondayOf(this.startDate)
-      if (!weekStart) {
-        // 开始日期为空/非法时用结束日期兜底
-        weekStart = mondayOf(this.endDate)
-        if (!weekStart) return
-      }
-      this.startDate = weekStart
-      this.endDate = shiftDateStr(weekStart, 6)
-      this.currentWeek = weekStart
-      // 学期已填开始日期时换算周数；未填则周数保持不变，只显示日期
-      if (this.semesterMonday) {
-        const n = Math.round(diffDays(this.semesterMonday, weekStart) / 7) + 1
-        if (n >= 1) this.weekCount = n
-      }
-      this.loadDaily()
-    },
-    // 提交：把该周写入历史记录
-    async submitWeek() {
-      const weekStart = this.currentWeek || mondayOf(this.startDate)
-      if (!weekStart) {
-        useNotification().error('请先选择有效的周')
-        return
-      }
-      try {
-        const res = await axios.post('/api/duty/history/week', { week_start: weekStart, mode: this.mode })
-        useNotification().success(res.data && res.data.message)
-        this.formOpen = false
-        await this.loadDaily()
-        this.$emit('changed')
-      } catch (err) {
-        useNotification().error((err && err.response && err.response.data && err.response.data.error) || '增加周记录失败')
+// 每次打开重置状态并加载周列表
+async function onOpen() {
+  formOpen.value = false
+  dailyRows.value = []
+  weekCount.value = null
+  startDate.value = ''
+  endDate.value = ''
+  currentWeek.value = ''
+  semesterMonday.value = ''
+  await loadWeeks()
+}
+// 周列表：优先用当前学期的起止日期生成；学期没填日期则退化为历史快照的周列表
+async function loadWeeks() {
+  let list = []
+  let semMonday = ''
+  try {
+    const res = await axios.get('/api/schedule/semesters')
+    const cur = res.data && res.data.current
+    const startDate = cur && cur.start_date
+    const endDate = cur && cur.end_date
+    if (startDate && endDate) {
+      semMonday = mondayOf(startDate)
+      const endMonday = mondayOf(endDate)
+      let ws = semMonday
+      let guard = 0
+      // 从学期起始的周一算起，每周 +7 天，直到超过学期结束所在周（最多 60 周）
+      while (ws && endMonday && ws <= endMonday && guard < 60) {
+        list.push({ week_start: ws })
+        ws = shiftDateStr(ws, 7)
+        guard++
       }
     }
+  } catch (e) { console.error(e) }
+
+  if (!list.length) {
+    // 学期未填日期：用历史快照的 week_start 列表（倒序返回，这里重排为升序）
+    semMonday = ''
+    try {
+      const h = await axios.get(`/api/duty/history?mode=${props.mode}`)
+      const arr = (h.data || []).map(w => w.week_start).filter(Boolean)
+      arr.sort()
+      list = Array.from(new Set(arr)).map(ws => ({ week_start: ws }))
+    } catch (e) { console.error(e) }
+  }
+
+  semesterMonday.value = semMonday
+  weeks.value = list
+
+  // 默认选中「包含今天的周」，不在列表内则选第一项
+  const d = new Date()
+  const today = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+  const todayMonday = mondayOf(today)
+  let def = ''
+  if (weeks.value.some(w => w.week_start === todayMonday)) def = todayMonday
+  else if (weeks.value.length) def = weeks.value[0].week_start
+
+  applyWeek(def)
+}
+// 选中某一周：同步周数、日期区间，并拉取该周明细
+function applyWeek(weekStart) {
+  if (!weekStart) {
+    currentWeek.value = ''
+    startDate.value = ''
+    endDate.value = ''
+    dailyRows.value = []
+    weekCount.value = null
+    return
+  }
+  currentWeek.value = weekStart
+  startDate.value = weekStart
+  endDate.value = shiftDateStr(weekStart, 6)
+  if (semesterMonday.value) {
+    // 周数 = (该周周一 - 学期起始周一) / 7 + 1
+    const n = Math.round(diffDays(semesterMonday.value, weekStart) / 7) + 1
+    weekCount.value = n >= 1 ? n : null
+  } else {
+    const idx = weeks.value.findIndex(w => w.week_start === weekStart)
+    weekCount.value = idx >= 0 ? idx + 1 : null
+  }
+  loadDaily()
+}
+// 拉取当前周每天的记录
+async function loadDaily() {
+  const from = currentWeek.value
+  if (!from) { dailyRows.value = []; return }
+  const to = shiftDateStr(from, 6)
+  try {
+    const res = await axios.get('/api/duty/daily', { params: { mode: props.mode, from, to } })
+    dailyRows.value = Array.isArray(res.data) ? res.data : ((res.data && res.data.data) || [])
+  } catch (e) {
+    console.error(e)
+    dailyRows.value = []
+  }
+}
+function toggleForm() { formOpen.value = !formOpen.value }
+// 周数 -> 日期：weekStart = 学期起始周一 + (N-1)*7，weekEnd = weekStart + 6
+function onWeekCountChange() {
+  let n = Math.round(Number(weekCount.value))
+  if (!Number.isFinite(n)) n = 1
+  const maxNo = weeks.value.length || 60
+  n = Math.max(1, Math.min(maxNo, n))
+  weekCount.value = n
+
+  let weekStart = ''
+  if (semesterMonday.value) weekStart = shiftDateStr(semesterMonday.value, (n - 1) * 7)
+  else {
+    const w = weeks.value[n - 1]
+    weekStart = w ? w.week_start : ''
+  }
+  if (!weekStart) return
+
+  currentWeek.value = weekStart
+  startDate.value = weekStart
+  endDate.value = shiftDateStr(weekStart, 6)
+  loadDaily()
+}
+// 日期 -> 周数：以开始日期所在周的周一为准；结束日期跨到别的周时，默认改回「第一周」（即开始日期所在周）
+function onDateChange() {
+  let weekStart = mondayOf(startDate.value)
+  if (!weekStart) {
+    // 开始日期为空/非法时用结束日期兜底
+    weekStart = mondayOf(endDate.value)
+    if (!weekStart) return
+  }
+  startDate.value = weekStart
+  endDate.value = shiftDateStr(weekStart, 6)
+  currentWeek.value = weekStart
+  // 学期已填开始日期时换算周数；未填则周数保持不变，只显示日期
+  if (semesterMonday.value) {
+    const n = Math.round(diffDays(semesterMonday.value, weekStart) / 7) + 1
+    if (n >= 1) weekCount.value = n
+  }
+  loadDaily()
+}
+// 提交：把该周写入历史记录
+async function submitWeek() {
+  const weekStart = currentWeek.value || mondayOf(startDate.value)
+  if (!weekStart) {
+    useNotification().error('请先选择有效的周')
+    return
+  }
+  try {
+    const res = await axios.post('/api/duty/history/week', { week_start: weekStart, mode: props.mode })
+    useNotification().success(res.data && res.data.message)
+    formOpen.value = false
+    await loadDaily()
+    emit('changed')
+  } catch (err) {
+    useNotification().error((err && err.response && err.response.data && err.response.data.error) || '增加周记录失败')
   }
 }
 </script>

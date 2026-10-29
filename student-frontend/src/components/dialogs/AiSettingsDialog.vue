@@ -94,8 +94,9 @@
   />
 </template>
 
-<script>
+<script setup>
 import axios from 'axios'
+import { ref, computed, watch } from 'vue'
 import AppHelp from '../base/AppHelp.vue'
 import AppSelect from '../base/AppSelect.vue'
 import AppSwitch from '../base/AppSwitch.vue'
@@ -106,237 +107,228 @@ import { useSeq } from '../../composables/useSeq.js'
 import '../../styles/dialog-transition.css'
 import DialogShell from '../base/DialogShell.vue'
 
-export default {
-  name: 'AiSettingsDialog',
-  components: { AppHelp, AppSelect, AppSwitch, AddModelDialog, ConfirmDialog, DialogShell },
-  props: {
-    show: { type: Boolean, default: false },
-  },
-  emits: ['close', 'saved'],
-  data() {
-    return {
-      enabled: false,
-      models: [],
-      loadError: '',      // 配置/可用模型加载失败的提示；空串表示正常
-      modelDialog: false, // 是否打开「添加模型」二次弹窗
-      editDialog: false,  // 是否打开「编辑模型」二次弹窗
-      editTarget: null,   // 正在编辑的模型对象
-      modelChoices: {},  // id -> 该服务商可用模型名列表（供卡片下拉切换）
-      providerChoices: {}, // provider -> 可用模型名列表（按服务商共享，避免每张卡片单独请求）
-      // 删除确认弹窗
-      confirmShow: false,
-      confirmTitle: '',
-      confirmMessage: '',
-      removeTarget: null,
-      providerLabels: {
-        deepseek: 'DeepSeek',
-        openai: 'OpenAI',
-        moonshot: 'Kimi（月之暗面）',
-        qwen: '通义千问',
-        glm: '智谱清言',
-        custom: '自定义',
-      },
-    }
-  },
-  computed: {
-    // 「添加模型」按钮旁的识别标签：当前选中的模型名
-    currentModelName() {
-      const a = this.models.find((m) => m.is_active)
-      return a ? a.name || a.model : '未选择模型'
-    },
-    // 预计算每张卡片的下拉选项，避免模板中调用方法导致的响应式追踪问题
-    modelOptions() {
-      const result = {}
-      this.models.forEach((m) => {
-        const arr = this.modelChoices[m.id]
-        result[m.id] = arr && arr.length ? arr.map((mId) => ({ value: mId, label: mId })) : []
-      })
-      return result
-    },
-  },
-  watch: {
-    show(val) {
-      if (val) this.load()
-    },
-  },
-  created() {
-    // 请求序号挂实例上（Options API 没有 setup 作用域）：load 会被 watch(show)、
-    // 保存后回调、删除确认等多路并发触发，慢的那次回来不能覆盖新状态。
-    this.seq = useSeq()
-  },
-  methods: {
-    close() {
-      this.$emit('close')
-    },
-    providerName(p) {
-      return this.providerLabels[p] || p || '未知'
-    },
-    // 把已缓存的 providerChoices 映射到各卡片（纯本地计算，不联网）
-    remapChoices() {
-      const next = {}
-      this.models.forEach((m) => {
-        const arr = this.providerChoices[m.provider]
-        if (arr && arr.length) next[m.id] = arr
-      })
-      this.modelChoices = next
-    },
-    // 轻量刷新：只拉开关与模型列表（都是本地接口，两个请求并行）。
-    // 用于卡片上的即时操作（切换模型 / 设为当前 / 删除模型）—— 这些操作**不需要**
-    // 重新 discover。discover 是真实外网请求（后端 20s 超时），每次操作都对每个
-    // 服务商发一遍，就是「切个模型要等几秒」的根因。
-    async refreshModelsOnly() {
-      const my = this.seq.take()
-      this.loadError = ''
+defineOptions({ name: 'AiSettingsDialog' })
+
+const props = defineProps({
+  show: { type: Boolean, default: false },
+})
+const emit = defineEmits(['close', 'saved'])
+
+const enabled = ref(false);
+const models = ref([]);
+const loadError = ref('')      // 配置/可用模型加载失败的提示；空串表示正常
+const modelDialog = ref(false) // 是否打开「添加模型」二次弹窗
+const editDialog = ref(false)  // 是否打开「编辑模型」二次弹窗
+const editTarget = ref(null)   // 正在编辑的模型对象
+const modelChoices = ref({})  // id -> 该服务商可用模型名列表（供卡片下拉切换）
+const providerChoices = ref({}) // provider -> 可用模型名列表（按服务商共享，避免每张卡片单独请求）
+// 删除确认弹窗
+const confirmShow = ref(false)
+const confirmTitle = ref('')
+const confirmMessage = ref('')
+const removeTarget = ref(null)
+const providerLabels = ref({
+  deepseek: 'DeepSeek',
+  openai: 'OpenAI',
+  moonshot: 'Kimi（月之暗面）',
+  qwen: '通义千问',
+  glm: '智谱清言',
+  custom: '自定义',
+});
+
+// 「添加模型」按钮旁的识别标签：当前选中的模型名
+const currentModelName = computed(() => {
+  const a = models.value.find((m) => m.is_active)
+  return a ? a.name || a.model : '未选择模型'
+})
+// 预计算每张卡片的下拉选项，避免模板中调用方法导致的响应式追踪问题
+const modelOptions = computed(() => {
+  const result = {}
+  models.value.forEach((m) => {
+    const arr = modelChoices.value[m.id]
+    result[m.id] = arr && arr.length ? arr.map((mId) => ({ value: mId, label: mId })) : []
+  })
+  return result
+})
+
+watch(() => props.show, (val) => {
+  if (val) load()
+})
+
+// 请求序号挂实例上（Options API 没有 setup 作用域）：load 会被 watch(show)、
+// 保存后回调、删除确认等多路并发触发，慢的那次回来不能覆盖新状态。
+const seq = useSeq()
+
+function close() {
+  emit('close')
+}
+function providerName(p) {
+  return providerLabels.value[p] || p || '未知'
+}
+// 把已缓存的 providerChoices 映射到各卡片（纯本地计算，不联网）
+function remapChoices() {
+  const next = {}
+  models.value.forEach((m) => {
+    const arr = providerChoices.value[m.provider]
+    if (arr && arr.length) next[m.id] = arr
+  })
+  modelChoices.value = next
+}
+// 轻量刷新：只拉开关与模型列表（都是本地接口，两个请求并行）。
+// 用于卡片上的即时操作（切换模型 / 设为当前 / 删除模型）—— 这些操作**不需要**
+// 重新 discover。discover 是真实外网请求（后端 20s 超时），每次操作都对每个
+// 服务商发一遍，就是「切个模型要等几秒」的根因。
+async function refreshModelsOnly() {
+  const my = seq.take()
+  loadError.value = ''
+  try {
+    const [cfg, list] = await Promise.all([
+      axios.get('/api/ai/config'),
+      axios.get('/api/ai/models'),
+    ])
+    if (!seq.isLatest(my)) return
+    enabled.value = cfg.data.success && cfg.data.data.enabled
+    models.value = list.data.success ? list.data.data : []
+    remapChoices()
+  } catch (err) {
+    if (!seq.isLatest(my)) return
+    console.error('刷新模型列表失败:', err)
+    loadError.value = '刷新模型列表失败：' + (err.response?.data?.error || err.message || '未知错误')
+  }
+}
+// 全量加载：本地两项 + 为每个服务商 discover 可用模型。
+// 只在**打开设置弹窗**与**新增模型**时调用（新增可能引入新服务商，必须发现一次）。
+async function load() {
+  const my = seq.take()
+  loadError.value = ''
+  try {
+    const [cfg, list] = await Promise.all([
+      axios.get('/api/ai/config'),
+      axios.get('/api/ai/models'),
+    ])
+    if (!seq.isLatest(my)) return
+    enabled.value = cfg.data.success && cfg.data.data.enabled
+    models.value = list.data.success ? list.data.data : []
+    // 先拉取所有服务商可用模型列表，再一次性更新 modelChoices（避免中间态闪烁）
+    const providers = [...new Set(models.value.map((m) => m.provider))]
+    const newChoices = {}
+    let discoverFailed = false
+    await Promise.all(providers.map(async (p) => {
       try {
-        const [cfg, list] = await Promise.all([
-          axios.get('/api/ai/config'),
-          axios.get('/api/ai/models'),
-        ])
-        if (!this.seq.isLatest(my)) return
-        this.enabled = cfg.data.success && cfg.data.data.enabled
-        this.models = list.data.success ? list.data.data : []
-        this.remapChoices()
+        // custom 服务商的 base_url 没有预设值，必须带上已存模型的自定义地址；
+        // 否则后端会退回到空 base_url，discover 直接失败（B09-4）。
+        const saved = models.value.find((m) => m.provider === p)
+        const res = await axios.post('/api/ai/models/discover', {
+          provider: p,
+          base_url: saved?.base_url || ''
+        })
+        newChoices[p] = res.data.success ? res.data.models : []
       } catch (err) {
-        if (!this.seq.isLatest(my)) return
-        console.error('刷新模型列表失败:', err)
-        this.loadError = '刷新模型列表失败：' + (err.response?.data?.error || err.message || '未知错误')
+        console.error('加载模型列表失败:', p, err)
+        newChoices[p] = []
+        discoverFailed = true
       }
-    },
-    // 全量加载：本地两项 + 为每个服务商 discover 可用模型。
-    // 只在**打开设置弹窗**与**新增模型**时调用（新增可能引入新服务商，必须发现一次）。
-    async load() {
-      const my = this.seq.take()
-      this.loadError = ''
-      try {
-        const [cfg, list] = await Promise.all([
-          axios.get('/api/ai/config'),
-          axios.get('/api/ai/models'),
-        ])
-        if (!this.seq.isLatest(my)) return
-        this.enabled = cfg.data.success && cfg.data.data.enabled
-        this.models = list.data.success ? list.data.data : []
-        // 先拉取所有服务商可用模型列表，再一次性更新 modelChoices（避免中间态闪烁）
-        const providers = [...new Set(this.models.map((m) => m.provider))]
-        const newChoices = {}
-        let discoverFailed = false
-        await Promise.all(providers.map(async (p) => {
-          try {
-            // custom 服务商的 base_url 没有预设值，必须带上已存模型的自定义地址；
-            // 否则后端会退回到空 base_url，discover 直接失败（B09-4）。
-            const saved = this.models.find((m) => m.provider === p)
-            const res = await axios.post('/api/ai/models/discover', {
-              provider: p,
-              base_url: saved?.base_url || ''
-            })
-            newChoices[p] = res.data.success ? res.data.models : []
-          } catch (err) {
-            console.error('加载模型列表失败:', p, err)
-            newChoices[p] = []
-            discoverFailed = true
-          }
-        }))
-        // discover 是逐个服务商串行的，最容易出现「旧的先发、后到」
-        if (!this.seq.isLatest(my)) return
-        this.providerChoices = newChoices
-        // 将服务商结果映射到各卡片（保留旧 choices 直到新数据就位）
-        this.remapChoices()
-        if (discoverFailed) this.loadError = '部分服务商的可用模型加载失败，模型下拉可能不完整'
-      } catch (err) {
-        // 过期请求的失败不要盖掉新请求的结果
-        if (!this.seq.isLatest(my)) return
-        console.error('加载 AI 配置失败:', err)
-        this.loadError = '加载 AI 配置失败：' + (err.response?.data?.error || err.message || '未知错误')
-      }
-    },
-    // 卡片下拉切换模型：先由后端验证连通，通过才保存
-    async onCardModelChange(id) {
-      const item = this.models.find((x) => x.id === id)
-      if (!item || !item.model) return
-      try {
-        await axios.put(`/api/ai/models/${id}`, { model: item.model })
-      } catch (err) {
-        // 原生 alert 会阻塞渲染进程且样式与项目通知体系脱节（v1 B07-6 已统一过 history.js 同类问题）
-        reportError(err, { action: '切换模型' })
-      }
-      await this.refreshModelsOnly()
-      this.$emit('saved')
-    },
-    async toggleEnabled(value) {
-      const prev = this.enabled
-      this.enabled = !!value
-      try {
-        await axios.put('/api/ai/config', { enabled: this.enabled })
-        this.$emit('saved')
-      } catch (err) {
-        // 失败要把开关拨回去（对照同文件 toggleReasoning 的写法）：
-        // 不回滚的话界面显示「已启用」、后端仍是关闭，用户接着点「保存」会一路撞墙。
-        this.enabled = prev
-        reportError(err, { action: '切换 AI 开关' })
-      }
-    },
-    // 切换该模型的推理开关（即时保存，无需确定按钮）
-    async toggleReasoning(m, e) {
-      const on = e.target.checked
-      try {
-        await axios.put(`/api/ai/models/${m.id}/reasoning`, { reasoning: on })
-        m.reasoning = on
-        this.$emit('saved')
-      } catch (err) {
-        e.target.checked = !on
-        reportError(err, { action: '切换推理开关' })
-      }
-    },
-    // 添加模型成功后的回调：刷新列表
-    async onModelSaved() {
-      await this.load()
-      this.$emit('saved')
-    },
-    async selectModel(id) {
-      try {
-        await axios.put(`/api/ai/models/${id}/active`)
-        await this.refreshModelsOnly()
-        this.$emit('saved')
-      } catch (err) {
-        console.error('选中失败:', err)
-      }
-    },
-    // 打开「添加模型」弹窗（清空编辑态目标）
-    openAdd() {
-      this.editTarget = null
-      this.editDialog = false
-      this.modelDialog = true
-    },
-    // 打开「编辑模型」弹窗，回填该条数据
-    openEdit(m) {
-      this.modelDialog = false
-      this.editTarget = m
-      this.editDialog = true
-    },
-    // 关闭添加/编辑弹窗（不清 editTarget，避免关闭动画期间标题从「编辑模型」闪回「添加模型」；
-    // 下次打开时由 openAdd/openEdit 重新设置）
-    closeModelDialog() {
-      this.modelDialog = false
-      this.editDialog = false
-    },
-    removeModel(m) {
-      this.removeTarget = m
-      this.confirmTitle = '删除密钥'
-      this.confirmMessage = `确定删除密钥「${m.name || m.model}」？`
-      this.confirmShow = true
-    },
-    async onRemoveConfirm() {
-      const m = this.removeTarget
-      if (!m) return
-      this.confirmShow = false
-      try {
-        await axios.delete(`/api/ai/models/${m.id}`)
-        await this.refreshModelsOnly()
-        this.$emit('saved')
-      } catch (err) {
-        console.error('删除失败:', err)
-      }
-      this.removeTarget = null
-    },
-  },
+    }))
+    // discover 是逐个服务商串行的，最容易出现「旧的先发、后到」
+    if (!seq.isLatest(my)) return
+    providerChoices.value = newChoices
+    // 将服务商结果映射到各卡片（保留旧 choices 直到新数据就位）
+    remapChoices()
+    if (discoverFailed) loadError.value = '部分服务商的可用模型加载失败，模型下拉可能不完整'
+  } catch (err) {
+    // 过期请求的失败不要盖掉新请求的结果
+    if (!seq.isLatest(my)) return
+    console.error('加载 AI 配置失败:', err)
+    loadError.value = '加载 AI 配置失败：' + (err.response?.data?.error || err.message || '未知错误')
+  }
+}
+// 卡片下拉切换模型：先由后端验证连通，通过才保存
+async function onCardModelChange(id) {
+  const item = models.value.find((x) => x.id === id)
+  if (!item || !item.model) return
+  try {
+    await axios.put(`/api/ai/models/${id}`, { model: item.model })
+  } catch (err) {
+    // 原生 alert 会阻塞渲染进程且样式与项目通知体系脱节（v1 B07-6 已统一过 history.js 同类问题）
+    reportError(err, { action: '切换模型' })
+  }
+  await refreshModelsOnly()
+  emit('saved')
+}
+async function toggleEnabled(value) {
+  const prev = enabled.value
+  enabled.value = !!value
+  try {
+    await axios.put('/api/ai/config', { enabled: enabled.value })
+    emit('saved')
+  } catch (err) {
+    // 失败要把开关拨回去（对照同文件 toggleReasoning 的写法）：
+    // 不回滚的话界面显示「已启用」、后端仍是关闭，用户接着点「保存」会一路撞墙。
+    enabled.value = prev
+    reportError(err, { action: '切换 AI 开关' })
+  }
+}
+// 切换该模型的推理开关（即时保存，无需确定按钮）
+async function toggleReasoning(m, e) {
+  const on = e.target.checked
+  try {
+    await axios.put(`/api/ai/models/${m.id}/reasoning`, { reasoning: on })
+    m.reasoning = on
+    emit('saved')
+  } catch (err) {
+    e.target.checked = !on
+    reportError(err, { action: '切换推理开关' })
+  }
+}
+// 添加模型成功后的回调：刷新列表
+async function onModelSaved() {
+  await load()
+  emit('saved')
+}
+async function selectModel(id) {
+  try {
+    await axios.put(`/api/ai/models/${id}/active`)
+    await refreshModelsOnly()
+    emit('saved')
+  } catch (err) {
+    console.error('选中失败:', err)
+  }
+}
+// 打开「添加模型」弹窗（清空编辑态目标）
+function openAdd() {
+  editTarget.value = null
+  editDialog.value = false
+  modelDialog.value = true
+}
+// 打开「编辑模型」弹窗，回填该条数据
+function openEdit(m) {
+  modelDialog.value = false
+  editTarget.value = m
+  editDialog.value = true
+}
+// 关闭添加/编辑弹窗（不清 editTarget，避免关闭动画期间标题从「编辑模型」闪回「添加模型」；
+// 下次打开时由 openAdd/openEdit 重新设置）
+function closeModelDialog() {
+  modelDialog.value = false
+  editDialog.value = false
+}
+function removeModel(m) {
+  removeTarget.value = m
+  confirmTitle.value = '删除密钥'
+  confirmMessage.value = `确定删除密钥「${m.name || m.model}」？`
+  confirmShow.value = true
+}
+async function onRemoveConfirm() {
+  const m = removeTarget.value
+  if (!m) return
+  confirmShow.value = false
+  try {
+    await axios.delete(`/api/ai/models/${m.id}`)
+    await refreshModelsOnly()
+    emit('saved')
+  } catch (err) {
+    console.error('删除失败:', err)
+  }
+  removeTarget.value = null
 }
 </script>

@@ -280,7 +280,7 @@ router.get('/', (req, res) => {
       if (!row) continue
       for (const mode of ['daily', 'big']) {
         const cells = unpackMode(row.cells, mode)
-        const items = dutyItemsField ? unpackMode(dutyItemsField, mode) : []
+        const items = dutyItemsField ? unpackMode(dutyItemsField, mode, []) : []
         if (!Array.isArray(items) || !items.length) continue
         if (!cells || !Object.keys(cells).length) continue
         const out = []

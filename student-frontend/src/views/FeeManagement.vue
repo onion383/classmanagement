@@ -553,7 +553,6 @@ async function saveReceiptImages() {
 function getFullUrl(img) {
   if (!img) return ''
   // 收据存储路径为 /uploads/xxx；resourceUrl 会补完整后端地址（file:// 打包版）并追加 ?token= 通过鉴权。
-  // 兼容历史数据里可能存在的绝对 http 地址（直接透传 + 补 token）。
   return resourceUrl(img)
 }
 

@@ -2,7 +2,7 @@ import axios from 'axios'
 import { setupSecureAxios } from '../composables/secureAxios'
 import { applyAuthHeader, safe } from '../composables/secureChannel'
 import { waitForBackendReady, isBackendUnreachable, resetBackendReady } from './backendReady'
-import { storeMediaToken } from './apiUrl'
+import { absorbRenewal } from './apiUrl'
 
 // 安全通道「会话过期」不是登录态失效：加密会话 15 分钟被动过期时，后端在请求解密阶段
 // 直接回 401 且 body 为 { d:'session-expired' }（不是密文，也非登录 token 问题）。
@@ -71,13 +71,7 @@ export function setupApiClient({
   axios.interceptors.response.use(
     res => {
       // 滑动续期：后端在 token 快到期时随响应下发新的 30 天 token / 媒体凭据，落盘后生效
-      const renewed = res.headers && res.headers['x-renewed-token']
-      if (renewed) {
-        try { localStorage.setItem('token', renewed) } catch (_) {}
-        onTokenRenewed?.(renewed)
-      }
-      const renewedMedia = res.headers && res.headers['x-renewed-media']
-      if (renewedMedia) storeMediaToken(renewedMedia)
+      absorbRenewal(res.headers, { onTokenRenewed })
       return res
     },
     async (error) => {

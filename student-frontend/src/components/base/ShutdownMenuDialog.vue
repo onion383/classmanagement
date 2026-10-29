@@ -75,28 +75,24 @@
   </Teleport>
 </template>
 
-<script>
+<script setup>
 // 主窗口关闭选择菜单：复用 dialog-transition.css 的弹窗动画
+import { ref } from 'vue'
 import '../../styles/dialog-transition.css'
 import { Monitor, PanelsTopLeft, LayoutGrid, Power } from '@lucide/vue'
 
-export default {
-  name: 'ShutdownMenuDialog',
-  components: { Monitor, PanelsTopLeft, LayoutGrid, Power },
-  props: {
-    visible: Boolean,
-    hasToolbox: Boolean,
-    hasDesktop: Boolean,
-  },
-  data() {
-    return { remember: false }
-  },
-  emits: ['choose', 'cancel'],
-  methods: {
-    choose(action) { this.$emit('choose', { action, remember: this.remember }) },
-    cancel() { this.$emit('cancel') },
-  },
-}
+defineOptions({ name: 'ShutdownMenuDialog' })
+defineProps({
+  visible: Boolean,
+  hasToolbox: Boolean,
+  hasDesktop: Boolean,
+})
+const emit = defineEmits(['choose', 'cancel'])
+
+const remember = ref(false)
+
+function choose(action) { emit('choose', { action, remember: remember.value }) }
+function cancel() { emit('cancel') }
 </script>
 
 <style scoped>

@@ -26,13 +26,11 @@
   </div>
 </template>
 
-<script>
-export default {
-  name: 'Tabs',
-  props: {
-    tabs: { type: Array, required: true },
-    modelValue: { type: String, required: true }
-  },
-  emits: ['update:modelValue']
-};
+<script setup>
+defineOptions({ name: 'Tabs' })
+defineProps({
+  tabs: { type: Array, required: true },
+  modelValue: { type: String, required: true }
+})
+defineEmits(['update:modelValue'])
 </script>

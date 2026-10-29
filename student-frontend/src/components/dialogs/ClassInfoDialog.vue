@@ -34,47 +34,44 @@
   </DialogShell>
 </template>
 
-<script>
+<script setup>
 import '../../styles/dialog-transition.css'
+import { ref, watch, nextTick } from 'vue'
 import DialogShell from '../base/DialogShell.vue'
 
-export default {
-  name: 'ClassInfoDialog',
-  components: { DialogShell },
-  props: {
-    visible: { type: Boolean, default: false },
-    classData: { type: Object, default: () => ({}) }
-  },
-  emits: ['confirm', 'cancel'],
-  data() {
-    return { form: { name: '', motto: '', mottoStyle: '', xuefeng: '' } }
-  },
-  watch: {
-    visible(v) {
-      if (v) {
-        this.form = {
-          name: this.classData.name || '',
-          motto: this.classData.motto || '',
-          mottoStyle: this.classData.mottoStyle || '',
-          xuefeng: this.classData.xuefeng || ''
-        }
-        // 打开后聚焦「班级名称」，便于直接回车保存
-        this.$nextTick(() => { this.$refs.nameInput?.focus() })
-      }
+defineOptions({ name: 'ClassInfoDialog' })
+
+const props = defineProps({
+  visible: { type: Boolean, default: false },
+  classData: { type: Object, default: () => ({}) }
+})
+const emit = defineEmits(['confirm', 'cancel'])
+
+const form = ref({ name: '', motto: '', mottoStyle: '', xuefeng: '' })
+const nameInput = ref(null)
+
+watch(() => props.visible, (v) => {
+  if (v) {
+    form.value = {
+      name: props.classData.name || '',
+      motto: props.classData.motto || '',
+      mottoStyle: props.classData.mottoStyle || '',
+      xuefeng: props.classData.xuefeng || ''
     }
-  },
-  methods: {
-    // 回车确定：textarea 内回车用于换行、输入法合成态回车不上屏，均不触发保存
-    onKeydown(e) {
-      if (e.key !== 'Enter' || e.isComposing) return
-      if (e.target && e.target.tagName === 'TEXTAREA') return
-      e.preventDefault()
-      this.submit()
-    },
-    submit() {
-      this.$emit('confirm', { ...this.form })
-    }
+    // 打开后聚焦「班级名称」，便于直接回车保存
+    nextTick(() => { nameInput.value?.focus() })
   }
+})
+
+// 回车确定：textarea 内回车用于换行、输入法合成态回车不上屏，均不触发保存
+function onKeydown(e) {
+  if (e.key !== 'Enter' || e.isComposing) return
+  if (e.target && e.target.tagName === 'TEXTAREA') return
+  e.preventDefault()
+  submit()
+}
+function submit() {
+  emit('confirm', { ...form.value })
 }
 </script>
 

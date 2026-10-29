@@ -150,7 +150,7 @@ export function bindElastic(el) {
 // 全局启动：扫描当前及未来（动态弹窗）出现的所有可滚动容器并绑定
 let started = false
 export function startElasticScroll() {
-  if (started || typeof document === 'undefined') return
+  if (started) return
   started = true
 
   const scanAll = () => {

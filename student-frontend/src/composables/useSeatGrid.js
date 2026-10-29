@@ -128,7 +128,10 @@ export function useSeatGrid(apiBase, options = {}) {
         if (isAisleCol(d, cols.value, mode.value, showAisle.value)) continue
         const cell = row.cells[d]
         const name = cell?.course?.trim() || ''
-        const studentId = getStudentId(name)
+        // 候选框里明确点选的学生：直接用它的 id（同名正式/临时也能区分）。
+        // 手输的名字没有 _studentId，退回按姓名解析；仍解析不到就暂存姓名（等名字同步后下次保存再转 id）。
+        const pickedId = Number.isInteger(cell?._studentId) ? cell._studentId : null
+        const studentId = pickedId != null ? pickedId : getStudentId(name)
         if (studentId != null) {
           seatRow.push(studentId)
         } else if (name === '') {

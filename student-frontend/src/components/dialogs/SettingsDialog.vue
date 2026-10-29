@@ -115,128 +115,119 @@
   </DialogShell>
 </template>
 
-<script>
+<script setup>
 import '../../styles/dialog-transition.css'
 import DialogShell from '../base/DialogShell.vue'
 import AppSelect from '../base/AppSelect.vue'
 import { useNotification } from '../../composables/useNotification.js'
+import { ref, watch } from 'vue'
 
-export default {
-  name: 'SettingsDialog',
-  components: { AppSelect, DialogShell },
-  props: {
-    visible: Boolean,
-    settings: { type: Object, default: () => ({}) },
-    semesterStart: { type: String, default: '' } ,
-    showSemesterStart: { type: Boolean, default: true }   // 补上这一行  // 新增
-  },
-  emits: ['save', 'cancel', 'update:semesterStart'],  // 新增
-  data() {
-    return {
-      startDay: 1,
-      endDay: 5,
-      sections: {
-        morning: [],
-        noon: [],
-        afternoon: [],
-        evening: [],
-        night: []
-      },
-      dayOptions: [
-        { label: '周一', value: 1 },
-        { label: '周二', value: 2 },
-        { label: '周三', value: 3 },
-        { label: '周四', value: 4 },
-        { label: '周五', value: 5 },
-        { label: '周六', value: 6 },
-        { label: '周日', value: 7 }
-      ]
+defineOptions({ name: 'SettingsDialog' })
+
+const props = defineProps({
+  visible: Boolean,
+  settings: { type: Object, default: () => ({}) },
+  semesterStart: { type: String, default: '' } ,
+  showSemesterStart: { type: Boolean, default: true }   // 补上这一行  // 新增
+})
+const emit = defineEmits(['save', 'cancel', 'update:semesterStart'])  // 新增
+
+const startDay = ref(1);
+const endDay = ref(5);
+const sections = ref({
+  morning: [],
+  noon: [],
+  afternoon: [],
+  evening: [],
+  night: []
+});
+const dayOptions = ref([
+  { label: '周一', value: 1 },
+  { label: '周二', value: 2 },
+  { label: '周三', value: 3 },
+  { label: '周四', value: 4 },
+  { label: '周五', value: 5 },
+  { label: '周六', value: 6 },
+  { label: '周日', value: 7 }
+]);
+
+watch(() => props.settings, (val) => {
+  if (val.sections) {
+    sections.value = {
+      morning: val.sections.morning?.map(i => ({...i})) || [],
+      noon: val.sections.noon?.map(i => ({...i})) || [],
+      afternoon: val.sections.afternoon?.map(i => ({...i})) || [],
+      evening: val.sections.evening?.map(i => ({...i})) || [],
+      night: val.sections.night?.map(i => ({...i})) || []
     };
-  },
-  watch: {
-    settings: {
-      handler(val) {
-        if (val.sections) {
-          this.sections = {
-            morning: val.sections.morning?.map(i => ({...i})) || [],
-            noon: val.sections.noon?.map(i => ({...i})) || [],
-            afternoon: val.sections.afternoon?.map(i => ({...i})) || [],
-            evening: val.sections.evening?.map(i => ({...i})) || [],
-            night: val.sections.night?.map(i => ({...i})) || []
-          };
-        } else if (val.periods) {
-          this.resetToDefault(); // 简单降级
-        }
-        if (val.days) {
-          const dayMap = { '周一':1,'周二':2,'周三':3,'周四':4,'周五':5,'周六':6,'周日':7 };
-          this.startDay = dayMap[val.days[0]] || 1;
-          this.endDay = dayMap[val.days[val.days.length-1]] || 5;
-        }
-      },
-      deep: true,
-      immediate: true
-    }
-  },
-  methods: {
-    addItem(section) {
-      this.sections[section].push({ name: '', start: '08:00', end: '08:45', type: 'lesson' });
-    },
-    removeItem(section, idx) {
-      this.sections[section].splice(idx, 1);
-    },
-    resetToDefault() {
-      this.sections = {
-        morning: [
-          { name: '第1节', start: '08:10', end: '08:55', type: 'lesson' },
-          { name: '第2节', start: '09:05', end: '09:50', type: 'lesson' },
-          { name: '大课间', start: '09:50', end: '10:20', type: 'rest' },
-          { name: '第3节', start: '10:20', end: '11:05', type: 'lesson' },
-          { name: '第4节', start: '11:15', end: '12:00', type: 'lesson' }
-        ],
-        noon: [
-          { name: '午休', start: '12:00', end: '14:00', type: 'rest' }
-        ],
-        afternoon: [
-          { name: '第5节', start: '14:30', end: '15:15', type: 'lesson' },
-          { name: '第6节', start: '15:25', end: '16:10', type: 'lesson' }
-        ],
-        evening: [
-          { name: '休息', start: '17:00', end: '18:30', type: 'rest' }
-        ],
-        night: [
-          { name: '晚修1', start: '19:00', end: '19:45', type: 'lesson' },
-          { name: '晚修2', start: '19:55', end: '20:40', type: 'lesson' }
-        ]
-      };
-      this.startDay = 1;
-      this.endDay = 5;
-    },
-    save() {
-      // 开始日晚于结束日会生成空 days 数组，后端保存后课表直接没有可用星期
-      if (this.startDay > this.endDay) {
-        useNotification().error('开始日不能晚于结束日')
-        return
-      }
-      const dayNames = ['周一','周二','周三','周四','周五','周六','周日'];
-      const days = [];
-      for (let i = this.startDay; i <= this.endDay; i++) days.push(dayNames[i-1]);
-
-      const sections = JSON.parse(JSON.stringify(this.sections));
-      const periods = [];
-      ['morning','noon','afternoon','evening','night'].forEach(key => {
-        sections[key].forEach(item => {
-          periods.push({ name: item.name, start: item.start, end: item.end, type: item.type });
-        });
-      });
-
-      this.$emit('save', { sections, periods, days });
-    }
-  },
-  created() {
-    if (!this.settings || !this.settings.sections) {
-      this.resetToDefault();
-    }
+  } else if (val.periods) {
+    resetToDefault(); // 简单降级
   }
-};
+  if (val.days) {
+    const dayMap = { '周一':1,'周二':2,'周三':3,'周四':4,'周五':5,'周六':6,'周日':7 };
+    startDay.value = dayMap[val.days[0]] || 1;
+    endDay.value = dayMap[val.days[val.days.length-1]] || 5;
+  }
+}, {
+  deep: true,
+  immediate: true
+});
 
+function addItem(section) {
+  sections.value[section].push({ name: '', start: '08:00', end: '08:45', type: 'lesson' });
+}
+function removeItem(section, idx) {
+  sections.value[section].splice(idx, 1);
+}
+function resetToDefault() {
+  sections.value = {
+    morning: [
+      { name: '第1节', start: '08:10', end: '08:55', type: 'lesson' },
+      { name: '第2节', start: '09:05', end: '09:50', type: 'lesson' },
+      { name: '大课间', start: '09:50', end: '10:20', type: 'rest' },
+      { name: '第3节', start: '10:20', end: '11:05', type: 'lesson' },
+      { name: '第4节', start: '11:15', end: '12:00', type: 'lesson' }
+    ],
+    noon: [
+      { name: '午休', start: '12:00', end: '14:00', type: 'rest' }
+    ],
+    afternoon: [
+      { name: '第5节', start: '14:30', end: '15:15', type: 'lesson' },
+      { name: '第6节', start: '15:25', end: '16:10', type: 'lesson' }
+    ],
+    evening: [
+      { name: '休息', start: '17:00', end: '18:30', type: 'rest' }
+    ],
+    night: [
+      { name: '晚修1', start: '19:00', end: '19:45', type: 'lesson' },
+      { name: '晚修2', start: '19:55', end: '20:40', type: 'lesson' }
+    ]
+  };
+  startDay.value = 1;
+  endDay.value = 5;
+}
+function save() {
+  // 开始日晚于结束日会生成空 days 数组，后端保存后课表直接没有可用星期
+  if (startDay.value > endDay.value) {
+    useNotification().error('开始日不能晚于结束日')
+    return
+  }
+  const dayNames = ['周一','周二','周三','周四','周五','周六','周日'];
+  const days = [];
+  for (let i = startDay.value; i <= endDay.value; i++) days.push(dayNames[i-1]);
+
+  const sectionsData = JSON.parse(JSON.stringify(sections.value));
+  const periods = [];
+  ['morning','noon','afternoon','evening','night'].forEach(key => {
+    sectionsData[key].forEach(item => {
+      periods.push({ name: item.name, start: item.start, end: item.end, type: item.type });
+    });
+  });
+
+  emit('save', { sections: sectionsData, periods, days });
+}
+
+if (!props.settings || !props.settings.sections) {
+  resetToDefault();
+}
 </script>

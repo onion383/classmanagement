@@ -37,6 +37,7 @@
                 :candidateItems="allStudents"
                 :candidateExcludeIds="currentEditExcludeIds"
                 candidateLabelField="姓名"
+                candidateIdField="id"
                 candidatePlaceholder="输入姓名"
                 :minTableHeight="200"
                 :emptyReady="activeLoaded"
@@ -64,6 +65,7 @@
                 :candidateItems="allStudents"
                 :candidateExcludeIds="currentMasterEditExcludeIds"
                 candidateLabelField="姓名"
+                candidateIdField="id"
                 candidatePlaceholder="输入姓名"
                 :minTableHeight="200"
                 :emptyReady="masterLoaded"
@@ -382,7 +384,11 @@ function getStudentId(name) {
 async function fetchAllStudents() {
   try {
     const res = await axios.get(`${API_BASE}/students`)
-    allStudents.value = res.data.data || res.data
+    // 兼容两种正常形状（数组 / {data:数组}）；其余形状一律不覆盖现有名册，
+    // 避免把 {d:密文} 之类的异常响应当成数组用，把整张座位表带崩。
+    const list = Array.isArray(res.data) ? res.data : (res.data && Array.isArray(res.data.data) ? res.data.data : null)
+    if (!list) { console.error('[students] 响应形状异常', res.data); return }
+    allStudents.value = list
     studentMap.value = {}
     allStudents.value.forEach(s => { studentMap.value[s.id] = s })
   } catch (e) { console.error(e) }
@@ -494,9 +500,11 @@ function confirmShrink() {
 const saveActiveSettings = (s) => requestSaveSettings(s)
 
 const loadMaster = masterGrid.load
-// 表格输入的人名同步到学生管理：包装 onCellsUpdate，先同步再转发给网格逻辑
-const wrapCellsSync = (fn) => (newRows) => {
-  syncStudentNamesFromRows(newRows, {
+// 表格输入的人名同步到学生管理：包装 onCellsUpdate，先同步再转发给网格逻辑。
+// 必须 await：新名字还没进 allStudents 时，syncCellsToSeats 会把座位先落成姓名字符串；
+// 等后端解析/建档完成并刷新后再转换，才能直接落成学生 id。
+const wrapCellsSync = (fn) => async (newRows) => {
+  await syncStudentNamesFromRows(newRows, {
     getKnown: () => allStudents.value,
     refresh: fetchAllStudents,
     notify: notifySuccess

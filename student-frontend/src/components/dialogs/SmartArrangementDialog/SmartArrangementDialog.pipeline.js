@@ -1,5 +1,5 @@
 // ===== 智能排表：网格工具 + 统一条件流水线 =====
-// 纯代码搬运自 SmartArrangementDialog.vue 的 methods，未改写逻辑；通过展开注册到组件 methods。
+// 纯代码搬运自 SmartArrangementDialog.vue 的 methods，未改写逻辑；经 ctx 闭包调用（script setup）。
 // Fisher-Yates 洗牌（组块置换模块也复用）
 function shuffle(arr) {
   const a = [...arr]
@@ -10,7 +10,8 @@ function shuffle(arr) {
   return a
 }
 export { shuffle }
-export function useSmartArrangementPipeline(CONDITION_REGISTRY) {
+// ctx 契约：状态 ref（.value 访问）与跨模块方法（运行时解析）。
+export function useSmartArrangementPipeline(ctx, CONDITION_REGISTRY) {
   return {
     // ==================== 网格工具（与座位网格保持一致的显示算法） ====================
     generateColHeaders(cols, mode, showAisle) {
@@ -30,7 +31,7 @@ export function useSmartArrangementPipeline(CONDITION_REGISTRY) {
     },
     isAisleCol(displayIdx, cols, mode, showAisle) {
       if (!showAisle) return false
-      const totalDisplay = this.getDisplayColCount(cols, mode, showAisle)
+      const totalDisplay = ctx.getDisplayColCount(cols, mode, showAisle)
       if (mode === 'single') return displayIdx % 2 === 1
       else return displayIdx >= 2 && (displayIdx - 2) % 3 === 0 && displayIdx < totalDisplay
     },
@@ -40,13 +41,13 @@ export function useSmartArrangementPipeline(CONDITION_REGISTRY) {
     // 每条条件都自带「作用域 scope」：先把区域按 scope 切成若干作用块，条件在每个块内生效；
     // 列表按顺序依次执行，越靠后的条件越晚执行、可部分覆盖前面的结果（越靠后越重要）。
     buildSeats() {
-      this.satisfaction = {}
-      const grid = this.initGrid()
-      const all = this.allCells()
-      for (const node of this.conditions) {
+      ctx.satisfaction.value = {}
+      const grid = ctx.initGrid()
+      const all = ctx.allCells()
+      for (const node of ctx.conditions.value) {
         // 作用域切块后取各块的格子列表，作为「区域」交给条件（条件内部再按 unit 切块）
-        const regions = this.splitRegion(all, node.scope).map(b => b.pos)
-        this.applyCondition(grid, regions, node)
+        const regions = ctx.splitRegion(all, node.scope).map(b => b.pos)
+        ctx.applyCondition(grid, regions, node)
       }
       return grid
     },
@@ -61,7 +62,7 @@ export function useSmartArrangementPipeline(CONDITION_REGISTRY) {
 
     // 初始化网格：从原座位表填满学生，未出现的学生补到空位
     initGrid() {
-      const grid = Array.from({ length: this.rows }, () => new Array(this.cols).fill(null))
+      const grid = Array.from({ length: ctx.rows.value }, () => new Array(ctx.cols.value).fill(null))
       const used = new Set()
       // 新同学(字符串名字)没有真实 id，给一个负 id 占位，使其能走通排表流水线
       let pseudoId = -1
@@ -70,29 +71,29 @@ export function useSmartArrangementPipeline(CONDITION_REGISTRY) {
         if (!pseudoCache[n]) pseudoCache[n] = { id: pseudoId--, 姓名: n }
         return pseudoCache[n]
       }
-      for (let r = 0; r < this.rows; r++) {
-        for (let c = 0; c < this.cols; c++) {
-          const val = this.baseSeats?.[r]?.[c]
+      for (let r = 0; r < ctx.rows.value; r++) {
+        for (let c = 0; c < ctx.cols.value; c++) {
+          const val = ctx.baseSeats.value?.[r]?.[c]
           let s = null
           if (typeof val === 'number') {
-            s = this.students.find(x => x.id === val)
+            s = ctx.students.value.find(x => x.id === val)
           } else if (typeof val === 'string') {
             // 班级学生存 id，字符串名字均为"新同学"（未识别的自由文本）
             const n = val.trim()
-            if (n && !(this.excludeNew && this.strangerNames.has(n))) s = ensurePseudo(n)
+            if (n && !(ctx.excludeNew.value && ctx.strangerNames.value.has(n))) s = ensurePseudo(n)
           } else if (val && typeof val === 'object') {
             const n = String(val.姓名 || '').trim()
-            if (!(this.excludeNew && this.strangerNames.has(n))) {
+            if (!(ctx.excludeNew.value && ctx.strangerNames.value.has(n))) {
               s = n ? ensurePseudo(n) : val
             }
           }
           if (s) { grid[r][c] = s; used.add(s.id) }
         }
       }
-      const rest = this.students.filter(s => !used.has(s.id))
+      const rest = ctx.students.value.filter(s => !used.has(s.id))
       let k = 0
-      for (let r = 0; r < this.rows && k < rest.length; r++) {
-        for (let c = 0; c < this.cols && k < rest.length; c++) {
+      for (let r = 0; r < ctx.rows.value && k < rest.length; r++) {
+        for (let c = 0; c < ctx.cols.value && k < rest.length; c++) {
           if (!grid[r][c]) { grid[r][c] = rest[k++]; used.add(rest[k - 1].id) }
         }
       }
@@ -100,15 +101,15 @@ export function useSmartArrangementPipeline(CONDITION_REGISTRY) {
     },
     allCells() {
       const cells = []
-      for (let r = 0; r < this.rows; r++) for (let c = 0; c < this.cols; c++) cells.push({ r, c })
+      for (let r = 0; r < ctx.rows.value; r++) for (let c = 0; c < ctx.cols.value; c++) cells.push({ r, c })
       return cells
     },
 
     // 几何切块规则：column 一列（每列一块）| whole 一大组（整块）| six 相邻六位(3行×2列) | four 相邻四位(2行×2列)
     //             | student 同学（一人一格一块）| deskmate 同桌（同行左右相邻两人一块）
     shapeSpans(shape) {
-      if (shape === 'column') return { rSpan: this.rows, cSpan: 1 }
-      if (shape === 'whole') return { rSpan: this.rows, cSpan: this.cols }
+      if (shape === 'column') return { rSpan: ctx.rows.value, cSpan: 1 }
+      if (shape === 'whole') return { rSpan: ctx.rows.value, cSpan: ctx.cols.value }
       if (shape === 'six') return { rSpan: 3, cSpan: 2 }
       if (shape === 'student') return { rSpan: 1, cSpan: 1 }
       return { rSpan: 2, cSpan: 2 }
@@ -126,7 +127,7 @@ export function useSmartArrangementPipeline(CONDITION_REGISTRY) {
         }
         return [...map.values()]
       }
-      const { rSpan, cSpan } = this.shapeSpans(shape)
+      const { rSpan, cSpan } = ctx.shapeSpans(shape)
       const map = new Map()
       for (const p of region) {
         const br = Math.floor(p.r / rSpan), bc = Math.floor(p.c / cSpan)
@@ -150,7 +151,7 @@ export function useSmartArrangementPipeline(CONDITION_REGISTRY) {
         let i = 0
         while (i < cols.length) {
           const c = cols[i]
-          if (this.mode !== 'single' && c % 2 === 0 && inRow.has(c + 1)) {
+          if (ctx.mode.value !== 'single' && c % 2 === 0 && inRow.has(c + 1)) {
             slots.push([{ r, c }, { r, c: c + 1 }])
             i += 2
           } else {
@@ -192,7 +193,7 @@ export function useSmartArrangementPipeline(CONDITION_REGISTRY) {
         si++
       }
       // 再填剩余空位
-      const empties = this.cellOrder(region).filter(p => !grid[p.r][p.c])
+      const empties = ctx.cellOrder(region).filter(p => !grid[p.r][p.c])
       for (const p of empties) {
         if (si >= singles.length) break
         grid[p.r][p.c] = singles[si].cells[0]
@@ -206,23 +207,23 @@ export function useSmartArrangementPipeline(CONDITION_REGISTRY) {
       const unit = node.unit || 'six'
       let total = 0
       for (const region of regions) {
-        const blocks = this.splitRegion(region, unit)
+        const blocks = ctx.splitRegion(region, unit)
         if (blocks.length >= 2) {
-          this.applyPerm(grid, blocks, this.permWithinSizes(blocks))
+          ctx.applyPerm(grid, blocks, ctx.permWithinSizes(blocks))
         } else {
           // 只有一块时退化为「逐个学生」打乱，保证"换一换"仍能换出不同布局
-          this.shuffleSingles(grid, region)
+          ctx.shuffleSingles(grid, region)
         }
         total += region.filter(p => grid[p.r][p.c]).length
       }
-      this.trackSatisfaction(node.uid, total, total)
+      ctx.trackSatisfaction(node.uid, total, total)
     },
 
     // 以「个人」为最小单位打乱（每个学生独立，不保留同桌对）
     shuffleSingles(grid, region) {
       const students = region.map(p => grid[p.r][p.c]).filter(s => s)
       const units = students.map(s => ({ cells: [s], indivisible: false }))
-      this.fillSlots(grid, region, this.regionSlots(region), shuffle(units))
+      ctx.fillSlots(grid, region, ctx.regionSlots(region), shuffle(units))
     },
   }
 }

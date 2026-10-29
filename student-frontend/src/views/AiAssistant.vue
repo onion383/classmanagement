@@ -425,8 +425,9 @@
 }
 </style>
 
-<script>
-import { defineAsyncComponent } from 'vue'
+<script setup>
+import { ref, computed, watch, onMounted, onUnmounted, defineAsyncComponent, nextTick, toRef } from 'vue'
+import { useRouter } from 'vue-router'
 import axios from 'axios'
 import { PanelLeft, Plus, Database } from '@lucide/vue'
 import { useNotification } from '../composables/useNotification.js'
@@ -443,9 +444,9 @@ import {
 } from '../composables/ai/aiMessages.js'
 import { triggerPendingExport as runPendingExport, triggerPendingImage as runPendingImage } from '../composables/ai/aiFiles.js'
 import { AI_PERMISSION_KEY, AI_PERMISSION_FULL, AI_WEB_SEARCH_KEY, tableJumpTarget } from '../composables/ai/aiConstants.js'
-import aiConversations from '../composables/ai/aiConversations.js'
-import aiChat from '../composables/ai/aiChat.js'
-import aiExec from '../composables/ai/aiExec.js'
+import { useAiConversations } from '../composables/ai/aiConversations.js'
+import { useAiChat } from '../composables/ai/aiChat.js'
+import { useAiExec } from '../composables/ai/aiExec.js'
 import { INVOKE } from '../electronChannels.js'
 
 // 读取本地保存的写入权限挡位（只有 'full' 视为完全权限，其余一律回落到默认的「全部审批」）
@@ -481,383 +482,427 @@ const AiSettingsDialog = lazyDialog(() => import('../components/dialogs/AiSettin
 // 数据管理弹窗异步化：只在首次点「数据管理」时加载，避免进入 AI 助手就带上这份代码
 const DataManageDialog = lazyDialog(() => import('../components/data-manage/DataManageDialog.vue'))
 
-export default {
-  name: 'AiAssistant',
-  components: { AiSettingsDialog, DataManageDialog, ConfirmDialog, AiConversationPanel, AiLinkPanel, AiChangePanel, AiChatMessages, AiComposer, PanelLeft, Plus, Database },
-  // 逻辑模块以 mixin 合并为实例方法/computed，方法体保留 this.xxx 写法（不搬 data/watch/mounted/unmounted）
-  mixins: [aiConversations, aiChat, aiExec],
-  props: {
-    // 页面模式 / 悬浮呼出模式（紧凑）
-    floating: { type: Boolean, default: false },
-  },
-  emits: ['close'],
-  data() {
-    return {
-      _unmounted: false, // 卸载后异步回调（markdown 预加载）不再写组件状态
-      enabled: null, // null=加载中, false=未启用, true=已启用
-      busy: false,
-      messages: [],
-      hasEarlier: false, // 是否还有更早的历史消息可补载（滚动到顶部时触发）
-      loadingEarlier: false, // 更早历史补载中（防重入）
-      earliestMsgId: null, // 已加载消息中最早一条的落库 id（上翻分页游标）
-      input: '',
-      conversationId: null, // 当前会话 id（持久化用），null 表示尚未创建
-      conversationList: [], // 会话列表
-      showSettings: false, // AI 设置弹窗
-      dataManageOpen: false, // 数据管理弹窗是否显示
-      dataManageOpened: false, // 是否已首次打开过（首次打开才异步加载弹窗代码）
-      confirmDeleteShow: false, // 删除确认弹窗
-      confirmDeleteId: null, // 待删除的会话 id
-      rollbackConfirmShow: false, // 回退确认弹窗
-      attachedFile: null,    // 当前待发送的附件：{name, isImage, dataUrl, textContent, sizeLabel}
-      capturing: false,      // 截屏进行中（按钮转圈并禁用，避免重复触发）
-      abortCtrl: null,       // 当前流式请求的 AbortController（供「中断」按钮停止响应）
-      regionShot: null,      // 选区截屏的冻结画面（dataURL），非空时显示全屏选区遮罩
-      regionRect: null,      // 已框选区域（视口 CSS 像素）：{x, y, w, h}
-      regionDragging: false,
-      regionStart: null,
-      models: [],            // 已配置的模型列表（供输入区快捷切换）
-      activeModelId: null,   // 当前选中的模型 id
-      convDrawerOpen: false, // 对话列表抽屉是否展开
-      linkDrawerOpen: false, // 网页抽屉是否展开（点击消息里的链接时打开）
-      linkDrawerUrl: '',     // 网页抽屉当前打开的地址
-      changeDrawerOpen: false, // 改动明细抽屉是否展开（点击改动总结条的「↗」时打开）
-      changeDrawerProposal: null, // 改动明细抽屉展示的提案
-      visibleConvCount: 3, // 会话列表默认只渲染最近 3 条，其余点「加载更多」再显示
-      askPage: 0, // 多问题提问的分页索引（一页一题，从 0 开始）
-      // AI 写入权限挡位：'approve' 全部审批（每次写入都要确认）/ 'full' 完全权限（写入提案自动执行）
-      permissionMode: readPermissionMode(),
-      webSearchOn: readWebSearchOn(), // 联网搜索开关（仅 DeepSeek 模式可用，本地持久化）
-      permConfirmShow: false, // 切到完全权限前的风险确认弹窗
-      // 技能（md 指令文件）：可选列表来自「数据管理」页；输入框打「/」选中后加入已选，随本轮请求注入系统提示
-      skillOptions: [],
-      selectedSkills: [],
-    }
-  },
-  computed: {
-    // 当前选中的模型是否为 DeepSeek：联网搜索仅在该模式下可用，据此决定开关是否显示
-    searchAvailable() {
-      const m = this.models.find((x) => x.is_active)
-      return !!(m && m.provider === 'deepseek')
-    },
-    regionRectReady() {
-      const r = this.regionRect
-      return !!(r && r.w >= 4 && r.h >= 4)
-    },
-    // 当前会话标题（聊天区工具条上显示；未匹配到时为空）
-    activeConvTitle() {
-      const c = this.conversationList.find((x) => x.id === this.conversationId)
-      return c ? c.title : ''
-    },
-    // 暗色遮罩上按选区挖洞：用 clip-path 多边形留出选区，拖动时只改这一个属性
-    regionDimStyle() {
-      const r = this.regionRect
-      if (!r) return {}
-      const { x, y, w, h } = r
-      return { clipPath: `polygon(0 0, 100% 0, 100% 100%, 0 100%, 0 0, ${x}px ${y}px, ${x}px ${y + h}px, ${x + w}px ${y + h}px, ${x + w}px ${y}px, ${x}px ${y}px)` }
-    },
-    regionRectStyle() {
-      const r = this.regionRect
-      return r ? { left: r.x + 'px', top: r.y + 'px', width: r.w + 'px', height: r.h + 'px' } : {}
-    },
-  },
-  watch: {
-    // 冒出新的待回答提问时，分页回到第一题
-    pendingAsk(a) {
-      if (a) this.askPage = 0
-    },
-    // 网页抽屉打开时挂 document 级监听：点击「抽屉面板以外、且不是消息链接」的地方即收起。
-    // 之所以不在模板里放遮罩层：遮罩会盖住消息区，导致抽屉已打开时再点其它链接被遮罩吃掉，
-    // 变成「先关抽屉、还要再点一次」；改用面板穿透 + document 监听后，点链接直达 onMsgClick 直接切换。
-    linkDrawerOpen() { this.updateOutsideListener() },
-    changeDrawerOpen() { this.updateOutsideListener() },
-  },
-  mounted() {
-    this._unmounted = false
-    // 后台预加载 markdown 库（不阻塞首次渲染）
-    ensureMarkdown()
-      .then(() => { if (!this._unmounted) this._computeAllHtml() })
-      .catch((e) => console.warn('[ai] markdown 预加载失败：', e && e.message))
-    this.loadEnabled()
-    this.loadSkillOptions()
-  },
-  unmounted() {
-    this._unmounted = true
-    // 卸载时若仍在选区截屏，先把窗口还原，避免主窗口停在铺满整屏的状态
-    if (this.regionShot) this.endRegionSelect()
-    document.removeEventListener('mousedown', this.onDocMouseDown, true)
-  },
-  methods: {
-    // ===== 薄转发：把纯函数模块桥接为实例方法，供本组件与方法组内的 this.xxx 调用 =====
-    _buildBlocks(content) { return buildBlocks(content) },
-    _updateLiveRender(m) { return updateLiveRender(m) },
-    _parseMessages(rows) { return parseMessages(rows) },
-    _lastAssistantIndex() { return lastAssistantIndex(this.messages) },
-    _lastAssistant() { return lastAssistant(this.messages) },
-    _buildProc(m) { return buildProc(m) },
-    _isAutoMessage(m) { return isAutoMessage(m) },
-    isRetryable(i) { return isRetryableInList(this.messages, i, this.busy) },
-    isRollbackable(i) { return isRollbackableInList(this.messages, i, this.busy) },
-    triggerPendingExport(m) { return runPendingExport(m) },
-    triggerPendingImage(m) { return runPendingImage(m) },
-    // 附件：由 AiComposer 读取/粘贴后回填到父状态
-    setAttachment(file) { this.attachedFile = file },
-    clearAttachment() {
-      this.attachedFile = null
-    },
-    // ===== 技能（md 指令文件）：输入框打「/」按文件名匹配，选中即随本轮请求启用 =====
-    // 拉取可选技能名（失败静默，不影响聊天）
-    async loadSkillOptions() {
-      try {
-        const { data } = await axios.get('/api/ai/skills')
-        const list = (data && data.data) || []
-        this.skillOptions = list.map((s) => s && s.name).filter(Boolean)
-        // 已选技能若已被删除，从已选里清掉
-        this.selectedSkills = this.selectedSkills.filter((n) => this.skillOptions.includes(n))
-      } catch (_) { this.skillOptions = [] }
-    },
-    // 选中一个技能：加入已选（去重）
-    onSelectSkill(name) {
-      if (!name || this.selectedSkills.includes(name)) return
-      this.selectedSkills.push(name)
-    },
-    // 移除已选技能
-    onRemoveSkill(name) {
-      this.selectedSkills = this.selectedSkills.filter((n) => n !== name)
-    },
-    // 打开数据管理弹窗（标题栏「设置」旁的按钮）：首次打开时才异步加载弹窗组件
-    openDataManage() {
-      this.dataManageOpened = true
-      this.dataManageOpen = true
-    },
-    // ===== 写入权限挡位（输入框工具行左下的「全部审批 / 完全权限」）=====
-    // 选挡位：切到完全权限前先弹风险确认（高风险，必须显式确认）；切回全部审批立即生效
-    onPickPermission(mode) {
-      if (mode === this.permissionMode) return
-      if (mode === AI_PERMISSION_FULL) { this.permConfirmShow = true; return }
-      this.setPermissionMode('approve')
-    },
-    // 确认开启完全权限
-    onPermConfirm() {
-      this.permConfirmShow = false
-      this.setPermissionMode(AI_PERMISSION_FULL)
-    },
-    // 写入挡位并持久化（下次打开沿用）
-    setPermissionMode(mode) {
-      this.permissionMode = mode
-      try { localStorage.setItem(AI_PERMISSION_KEY, mode) } catch (_) { /* 忽略 */ }
-    },
-    // 切换联网搜索开关并持久化（下次打开沿用）
-    onToggleSearch() {
-      this.webSearchOn = !this.webSearchOn
-      try { localStorage.setItem(AI_WEB_SEARCH_KEY, this.webSearchOn ? '1' : '0') } catch (_) { /* 忽略 */ }
-    },
-    // 抽屉内新建 / 切换会话后自动收起抽屉
-    onConvNew() {
-      this.newConversation()
-      this.convDrawerOpen = false
-    },
-    onConvSelect(id) {
-      this.switchConversation(id)
-      this.convDrawerOpen = false
-    },
-    // 截屏：主进程先隐藏窗口截取整屏，本组件铺满整屏显示冻结画面供框选，确定后作为图片附件交给 AI
-    async captureScreenshot() {
-      const { error: notifyError } = useNotification()
-      if (this.capturing || this.regionShot) return
-      if (!window.electron || !window.electron.invoke) {
-        notifyError('当前环境不支持截屏，请在桌面客户端中使用')
-        return
-      }
-      this.capturing = true
-      try {
-        // 窗口模式：截屏时主窗口保持可见（画面带上应用界面），先把 AI 浮窗收起到图标位置，
-        // 等收起动画走完再截，避免浮窗被截进画面；截屏结束后由 endRegionSelect 通知宿主重新展开
-        if (this.floating) {
-          this.$emit('capture-start')
-          await new Promise((r) => setTimeout(r, 160))
-        }
-        const res = await window.electron.invoke(INVOKE.SCREENSHOT_REGION)
-        if (!res || !res.success) throw new Error((res && res.error) || '截屏失败')
-        this.regionShot = res.dataUrl
-        this.regionRect = null
-        // 等渲染层把冻结画面画好，再让窗口铺满整屏显示遮罩，避免露出原界面闪一下
-        await this.$nextTick()
-        await new Promise((r) => requestAnimationFrame(r))
-        await window.electron.invoke(INVOKE.SCREENSHOT_REGION_SHOW)
-        document.addEventListener('keydown', this.onRegionKey)
-      } catch (err) {
-        await this.endRegionSelect()
-        notifyError('截屏失败：' + (err.message || '未知错误'))
-      } finally {
-        this.capturing = false
-      }
-    },
-    // 选区开始：记录起点并初始化零尺寸选区
-    onRegionDown(e) {
-      if (e.button !== 0) return
-      this.regionDragging = true
-      this.regionStart = { x: e.clientX, y: e.clientY }
-      this.regionRect = { x: e.clientX, y: e.clientY, w: 0, h: 0 }
-    },
-    onRegionMove(e) {
-      if (!this.regionDragging || !this.regionStart) return
-      const s = this.regionStart
-      this.regionRect = {
-        x: Math.min(s.x, e.clientX),
-        y: Math.min(s.y, e.clientY),
-        w: Math.abs(e.clientX - s.x),
-        h: Math.abs(e.clientY - s.y),
-      }
-    },
-    onRegionUp() {
-      if (!this.regionDragging) return
-      this.regionDragging = false
-      // 误点（几乎没拖动）视为未框选，避免出现 1px 的选区
-      if (this.regionRect && (this.regionRect.w < 4 || this.regionRect.h < 4)) this.regionRect = null
-    },
-    onRegionKey(e) {
-      if (e.key === 'Escape') {
-        e.preventDefault()
-        this.cancelRegion()
-      } else if (e.key === 'Enter' && this.regionRectReady) {
-        e.preventDefault()
-        this.confirmRegion()
-      }
-    },
-    // 确定：按「视口尺寸 ↔ 原图尺寸」比例裁出选区，作为附件发给 AI
-    async confirmRegion() {
-      const rect = this.regionRect
-      const shot = this.regionShot
-      if (!rect || !shot || !this.regionRectReady) return
-      const { error: notifyError } = useNotification()
-      try {
-        const img = new Image()
-        await new Promise((resolve, reject) => {
-          img.onload = resolve
-          img.onerror = () => reject(new Error('图片加载失败'))
-          img.src = shot
-        })
-        const scaleX = img.naturalWidth / window.innerWidth
-        const scaleY = img.naturalHeight / window.innerHeight
-        const canvas = document.createElement('canvas')
-        canvas.width = Math.max(1, Math.round(rect.w * scaleX))
-        canvas.height = Math.max(1, Math.round(rect.h * scaleY))
-        const ctx = canvas.getContext('2d')
-        ctx.drawImage(
-          img,
-          Math.round(rect.x * scaleX), Math.round(rect.y * scaleY), canvas.width, canvas.height,
-          0, 0, canvas.width, canvas.height
-        )
-        const dataUrl = canvas.toDataURL('image/png')
-        // 由 base64 长度估算图片大小（base64 约为原始字节的 4/3）
-        const bytes = Math.round((dataUrl.split(',')[1] || '').length * 0.75)
-        const sizeLabel = bytes > 1048576
-          ? (bytes / 1048576).toFixed(1) + ' MB'
-          : (bytes / 1024).toFixed(0) + ' KB'
-        await this.endRegionSelect()
-        this.attachedFile = { name: '截屏.png', isImage: true, dataUrl, textContent: '', sizeLabel }
-      } catch (err) {
-        await this.endRegionSelect()
-        notifyError('截屏失败：' + (err.message || '未知错误'))
-      }
-    },
-    cancelRegion() {
-      this.endRegionSelect()
-    },
-    // 结束选区：先让主进程把窗口还原到截屏前状态，再清掉遮罩（顺序反了会露出铺满整屏的界面）
-    async endRegionSelect() {
-      document.removeEventListener('keydown', this.onRegionKey)
-      try {
-        if (window.electron && window.electron.invoke) await window.electron.invoke(INVOKE.SCREENSHOT_REGION_END)
-      } catch (_) { /* 忽略 */ }
-      this.regionShot = null
-      this.regionRect = null
-      this.regionDragging = false
-      this.regionStart = null
-      // 窗口模式：截屏流程结束，通知宿主把收起的 AI 浮窗重新展开
-      if (this.floating) this.$emit('capture-end')
-    },
-    // 聊天区滚动到接近顶部时补载更早的历史消息（贴底由 scrollBottom 负责）
-    onMsgScroll() {
-      const box = this.$refs.msgBox
-      if (!box || box.scrollTop > 60) return
-      if (!this.hasEarlier || this.loadingEarlier) return
-      this.loadEarlier()
-    },
-    // 点击消息里的网页链接：拦下 <a href>，默认在右侧网页抽屉内打开（不再跳转 Electron 窗口）
-    onMsgClick(e) {
-      if (!this.isHttpLink(e.target)) return
-      const a = e.target.closest('a[href]')
-      e.preventDefault()
-      this.openLinkInDrawer(a.getAttribute('href') || '')
-    },
-    // 事件目标是否落在消息里「可内嵌打开」的 http(s) 链接内（onMsgClick 与 onDocMouseDown 共用）
-    isHttpLink(t) {
-      const a = t && t.closest ? t.closest('a[href]') : null
-      if (!a) return false
-      return /^https?:\/\//i.test(a.getAttribute('href') || '')
-    },
-    // 任一侧抽屉打开时挂 document 级监听，两扇都收起后摘除（同一函数引用，重复 add 为幂等）
-    updateOutsideListener() {
-      if (this.linkDrawerOpen || this.changeDrawerOpen) {
-        document.addEventListener('mousedown', this.onDocMouseDown, true)
-      } else {
-        document.removeEventListener('mousedown', this.onDocMouseDown, true)
-      }
-    },
-    // 点抽屉外部关闭：命中面板内、或点击的是消息链接 / 改动总结条上的「↗」时都不关闭
-    // （后两者分别交给 onMsgClick / openChangeDrawer 直接切换，实现「抽屉已打开时无需先关掉」）
-    onDocMouseDown(e) {
-      const t = e.target
-      const inLink = t && t.closest && (t.closest('.link-panel') || this.isHttpLink(t))
-      if (!inLink) this.linkDrawerOpen = false
-      const inChange = t && t.closest && (t.closest('.change-panel') || t.closest('.open-changes-btn'))
-      if (!inChange) this.changeDrawerOpen = false
-    },
-    // 打开改动明细抽屉（已有抽屉则复用，仅切换展示的提案；同一提案重复点则收起，避免无反应）
-    openChangeDrawer(m) {
-      // 浮窗（窗口）模式精简：不提供改动明细抽屉
-      if (this.floating) return
-      const p = m && m.proposal
-      if (!p) return
-      if (this.changeDrawerOpen && this.changeDrawerProposal === p) { this.changeDrawerOpen = false; return }
-      this.changeDrawerProposal = p
-      this.changeDrawerOpen = true
-    },
-    // 从改动明细抽屉跳转到对应业务表：带 ?focus=<id> 时目标页会滚动到该行并闪动高亮
-    // （复用 useRowFocus），跳转前先收起抽屉。
-    gotoTable({ table, id, focus }) {
-      const target = tableJumpTarget(table, id)
-      if (!target) return
-      this.changeDrawerOpen = false
-      // focus 优先：网格表（课表/座位/权重）改动明细可带「精确到格子」的定位串
-      const query = focus ? { focus } : target.query
-      this.$router.push(query ? { path: target.path, query } : { path: target.path })
-    },
-    // 在右侧抽屉里打开某个地址（已有抽屉则复用，仅切换地址）
-    openLinkInDrawer(url) {
-      this.linkDrawerUrl = url
-      this.linkDrawerOpen = true
-    },
-    // 用系统默认浏览器打开当前抽屉里的地址
-    openLinkExternal(url) {
-      if (!url) return
-      if (window.electron && window.electron.invoke) window.electron.invoke(INVOKE.OPEN_EXTERNAL, url)
-    },
-    // 置底：合并到下一帧执行。流式输出时每个 chunk 都会请求置底，
-    // 若每次都同步读写 scrollTop / scrollHeight 会反复触发强制布局；
-    // 用 rAF 去重，把同一帧内的多次请求合并为一次（行为不变，仍始终贴底）。
-    scrollBottom() {
-      this.$nextTick(() => {
-        if (this._scrollRaf) return
-        this._scrollRaf = requestAnimationFrame(() => {
-          this._scrollRaf = null
-          const box = this.$refs.msgBox
-          if (box) box.scrollTop = box.scrollHeight
-        })
-      })
-    },
-  },
+defineOptions({ name: 'AiAssistant' })
+
+const props = defineProps({
+  // 页面模式 / 悬浮呼出模式（紧凑）
+  floating: { type: Boolean, default: false },
+})
+const emit = defineEmits(['close', 'capture-start', 'capture-end'])
+
+const router = useRouter()
+
+// 模板 ref
+const msgBox = ref(null)
+const composer = ref(null)
+
+// ===== 状态 =====
+const _unmounted = ref(false) // 卸载后异步回调（markdown 预加载）不再写组件状态
+const enabled = ref(null) // null=加载中, false=未启用, true=已启用
+const busy = ref(false)
+const messages = ref([])
+const hasEarlier = ref(false) // 是否还有更早的历史消息可补载（滚动到顶部时触发）
+const loadingEarlier = ref(false) // 更早历史补载中（防重入）
+const earliestMsgId = ref(null) // 已加载消息中最早一条的落库 id（上翻分页游标）
+const input = ref('')
+const conversationId = ref(null) // 当前会话 id（持久化用），null 表示尚未创建
+const conversationList = ref([]) // 会话列表
+const showSettings = ref(false) // AI 设置弹窗
+const dataManageOpen = ref(false) // 数据管理弹窗是否显示
+const dataManageOpened = ref(false) // 是否已首次打开过（首次打开才异步加载弹窗代码）
+const confirmDeleteShow = ref(false) // 删除确认弹窗
+const confirmDeleteId = ref(null) // 待删除的会话 id
+const rollbackConfirmShow = ref(false) // 回退确认弹窗
+const attachedFile = ref(null)    // 当前待发送的附件：{name, isImage, dataUrl, textContent, sizeLabel}
+const capturing = ref(false)      // 截屏进行中（按钮转圈并禁用，避免重复触发）
+const abortCtrl = ref(null)       // 当前流式请求的 AbortController（供「中断」按钮停止响应）
+const regionShot = ref(null)      // 选区截屏的冻结画面（dataURL），非空时显示全屏选区遮罩
+const regionRect = ref(null)      // 已框选区域（视口 CSS 像素）：{x, y, w, h}
+const regionDragging = ref(false)
+const regionStart = ref(null)
+const models = ref([])            // 已配置的模型列表（供输入区快捷切换）
+const activeModelId = ref(null)   // 当前选中的模型 id
+const convDrawerOpen = ref(false) // 对话列表抽屉是否展开
+const linkDrawerOpen = ref(false) // 网页抽屉是否展开（点击消息里的链接时打开）
+const linkDrawerUrl = ref('')     // 网页抽屉当前打开的地址
+const changeDrawerOpen = ref(false) // 改动明细抽屉是否展开（点击改动总结条的「↗」时打开）
+const changeDrawerProposal = ref(null) // 改动明细抽屉展示的提案
+const visibleConvCount = ref(3) // 会话列表默认只渲染最近 3 条，其余点「加载更多」再显示
+const askPage = ref(0) // 多问题提问的分页索引（一页一题，从 0 开始）
+// AI 写入权限挡位：'approve' 全部审批（每次写入都要确认）/ 'full' 完全权限（写入提案自动执行）
+const permissionMode = ref(readPermissionMode())
+const webSearchOn = ref(readWebSearchOn()) // 联网搜索开关（仅 DeepSeek 模式可用，本地持久化）
+const permConfirmShow = ref(false) // 切到完全权限前的风险确认弹窗
+// 技能（md 指令文件）：可选列表来自「数据管理」页；输入框打「/」选中后加入已选，随本轮请求注入系统提示
+const skillOptions = ref([])
+const selectedSkills = ref([])
+
+// ===== 组件 computed =====
+// 当前选中的模型是否为 DeepSeek：联网搜索仅在该模式下可用，据此决定开关是否显示
+const searchAvailable = computed(() => {
+  const m = models.value.find((x) => x.is_active)
+  return !!(m && m.provider === 'deepseek')
+})
+const regionRectReady = computed(() => {
+  const r = regionRect.value
+  return !!(r && r.w >= 4 && r.h >= 4)
+})
+// 当前会话标题（聊天区工具条上显示；未匹配到时为空）
+const activeConvTitle = computed(() => {
+  const c = conversationList.value.find((x) => x.id === conversationId.value)
+  return c ? c.title : ''
+})
+// 暗色遮罩上按选区挖洞：用 clip-path 多边形留出选区，拖动时只改这一个属性
+const regionDimStyle = computed(() => {
+  const r = regionRect.value
+  if (!r) return {}
+  const { x, y, w, h } = r
+  return { clipPath: `polygon(0 0, 100% 0, 100% 100%, 0 100%, 0 0, ${x}px ${y}px, ${x}px ${y + h}px, ${x + w}px ${y + h}px, ${x + w}px ${y}px, ${x}px ${y}px)` }
+})
+const regionRectStyle = computed(() => {
+  const r = regionRect.value
+  return r ? { left: r.x + 'px', top: r.y + 'px', width: r.w + 'px', height: r.h + 'px' } : {}
+})
+
+// 非响应式实例状态
+let _scrollRaf = null
+
+// ===== ctx 袋：三个逻辑模块（原 Options mixin）经它互调 =====
+const ctx = {
+  // 状态 ref（.value 访问）
+  _unmounted, enabled, busy, messages, hasEarlier, loadingEarlier, earliestMsgId, input,
+  conversationId, conversationList, showSettings, dataManageOpen, dataManageOpened,
+  confirmDeleteShow, confirmDeleteId, rollbackConfirmShow, attachedFile, capturing, abortCtrl,
+  regionShot, regionRect, regionDragging, regionStart, models, activeModelId, convDrawerOpen,
+  linkDrawerOpen, linkDrawerUrl, changeDrawerOpen, changeDrawerProposal, visibleConvCount,
+  askPage, permissionMode, webSearchOn, permConfirmShow, skillOptions, selectedSkills,
+  // props（toRef，供模块经 ctx.floating.value 读）
+  floating: toRef(props, 'floating'),
+  // 模板 ref
+  msgBox, composer,
+  // 事件
+  emit,
 }
+
+// ===== 薄转发：把纯函数模块桥接为函数，供本组件与方法组内的 ctx.xxx 调用 =====
+function _buildBlocks(content) { return buildBlocks(content) }
+function _updateLiveRender(m) { return updateLiveRender(m) }
+function _parseMessages(rows) { return parseMessages(rows) }
+function _lastAssistantIndex() { return lastAssistantIndex(messages.value) }
+function _lastAssistant() { return lastAssistant(messages.value) }
+function _buildProc(m) { return buildProc(m) }
+function _isAutoMessage(m) { return isAutoMessage(m) }
+function isRetryable(i) { return isRetryableInList(messages.value, i, busy.value) }
+function isRollbackable(i) { return isRollbackableInList(messages.value, i, busy.value) }
+function triggerPendingExport(m) { return runPendingExport(m) }
+function triggerPendingImage(m) { return runPendingImage(m) }
+// 附件：由 AiComposer 读取/粘贴后回填到父状态
+function setAttachment(file) { attachedFile.value = file }
+function clearAttachment() {
+  attachedFile.value = null
+}
+// ===== 技能（md 指令文件）：输入框打「/」按文件名匹配，选中即随本轮请求启用 =====
+// 拉取可选技能名（失败静默，不影响聊天）
+async function loadSkillOptions() {
+  try {
+    const { data } = await axios.get('/api/ai/skills')
+    const list = (data && data.data) || []
+    skillOptions.value = list.map((s) => s && s.name).filter(Boolean)
+    // 已选技能若已被删除，从已选里清掉
+    selectedSkills.value = selectedSkills.value.filter((n) => skillOptions.value.includes(n))
+  } catch (_) { skillOptions.value = [] }
+}
+// 选中一个技能：加入已选（去重）
+function onSelectSkill(name) {
+  if (!name || selectedSkills.value.includes(name)) return
+  selectedSkills.value.push(name)
+}
+// 移除已选技能
+function onRemoveSkill(name) {
+  selectedSkills.value = selectedSkills.value.filter((n) => n !== name)
+}
+// 打开数据管理弹窗（标题栏「设置」旁的按钮）：首次打开时才异步加载弹窗组件
+function openDataManage() {
+  dataManageOpened.value = true
+  dataManageOpen.value = true
+}
+// ===== 写入权限挡位（输入框工具行左下的「全部审批 / 完全权限」）=====
+// 选挡位：切到完全权限前先弹风险确认（高风险，必须显式确认）；切回全部审批立即生效
+function onPickPermission(mode) {
+  if (mode === permissionMode.value) return
+  if (mode === AI_PERMISSION_FULL) { permConfirmShow.value = true; return }
+  setPermissionMode('approve')
+}
+// 确认开启完全权限
+function onPermConfirm() {
+  permConfirmShow.value = false
+  setPermissionMode(AI_PERMISSION_FULL)
+}
+// 写入挡位并持久化（下次打开沿用）
+function setPermissionMode(mode) {
+  permissionMode.value = mode
+  try { localStorage.setItem(AI_PERMISSION_KEY, mode) } catch (_) { /* 忽略 */ }
+}
+// 切换联网搜索开关并持久化（下次打开沿用）
+function onToggleSearch() {
+  webSearchOn.value = !webSearchOn.value
+  try { localStorage.setItem(AI_WEB_SEARCH_KEY, webSearchOn.value ? '1' : '0') } catch (_) { /* 忽略 */ }
+}
+// 抽屉内新建 / 切换会话后自动收起抽屉
+function onConvNew() {
+  ctx.newConversation()
+  convDrawerOpen.value = false
+}
+function onConvSelect(id) {
+  ctx.switchConversation(id)
+  convDrawerOpen.value = false
+}
+// 截屏：主进程先隐藏窗口截取整屏，本组件铺满整屏显示冻结画面供框选，确定后作为图片附件交给 AI
+async function captureScreenshot() {
+  const { error: notifyError } = useNotification()
+  if (capturing.value || regionShot.value) return
+  capturing.value = true
+  try {
+    // 窗口模式：截屏时主窗口保持可见（画面带上应用界面），先把 AI 浮窗收起到图标位置，
+    // 等收起动画走完再截，避免浮窗被截进画面；截屏结束后由 endRegionSelect 通知宿主重新展开
+    if (props.floating) {
+      emit('capture-start')
+      await new Promise((r) => setTimeout(r, 160))
+    }
+    const res = await window.electron.invoke(INVOKE.SCREENSHOT_REGION)
+    if (!res || !res.success) throw new Error((res && res.error) || '截屏失败')
+    regionShot.value = res.dataUrl
+    regionRect.value = null
+    // 等渲染层把冻结画面画好，再让窗口铺满整屏显示遮罩，避免露出原界面闪一下
+    await nextTick()
+    await new Promise((r) => requestAnimationFrame(r))
+    await window.electron.invoke(INVOKE.SCREENSHOT_REGION_SHOW)
+    document.addEventListener('keydown', onRegionKey)
+  } catch (err) {
+    await endRegionSelect()
+    notifyError('截屏失败：' + (err.message || '未知错误'))
+  } finally {
+    capturing.value = false
+  }
+}
+// 选区开始：记录起点并初始化零尺寸选区
+function onRegionDown(e) {
+  if (e.button !== 0) return
+  regionDragging.value = true
+  regionStart.value = { x: e.clientX, y: e.clientY }
+  regionRect.value = { x: e.clientX, y: e.clientY, w: 0, h: 0 }
+}
+function onRegionMove(e) {
+  if (!regionDragging.value || !regionStart.value) return
+  const s = regionStart.value
+  regionRect.value = {
+    x: Math.min(s.x, e.clientX),
+    y: Math.min(s.y, e.clientY),
+    w: Math.abs(e.clientX - s.x),
+    h: Math.abs(e.clientY - s.y),
+  }
+}
+function onRegionUp() {
+  if (!regionDragging.value) return
+  regionDragging.value = false
+  // 误点（几乎没拖动）视为未框选，避免出现 1px 的选区
+  if (regionRect.value && (regionRect.value.w < 4 || regionRect.value.h < 4)) regionRect.value = null
+}
+function onRegionKey(e) {
+  if (e.key === 'Escape') {
+    e.preventDefault()
+    cancelRegion()
+  } else if (e.key === 'Enter' && regionRectReady.value) {
+    e.preventDefault()
+    confirmRegion()
+  }
+}
+// 确定：按「视口尺寸 ↔ 原图尺寸」比例裁出选区，作为附件发给 AI
+async function confirmRegion() {
+  const rect = regionRect.value
+  const shot = regionShot.value
+  if (!rect || !shot || !regionRectReady.value) return
+  const { error: notifyError } = useNotification()
+  try {
+    const img = new Image()
+    await new Promise((resolve, reject) => {
+      img.onload = resolve
+      img.onerror = () => reject(new Error('图片加载失败'))
+      img.src = shot
+    })
+    const scaleX = img.naturalWidth / window.innerWidth
+    const scaleY = img.naturalHeight / window.innerHeight
+    const canvas = document.createElement('canvas')
+    canvas.width = Math.max(1, Math.round(rect.w * scaleX))
+    canvas.height = Math.max(1, Math.round(rect.h * scaleY))
+    const c2d = canvas.getContext('2d')
+    c2d.drawImage(
+      img,
+      Math.round(rect.x * scaleX), Math.round(rect.y * scaleY), canvas.width, canvas.height,
+      0, 0, canvas.width, canvas.height
+    )
+    const dataUrl = canvas.toDataURL('image/png')
+    // 由 base64 长度估算图片大小（base64 约为原始字节的 4/3）
+    const bytes = Math.round((dataUrl.split(',')[1] || '').length * 0.75)
+    const sizeLabel = bytes > 1048576
+      ? (bytes / 1048576).toFixed(1) + ' MB'
+      : (bytes / 1024).toFixed(0) + ' KB'
+    await endRegionSelect()
+    attachedFile.value = { name: '截屏.png', isImage: true, dataUrl, textContent: '', sizeLabel }
+  } catch (err) {
+    await endRegionSelect()
+    notifyError('截屏失败：' + (err.message || '未知错误'))
+  }
+}
+function cancelRegion() {
+  endRegionSelect()
+}
+// 结束选区：先让主进程把窗口还原到截屏前状态，再清掉遮罩（顺序反了会露出铺满整屏的界面）
+async function endRegionSelect() {
+  document.removeEventListener('keydown', onRegionKey)
+  try {
+    if (window.electron && window.electron.invoke) await window.electron.invoke(INVOKE.SCREENSHOT_REGION_END)
+  } catch (_) { /* 忽略 */ }
+  regionShot.value = null
+  regionRect.value = null
+  regionDragging.value = false
+  regionStart.value = null
+  // 窗口模式：截屏流程结束，通知宿主把收起的 AI 浮窗重新展开
+  if (props.floating) emit('capture-end')
+}
+// 聊天区滚动到接近顶部时补载更早的历史消息（贴底由 scrollBottom 负责）
+function onMsgScroll() {
+  const box = msgBox.value
+  if (!box || box.scrollTop > 60) return
+  if (!hasEarlier.value || loadingEarlier.value) return
+  ctx.loadEarlier()
+}
+// 点击消息里的网页链接：拦下 <a href>，默认在右侧网页抽屉内打开（不再跳转 Electron 窗口）
+function onMsgClick(e) {
+  if (!isHttpLink(e.target)) return
+  const a = e.target.closest('a[href]')
+  e.preventDefault()
+  openLinkInDrawer(a.getAttribute('href') || '')
+}
+// 事件目标是否落在消息里「可内嵌打开」的 http(s) 链接内（onMsgClick 与 onDocMouseDown 共用）
+function isHttpLink(t) {
+  const a = t && t.closest ? t.closest('a[href]') : null
+  if (!a) return false
+  return /^https?:\/\//i.test(a.getAttribute('href') || '')
+}
+// 任一侧抽屉打开时挂 document 级监听，两扇都收起后摘除（同一函数引用，重复 add 为幂等）
+function updateOutsideListener() {
+  if (linkDrawerOpen.value || changeDrawerOpen.value) {
+    document.addEventListener('mousedown', onDocMouseDown, true)
+  } else {
+    document.removeEventListener('mousedown', onDocMouseDown, true)
+  }
+}
+// 点抽屉外部关闭：命中面板内、或点击的是消息链接 / 改动总结条上的「↗」时都不关闭
+// （后两者分别交给 onMsgClick / openChangeDrawer 直接切换，实现「抽屉已打开时无需先关掉」）
+function onDocMouseDown(e) {
+  const t = e.target
+  const inLink = t && t.closest && (t.closest('.link-panel') || isHttpLink(t))
+  if (!inLink) linkDrawerOpen.value = false
+  const inChange = t && t.closest && (t.closest('.change-panel') || t.closest('.open-changes-btn'))
+  if (!inChange) changeDrawerOpen.value = false
+}
+// 打开改动明细抽屉（已有抽屉则复用，仅切换展示的提案；同一提案重复点则收起，避免无反应）
+function openChangeDrawer(m) {
+  // 浮窗（窗口）模式精简：不提供改动明细抽屉
+  if (props.floating) return
+  const p = m && m.proposal
+  if (!p) return
+  if (changeDrawerOpen.value && changeDrawerProposal.value === p) { changeDrawerOpen.value = false; return }
+  changeDrawerProposal.value = p
+  changeDrawerOpen.value = true
+}
+// 从改动明细抽屉跳转到对应业务表：带 ?focus=<id> 时目标页会滚动到该行并闪动高亮
+// （复用 useRowFocus），跳转前先收起抽屉。
+function gotoTable({ table, id, focus }) {
+  const target = tableJumpTarget(table, id)
+  if (!target) return
+  changeDrawerOpen.value = false
+  // focus 优先：网格表（课表/座位/权重）改动明细可带「精确到格子」的定位串
+  const query = focus ? { focus } : target.query
+  router.push(query ? { path: target.path, query } : { path: target.path })
+}
+// 在右侧抽屉里打开某个地址（已有抽屉则复用，仅切换地址）
+function openLinkInDrawer(url) {
+  linkDrawerUrl.value = url
+  linkDrawerOpen.value = true
+}
+// 用系统默认浏览器打开当前抽屉里的地址
+function openLinkExternal(url) {
+  if (!url) return
+  if (window.electron && window.electron.invoke) window.electron.invoke(INVOKE.OPEN_EXTERNAL, url)
+}
+// 置底：合并到下一帧执行。流式输出时每个 chunk 都会请求置底，
+// 若每次都同步读写 scrollTop / scrollHeight 会反复触发强制布局；
+// 用 rAF 去重，把同一帧内的多次请求合并为一次（行为不变，仍始终贴底）。
+function scrollBottom() {
+  nextTick(() => {
+    if (_scrollRaf) return
+    _scrollRaf = requestAnimationFrame(() => {
+      _scrollRaf = null
+      const box = msgBox.value
+      if (box) box.scrollTop = box.scrollHeight
+    })
+  })
+}
+
+// 组件自身方法挂上 ctx（供三个逻辑模块经 ctx.xxx 互调）
+Object.assign(ctx, {
+  _buildBlocks, _updateLiveRender, _parseMessages, _lastAssistantIndex, _lastAssistant,
+  _buildProc, _isAutoMessage, isRetryable, isRollbackable, triggerPendingExport, triggerPendingImage,
+  setAttachment, clearAttachment, loadSkillOptions, onSelectSkill, onRemoveSkill,
+  openDataManage, onPickPermission, onPermConfirm, setPermissionMode, onToggleSearch,
+  onConvNew, onConvSelect, captureScreenshot, onRegionDown, onRegionMove, onRegionUp, onRegionKey,
+  confirmRegion, cancelRegion, endRegionSelect, onMsgScroll, onMsgClick, isHttpLink,
+  updateOutsideListener, onDocMouseDown, openChangeDrawer, gotoTable, openLinkInDrawer,
+  openLinkExternal, scrollBottom,
+})
+// 迟绑定：三个逻辑模块（原 Options mixin）的方法/computed 回填进 ctx。
+// 模块间互相调用、以及对上面组件方法的调用，都在运行时经 ctx 解析，故必须在组件方法挂完后再填。
+Object.assign(ctx, useAiConversations(ctx), useAiChat(ctx), useAiExec(ctx))
+
+// ===== 模板顶层绑定：由逻辑模块提供的 computed / 方法 =====
+const {
+  // computed（aiConversations）
+  visibleConversations, hiddenConvCount, modelOptions, activeReasoningOn,
+  pendingAsk, askCurrent, askCanAdvance, askCanSubmit, pendingProposal,
+  // 方法（aiConversations）
+  loadMoreConversations, deleteConversation, onDeleteConfirm, onSettingsSaved, newConversation,
+  // 方法（aiChat）
+  pickAsk, skipAsk, setAskOther, askNext, submitAsk, dismissAsk, copyMessage, retryMessage,
+  askRollback, onRollbackConfirm, send, interrupt,
+  // 方法（aiExec）
+  confirmProposal, dismissProposal, canUndoChange, undoChange,
+} = ctx
+
+// 冒出新的待回答提问时，分页回到第一题
+watch(pendingAsk, (a) => {
+  if (a) askPage.value = 0
+})
+// 网页抽屉打开时挂 document 级监听：点击「抽屉面板以外、且不是消息链接」的地方即收起。
+// 之所以不在模板里放遮罩层：遮罩会盖住消息区，导致抽屉已打开时再点其它链接被遮罩吃掉，
+// 变成「先关抽屉、还要再点一次」；改用面板穿透 + document 监听后，点链接直达 onMsgClick 直接切换。
+watch(linkDrawerOpen, () => updateOutsideListener())
+watch(changeDrawerOpen, () => updateOutsideListener())
+
+onMounted(() => {
+  _unmounted.value = false
+  // 后台预加载 markdown 库（不阻塞首次渲染）
+  ensureMarkdown()
+    .then(() => { if (!_unmounted.value) ctx._computeAllHtml() })
+    .catch((e) => console.warn('[ai] markdown 预加载失败：', e && e.message))
+  ctx.loadEnabled()
+  loadSkillOptions()
+})
+onUnmounted(() => {
+  _unmounted.value = true
+  // 卸载时若仍在选区截屏，先把窗口还原，避免主窗口停在铺满整屏的状态
+  if (regionShot.value) endRegionSelect()
+  document.removeEventListener('mousedown', onDocMouseDown, true)
+})
 </script>

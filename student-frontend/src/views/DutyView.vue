@@ -420,7 +420,8 @@ async function fetchSettings() {
   try {
     const res = await axios.get(`${API_BASE}/duty/settings?mode=${dutyMode.value}`)
     settingsDays.value = (res.data.days && res.data.days.length) ? res.data.days : ['周一', '周二', '周三', '周四', '周五']
-    settingsItems.value = res.data.items || []
+    // 只接受数组：items 契约是 [{name,difficulty,count}]，形状异常时不覆盖现有设置（避免 {} 把 forEach 带崩）
+    settingsItems.value = Array.isArray(res.data.items) ? res.data.items : []
   } catch (e) { console.error(e) }
 }
 
@@ -482,7 +483,10 @@ let studentsPrime = null
 async function fetchAllStudents() {
   try {
     const res = await axios.get(`${API_BASE}/students`)
-    allStudents.value = res.data.data || res.data
+    // 同 SeatView：只接受数组或 {data:数组}，异常响应不覆盖现有名册（避免 {d:密文} 把界面带崩）
+    const list = Array.isArray(res.data) ? res.data : (res.data && Array.isArray(res.data.data) ? res.data.data : null)
+    if (!list) { console.error('[students] 响应形状异常', res.data); return }
+    allStudents.value = list
     studentsLoaded = true
   } catch (e) { console.error(e) }
 }
@@ -572,9 +576,9 @@ function diffCellsLabel(prev, next) {
   }
   return ''
 }
-// 值日表格中出现的人名，若不在学生管理中，自动新增到学生（复用共享工具）
+// 值日表格中出现的人名，若不在学生管理中，交给后端解析/建档（临时学生），复用共享工具
 function syncNewNamesFromRows(newRows) {
-  syncStudentNamesFromRows(newRows, {
+  return syncStudentNamesFromRows(newRows, {
     getKnown: () => allStudents.value,
     refresh: fetchAllStudents,
     notify: notifySuccess
@@ -583,8 +587,9 @@ function syncNewNamesFromRows(newRows) {
 
 // GridView 保存/编辑单元格后会 emit 新的多行子行表格，按「项目名」分组回写
 function makeCellsUpdate(cellsRef, persist, table) {
-  return (newRows) => {
-    syncNewNamesFromRows(newRows) // 输入的人名自动同步到学生管理
+  return async (newRows) => {
+    // 先等解析/建档完成：候选人名要先进 allStudents，后续候选框和值日指数才认得到它
+    await syncNewNamesFromRows(newRows)
     // 旧值会被整体替换为新对象，无需深拷贝即可作为撤销快照（recordGridSnapshotUndo 同步序列化，不受后续就地修改影响）
     const prev = cellsRef.value
     const next = reconstructCells(newRows, settingsDays.value)

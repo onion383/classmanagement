@@ -10,8 +10,8 @@ const { isDateStr } = require('../utils/sql');
 // settings 结构：{ days: ['周一',...], items: [{name, difficulty, count}, ...] }
 
 // ======================== 模式（日常值日 / 大扫除） ========================
-// cells/settings/items 字段既可存旧版「整块即日常」，也可存「按模式分键」的新结构，
-// 这样两种模式数据彼此独立，且旧数据自动归入「日常」模式。
+// cells/settings/items 字段统一存「按模式分键」结构（{ daily: ..., big: ... }），
+// 两种模式数据彼此独立。
 // 拆包/打包的唯一实现在 services/dutyMode.js —— search.js / ai.dataRoutes.js / AI 工具
 // 执行器读的是同一批字段，此前四份实现逐字重复，口径不一致会让同一份数据被解释成不同结构。
 const { unpackMode, packMode, normalizeMode } = require('../services/dutyMode');
@@ -24,7 +24,7 @@ router.get('/settings', (req, res) => {
   const doc = readDocJson(row, { days: [] });
   res.json({
     days: doc.days,
-    items: unpackMode(row.items, mode)
+    items: unpackMode(row.items, mode, []) // items 的模式值是数组：缺失/旧结构回 []，不能回 {}
   });
 });
 
@@ -66,7 +66,7 @@ function readDuty(modeRaw) {
     const g = db.prepare(`SELECT items FROM duty_settings WHERE id = 1`).get();
     if (g && g.items) {
       try {
-        const gItems = unpackMode(g.items, mode);
+        const gItems = unpackMode(g.items, mode, []);
         if (Array.isArray(gItems) && gItems.length > 0) settings.items = gItems;
       } catch (_) { /* 解析失败则忽略 */ }
     }

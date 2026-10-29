@@ -125,7 +125,8 @@
   </DialogShell>
 </template>
 
-<script>
+<script setup>
+import { ref, computed, watch, onBeforeUnmount, nextTick, toRef } from 'vue'
 import GridView from '../../tables/GridView/GridView.vue'
 import AppSelect from '../../base/AppSelect.vue'
 import { useDutyArrangementPipeline } from './DutyArrangementDialog.pipeline.js'
@@ -133,6 +134,23 @@ import { useDutyArrangementOptions } from './DutyArrangementDialog.options.js'
 import { useDutyArrangementDimension } from './DutyArrangementDialog.dimension.js'
 import '../../../styles/dialog-transition.css'
 import DialogShell from '../../base/DialogShell.vue'
+
+defineOptions({ name: 'DutyArrangementDialog' })
+const props = defineProps({
+  visible: Boolean,
+  // 值日全局设置：days（星期）、items（[{name, count, ...}]）
+  days: { type: Array, default: () => [] },
+  items: { type: Array, default: () => [] },
+  // 全班学生（含 id / 姓名）
+  students: { type: Array, default: () => [] },
+  // 值日项目权重表：{ 项目名: { 星期: 权重值 } }
+  weights: { type: Object, default: () => ({}) },
+  // 公平账本：{ 学生姓名: 累计权重值 }
+  ledger: { type: Object, default: () => ({}) },
+  // 草稿：{ exists, cells, settings, conditions, savedAt }
+  draft: { type: Object, default: () => ({ exists: false }) }
+})
+const emit = defineEmits(['cancel', 'confirm', 'save-draft', 'clear-draft'])
 
 // 排表条件选项：method 为排表方式，constraint 为限制条件（拖到方式下方）
 const OPTIONS = [
@@ -143,112 +161,90 @@ const OPTIONS = [
   { key: 'labor', label: '特殊劳动', type: 'constraint' }
 ]
 
-export default {
-  name: 'DutyArrangementDialog',
-  components: { GridView, AppSelect, DialogShell },
-  props: {
-    visible: Boolean,
-    // 值日全局设置：days（星期）、items（[{name, count, ...}]）
-    days: { type: Array, default: () => [] },
-    items: { type: Array, default: () => [] },
-    // 全班学生（含 id / 姓名）
-    students: { type: Array, default: () => [] },
-    // 值日项目权重表：{ 项目名: { 星期: 权重值 } }
-    weights: { type: Object, default: () => ({}) },
-    // 公平账本：{ 学生姓名: 累计权重值 }
-    ledger: { type: Object, default: () => ({}) },
-    // 草稿：{ exists, cells, settings, conditions, savedAt }
-    draft: { type: Object, default: () => ({ exists: false }) }
-  },
-  emits: ['cancel', 'confirm', 'save-draft', 'clear-draft'],
-  data() {
-    return {
-      tree: [{ key: 'random', label: '随机排表', children: [] }],
-      previewCells: {},
-      previewVersion: 0,
-      rejectText: '',
-      arranged: false,
-      satisfaction: {},
-      // 恢复草稿时 tree 的赋值会触发深度 watch，先压住它，避免刚恢复的 arranged 立刻被重置
-      _restoringDraft: false,
-      // 分组维度（来自分组管理接口）
-      dimensions: [],
-      groups: [],
-      selectedDimId: ''
-    }
-  },
-  computed: {
-    daysArr() {
-      return (this.days && this.days.length) ? this.days : ['周一', '周二', '周三', '周四', '周五']
-    },
-    itemsArr() {
-      return (this.items && this.items.length) ? this.items : []
-    },
-    // 学生姓名（排表操作的原子单位）
-    studentNames() {
-      return this.students.map(s => String(s.姓名 || '').trim()).filter(Boolean)
-    },
-    studentOptions() {
-      return this.students.map(s => ({ value: String(s.姓名).trim(), label: s.姓名 }))
-    },
-    itemOptions() {
-      return this.itemsArr.map(it => ({ value: it.name, label: it.name }))
-    },
-    dimensionOptions() {
-      return this.dimensions.map(d => ({ value: String(d.id), label: d.name }))
-    },
-    methodOptions() {
-      return OPTIONS.filter(o => o.type === 'method')
-    },
-    constraintOptions() {
-      return OPTIONS.filter(o => o.type === 'constraint')
-    },
-    previewKey() {
-      const flat = this.tree.flatMap(n => [n.key, ...(n.children || []).map(c => c.key)]).join('-') || 'empty'
-      return this.visible ? `duty-arrange-${flat}-${this.previewVersion}` : 'closed'
-    },
-    previewRows() {
-      return this.buildPreviewRows(this.previewCells)
-    }
-  },
-  watch: {
-    visible(v) {
-      if (v) {
-        this.arranged = false
-        this.previewCells = {}
-        this.previewVersion++
-        this.satisfaction = {}
-        this.rejectText = ''
-        // 草稿恢复：若存在草稿则先恢复（树 + 预览），让用户接着上次继续
-        if (this.draft && this.draft.exists && this.draft.conditions && this.draft.conditions.length) {
-          this._restoringDraft = true
-          this.tree = this.draft.conditions.map(c => ({ ...c, children: c.children || [] }))
-          if (this.draft.cells && Object.keys(this.draft.cells).length) {
-            this.previewCells = this.draft.cells
-            this.arranged = true
-            this.previewVersion++
-          }
-          this.$nextTick(() => { this._restoringDraft = false })
-        } else {
-          this.tree = [{ key: 'random', label: '随机排表', children: [] }]
-        }
-        this.fetchDimensions()
-      }
-    },
-    tree: {
-      deep: true,
-      handler() {
-        if (this._restoringDraft) return
-        this.arranged = false
-      }
-    }
-  },
-  // 提示条自动消失的定时器：弹窗关闭后仍在跑会往已销毁的实例写 rejectText
-  beforeUnmount() { clearTimeout(this._rejectTimer) },
-  methods: {
-    ...useDutyArrangementPipeline(OPTIONS),
-    ...useDutyArrangementOptions(OPTIONS),
-    ...useDutyArrangementDimension(),
-  }
+const tree = ref([{ key: 'random', label: '随机排表', children: [] }])
+const previewCells = ref({})
+const previewVersion = ref(0)
+const rejectText = ref('')
+const arranged = ref(false)
+const satisfaction = ref({})
+// 分组维度（来自分组管理接口）
+const dimensions = ref([])
+const groups = ref([])
+const selectedDimId = ref('')
+
+const daysArr = computed(() => (props.days && props.days.length) ? props.days : ['周一', '周二', '周三', '周四', '周五'])
+const itemsArr = computed(() => (props.items && props.items.length) ? props.items : [])
+// 学生姓名（排表操作的原子单位）
+const studentNames = computed(() => props.students.map(s => String(s.姓名 || '').trim()).filter(Boolean))
+const studentOptions = computed(() => props.students.map(s => ({ value: String(s.姓名).trim(), label: s.姓名 })))
+const itemOptions = computed(() => itemsArr.value.map(it => ({ value: it.name, label: it.name })))
+const dimensionOptions = computed(() => dimensions.value.map(d => ({ value: String(d.id), label: d.name })))
+const methodOptions = computed(() => OPTIONS.filter(o => o.type === 'method'))
+const constraintOptions = computed(() => OPTIONS.filter(o => o.type === 'constraint'))
+const previewKey = computed(() => {
+  const flat = tree.value.flatMap(n => [n.key, ...(n.children || []).map(c => c.key)]).join('-') || 'empty'
+  return props.visible ? `duty-arrange-${flat}-${previewVersion.value}` : 'closed'
+})
+
+// 跨模块共享的上下文：状态为 ref（模块内 .value 访问），临时字段与方法直接挂上；
+// 三个 useXxx 的返回方法在下方 Object.assign 回填，模块间经 ctx 互相调用（运行时解析）
+const ctx = {
+  tree, previewCells, previewVersion, rejectText, arranged, satisfaction,
+  dimensions, groups, selectedDimId,
+  daysArr, itemsArr, studentNames,
+  weights: toRef(props, 'weights'),
+  ledger: toRef(props, 'ledger'),
+  // 恢复草稿时 tree 的赋值会触发深度 watch，先压住它，避免刚恢复的 arranged 立刻被重置
+  _restoringDraft: false,
+  // 提示条自动消失的定时器
+  _rejectTimer: null,
+  // 分组主天统计（groupFill 写入、computeGroupSatisfaction 读取）
+  _groupMainDay: null,
+  emit,
 }
+const pipeline = useDutyArrangementPipeline(ctx, OPTIONS)
+const options = useDutyArrangementOptions(ctx, OPTIONS)
+const dimension = useDutyArrangementDimension(ctx)
+Object.assign(ctx, pipeline, options, dimension)
+
+// 供模板调用的顶层绑定
+const { isMethod, satisfactionOf, buildPreviewRows } = pipeline
+const {
+  onOptionDragStart, onNodeDragStart, onDropTop, onDropChild,
+  removeNode, removeChild, startArrange, confirm, onSaveDraft, onClearDraft,
+} = options
+const { onDimensionChange, fetchDimensions } = dimension
+
+const previewRows = computed(() => buildPreviewRows(previewCells.value))
+
+watch(() => props.visible, (v) => {
+  if (v) {
+    arranged.value = false
+    previewCells.value = {}
+    previewVersion.value++
+    satisfaction.value = {}
+    rejectText.value = ''
+    // 草稿恢复：若存在草稿则先恢复（树 + 预览），让用户接着上次继续
+    if (props.draft && props.draft.exists && props.draft.conditions && props.draft.conditions.length) {
+      ctx._restoringDraft = true
+      tree.value = props.draft.conditions.map(c => ({ ...c, children: c.children || [] }))
+      if (props.draft.cells && Object.keys(props.draft.cells).length) {
+        previewCells.value = props.draft.cells
+        arranged.value = true
+        previewVersion.value++
+      }
+      nextTick(() => { ctx._restoringDraft = false })
+    } else {
+      tree.value = [{ key: 'random', label: '随机排表', children: [] }]
+    }
+    fetchDimensions()
+  }
+})
+watch(tree, () => {
+  if (ctx._restoringDraft) return
+  arranged.value = false
+}, { deep: true })
+
+// 提示条自动消失的定时器：弹窗关闭后仍在跑会往已销毁的实例写 rejectText
+onBeforeUnmount(() => { clearTimeout(ctx._rejectTimer) })
 </script>

@@ -3,7 +3,7 @@
 //
 // 覆盖「按已有索引更新」这条路径的关键约定：
 //   1. 不遍历磁盘、不新增行、不删除行（虚拟相册没有文件夹，数据源就是索引）
-//   2. 补读 EXIF 拍摄时间（拷索引时带过来的旧日期要被纠正）
+//   2. 同步文件元信息（file_size / mtime），不重核拍摄日期（旧格式 date_src 不再补读）
 //   3. 补生成缺失/过期的缩略图
 //   4. 源文件已不存在时**跳过但不删行**
 //   5. 全部已是最新时再跑一遍不产生写库（幂等、重复点刷新不白跑）
@@ -83,10 +83,10 @@ async function makeJpeg(file, exifDate) {
   } catch (_) {}
 
   // 建虚拟相册 + 4 行索引：
-  //   1) 有 EXIF、date_src 空（拷贝来的旧状态）→ 应补出拍摄日期 + 缩略图
-  //   2) 有 EXIF、date_src='exif'、缩略图齐全 → 不应有任何写库
+  //   1) date_src 空（旧格式值）+ 缩略图缺失 → 只补缩略图，日期保持原样
+  //   2) date_src='exif'、缩略图齐全 → 不应有任何写库
   //   3) 源文件不存在 → 应跳过且**保留行**
-  //   4) date_src='mtime'（早期兜底值）→ 应重新核一次
+  //   4) date_src='mtime'（旧格式值）→ 只同步元信息，日期保持原样
   const f1 = path.join(imgDir, 'a.jpg');
   const f2 = path.join(imgDir, 'b.jpg');
   const f4 = path.join(imgDir, 'd.jpg');
@@ -94,8 +94,8 @@ async function makeJpeg(file, exifDate) {
   await makeJpeg(f2, '2021:07:08 09:10:11');
   await makeJpeg(f4, '2023:11:12 13:14:15');
   db.prepare(`INSERT INTO albums (id, name, folder_path, kind, sort_order) VALUES (1,'v','','virtual',1)`).run();
-  // 刻意造出「拷贝来的旧状态」：photo_date 是老的 mtime 日键、date_src 为空（=没核过）、
-// thumb_v=0（=缩略图缺失或版本过期）—— 三样都得被 refreshVirtual 补上。
+  // 刻意造出「拷贝来的旧状态」：photo_date 是老的 mtime 日键、date_src 为空（旧格式值）、
+// thumb_v=0（=缩略图缺失或版本过期）—— 只有缩略图会被补上，日期不再补读。
 const ins = db.prepare(`INSERT INTO album_photos (album_id, file_path, file_name, file_size, mtime, photo_date, exif_date, date_src, thumb_path, thumb_v)
     VALUES (1, ?, ?, 0, ?, ?, '', '', '', 0)`);
   ins.run(f1, 'a.jpg', '2026-01-01T00:00:00.000Z', '2026-01-01');
@@ -103,7 +103,7 @@ const ins = db.prepare(`INSERT INTO album_photos (album_id, file_path, file_name
   // 第 3 行：文件不存在
   ins.run(path.join(imgDir, 'gone.jpg'), 'gone.jpg', '2026-01-01T00:00:00.000Z', '2026-01-01');
   ins.run(f4, 'd.jpg', '2026-01-01T00:00:00.000Z', '2026-01-01');
-  // 把第 2 行预先修好（模拟「已最新」），第 4 行标成 'mtime'（早期兜底值）
+  // 把第 2 行预先修好（模拟「已最新」），第 4 行标成 'mtime'（旧格式值）
   db.prepare(`UPDATE album_photos SET photo_date='2021-07-08', exif_date='2021-07-08T09:10:11',
               date_src='exif', thumb_path=?, thumb_v=? WHERE id = 2`).run(
     albumThumbs.thumbPathFor('testslug', 2), THUMB_VERSION);
@@ -125,16 +125,13 @@ const ins = db.prepare(`INSERT INTO album_photos (album_id, file_path, file_name
     assert.strictEqual(after.length, 4, '行数变了：' + after.length);
   });
 
-  await test('补读 EXIF 拍摄时间（第1 行 date_src 空 → 补出2019-03-08）', () => {
-    assert.strictEqual(after[0].photo_date, '2019-03-05');
-    assert.strictEqual(after[0].exif_date, '2019-03-05T14:22:31');
-    assert.strictEqual(after[0].date_src, 'exif');
-  });
-
-  await test("date_src='mtime' 的旧兜底行会被重新核（第 4 行）", () => {
-    assert.strictEqual(after[3].date_src, 'exif');
-    assert.strictEqual(after[3].photo_date, '2023-11-12');
-    assert.strictEqual(after[3].exif_date, '2023-11-12T13:14:15');
+  await test('旧 date_src 值不再补读 EXIF（第 1 行空串 / 第 4 行 mtime：日期保持原样）', () => {
+    assert.strictEqual(after[0].photo_date, '2026-01-01');
+    assert.strictEqual(after[0].exif_date, '');
+    assert.strictEqual(after[0].date_src, '');
+    assert.strictEqual(after[3].photo_date, '2026-01-01');
+    assert.strictEqual(after[3].exif_date, '');
+    assert.strictEqual(after[3].date_src, 'mtime');
   });
 
   await test('补生成缺失的缩略图（第 1 行）', () => {

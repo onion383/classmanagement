@@ -330,10 +330,14 @@
           <div
             v-for="(s, idx) in suggestedStudents"
             :key="s.id"
-            :class="['px-3 py-2 text-sm cursor-pointer hover:bg-info/10 truncate', { 'bg-info/20': idx === suggestState.index }]"
+            :class="['px-3 py-2 text-sm cursor-pointer hover:bg-info/10 flex items-center gap-2', { 'bg-info/20': idx === suggestState.index }]"
             @mousedown.prevent="fillCandidate(s)"
             @mouseenter="suggestState.index = idx"
-          >{{ s.姓名 }}</div>
+          >
+            <span class="flex-1 min-w-0 truncate">{{ s.姓名 }}</span>
+            <!-- 临时学生：与正式学生共用同一个 id，标出来便于直接选中已存在的人 -->
+            <span v-if="s.is_provisional" class="shrink-0 text-[10px] leading-4 px-1 rounded bg-warning/15 text-warning">临时</span>
+          </div>
         </div>
         <div v-else class="px-3 py-2 text-sm text-text-muted">无匹配学生</div>
       </div>
@@ -504,7 +508,10 @@ async function fetchStudents() {
   try {
     const res = await apiFetch('/api/students');
     const data = await res.json();
-    allStudents.value = data.data || data || [];
+    // 只接受数组或 {data:数组}：异常形状（如缓存旧密文解出来的 {d}）不覆盖现有名册
+    const list = Array.isArray(data) ? data : (data && Array.isArray(data.data) ? data.data : null);
+    if (!list) { console.error('[students] 响应形状异常', data); return; }
+    allStudents.value = list;
   } catch (e) { /* 学生列表不可用时不阻塞分组功能 */ }
 }
 const suggestState = reactive({ visible: false, member: null, top: 0, left: 0, width: 0, index: 0, keyword: '' });
@@ -971,6 +978,8 @@ async function commitMember(m) {
       delete m._local;
       await selectDim(activeDimId.value);
       recordGroupStructure(before, buildGroupSnapshot());
+      // 新名字可能刚在后端被记为临时学生：刷新候选名册，下一次输入就能带「临时」标记选到它
+      fetchStudents();
     } catch (e) {
       error(e.message);
     }
@@ -988,6 +997,8 @@ async function commitMember(m) {
     // 保存成功后才登记撤销；失败时回滚界面到旧值，避免「撤销一个没生效的修改」（B06-04）
     if (String(oldName ?? '') !== String(newName ?? '')) recordGroupUndo('group_members', m.id, 'member_name', oldName ?? '', newName);
     if (String(oldRemark ?? '') !== String(newRemark ?? '')) recordGroupUndo('group_members', m.id, 'remark', oldRemark ?? '', newRemark);
+    // 改名也可能产生新的临时学生（原名被替换）；刷新候选名册
+    if (String(oldName ?? '') !== String(newName ?? '')) fetchStudents();
     m._undoName = undefined;
     m._undoRemark = undefined;
   } catch (e) {

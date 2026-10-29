@@ -81,8 +81,8 @@ function registerAppsIpc(opts = {}) {
   })
 
   // 拖拽添加：渲染层把从桌面拖入的文件/文件夹/快捷方式路径一次性发来，
-  // 这里统一校验存在性并提取名称/图标。渲染层拿不到真实路径时（旧版 Electron）
-  // 会退回本地解析，因此这里静默跳过不存在的路径即可。
+  // 这里统一校验存在性并提取名称/图标。拖入的快捷方式可能指向已删除的文件，
+  // 因此这里静默跳过不存在的路径即可。
   ipcMain.handle('apps-resolve-paths', async (event, paths) => {
     const list = Array.isArray(paths) ? paths.slice(0, MAX_RESOLVE_PATHS) : []
     const out = []

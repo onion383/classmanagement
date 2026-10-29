@@ -32,56 +32,49 @@
   </div>
 </template>
 
-<script>
+<script setup>
+import { ref, computed, watch } from 'vue'
 import AppSelect from './AppSelect.vue'
-export default {
-  name: 'SearchBar',
-  components: { AppSelect },
-  props: {
-    searchField: String,
-    keyword: String,
-    // 可选列清单：传入则用下拉切换搜索列；不传保持旧的固定「搜索当前列」展示
-    fields: { type: Array, default: () => [] },
-    // 面板显隐控：不传时向后兼容——由 searchField 是否存在决定显示
-    visible: { type: Boolean, default: undefined }
-  },
-  emits: ['update:keyword', 'update:searchField', 'close'],
-  data() {
-    return {
-      // 本地输入文本：避免父级因搜索结果变化而每击键重渲染时，反复把受控 value 写回 DOM，
-      // 导致输入框在 Chromium/Electron（尤其中文输入法）下失焦/光标跳位。
-      text: (this.keyword ?? '') || ''
-    }
-  },
-  watch: {
-    // 仅当父层值变化（如选列后清空）才同步本地文本；击键时本地 text 已等同父值，不重复写回
-    keyword(v) {
-      if (v !== this.text) this.text = v ?? ''
-    }
-  },
-  methods: {
-    onInput(e) {
-      this.text = e.target.value
-      this.$emit('update:keyword', e.target.value)
-    }
-  },
-  computed: {
-    hasFields() {
-      return (this.fields || []).length > 0
-    },
-    fieldOptions() {
-      return this.fields.map(f => {
-        // 支持字符串列，也支持字段对象（{name,type,...}）——取 name 作为下拉值
-        const name = typeof f === 'string' ? f : (f.name ?? f.label ?? String(f))
-        return { value: name, label: name }
-      })
-    },
-    shown() {
-      // 父组件显式传 visible 时以其为准（“点搜索按钮弹出”模式）；否则回退旧逻辑
-      return this.visible !== undefined ? this.visible : !!this.searchField
-    }
-  }
+
+defineOptions({ name: 'SearchBar' })
+const props = defineProps({
+  searchField: String,
+  keyword: String,
+  // 可选列清单：传入则用下拉切换搜索列；不传保持旧的固定「搜索当前列」展示
+  fields: { type: Array, default: () => [] },
+  // 面板显隐控：不传时向后兼容——由 searchField 是否存在决定显示
+  visible: { type: Boolean, default: undefined }
+})
+const emit = defineEmits(['update:keyword', 'update:searchField', 'close'])
+
+// 本地输入文本：避免父级因搜索结果变化而每击键重渲染时，反复把受控 value 写回 DOM，
+// 导致输入框在 Chromium/Electron（尤其中文输入法）下失焦/光标跳位。
+const text = ref((props.keyword ?? '') || '')
+
+// 仅当父层值变化（如选列后清空）才同步本地文本；击键时本地 text 已等同父值，不重复写回
+watch(() => props.keyword, (v) => {
+  if (v !== text.value) text.value = v ?? ''
+})
+
+function onInput(e) {
+  text.value = e.target.value
+  emit('update:keyword', e.target.value)
 }
+
+const hasFields = computed(() => {
+  return (props.fields || []).length > 0
+})
+const fieldOptions = computed(() => {
+  return props.fields.map(f => {
+    // 支持字符串列，也支持字段对象（{name,type,...}）——取 name 作为下拉值
+    const name = typeof f === 'string' ? f : (f.name ?? f.label ?? String(f))
+    return { value: name, label: name }
+  })
+})
+const shown = computed(() => {
+  // 父组件显式传 visible 时以其为准（“点搜索按钮弹出”模式）；否则回退旧逻辑
+  return props.visible !== undefined ? props.visible : !!props.searchField
+})
 </script>
 
 <style scoped>

@@ -570,7 +570,6 @@ async function addApp() {
     return
   }
   try {
-    if (!window.electron || !window.electron.invoke) return
     const result = await window.electron.invoke(INVOKE.APPS_SELECT_FILE)
     if (!result || result.canceled || !result.filePath) return
     // 对话框打开期间可能已拖入新项占满槽位，提交前再判一次
@@ -600,14 +599,13 @@ function removeApp(idx) {
 }
 
 // ===== 拖入添加（快捷方式 / 文件夹 / 文件）=====
-// Electron 32 起 File.path 已移除，真实路径必须经 preload 的 webUtils.getPathForFile 获取；
-// 拿不到时回退旧字段，保证老版本 Electron 也能添加（只是名称/图标退化为本地推导）。
+// Electron 32 起 File.path 已移除，真实路径必须经 preload 的 webUtils.getPathForFile 获取。
 function pathOfFile(file) {
   try {
-    const p = window.electron?.getPathForFile?.(file)
-    if (p) return p
-  } catch (_) {}
-  return typeof file?.path === 'string' ? file.path : ''
+    return window.electron.getPathForFile(file) || ''
+  } catch (_) {
+    return ''
+  }
 }
 
 // 主进程通道不可用时的兜底条目：名称取文件名并去掉可执行类扩展名
@@ -1053,7 +1051,7 @@ function onWindowDragStart(e) {
       ' btn=' + e.button + ' type=' + e.pointerType)
   }
   dragMoveLogged = false
-  if (e.button !== 0 || !window.electron || !window.electron.send) return
+  if (e.button !== 0) return
   windowDragging = true
   e.preventDefault()
   // 捕获指针：鼠标被甩出窗口时仍能收到 pointermove，否则快速拖动会中途断连

@@ -126,10 +126,6 @@ watch(sourceAlbumId, (v, old) => {
 })
 
 async function pickFolder() {
-  if (!window.electron || typeof window.electron.invoke !== 'function') {
-    useNotification().warning('请使用桌面客户端选择文件夹')
-    return
-  }
   try {
     const result = await window.electron.invoke(INVOKE.SELECT_FOLDER)
     if (result && result.filePaths && result.filePaths.length > 0) {

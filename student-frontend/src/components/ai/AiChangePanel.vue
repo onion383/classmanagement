@@ -80,77 +80,74 @@
   </div>
 </template>
 
-<script>
+<script setup>
 import DynamicTable from '../tables/DynamicTable/DynamicTable.vue'
 import AiGridPreview from '../tables/AiGridPreview.vue'
 import { summarizeProposalChanges, gridCellFocus } from '../../composables/ai/aiMessages.js'
 import { TABLE_ROUTE } from '../../composables/ai/aiConstants.js'
+import { computed } from 'vue'
 
-export default {
-  name: 'AiChangePanel',
-  components: { DynamicTable, AiGridPreview },
-  props: {
-    proposal: { type: Object, default: null },
-  },
-  emits: ['close', 'goto'],
-  computed: {
-    summary() { return summarizeProposalChanges(this.proposal) },
-  },
-  methods: {
-    // 该项对应的表是否有可跳转的业务页（技能 md 无对应表 → 不显示跳转）
-    canJump(it) { return !!TABLE_ROUTE[this.tableOfItem(it)] },
-    // 发起跳转：向上抛给宿主（AiAssistant）做路由跳转并关闭抽屉。
-    // focus 为网格表可选的「精确到格子」定位串（课时行/座位列等），为空则只跳到页面。
-    goto(it, id, focus) { this.$emit('goto', { table: this.tableOfItem(it), id, focus: focus || null }) },
-    // 网格表（课表/座位/权重）改动 → 计算第一个变化格子的定位串，供跳转时精确到格子；
-    // 行状表或无法确定坐标时返回 null（回退为只跳页面）。
-    gridFocus(it) {
-      const table = this.tableOfItem(it)
-      const a = (it.actions || []).find((x) => x.type === 'cells')
-      return a ? gridCellFocus(table, a.before, a.values) : null
-    },
-    // 动作级「精确到行」的跳转目标 id：仅当该动作只作用于单独一行时返回该行 id，否则返回 null
-    actionJumpId(a) {
-      if (!a || (a.type !== 'add' && a.type !== 'del')) return null
-      const rows = a.rows || []
-      return rows.length === 1 && rows[0] && rows[0].id != null ? rows[0].id : null
-    },
-    // 每个动作行的说明文案（增删条数 / 修改字段数 / 写入格子数 / md 行数）
-    actionLabel(a, it) {
-      if (a.type === 'add') return `增加 ${a.count} 条数据`
-      if (a.type === 'del') return `删除 ${a.count} 条数据`
-      if (a.type === 'update') return `修改 ${a.count} 个字段`
-      if (a.type === 'cells') return `写入 ${a.count} 个格子`
-      if (a.type === 'lines') return `新增 ${it.added} 行 · 删除 ${it.removed} 行`
-      return ''
-    },
-    // 项的 key 形如 grid:schedule / table:students / skill:xxx，取回原始表名供网格预览使用
-    tableOfItem(it) { return (it.key || '').split(':')[1] || '' },
-    // 只读表格：各行列可能不同，取并集做表头并保持首次出现的顺序
-    fieldsOf(rows) {
-      const keys = []
-      for (const r of rows) for (const k of Object.keys(r || {})) if (!keys.includes(k)) keys.push(k)
-      return keys.map((name) => ({ name }))
-    },
-    keyedRows(rows) { return rows.map((r, i) => ({ ...r, _rowKey: i })) },
-    fmtVal(v) {
-      if (v == null) return ''
-      if (typeof v === 'object') { try { return JSON.stringify(v) } catch (_) { return String(v) } }
-      return String(v)
-    },
-    // 修改明细：单条为「字段: 新值」，批量修改为「字段: 旧值 → 新值」
-    updateText(u) {
-      if (u && u.changes && typeof u.changes === 'object') {
-        return Object.entries(u.changes).map(([k, v]) => `${k}: ${this.fmtVal(v)}`).join('、')
-      }
-      if (u && Array.isArray(u.diff)) {
-        return u.diff.map((d) => `${d.field}: ${this.fmtVal(d.from)} → ${this.fmtVal(d.to)}`).join('、')
-      }
-      return ''
-    },
-    diffLines(a) { return a && a.diff ? a.diff.lines.filter((l) => l.type !== 'ctx') : [] },
-  },
+defineOptions({ name: 'AiChangePanel' })
+
+const props = defineProps({
+  proposal: { type: Object, default: null },
+})
+const emit = defineEmits(['close', 'goto'])
+
+const summary = computed(() => summarizeProposalChanges(props.proposal))
+
+// 该项对应的表是否有可跳转的业务页（技能 md 无对应表 → 不显示跳转）
+function canJump(it) { return !!TABLE_ROUTE[tableOfItem(it)] }
+// 发起跳转：向上抛给宿主（AiAssistant）做路由跳转并关闭抽屉。
+// focus 为网格表可选的「精确到格子」定位串（课时行/座位列等），为空则只跳到页面。
+function goto(it, id, focus) { emit('goto', { table: tableOfItem(it), id, focus: focus || null }) }
+// 网格表（课表/座位/权重）改动 → 计算第一个变化格子的定位串，供跳转时精确到格子；
+// 行状表或无法确定坐标时返回 null（回退为只跳页面）。
+function gridFocus(it) {
+  const table = tableOfItem(it)
+  const a = (it.actions || []).find((x) => x.type === 'cells')
+  return a ? gridCellFocus(table, a.before, a.values) : null
 }
+// 动作级「精确到行」的跳转目标 id：仅当该动作只作用于单独一行时返回该行 id，否则返回 null
+function actionJumpId(a) {
+  if (!a || (a.type !== 'add' && a.type !== 'del')) return null
+  const rows = a.rows || []
+  return rows.length === 1 && rows[0] && rows[0].id != null ? rows[0].id : null
+}
+// 每个动作行的说明文案（增删条数 / 修改字段数 / 写入格子数 / md 行数）
+function actionLabel(a, it) {
+  if (a.type === 'add') return `增加 ${a.count} 条数据`
+  if (a.type === 'del') return `删除 ${a.count} 条数据`
+  if (a.type === 'update') return `修改 ${a.count} 个字段`
+  if (a.type === 'cells') return `写入 ${a.count} 个格子`
+  if (a.type === 'lines') return `新增 ${it.added} 行 · 删除 ${it.removed} 行`
+  return ''
+}
+// 项的 key 形如 grid:schedule / table:students / skill:xxx，取回原始表名供网格预览使用
+function tableOfItem(it) { return (it.key || '').split(':')[1] || '' }
+// 只读表格：各行列可能不同，取并集做表头并保持首次出现的顺序
+function fieldsOf(rows) {
+  const keys = []
+  for (const r of rows) for (const k of Object.keys(r || {})) if (!keys.includes(k)) keys.push(k)
+  return keys.map((name) => ({ name }))
+}
+function keyedRows(rows) { return rows.map((r, i) => ({ ...r, _rowKey: i })) }
+function fmtVal(v) {
+  if (v == null) return ''
+  if (typeof v === 'object') { try { return JSON.stringify(v) } catch (_) { return String(v) } }
+  return String(v)
+}
+// 修改明细：单条为「字段: 新值」，批量修改为「字段: 旧值 → 新值」
+function updateText(u) {
+  if (u && u.changes && typeof u.changes === 'object') {
+    return Object.entries(u.changes).map(([k, v]) => `${k}: ${fmtVal(v)}`).join('、')
+  }
+  if (u && Array.isArray(u.diff)) {
+    return u.diff.map((d) => `${d.field}: ${fmtVal(d.from)} → ${fmtVal(d.to)}`).join('、')
+  }
+  return ''
+}
+function diffLines(a) { return a && a.diff ? a.diff.lines.filter((l) => l.type !== 'ctx') : [] }
 </script>
 
 <style scoped>

@@ -6,10 +6,8 @@
   </div>
 </template>
 
-<script>
-export default {
-  name: 'EmptySnapshot'
-}
+<script setup>
+defineOptions({ name: 'EmptySnapshot' })
 </script>
 
 <style scoped>

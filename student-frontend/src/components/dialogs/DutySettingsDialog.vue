@@ -112,131 +112,121 @@
   </DialogShell>
 </template>
 
-<script>
+<script setup>
+import { ref, computed, watch, nextTick } from 'vue'
 import '../../styles/dialog-transition.css'
 import DialogShell from '../base/DialogShell.vue'
 
 const WEEK = ['周一', '周二', '周三', '周四', '周五', '周六', '周日']
 const DEFAULT_POOL = ['擦黑板', '倒垃圾', '拖地', '扫地', '摆桌子']
 
-export default {
-  name: 'DutySettingsDialog',
-  components: { DialogShell },
-  props: {
-    visible: Boolean,
-    days: { type: Array, default: () => ['周一', '周二', '周三', '周四', '周五'] },
-    items: { type: Array, default: () => [] }
-  },
-  emits: ['save', 'cancel'],
-  // 组件内部使用本地副本，避免直接修改父传入的 props/响应式数据
-  data() {
-    return {
-      localDays: [],
-      localItems: [],
-      customPool: [],
-      weekDays: WEEK,
-      dragSource: null, // { type: 'pool', name } 或 { type: 'box', index }
-      overIndex: -1,
-      adding: false,
-      newPoolName: ''
-    }
-  },
-  computed: {
-    poolChips() {
-      return [...DEFAULT_POOL, ...this.customPool]
-    },
-    isInList() {
-      return (name) => this.localItems.some(it => it.name === name)
-    }
-  },
-  watch: {
-    visible(val) {
-      if (val) {
-        this.localDays = [...this.days]
-        this.localItems = this.items.map(it => ({ name: it.name, difficulty: it.difficulty == null ? 0.6 : it.difficulty, count: it.count || 1 }))
-        this.customPool = []
-        this.adding = false
-        this.newPoolName = ''
-        this.dragSource = null
-        this.overIndex = -1
-      }
-    }
-  },
-  methods: {
-    isDayOn(d) { return this.localDays.includes(d) },
-    removeItem(i) { this.localItems.splice(i, 1) },
-    // 项目池拖入
-    onPoolDrag(name) { this.dragSource = { type: 'pool', name } },
-    // 列表内拖动排序
-    onGripDrag(i) {
-      if (i >= this.localItems.length) return
-      this.dragSource = { type: 'box', index: i }
-    },
-    // 悬停在空区域（末尾追加）
-    onBoxOver() {
-      if (this.dragSource) this.overIndex = this.localItems.length
-    },
-    // 悬停在某一行
-    onRowOver(i) {
-      if (this.dragSource) this.overIndex = i
-    },
-    onRowDrop(i) {
-      if (!this.dragSource) return
-      this.placeAt(i)
-    },
-    onBoxDrop() {
-      if (!this.dragSource) return
-      this.placeAt(this.overIndex >= 0 ? this.overIndex : this.localItems.length)
-    },
-    placeAt(targetIdx) {
-      const idx = Math.max(0, Math.min(targetIdx, this.localItems.length))
-      const source = this.dragSource
-      if (source.type === 'pool') {
-        if (!this.localItems.some(it => it.name === source.name)) {
-          this.localItems.splice(idx, 0, { name: source.name, difficulty: 0.6, count: 1 })
-        }
-      } else if (source.type === 'box' && source.index !== idx) {
-        const moved = this.localItems.splice(source.index, 1)[0]
-        this.localItems.splice(idx, 0, moved)
-      }
-      this.dragSource = null
-      this.overIndex = -1
-    },
-    startAdd() {
-      this.adding = true
-      this.newPoolName = ''
-      this.$nextTick(() => { if (this.$refs && this.$refs.newInput) this.$refs.newInput.focus() })
-    },
-    cancelAdd() {
-      this.adding = false
-      this.newPoolName = ''
-    },
-    confirmAdd() {
-      const name = (this.newPoolName || '').trim()
-      if (name) {
-        if (this.defaultPoolHas(name) || this.customPool.includes(name)) {
-          this.adding = false
-          this.newPoolName = ''
-          return
-        }
-        this.customPool.push(name)
-      }
-      this.adding = false
-      this.newPoolName = ''
-    },
-    defaultPoolHas(name) { return DEFAULT_POOL.includes(name) },
-    save() {
-      // 过滤空姓名
-      const items = this.localItems
-        .filter(it => (it.name || '').trim())
-        .map(it => ({ name: it.name.trim(), difficulty: Number(it.difficulty) || 0, count: Math.max(1, Math.round(Number(it.count)) || 1) }))
-      // 天数按 周一到周日 固定顺序输出，避免因勾选顺序导致列乱序
-      const days = WEEK.filter(d => this.localDays.includes(d))
-      this.$emit('save', { days, items })
-    },
-    cancel() { this.$emit('cancel') }
+defineOptions({ name: 'DutySettingsDialog' })
+
+const props = defineProps({
+  visible: Boolean,
+  days: { type: Array, default: () => ['周一', '周二', '周三', '周四', '周五'] },
+  items: { type: Array, default: () => [] }
+})
+const emit = defineEmits(['save', 'cancel'])
+
+// 组件内部使用本地副本，避免直接修改父传入的 props/响应式数据
+const localDays = ref([])
+const localItems = ref([])
+const customPool = ref([])
+const weekDays = ref(WEEK)
+const dragSource = ref(null) // { type: 'pool', name } 或 { type: 'box', index }
+const overIndex = ref(-1)
+const adding = ref(false)
+const newPoolName = ref('')
+const newInput = ref(null)
+
+const poolChips = computed(() => [...DEFAULT_POOL, ...customPool.value])
+const isInList = computed(() => (name) => localItems.value.some(it => it.name === name))
+
+watch(() => props.visible, (val) => {
+  if (val) {
+    localDays.value = [...props.days]
+    localItems.value = props.items.map(it => ({ name: it.name, difficulty: it.difficulty == null ? 0.6 : it.difficulty, count: it.count || 1 }))
+    customPool.value = []
+    adding.value = false
+    newPoolName.value = ''
+    dragSource.value = null
+    overIndex.value = -1
   }
+})
+
+function isDayOn(d) { return localDays.value.includes(d) }
+function removeItem(i) { localItems.value.splice(i, 1) }
+// 项目池拖入
+function onPoolDrag(name) { dragSource.value = { type: 'pool', name } }
+// 列表内拖动排序
+function onGripDrag(i) {
+  if (i >= localItems.value.length) return
+  dragSource.value = { type: 'box', index: i }
 }
+// 悬停在空区域（末尾追加）
+function onBoxOver() {
+  if (dragSource.value) overIndex.value = localItems.value.length
+}
+// 悬停在某一行
+function onRowOver(i) {
+  if (dragSource.value) overIndex.value = i
+}
+function onRowDrop(i) {
+  if (!dragSource.value) return
+  placeAt(i)
+}
+function onBoxDrop() {
+  if (!dragSource.value) return
+  placeAt(overIndex.value >= 0 ? overIndex.value : localItems.value.length)
+}
+function placeAt(targetIdx) {
+  const idx = Math.max(0, Math.min(targetIdx, localItems.value.length))
+  const source = dragSource.value
+  if (source.type === 'pool') {
+    if (!localItems.value.some(it => it.name === source.name)) {
+      localItems.value.splice(idx, 0, { name: source.name, difficulty: 0.6, count: 1 })
+    }
+  } else if (source.type === 'box' && source.index !== idx) {
+    const moved = localItems.value.splice(source.index, 1)[0]
+    localItems.value.splice(idx, 0, moved)
+  }
+  dragSource.value = null
+  overIndex.value = -1
+}
+function startAdd() {
+  adding.value = true
+  newPoolName.value = ''
+  nextTick(() => { if (newInput.value) newInput.value.focus() })
+}
+function cancelAdd() {
+  adding.value = false
+  newPoolName.value = ''
+}
+function confirmAdd() {
+  const name = (newPoolName.value || '').trim()
+  if (name) {
+    if (defaultPoolHas(name) || customPool.value.includes(name)) {
+      adding.value = false
+      newPoolName.value = ''
+      return
+    }
+    customPool.value.push(name)
+  }
+  adding.value = false
+  newPoolName.value = ''
+}
+function defaultPoolHas(name) { return DEFAULT_POOL.includes(name) }
+function save() {
+  // 过滤空姓名
+  const items = localItems.value
+    .filter(it => (it.name || '').trim())
+    .map(it => ({ name: it.name.trim(), difficulty: Number(it.difficulty) || 0, count: Math.max(1, Math.round(Number(it.count)) || 1) }))
+  // 天数按 周一到周日 固定顺序输出，避免因勾选顺序导致列乱序
+  const days = WEEK.filter(d => localDays.value.includes(d))
+  emit('save', { days, items })
+}
+function cancel() { emit('cancel') }
 </script>
 
 <style scoped>

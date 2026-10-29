@@ -64,172 +64,169 @@
   </Teleport>
 </template>
 
-<script>
+<script setup>
 import DynamicTable from '../tables/DynamicTable/DynamicTable.vue';
 import { parseSheet } from '../../utils/importSheet.js';
 import { useSeq } from '../../composables/useSeq.js';
 import '../../styles/dialog-transition.css';
+import { ref, computed, watch } from 'vue';
 
-export default {
-  name: 'ImportExcel',
-  components: { DynamicTable },
-  props: {
-    visible: Boolean,
-    existingFields: { type: Array, default: () => [] },
-    requiredFields: { type: Array, default: () => ['收支编码'] }
-  },
-  emits: ['import-data', 'cancel'],
-  created() {
-    // 请求序号挂实例上：Options API 没有 setup 作用域；序号不参与渲染，不必进 data
-    this.seq = useSeq()
-  },
-  computed: {
-    // 只把前 N 行交给表格渲染：10MB 表格可能有几万行，全量铺进 DOM（即使有虚拟滚动，
-    // 也要为每行建 vnode / 计算列宽）会明显卡顿。**数据本身仍保留全部**，
-    // confirmImport 用的还是完整 previewRows —— 截断只影响预览，不影响导入内容。
-    visibleRows() {
-      return this.previewRows.length > this.previewLimit
-        ? this.previewRows.slice(0, this.previewLimit)
-        : this.previewRows
-    },
-  },
-  data() {
-    return {
-      // 预览最多渲染多少行（进 data 是为了模板里也能读到，用于显示截断提示）
-      previewLimit: 3000,
-      fileData: null,
-      fileName: '',
-      parseError: '',
-      filteredCount: 0,
-      previewFields: [],
-      previewRows: [],
-      editingCell: null,
-      sortField: '',
-      sortOrder: 'asc',
-      rowKeyCounter: 0,
-      dragOver: false
-    };
-  },
-  methods: {
-    triggerFileSelect() { this.$refs.fileInput.click(); },
-    onFileDrop(e) {
-      this.dragOver = false;
-      const file = e.dataTransfer.files[0];
-      if (!file) return;
-      this.handleFile({ target: { files: [file] } });
-    },
-    resetFile() {
-      // 取消/关闭弹窗也要让在途读取与解析失效，避免关闭后仍写入预览状态
-      this.seq.invalidate();
-      this.fileName = '';
-      this.fileData = null;
-      this.parseError = '';
-      this.filteredCount = 0;
-      this.previewFields = [];
-      this.previewRows = [];
-      this.editingCell = null;
-      this.sortField = '';
-      this.sortOrder = 'asc';
-      // 清空 file input，保证同一文件可再次选择
-      if (this.$refs.fileInput) this.$refs.fileInput.value = '';
-    },
-    handleFile(e) {
-      const file = e.target.files[0];
-      if (!file) return;
-      // 每次选文件都让上一轮读取/解析失效，包括随后因体积被拒绝的分支
-      const my = this.seq.take();
-      // 大小上限：超大文件会让 xlsx 解析长时间卡死甚至内存暴涨，超过 10MB 直接拒绝
-      if (file.size > 10 * 1024 * 1024) {
-        this.resetFile();
-        this.fileName = file.name;
-        this.parseError = '文件过大，请选择 10MB 以内的表格文件';
-        return;
-      }
-      this.fileName = file.name;
-      const reader = new FileReader();
-      reader.onload = async (ev) => {
-        if (!this.seq.isLatest(my)) return;
-        this.fileData = new Uint8Array(ev.target.result);
-        // 选中文件后自动解析预览，无需再点击「解析预览」
-        await this.parseFile();
-      };
-      // 读盘失败（文件被移动/权限不足/设备断开）时必须给出提示，
-      // 否则界面停在「请选择一个文件进行解析」，用户以为是自己没选中文件
-      reader.onerror = () => {
-        if (!this.seq.isLatest(my)) return;
-        this.fileData = null;
-        this.parseError = '文件读取失败，请重新选择文件';
-      };
-      reader.readAsArrayBuffer(file);
-    },
-    async parseFile() {
-      if (!this.fileData) return;
-      const my = this.seq.current();
-      this.parseError = '';
-      this.filteredCount = 0;
-      // 大依赖 xlsx（SheetJS）延迟到真正导入文件时才加载，避免随表格页一打开就拖进几 MB 代码
-      const XLSX = await import('xlsx');
-      if (!this.seq.isLatest(my)) return;
-      try {
-        const workbook = XLSX.read(this.fileData, { type: 'array' });
-        const sheetName = workbook.SheetNames[0];
-        const sheet = workbook.Sheets[sheetName];
-        const data = XLSX.utils.sheet_to_json(sheet, { header: 1, defval: '', raw: false });
-        if (!this.seq.isLatest(my)) return;
-        if (!data || data.length === 0) { this.parseError = '文件无有效数据'; return; }
-        // 表头识别与行映射抽到 utils/importSheet.js：
-        // 表头保留原始列下标，空表头只跳过自己，不会让它右边的列整体左移（串列）
-        const parsed = parseSheet(data, this.requiredFields);
-        if (!this.seq.isLatest(my)) return;
-        if (parsed.fields.length === 0) { this.parseError = '未识别到列标题'; return; }
-        this.previewFields = parsed.fields.map(h => ({ name: h, type: '文字' }));
-        this.filteredCount = parsed.skipped;
-        // 就地在 parseSheet 新建的对象上加内部字段，不再展开拷贝：
-        // 大表（几万行）展开一份等于把所有单元格字符串再引用一遍、行对象翻倍。
-        parsed.rows.forEach((row, idx) => {
-          row._rowKey = `import_${this.rowKeyCounter++}`;
-          row._isNew = false;
-          row._displayIndex = idx + 1;
-        });
-        this.previewRows = parsed.rows;
-      } catch (e) {
-        if (!this.seq.isLatest(my)) return;
-        this.parseError = '文件解析失败：' + e.message;
-      }
-    },
-    startEditCell(row, field) { this.editingCell = { rowKey: row._rowKey, field: field.name }; },
-    saveCell(row, field) { this.editingCell = null; },
-    // order 可显式指定方向（表头筛选面板的升序/降序按钮）；不传则沿用翻转语义
-    toggleSort(fieldName, order) {
-      if (order === 'asc' || order === 'desc') {
-        if (this.sortField === fieldName && this.sortOrder === order) return;
-        this.sortField = fieldName;
-        this.sortOrder = order;
-      } else if (this.sortField === fieldName) this.sortOrder = this.sortOrder === 'asc' ? 'desc' : 'asc';
-      else { this.sortField = fieldName; this.sortOrder = 'asc'; }
-      this.previewRows.sort((a, b) => {
-        let va = a[fieldName] || '', vb = b[fieldName] || '';
-        if (va < vb) return this.sortOrder === 'asc' ? -1 : 1;
-        if (va > vb) return this.sortOrder === 'asc' ? 1 : -1;
-        return 0;
-      });
-    },
-    deletePreviewRow(rowKey) { this.previewRows = this.previewRows.filter(r => r._rowKey !== rowKey); },
-    confirmImport() {
-      const headers = this.previewFields.map(f => f.name);
-      const rows = this.previewRows.map(row => headers.map(h => row[h] ?? ''));
-      this.$emit('import-data', { fields: headers, rows });
-    },
-    cancel() { this.resetState(); this.$emit('cancel'); },
-    resetState() {
-      this.fileData = null; this.fileName = '';
-      this.parseError = ''; this.filteredCount = 0;
-      this.previewFields = []; this.previewRows = [];
-      this.sortField = '';
-    }
-  },
-  watch: { visible(val) { if (!val) this.resetState(); } }
-};
+defineOptions({ name: 'ImportExcel' });
+
+const props = defineProps({
+  visible: Boolean,
+  existingFields: { type: Array, default: () => [] },
+  requiredFields: { type: Array, default: () => ['收支编码'] }
+});
+
+const emit = defineEmits(['import-data', 'cancel']);
+
+// 请求序号挂实例上：Options API 没有 setup 作用域；序号不参与渲染，不必进 data
+const seq = useSeq();
+
+// 预览最多渲染多少行（进 data 是为了模板里也能读到，用于显示截断提示）
+const previewLimit = ref(3000);
+const fileData = ref(null);
+const fileName = ref('');
+const parseError = ref('');
+const filteredCount = ref(0);
+const previewFields = ref([]);
+const previewRows = ref([]);
+const editingCell = ref(null);
+const sortField = ref('');
+const sortOrder = ref('asc');
+const rowKeyCounter = ref(0);
+const dragOver = ref(false);
+
+const fileInput = ref(null);
+
+// 只把前 N 行交给表格渲染：10MB 表格可能有几万行，全量铺进 DOM（即使有虚拟滚动，
+// 也要为每行建 vnode / 计算列宽）会明显卡顿。**数据本身仍保留全部**，
+// confirmImport 用的还是完整 previewRows —— 截断只影响预览，不影响导入内容。
+const visibleRows = computed(() => {
+  return previewRows.value.length > previewLimit.value
+    ? previewRows.value.slice(0, previewLimit.value)
+    : previewRows.value
+});
+
+function triggerFileSelect() { fileInput.value.click(); }
+function onFileDrop(e) {
+  dragOver.value = false;
+  const file = e.dataTransfer.files[0];
+  if (!file) return;
+  handleFile({ target: { files: [file] } });
+}
+function resetFile() {
+  // 取消/关闭弹窗也要让在途读取与解析失效，避免关闭后仍写入预览状态
+  seq.invalidate();
+  fileName.value = '';
+  fileData.value = null;
+  parseError.value = '';
+  filteredCount.value = 0;
+  previewFields.value = [];
+  previewRows.value = [];
+  editingCell.value = null;
+  sortField.value = '';
+  sortOrder.value = 'asc';
+  // 清空 file input，保证同一文件可再次选择
+  if (fileInput.value) fileInput.value.value = '';
+}
+function handleFile(e) {
+  const file = e.target.files[0];
+  if (!file) return;
+  // 每次选文件都让上一轮读取/解析失效，包括随后因体积被拒绝的分支
+  const my = seq.take();
+  // 大小上限：超大文件会让 xlsx 解析长时间卡死甚至内存暴涨，超过 10MB 直接拒绝
+  if (file.size > 10 * 1024 * 1024) {
+    resetFile();
+    fileName.value = file.name;
+    parseError.value = '文件过大，请选择 10MB 以内的表格文件';
+    return;
+  }
+  fileName.value = file.name;
+  const reader = new FileReader();
+  reader.onload = async (ev) => {
+    if (!seq.isLatest(my)) return;
+    fileData.value = new Uint8Array(ev.target.result);
+    // 选中文件后自动解析预览，无需再点击「解析预览」
+    await parseFile();
+  };
+  // 读盘失败（文件被移动/权限不足/设备断开）时必须给出提示，
+  // 否则界面停在「请选择一个文件进行解析」，用户以为是自己没选中文件
+  reader.onerror = () => {
+    if (!seq.isLatest(my)) return;
+    fileData.value = null;
+    parseError.value = '文件读取失败，请重新选择文件';
+  };
+  reader.readAsArrayBuffer(file);
+}
+async function parseFile() {
+  if (!fileData.value) return;
+  const my = seq.current();
+  parseError.value = '';
+  filteredCount.value = 0;
+  // 大依赖 xlsx（SheetJS）延迟到真正导入文件时才加载，避免随表格页一打开就拖进几 MB 代码
+  const XLSX = await import('xlsx');
+  if (!seq.isLatest(my)) return;
+  try {
+    const workbook = XLSX.read(fileData.value, { type: 'array' });
+    const sheetName = workbook.SheetNames[0];
+    const sheet = workbook.Sheets[sheetName];
+    const data = XLSX.utils.sheet_to_json(sheet, { header: 1, defval: '', raw: false });
+    if (!seq.isLatest(my)) return;
+    if (!data || data.length === 0) { parseError.value = '文件无有效数据'; return; }
+    // 表头识别与行映射抽到 utils/importSheet.js：
+    // 表头保留原始列下标，空表头只跳过自己，不会让它右边的列整体左移（串列）
+    const parsed = parseSheet(data, props.requiredFields);
+    if (!seq.isLatest(my)) return;
+    if (parsed.fields.length === 0) { parseError.value = '未识别到列标题'; return; }
+    previewFields.value = parsed.fields.map(h => ({ name: h, type: '文字' }));
+    filteredCount.value = parsed.skipped;
+    // 就地在 parseSheet 新建的对象上加内部字段，不再展开拷贝：
+    // 大表（几万行）展开一份等于把所有单元格字符串再引用一遍、行对象翻倍。
+    parsed.rows.forEach((row, idx) => {
+      row._rowKey = `import_${rowKeyCounter.value++}`;
+      row._isNew = false;
+      row._displayIndex = idx + 1;
+    });
+    previewRows.value = parsed.rows;
+  } catch (e) {
+    if (!seq.isLatest(my)) return;
+    parseError.value = '文件解析失败：' + e.message;
+  }
+}
+function startEditCell(row, field) { editingCell.value = { rowKey: row._rowKey, field: field.name }; }
+function saveCell(row, field) { editingCell.value = null; }
+// order 可显式指定方向（表头筛选面板的升序/降序按钮）；不传则沿用翻转语义
+function toggleSort(fieldName, order) {
+  if (order === 'asc' || order === 'desc') {
+    if (sortField.value === fieldName && sortOrder.value === order) return;
+    sortField.value = fieldName;
+    sortOrder.value = order;
+  } else if (sortField.value === fieldName) sortOrder.value = sortOrder.value === 'asc' ? 'desc' : 'asc';
+  else { sortField.value = fieldName; sortOrder.value = 'asc'; }
+  previewRows.value.sort((a, b) => {
+    let va = a[fieldName] || '', vb = b[fieldName] || '';
+    if (va < vb) return sortOrder.value === 'asc' ? -1 : 1;
+    if (va > vb) return sortOrder.value === 'asc' ? 1 : -1;
+    return 0;
+  });
+}
+function deletePreviewRow(rowKey) { previewRows.value = previewRows.value.filter(r => r._rowKey !== rowKey); }
+function confirmImport() {
+  const headers = previewFields.value.map(f => f.name);
+  const rows = previewRows.value.map(row => headers.map(h => row[h] ?? ''));
+  emit('import-data', { fields: headers, rows });
+}
+function cancel() { resetState(); emit('cancel'); }
+function resetState() {
+  fileData.value = null; fileName.value = '';
+  parseError.value = ''; filteredCount.value = 0;
+  previewFields.value = []; previewRows.value = [];
+  sortField.value = '';
+}
+
+watch(() => props.visible, (val) => { if (!val) resetState(); });
 </script>
 
 <style>

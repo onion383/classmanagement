@@ -100,9 +100,7 @@ function unwrapKey(wrapped) {
 // 密码与恢复词各用独立 salt，改密码不会让已抄写的恢复词失效。
 // 成本参数：N=2^17（约 128MB 内存、本机实测 ~0.2s）。默认 maxmem 只有 32MB，
 // 必须按 N/r 显式放宽，否则 scryptSync 会直接抛错。
-// 每个账号把实际使用的参数记在 registry 里（密码/恢复词各一列），
-// 旧版本用 N=16384 包裹的库仍按旧参数解锁；改密码时顺势升级到新参数。
-const LEGACY_SCRYPT_PARAMS = { N: 16384, r: 8, p: 1 };
+// 每个账号把实际使用的参数记在 registry 里（密码/恢复词各一列），解锁按登记行的参数派生。
 const SCRYPT_PARAMS = { N: 131072, r: 8, p: 1 };
 const SCRYPT_LEN = 32;
 
@@ -111,21 +109,22 @@ function newPrivacySalt() {
 }
 
 // 把登记行里的参数（JSON 字符串 / 对象 / 空值）还原成 scrypt 选项。
-// 空值或损坏一律回退旧参数（兼容升级前开启的隐私库）；maxmem 不信任存下来的值，按 N/r 现算。
+// 空值或损坏一律回退当前默认参数；maxmem 不信任存下来的值，按 N/r 现算。
 function normalizeScryptParams(raw) {
+  const fallback = () => ({ ...SCRYPT_PARAMS, maxmem: 128 * SCRYPT_PARAMS.N * SCRYPT_PARAMS.r * 2 });
   let parsed = raw;
   if (typeof raw === 'string') {
-    if (!raw) return { ...LEGACY_SCRYPT_PARAMS, maxmem: 128 * LEGACY_SCRYPT_PARAMS.N * LEGACY_SCRYPT_PARAMS.r * 2 };
-    try { parsed = JSON.parse(raw); } catch (_) { return normalizeScryptParams(''); }
+    if (!raw) return fallback();
+    try { parsed = JSON.parse(raw); } catch (_) { return fallback(); }
   }
-  if (!parsed || typeof parsed !== 'object') return normalizeScryptParams('');
+  if (!parsed || typeof parsed !== 'object') return fallback();
   const N = Number(parsed.N);
   const r = Number(parsed.r);
   const p = Number(parsed.p);
   // 上限防止被改坏的登记行把内存拉爆（宁可解锁失败，也不要 OOM）
   if (!Number.isInteger(N) || !Number.isInteger(r) || !Number.isInteger(p)
     || N < 1024 || N > (1 << 19) || r < 1 || r > 32 || p < 1 || p > 16) {
-    return normalizeScryptParams('');
+    return fallback();
   }
   return { N, r, p, maxmem: Math.max(32 * 1024 * 1024, 128 * N * r * 2) };
 }
@@ -326,19 +325,6 @@ function ensureIndex() {
       created_at TEXT DEFAULT CURRENT_TIMESTAMP
     );
   `);
-  // 兼容存量 index.db：老库缺的列逐个补上，默认值保证既有库行为不变
-  const cols = indexDb.prepare('PRAGMA table_info(registry)').all();
-  const ensureCol = (name, ddl) => {
-    if (!cols.some((c) => c.name === name)) indexDb.exec(`ALTER TABLE registry ADD COLUMN ${ddl}`);
-  };
-  ensureCol('encrypted', 'encrypted INTEGER NOT NULL DEFAULT 1');
-  ensureCol('protect', 'protect INTEGER NOT NULL DEFAULT 0');
-  ensureCol('wrapped_by_password', "wrapped_by_password TEXT NOT NULL DEFAULT ''");
-  ensureCol('wrapped_by_mnemonic', "wrapped_by_mnemonic TEXT NOT NULL DEFAULT ''");
-  ensureCol('kdf_salt', "kdf_salt TEXT NOT NULL DEFAULT ''");
-  ensureCol('mnemonic_salt', "mnemonic_salt TEXT NOT NULL DEFAULT ''");
-  ensureCol('kdf_params_password', "kdf_params_password TEXT NOT NULL DEFAULT ''");
-  ensureCol('kdf_params_mnemonic', "kdf_params_mnemonic TEXT NOT NULL DEFAULT ''");
   return indexDb;
 }
 

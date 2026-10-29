@@ -23,17 +23,14 @@
   </DialogShell>
 </template>
 
-<script>
+<script setup>
 import '../../styles/dialog-transition.css'
 import DialogShell from '../base/DialogShell.vue'
 
-export default {
-  name: 'OverdueLeaveDialog',
-  components: { DialogShell },
-  props: {
-    visible: Boolean,
-    records: { type: Array, default: () => [] }
-  },
-  emits: ['not', 'ret']
-}
+defineOptions({ name: 'OverdueLeaveDialog' })
+defineProps({
+  visible: Boolean,
+  records: { type: Array, default: () => [] }
+})
+defineEmits(['not', 'ret'])
 </script>

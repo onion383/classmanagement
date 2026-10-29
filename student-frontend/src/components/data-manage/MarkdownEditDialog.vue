@@ -32,47 +32,45 @@
   </Teleport>
 </template>
 
-<script>
+<script setup>
+import { ref, watch } from 'vue'
 import '../../styles/dialog-transition.css'
 import { sanitizeFileName } from '../../utils/fileName.js'
 
-export default {
-  name: 'MarkdownEditDialog',
-  props: {
-    visible: { type: Boolean, default: false },
-    // isNew=true 为「新增文件」；否则为编辑既有文件（原文件名 originalName 用于后端重命名）
-    isNew: { type: Boolean, default: false },
-    // 文件名是否只读（如「AI 记忆文件」名称固定，不可改名）
-    nameDisabled: { type: Boolean, default: false },
-    originalName: { type: String, default: '' },
-    initialName: { type: String, default: '' },
-    initialContent: { type: String, default: '' },
+defineOptions({ name: 'MarkdownEditDialog' })
+const props = defineProps({
+  visible: { type: Boolean, default: false },
+  // isNew=true 为「新增文件」；否则为编辑既有文件（原文件名 originalName 用于后端重命名）
+  isNew: { type: Boolean, default: false },
+  // 文件名是否只读（如「AI 记忆文件」名称固定，不可改名）
+  nameDisabled: { type: Boolean, default: false },
+  originalName: { type: String, default: '' },
+  initialName: { type: String, default: '' },
+  initialContent: { type: String, default: '' },
+})
+const emit = defineEmits(['update:visible', 'save'])
+
+const name = ref('')
+const content = ref('')
+
+watch(
+  () => props.visible,
+  (v) => {
+    if (v) {
+      name.value = props.initialName || ''
+      content.value = props.initialContent || ''
+    }
   },
-  emits: ['update:visible', 'save'],
-  data() {
-    return { name: '', content: '' }
-  },
-  watch: {
-    visible: {
-      immediate: true,
-      handler(v) {
-        if (v) {
-          this.name = this.initialName || ''
-          this.content = this.initialContent || ''
-        }
-      },
-    },
-  },
-  methods: {
-    cancel() { this.$emit('update:visible', false) },
-    save() {
-      // 文件名会落成磁盘上的 <name>.md：非法字符/末尾点空格先清洗，
-      // 清成空串（只输了非法字符）时直接不保存，避免创建出诡异的空名文件
-      const name = sanitizeFileName(this.name, '')
-      if (!name) return
-      this.$emit('save', { original: this.originalName, name, content: this.content })
-    },
-  },
+  { immediate: true }
+)
+
+function cancel() { emit('update:visible', false) }
+function save() {
+  // 文件名会落成磁盘上的 <name>.md：非法字符/末尾点空格先清洗，
+  // 清成空串（只输了非法字符）时直接不保存，避免创建出诡异的空名文件
+  const safeName = sanitizeFileName(name.value, '')
+  if (!safeName) return
+  emit('save', { original: props.originalName, name: safeName, content: content.value })
 }
 </script>
 

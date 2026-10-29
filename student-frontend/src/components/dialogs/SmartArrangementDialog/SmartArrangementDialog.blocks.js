@@ -1,7 +1,7 @@
 // ===== 智能排表：组块置换 + 位置公平 =====
 // 纯代码搬运自 SmartArrangementDialog.vue 的 methods，未改写逻辑。
 import { shuffle } from './SmartArrangementDialog.pipeline.js'
-export function useSmartArrangementBlocks() {
+export function useSmartArrangementBlocks(ctx) {
   return {
     // ==================== 组块置换工具 ====================
     // 按置换把组块内容整块搬到目标位置（块内成员不拆分；只写回这些区块，区域外不受影响）
@@ -33,7 +33,7 @@ export function useSmartArrangementBlocks() {
     // 分组方式置换：随机 → 同大小随机；Z字形 / 上下交换形 → 在块阵列内按路径置换
     buildGroupPerm(blocks, swapType) {
       const n = blocks.length
-      if (swapType !== 'updown' && swapType !== 'z') return this.permWithinSizes(blocks)
+      if (swapType !== 'updown' && swapType !== 'z') return ctx.permWithinSizes(blocks)
       const brs = blocks.map(b => b.br), bcs = blocks.map(b => b.bc)
       const minBr = Math.min(...brs), minBc = Math.min(...bcs)
       const rows = Math.max(...brs) - minBr + 1
@@ -69,17 +69,17 @@ export function useSmartArrangementBlocks() {
       const unit = node.unit || 'six'
       let total = 0
       for (const region of regions) {
-        const blocks = this.splitRegion(region, unit)
+        const blocks = ctx.splitRegion(region, unit)
         if (blocks.length >= 2) {
           const sizes = blocks.map(b => b.pos.length)
           const allSame = sizes.every(s => s === sizes[0])
           // Z字形 / 上下交换形要求各块大小一致，否则退化为同大小随机
-          const perm = allSame ? this.buildGroupPerm(blocks, swapType) : this.permWithinSizes(blocks)
-          this.applyPerm(grid, blocks, perm)
+          const perm = allSame ? ctx.buildGroupPerm(blocks, swapType) : ctx.permWithinSizes(blocks)
+          ctx.applyPerm(grid, blocks, perm)
         }
         total += region.filter(p => grid[p.r][p.c]).length
       }
-      this.trackSatisfaction(node.uid, total, total)
+      ctx.trackSatisfaction(node.uid, total, total)
     },
 
     // 性别选择：在「作用域」内，按性别把学生配成同桌（same=同性别，mixed=异性别），单座保持单座
@@ -110,7 +110,7 @@ export function useSmartArrangementBlocks() {
           }
           for (const o of others) units.push({ cells: [o], indivisible: false })
         }
-        this.fillSlots(grid, region, this.regionSlots(region), units)
+        ctx.fillSlots(grid, region, ctx.regionSlots(region), units)
         // 满足率：同桌对符合性别规则 + 单座视为满足
         for (const u of units) {
           if (u.indivisible) {
@@ -122,13 +122,13 @@ export function useSmartArrangementBlocks() {
           }
         }
       }
-      this.trackSatisfaction(node.uid, satisfied, total)
+      ctx.trackSatisfaction(node.uid, satisfied, total)
     },
 
     // 同桌关系：在「作用域」内，保留原座位表达成的同桌对（内部坐序按 lockMode 控制），单座保持单座
     applyLockDeskmate(grid, regions, node) {
       const lockMode = node.lockMode || 'no-swap'
-      const orig = this.extractOriginalPairs()
+      const orig = ctx.extractOriginalPairs()
       let placedTotal = 0, pairsTotal = 0
       for (const region of regions) {
         const students = region.map(p => grid[p.r][p.c]).filter(s => s)
@@ -155,9 +155,9 @@ export function useSmartArrangementBlocks() {
         if (lockMode === 'swap') {
           units.forEach(u => { if (u.indivisible) u.cells = [u.cells[1], u.cells[0]] })
         }
-        placedTotal += this.fillSlots(grid, region, this.regionSlots(region), units)
+        placedTotal += ctx.fillSlots(grid, region, ctx.regionSlots(region), units)
       }
-      this.trackSatisfaction(node.uid, placedTotal, pairsTotal)
+      ctx.trackSatisfaction(node.uid, placedTotal, pairsTotal)
     },
 
     // 特殊关系：在「作用域」内修复两人关系。
@@ -168,8 +168,8 @@ export function useSmartArrangementBlocks() {
       const a = pair.a, b = pair.b
       const type = node.relationType || 'deskmate'
       if (!a || !b || a === b) return
-      const pa = this.findPos(grid, a)
-      const pb = this.findPos(grid, b)
+      const pa = ctx.findPos(grid, a)
+      const pb = ctx.findPos(grid, b)
       if (!pa || !pb) return
 
       const contains = (region, pos) => region.some(p => p.r === pos[0] && p.c === pos[1])
@@ -177,8 +177,8 @@ export function useSmartArrangementBlocks() {
       const regionB = regions.find(r => contains(r, pb))
       const needSame = type === 'deskmate' || type === 'nearby'
       if (!regionA || !regionB || regionA !== regionB) {
-        const ok = type === 'not-deskmate' ? !this.isTwoAdjacent(pa, pb) : !this.isTwoNearby(pa, pb)
-        this.trackSatisfaction(node.uid, needSame ? 0 : (ok ? 1 : 0), 1)
+        const ok = type === 'not-deskmate' ? !ctx.isTwoAdjacent(pa, pb) : !ctx.isTwoNearby(pa, pb)
+        ctx.trackSatisfaction(node.uid, needSame ? 0 : (ok ? 1 : 0), 1)
         return
       }
 
@@ -187,19 +187,19 @@ export function useSmartArrangementBlocks() {
       const inRegion = pos => regionSet.has(pos[0] + ',' + pos[1])
       let ok = false
       if (type === 'deskmate') {
-        ok = this.isTwoAdjacent(pa, pb)
-        if (!ok) ok = this.tryTogetherInRegion(grid, pa, pb, inRegion)
+        ok = ctx.isTwoAdjacent(pa, pb)
+        if (!ok) ok = ctx.tryTogetherInRegion(grid, pa, pb, inRegion)
       } else if (type === 'not-deskmate') {
-        ok = !this.isTwoAdjacent(pa, pb)
-        if (!ok) ok = this.trySeparateInRegion(grid, pa, pb, inRegion, type)
+        ok = !ctx.isTwoAdjacent(pa, pb)
+        if (!ok) ok = ctx.trySeparateInRegion(grid, pa, pb, inRegion, type)
       } else if (type === 'nearby') {
-        ok = this.isTwoNearby(pa, pb)
-        if (!ok) ok = this.tryNearbyInRegion(grid, pa, pb, inRegion)
+        ok = ctx.isTwoNearby(pa, pb)
+        if (!ok) ok = ctx.tryNearbyInRegion(grid, pa, pb, inRegion)
       } else { // not-nearby
-        ok = !this.isTwoNearby(pa, pb)
-        if (!ok) ok = this.trySeparateInRegion(grid, pa, pb, inRegion, type)
+        ok = !ctx.isTwoNearby(pa, pb)
+        if (!ok) ok = ctx.trySeparateInRegion(grid, pa, pb, inRegion, type)
       }
-      this.trackSatisfaction(node.uid, ok ? 1 : 0, 1)
+      ctx.trackSatisfaction(node.uid, ok ? 1 : 0, 1)
     },
 
     // 特殊关系：作为同桌 → 把 b 移到 a 的相邻空位（作用域内，且不隔走廊）
@@ -212,7 +212,7 @@ export function useSmartArrangementBlocks() {
         if (!inRegion([ra, nc])) continue
         if (grid[ra][nc] !== null) continue
         // 双人桌模式下必须组成偶数列开头的同桌对（隔走廊不算同桌）
-        if (this.mode !== 'single' && Math.min(ca, nc) % 2 !== 0) continue
+        if (ctx.mode.value !== 'single' && Math.min(ca, nc) % 2 !== 0) continue
         grid[ra][nc] = movedStudent
         grid[pb[0]][pb[1]] = null
         return true
@@ -248,7 +248,7 @@ export function useSmartArrangementBlocks() {
       const movedStudent = grid[moved[0]][moved[1]]
       if (!movedStudent) return false
       const isFar = (r, c) => {
-        if (type === 'not-deskmate') return !this.isTwoAdjacent([r, c], other)
+        if (type === 'not-deskmate') return !ctx.isTwoAdjacent([r, c], other)
         return Math.max(Math.abs(r - other[0]), Math.abs(c - other[1])) > 1
       }
       for (let r = 0; r < grid.length; r++) {
@@ -286,8 +286,8 @@ export function useSmartArrangementBlocks() {
     // 步骤：① 按「按照 X 为一组」切块，整体调整组块顺序；
     //       ② 若允许，则再「组不动、只换人」调整组内排序。
     applyFair(grid, regions, node) {
-      const weights = this.weights || []
-      const ledger = this.ledger || {}
+      const weights = ctx.weights.value || []
+      const ledger = ctx.ledger.value || {}
       const unit = node.unit || 'six'
       const allowInner = node.innerOrder === 'yes'
       const wOf = (r, c) => (typeof weights[r]?.[c] === 'number' ? weights[r][c] : 0)
@@ -298,7 +298,7 @@ export function useSmartArrangementBlocks() {
         const students = region.map(p => grid[p.r][p.c]).filter(Boolean)
         allTotal += students.length
         // 作用域内的组块
-        const blocks = this.splitRegion(region, unit)
+        const blocks = ctx.splitRegion(region, unit)
         const active = blocks.map(b => ({ pos: b.pos })).filter(b => b.pos.length > 0)
         if (active.length < 2 || students.length < 2) { doneTotal += students.length; continue }
 
@@ -375,32 +375,32 @@ export function useSmartArrangementBlocks() {
         for (const [p, v] of writes) grid[p.r][p.c] = v
         doneTotal += students.length
       }
-      this.trackSatisfaction(node.uid, doneTotal, allTotal)
+      ctx.trackSatisfaction(node.uid, doneTotal, allTotal)
     },
 
     // 记录满足率
     trackSatisfaction(key, done, total) {
-      if (!this.satisfaction[key]) this.satisfaction[key] = { done: 0, total: 0 }
-      this.satisfaction[key].done += done
-      this.satisfaction[key].total += total
+      if (!ctx.satisfaction.value[key]) ctx.satisfaction.value[key] = { done: 0, total: 0 }
+      ctx.satisfaction.value[key].done += done
+      ctx.satisfaction.value[key].total += total
     },
     // 某条件的满足率（未排表或无统计时返回 null）：内联显示在每行条件右侧
     satisfactionOf(node) {
-      const st = this.satisfaction[node.uid]
+      const st = ctx.satisfaction.value[node.uid]
       if (!st) return null
       return st.total ? Math.round((st.done / st.total) * 100) : 0
     },
 
     // 生成排表结果：保证每次"开始排表/换一换"布局与当前预览不同
     generatePreview() {
-      let result = this.buildSeats()
+      let result = ctx.buildSeats()
       let guard = 0
-      while (guard < 30 && this.previewSeats && this.previewSeats.length && this.sameLayout(result, this.previewSeats)) {
-        result = this.buildSeats()
+      while (guard < 30 && ctx.previewSeats.value && ctx.previewSeats.value.length && ctx.sameLayout(result, ctx.previewSeats.value)) {
+        result = ctx.buildSeats()
         guard++
       }
-      this.previewSeats = result
-      this.previewVersion++
+      ctx.previewSeats.value = result
+      ctx.previewVersion.value++
     },
 
     // 判断两张座次网格是否完全相同（任一学生位置不同即视为不同）

@@ -4,34 +4,10 @@
 //   供「数据管理」页的「导出聊天记录 / 导出 Markdown 文件」弹窗复用，
 //   与 ExportExcel.vue（面向课表/座位等带特殊行语义的表格）相互独立、互不影响。
 // =========================================================================
-import { INVOKE } from '../electronChannels.js'
 import { loadPdfFontBase64, collectPdfText } from '../utils/pdfFont.js'
-import { sanitizeFileName } from '../utils/fileName.js'
+import { saveBlobWithDialog } from '../utils/saveFile.js'
 import { csvCell } from '../utils/csvCell.js'
 import { toRaw } from 'vue'
-
-// 保存文件：Electron 下弹系统保存对话框，用户确认后才写入；浏览器则直接下载
-export async function saveFileWithDialog(defaultName, blob) {
-  // 文件名来自用户输入，落盘前统一清洗（非法字符 / 末尾点空格 / 超长），
-  // 这里是所有导出格式的唯一出口，改这一处即可覆盖全部调用方
-  const safeName = sanitizeFileName(defaultName)
-  if (window.electron && typeof window.electron.invoke === 'function') {
-    const arrayBuffer = await blob.arrayBuffer()
-    const result = await window.electron.invoke(INVOKE.SAVE_FILE, { defaultName: safeName, data: arrayBuffer })
-    if (result && !result.canceled && result.filePath) {
-      // 保存成功后用系统默认应用打开文件
-      window.electron.invoke(INVOKE.OPEN_FILE, { filePath: result.filePath }).catch(() => {})
-    }
-    return !!result && !result.canceled
-  }
-  const url = URL.createObjectURL(blob)
-  const a = document.createElement('a')
-  a.href = url
-  a.download = safeName
-  a.click()
-  URL.revokeObjectURL(url)
-  return true
-}
 
 // 与 ExportExcel 保持同一套格式清单与文案（观感一致）
 export const FORMAT_OPTIONS = [
@@ -117,7 +93,7 @@ async function exportXLSX(cols, body, name, title) {
     ws.getColumn(i).width = Math.max(12, Math.min(maxLen + 6, 60))
   }
   const buf = await wb.xlsx.writeBuffer()
-  return saveFileWithDialog(`${name}.xlsx`, new Blob([buf], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' }))
+  return saveBlobWithDialog(`${name}.xlsx`, new Blob([buf], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' }))
 }
 
 async function exportHTML(cols, body, name, title) {
@@ -127,29 +103,29 @@ async function exportHTML(cols, body, name, title) {
       <thead><tr>${cols.map((h) => `<th>${escapeHtml(h)}</th>`).join('')}</tr></thead>
       <tbody>${body.map((row) => '<tr>' + row.map((c) => `<td style="text-align:left; vertical-align:top;">${escapeHtml(c)}</td>`).join('') + '</tr>').join('')}</tbody>
     </table></body></html>`
-  return saveFileWithDialog(`${name}.html`, new Blob([html], { type: 'text/html' }))
+  return saveBlobWithDialog(`${name}.html`, new Blob([html], { type: 'text/html' }))
 }
 
 async function exportCSV(cols, body, name) {
   const csv = '\uFEFF' + [cols, ...body].map((row) => row.map(csvCell).join(',')).join('\r\n')
-  return saveFileWithDialog(`${name}.csv`, new Blob([csv], { type: 'text/csv;charset=utf-8;' }))
+  return saveBlobWithDialog(`${name}.csv`, new Blob([csv], { type: 'text/csv;charset=utf-8;' }))
 }
 
 async function exportMD(cols, body, name) {
   const line = (cells) => `| ${cells.map(mdEscape).join(' | ')} |`
   const md = [`# ${mdEscape(name)}`, '', line(cols), `| ${cols.map(() => '---').join(' | ')} |`, ...body.map(line)].join('\n') + '\n'
-  return saveFileWithDialog(`${name}.md`, new Blob([md], { type: 'text/markdown;charset=utf-8;' }))
+  return saveBlobWithDialog(`${name}.md`, new Blob([md], { type: 'text/markdown;charset=utf-8;' }))
 }
 
 async function exportTXT(cols, body, name) {
   const line = (cells) => cells.map((c) => s(c).replace(/\t/g, ' ').replace(/\r?\n/g, ' ')).join('\t')
   const txt = [line(cols), ...body.map(line)].join('\r\n') + '\r\n'
-  return saveFileWithDialog(`${name}.txt`, new Blob([txt], { type: 'text/plain;charset=utf-8;' }))
+  return saveBlobWithDialog(`${name}.txt`, new Blob([txt], { type: 'text/plain;charset=utf-8;' }))
 }
 
 async function exportJSON(cols, body, name) {
   const data = body.map((row) => { const o = {}; cols.forEach((h, i) => { o[h] = row[i] == null ? '' : row[i] }); return o })
-  return saveFileWithDialog(`${name}.json`, new Blob([JSON.stringify(data, null, 2) + '\n'], { type: 'application/json;charset=utf-8;' }))
+  return saveBlobWithDialog(`${name}.json`, new Blob([JSON.stringify(data, null, 2) + '\n'], { type: 'application/json;charset=utf-8;' }))
 }
 
 async function exportImage(cols, body, name, title) {
@@ -161,8 +137,8 @@ async function exportImage(cols, body, name, title) {
   try {
     const canvas = await html2canvas(tempDiv, { scale: 2, backgroundColor: '#ffffff' })
     const blob = await new Promise((resolve) => canvas.toBlob(resolve, 'image/png'))
-    if (!blob) return false
-    return await saveFileWithDialog(`${name}.png`, blob)
+    if (!blob) return ''
+    return await saveBlobWithDialog(`${name}.png`, blob)
   } finally { document.body.removeChild(tempDiv) }
 }
 
@@ -193,13 +169,13 @@ async function exportPDF(cols, body, name, title) {
     styles: { font: pdfFont, fontStyle: 'normal', fontSize: 9, cellPadding: 1.5, halign: 'left', valign: 'middle' },
     headStyles: { font: pdfFont, fontStyle: 'normal', fillColor: [76, 175, 80], textColor: 255, halign: 'center' },
   })
-  return saveFileWithDialog(`${name}.pdf`, doc.output('blob'))
+  return saveBlobWithDialog(`${name}.pdf`, doc.output('blob'))
 }
 
 // 按格式导出二维数据；返回是否成功保存（用户取消返回 false，不视为失败）
 export async function runTableExport({ format, columns, rows, filename, title }) {
   const { cols, body } = normalize(columns, rows)
-  if (!cols.length) return false
+  if (!cols.length) return ''
   const name = filename || '导出数据'
   const head = title || name
   switch (format) {

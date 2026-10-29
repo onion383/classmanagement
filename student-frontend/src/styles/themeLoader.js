@@ -169,17 +169,13 @@ export function warmNightMode(theme, mode) {
 export function prefetchThemeStyles() {
   const keys = Object.keys(LOADERS).filter((key) => !cache.has(key))
   if (!keys.length) return
-  const idle = (fn) => {
-    if (typeof window.requestIdleCallback === 'function') window.requestIdleCallback(fn)
-    else setTimeout(fn, 300)
-  }
   let i = 0
   const next = () => {
     if (i >= keys.length) return
     const key = keys[i++]
     Promise.resolve()
       .then(() => once(key))
-      .then(() => idle(next))
+      .then(() => window.requestIdleCallback(next))
   }
-  idle(next)
+  window.requestIdleCallback(next)
 }

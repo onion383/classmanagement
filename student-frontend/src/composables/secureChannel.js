@@ -13,7 +13,7 @@
 
 import { INVOKE } from '../electronChannels.js'
 
-const subtle = typeof crypto !== 'undefined' && crypto.subtle ? crypto.subtle : (globalThis.crypto && globalThis.crypto.subtle)
+const subtle = crypto.subtle
 const BASE = 'http://localhost:3000'
 
 let kMaster = null
@@ -24,18 +24,13 @@ let sessionId = null
 let authBound = false
 
 export function safe() {
-  if (typeof window !== 'undefined' && window.__SECURE_CHANNEL__ === true) return true
+  if (window.__SECURE_CHANNEL__ === true) return true
   return import.meta.env && import.meta.env.VITE_SECURE === '1'
 }
 
 async function getMasterKey() {
   if (kMaster) return kMaster
-  const e = typeof window !== 'undefined' && window.electron
-  if (e && typeof e.invoke === 'function') {
-    kMaster = await e.invoke(INVOKE.GET_MASTER_KEY)
-  } else if (import.meta.env && import.meta.env.VITE_SECURE_MASTER) {
-    kMaster = import.meta.env.VITE_SECURE_MASTER
-  }
+  kMaster = await window.electron.invoke(INVOKE.GET_MASTER_KEY)
   if (!kMaster || !/^[0-9a-f]{64}$/.test(String(kMaster))) return null
   return kMaster
 }
@@ -102,17 +97,17 @@ function b64(bytes) {
   for (let i = 0; i < bytes.length; i += 0x8000) {
     s += String.fromCharCode.apply(null, bytes.subarray(i, i + 0x8000))
   }
-  return typeof btoa === 'function' ? btoa(s) : s
+  return btoa(s)
 }
 function unb64(str) {
-  const s = typeof atob === 'function' ? atob(str) : str
+  const s = atob(str)
   const u = new Uint8Array(s.length)
   for (let i = 0; i < s.length; i++) u[i] = s.charCodeAt(i)
   return u
 }
 function hexToBytes(hex) {
   const out = new Uint8Array(hex.length / 2)
-  for (let i = 0; i < out.length; i++) out[i] = parseInt(hex.substr(i * 2, 2), 16)
+  for (let i = 0; i < out.length; i++) out[i] = parseInt(hex.slice(i * 2, i * 2 + 2), 16)
   return out
 }
 const utf8 = (s) => new TextEncoder().encode(s)

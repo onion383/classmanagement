@@ -595,35 +595,37 @@ const loadDutyPipeline = () => import(pathToFileURL(path.join(
   __dirname, '../../student-frontend/src/components/dialogs/DutyArrangementDialog/DutyArrangementDialog.pipeline.js'
 )).href)
 
-function fairCtx(m, overrides) {
+function fairCtx(overrides) {
+  // ctx 契约：状态为 ref（.value 访问），跨模块方法经 Object.assign 回填
   return {
-    studentNames: [],
-    weights: {},
-    ledger: {},
-    satisfaction: {},
-    trackSatisfaction: m.trackSatisfaction,
+    studentNames: { value: [] },
+    weights: { value: {} },
+    ledger: { value: {} },
+    satisfaction: { value: {} },
     ...overrides,
   }
 }
 
 test('fairFill：学生名单为空时返回全空槽位，不因取模 0 崩溃', async () => {
   const { useDutyArrangementPipeline } = await loadDutyPipeline()
-  const m = useDutyArrangementPipeline([])
-  const ctx = fairCtx(m)
+  const ctx = fairCtx()
+  const m = useDutyArrangementPipeline(ctx, [])
+  Object.assign(ctx, m)
   const slots = [{ item: '扫地', day: '周一', k: 0 }, { item: '拖地', day: '周二', k: 0 }]
-  assert.deepEqual(m.fairFill.call(ctx, slots), ['', ''])
+  assert.deepEqual(m.fairFill(slots), ['', ''])
 })
 
 test('fairFill：名单非空时按账本降序轮询，槽位不足则循环使用学生', async () => {
   const { useDutyArrangementPipeline } = await loadDutyPipeline()
-  const m = useDutyArrangementPipeline([])
-  const ctx = fairCtx(m, { studentNames: ['甲', '乙'], ledger: { 甲: 5, 乙: 1 } })
+  const ctx = fairCtx({ studentNames: { value: ['甲', '乙'] }, ledger: { value: { 甲: 5, 乙: 1 } } })
+  const m = useDutyArrangementPipeline(ctx, [])
+  Object.assign(ctx, m)
   const slots = [
     { item: '扫地', day: '周一', k: 0 },
     { item: '拖地', day: '周一', k: 0 },
     { item: '擦窗', day: '周二', k: 0 },
   ]
-  assert.deepEqual(m.fairFill.call(ctx, slots), ['甲', '乙', '甲'])
+  assert.deepEqual(m.fairFill(slots), ['甲', '乙', '甲'])
 })
 
 // =========================================================================

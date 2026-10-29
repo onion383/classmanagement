@@ -447,7 +447,8 @@
 .skill-chip-x:hover { opacity: 1; }
 </style>
 
-<script>
+<script setup>
+import { ref, computed, onMounted, onBeforeUnmount, nextTick, getCurrentInstance } from 'vue'
 import { ShieldAlert, ShieldCheck, Globe } from '@lucide/vue'
 import AiProposalTable from '../../tables/AiProposalTable.vue'
 import AppSelect from '../../base/AppSelect.vue'
@@ -458,278 +459,273 @@ import { ASK_OTHER_KEY, ASK_OTHER_LABEL, AI_PERMISSION_FULL } from '../../../com
 import { _slashToken } from './AiComposer.skill.js'
 import { isPicked, _isSingleUnpicked } from './AiComposer.ask.js'
 
-export default {
-  name: 'AiComposer',
-  components: { AiProposalTable, AppSelect, ShieldAlert, ShieldCheck, Globe },
-  props: {
-    input: { type: String, default: '' },
-    busy: { type: Boolean, default: false },
-    capturing: { type: Boolean, default: false },
-    attachedFile: { type: Object, default: null },
-    pendingAsk: { type: Object, default: null },
-    askCurrent: { type: Object, default: null },
-    askPage: { type: Number, default: 0 },
-    askCanSubmit: { type: Boolean, default: false },
-    askCanAdvance: { type: Boolean, default: false },
-    pendingProposal: { type: Object, default: null },
-    // 写入权限挡位（由父侧持久化）：'approve' 全部审批 / 'full' 完全权限
-    permissionMode: { type: String, default: 'approve' },
-    // 联网搜索开关：当前是否开启（父侧持久化）；searchAvailable 表示当前模式是否支持（仅 DeepSeek）
-    webSearch: { type: Boolean, default: true },
-    searchAvailable: { type: Boolean, default: false },
-    // 模型快捷切换：当前模型 id 与可选项（父侧 aiConversations 的 modelOptions）
-    modelId: { type: [Number, String], default: null },
-    modelOptions: { type: Array, default: () => [] },
-    // 可用技能名列表（来自「数据管理」页维护的 md 指令文件）
-    skillOptions: { type: Array, default: () => [] },
-    // 本轮已启用的技能名（打「/」选中后加入，展示为可移除的小标签）
-    selectedSkills: { type: Array, default: () => [] },
-  },
-  emits: [
-    'update:input', 'send', 'interrupt', 'screenshot', 'attach',
-    'pick', 'other', 'next', 'submit', 'skip', 'dismiss', 'confirm', 'dismiss-proposal',
-    'pick-permission', 'update:modelId', 'select-skill', 'remove-skill', 'toggle-search',
-  ],
-  data() {
-    return {
-      OTHER_KEY: ASK_OTHER_KEY,
-      OTHER_LABEL: ASK_OTHER_LABEL,
-      aiPermissionFull: AI_PERMISSION_FULL,
-      permMenuOpen: false,
-      permBtnRect: null, // 「权限」按钮的视口位置（菜单按它定位，贴在按钮正上方）
-      // 技能候选菜单：输入框打「/」时展开，按「/」后的关键词过滤技能名
-      skillMenuOpen: false,
-      skillQuery: '',
-      skillIdx: 0,
-      // 权限挡位菜单项（默认挡位在前）
-      PERMISSION_OPTIONS: [
-        { value: 'approve', label: '全部审批' },
-        { value: AI_PERMISSION_FULL, label: '完全权限' },
-      ],
-    }
-  },
-  computed: {
-    // v-model:input 的本组件内部双向绑定壳（父为唯一数据源）
-    inputModel: {
-      get() { return this.input },
-      set(v) { this.$emit('update:input', v) },
-    },
-    // 选项行样式：单选/多选、分页/单题两条分支共用同一套类名
-    optBase() {
-      return 'w-full text-left text-sm px-3 py-2 rounded-sm border bg-surface text-text transition-theme cursor-pointer'
-    },
-    optOn() { return 'border-primary text-primary' },
-    optOff() { return 'border-border hover:border-primary hover:text-primary' },
-    // ask_user 结构兜底：缺 questions 时按「没有题目」渲染，模板里不再直接读 pendingAsk.questions.length
-    askQuestions() {
-      const a = this.pendingAsk
-      return a && Array.isArray(a.questions) ? a.questions : []
-    },
-    // 分页分支需显式点「下一页 / 完成」的情况：无选项（自由作答）、多选、或已选「其他」需先填内容
-    askNeedConfirm() {
-      const q = this.askCurrent
-      return !!q && (!this.askOptions(q).length || !!q.multiple || this.isPicked(q, ASK_OTHER_KEY))
-    },
-    // 单题分支：多选或已选「其他」时需要「完成」按钮
-    singleNeedConfirm() {
-      return this.askQuestions.some((q) => !!q.multiple || this.isPicked(q, ASK_OTHER_KEY))
-    },
-    // 分页分支当前题：单选、有选项且尚未选择 → 显示「跳过」
-    askSkipMode() {
-      const q = this.askCurrent
-      return this._isSingleUnpicked(q)
-    },
-    // 单题分支：该题单选、有选项且尚未选择 → 显示「跳过」
-    singleSkipMode() {
-      const qs = this.askQuestions
-      return qs.length === 1 && this._isSingleUnpicked(qs[0])
-    },
-    // 权限菜单定位：fixed 坐标由按钮 rect 推出，底边贴在按钮上方 6px 处
-    permMenuStyle() {
-      const r = this.permBtnRect
-      if (!r) return { display: 'none' }
-      return { position: 'fixed', left: `${r.left}px`, top: `${r.top - 6}px`, transform: 'translateY(-100%)' }
-    },
-    // 技能候选：排除已选，按「/」后的关键词做大小写不敏感的子串匹配
-    skillList() {
-      const q = (this.skillQuery || '').toLowerCase()
-      const sel = this.selectedSkills || []
-      return (this.skillOptions || [])
-        .filter((s) => s && !sel.includes(s))
-        .filter((s) => (q ? String(s).toLowerCase().includes(q) : true))
-        .slice(0, 50)
-    },
-  },
-  expose: ['openFilePicker', 'focusInput'],
-  mounted() {
-    // 点击输入区以外的任意位置关闭浮窗：提问浮窗（ask）、技能候选、权限挡位菜单。
-    // 权限菜单被 Teleport 到 body，并不在 this.$el 里，所以必须用 permMenuRef 单独判断：
-    // 既要在点击菜单内部时放行（否则 mousedown 先把菜单关掉，随后的 click 落不到选项上），
-    // 也要排除「权限」按钮本身（它自己用 @click 开合，否则会先关再开、点了没反应）。
-    this._onDocMouseDown = (e) => {
-      const t = e.target
-      const root = this.$el
-      const inRoot = !!(root && root.contains(t))
-      const menu = this.$refs.permMenuRef
-      const inMenu = !!(menu && menu.contains(t))
-      const btn = this.$refs.permBtn
-      const inBtn = !!(btn && btn.contains(t))
-      if (this.permMenuOpen && !inMenu && !inBtn) this.permMenuOpen = false
-      if (this.skillMenuOpen && !inRoot) this.skillMenuOpen = false
-      if (!this.pendingAsk) return
-      if (inRoot || inMenu) return
-      this.$emit('dismiss')
-    }
-    // Esc 也收起权限菜单（焦点通常停在输入框里，此时也要能关）
-    this._onDocKeyDown = (e) => {
-      if (e.key === 'Escape' && this.permMenuOpen) this.permMenuOpen = false
-    }
-    document.addEventListener('mousedown', this._onDocMouseDown, true)
-    document.addEventListener('keydown', this._onDocKeyDown, true)
-  },
-  beforeUnmount() {
-    if (this._onDocMouseDown) document.removeEventListener('mousedown', this._onDocMouseDown, true)
-    if (this._onDocKeyDown) document.removeEventListener('keydown', this._onDocKeyDown, true)
-    this._onDocMouseDown = null
-    this._onDocKeyDown = null
-  },
-  methods: {
-    // 待确认提案的说明文案。本组件是选项式 API（<script> 而非 <script setup>），
-    // 模板只能访问实例上的成员，顶层 import 的函数必须挂到 methods 才能在模板里调用，
-    // 否则渲染 proposal 浮窗时会抛 "frontProposalHint is not a function" 并中断整个页面。
-    frontProposalHint,
-    // 开合权限挡位菜单：打开时按「权限」按钮的位置定位，保证菜单贴在按钮正上方
-    togglePermMenu() {
-      if (this.permMenuOpen) { this.permMenuOpen = false; return }
-      const r = this.$refs.permBtn && this.$refs.permBtn.getBoundingClientRect()
-      if (!r || !r.width) return
-      this.permBtnRect = { left: r.left, top: r.top }
-      this.permMenuOpen = true
-    },
-    // 选中某个权限挡位：收起菜单并交给父侧处理（切到完全权限前父侧会先弹确认框）
-    pickPermission(mode) {
-      this.permMenuOpen = false
-      this.$emit('pick-permission', mode)
-    },
-    // 纯逻辑函数已抽到同目录 ./AiComposer.skill.js（原样搬运，命名与逻辑不变）；
-    // 本组件是选项式 API，仍挂到 methods，保证 this._slashToken 的调用点不变。
-    _slashToken,
-    // 输入变化：命中「/触发词」则展开技能候选菜单，否则收起
-    onComposerInput(e) {
-      const el = e.target
-      const t = this._slashToken(el.value, el.selectionStart)
-      if (t) {
-        this.skillQuery = t.query
-        this.skillIdx = 0
-        this.skillMenuOpen = true
-      } else {
-        this.skillMenuOpen = false
-      }
-    },
-    // 键盘：技能候选展开时接管上下键/回车/ESC；否则回车照常发送（Shift+Enter 换行）
-    onComposerKeydown(e) {
-      if (this.skillMenuOpen) {
-        if (e.key === 'Escape') { e.preventDefault(); this.skillMenuOpen = false; return }
-        if (this.skillList.length) {
-          if (e.key === 'ArrowDown') { e.preventDefault(); this.skillIdx = (this.skillIdx + 1) % this.skillList.length; return }
-          if (e.key === 'ArrowUp') { e.preventDefault(); this.skillIdx = (this.skillIdx - 1 + this.skillList.length) % this.skillList.length; return }
-          if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); this.applySkill(this.skillList[this.skillIdx]); return }
-        }
-      }
-      if (e.key === 'Enter' && !e.shiftKey && !e.ctrlKey && !e.altKey && !e.metaKey) {
-        e.preventDefault()
-        this.$emit('send')
-      }
-    },
-    // 选中技能：去掉输入框里的「/触发词」，把技能名交给父侧加入已选，并保持焦点
-    applySkill(name) {
-      if (!name) return
-      this.skillMenuOpen = false
-      const el = this.$refs.textareaRef
-      if (el) {
-        const t = this._slashToken(el.value, el.selectionStart)
-        if (t) {
-          const caret = el.selectionStart
-          this.$emit('update:input', el.value.slice(0, t.start) + el.value.slice(caret))
-          this.$nextTick(() => {
-            try { el.focus(); el.setSelectionRange(t.start, t.start) } catch (_) { /* 忽略 */ }
-          })
-        }
-      }
-      this.$emit('select-skill', name)
-    },
-    // 纯逻辑函数已抽到同目录 ./AiComposer.ask.js（原样搬运，命名与逻辑不变）；
-    // 仍挂到 methods，保证模板 isPicked(...) 与 this._isSingleUnpicked(...) 的调用点不变。
-    isPicked,
-    _isSingleUnpicked,
-    // 某题的选项数组（缺失/非数组时按空数组）：模板里的 v-for / v-if 统一走这里，
-    // 避免畸形 ask_user 结构让 q.options.length 直接抛 TypeError
-    askOptions(q) {
-      return q && Array.isArray(q.options) ? q.options : []
-    },
-    // 「其他」输入框回车：分页分支按当前位置前进，单题分支直接提交
-    onOtherEnter() {
-      const a = this.pendingAsk
-      if (!a) return
-      const n = this.askQuestions.length
-      if (n > 1 && this.askPage < n - 1) {
-        if (this.askCanAdvance) this.$emit('next')
-      } else {
-        this.$emit('submit')
-      }
-    },
-    // 触发隐藏的 file input（供父侧 / 内部封装的按钮调用）
-    openFilePicker() {
-      this.$refs.fileInput.click()
-    },
-    // 聚焦输入框（回退到本轮提问前时把原提问带回并聚焦）
-    focusInput() {
-      if (this.$refs.textareaRef) this.$refs.textareaRef.focus()
-    },
-    async onFileSelected(e) {
-      const file = e.target.files && e.target.files[0]
-      if (!file) return
-      e.target.value = ''
-      this.$emit('attach', await readFile(file))
-    },
-    // 粘贴：剪贴板里的图片/文件都作为附件（图片直出 dataURL，其余文件复用既有上传解析链路）
-    async onPaste(e) {
-      const cd = e.clipboardData
-      if (!cd) return
-      // 先取 files（Chromium 直接给出 FileList），为空时再从 items 兜底（部分环境只暴露 items）
-      const files = []
-      if (cd.files && cd.files.length) {
-        for (const f of cd.files) files.push(f)
-      }
-      if (!files.length && cd.items) {
-        for (const it of cd.items) {
-          if (it.kind === 'file') {
-            const f = it.getAsFile()
-            if (f) files.push(f)
-          }
-        }
-      }
-      // 非文件（纯文本等）→ 不拦截，走默认粘贴
-      const file = files[0]
-      if (!file) return
-      e.preventDefault()
-      // 一次只携带一个附件（多文件粘贴以第一个为准）
-      if ((file.type || '').startsWith('image/')) {
-        // readAsDataURL 在读盘失败时会 reject：不接住就会变成未处理的 Promise 拒绝
-        try {
-          const dataUrl = await readAsDataURL(file)
-          const sizeLabel = file.size > 1048576
-            ? (file.size / 1048576).toFixed(1) + ' MB'
-            : (file.size / 1024).toFixed(0) + ' KB'
-          this.$emit('attach', { name: file.name || '粘贴图片.png', isImage: true, dataUrl, textContent: '', sizeLabel })
-        } catch (err) {
-          console.error('[composer] 读取粘贴图片失败', err)
-          useNotification().error('读取剪贴板图片失败，请重试')
-        }
-      } else {
-        this.$emit('attach', await readFile(file))
-      }
-    },
-  },
+defineOptions({ name: 'AiComposer' })
+const props = defineProps({
+  input: { type: String, default: '' },
+  busy: { type: Boolean, default: false },
+  capturing: { type: Boolean, default: false },
+  attachedFile: { type: Object, default: null },
+  pendingAsk: { type: Object, default: null },
+  askCurrent: { type: Object, default: null },
+  askPage: { type: Number, default: 0 },
+  askCanSubmit: { type: Boolean, default: false },
+  askCanAdvance: { type: Boolean, default: false },
+  pendingProposal: { type: Object, default: null },
+  // 写入权限挡位（由父侧持久化）：'approve' 全部审批 / 'full' 完全权限
+  permissionMode: { type: String, default: 'approve' },
+  // 联网搜索开关：当前是否开启（父侧持久化）；searchAvailable 表示当前模式是否支持（仅 DeepSeek）
+  webSearch: { type: Boolean, default: true },
+  searchAvailable: { type: Boolean, default: false },
+  // 模型快捷切换：当前模型 id 与可选项（父侧 aiConversations 的 modelOptions）
+  modelId: { type: [Number, String], default: null },
+  modelOptions: { type: Array, default: () => [] },
+  // 可用技能名列表（来自「数据管理」页维护的 md 指令文件）
+  skillOptions: { type: Array, default: () => [] },
+  // 本轮已启用的技能名（打「/」选中后加入，展示为可移除的小标签）
+  selectedSkills: { type: Array, default: () => [] },
+})
+const emit = defineEmits([
+  'update:input', 'send', 'interrupt', 'screenshot', 'attach',
+  'pick', 'other', 'next', 'submit', 'skip', 'dismiss', 'confirm', 'dismiss-proposal',
+  'pick-permission', 'update:modelId', 'select-skill', 'remove-skill', 'toggle-search',
+])
+
+// 模板 ref（与模板 ref="xxx" 同名自动绑定）
+const permMenuRef = ref(null)
+const fileInput = ref(null)
+const textareaRef = ref(null)
+const permBtn = ref(null)
+
+const OTHER_KEY = ASK_OTHER_KEY
+const OTHER_LABEL = ASK_OTHER_LABEL
+const aiPermissionFull = AI_PERMISSION_FULL
+const permMenuOpen = ref(false)
+const permBtnRect = ref(null) // 「权限」按钮的视口位置（菜单按它定位，贴在按钮正上方）
+// 技能候选菜单：输入框打「/」时展开，按「/」后的关键词过滤技能名
+const skillMenuOpen = ref(false)
+const skillQuery = ref('')
+const skillIdx = ref(0)
+// 权限挡位菜单项（默认挡位在前）
+const PERMISSION_OPTIONS = [
+  { value: 'approve', label: '全部审批' },
+  { value: AI_PERMISSION_FULL, label: '完全权限' },
+]
+
+// 点击输入区以外的任意位置关闭浮窗用的文档级监听句柄（非响应式）
+let _onDocMouseDown = null
+let _onDocKeyDown = null
+// this.$el 契约（组件根 DOM）：由实例代理承载，供 contains 判定使用
+const inst = getCurrentInstance()
+
+// v-model:input 的本组件内部双向绑定壳（父为唯一数据源）
+const inputModel = computed({
+  get: () => props.input,
+  set: (v) => emit('update:input', v),
+})
+// 选项行样式：单选/多选、分页/单题两条分支共用同一套类名
+const optBase = computed(() => 'w-full text-left text-sm px-3 py-2 rounded-sm border bg-surface text-text transition-theme cursor-pointer')
+const optOn = computed(() => 'border-primary text-primary')
+const optOff = computed(() => 'border-border hover:border-primary hover:text-primary')
+// ask_user 结构兜底：缺 questions 时按「没有题目」渲染，模板里不再直接读 pendingAsk.questions.length
+const askQuestions = computed(() => {
+  const a = props.pendingAsk
+  return a && Array.isArray(a.questions) ? a.questions : []
+})
+// 分页分支需显式点「下一页 / 完成」的情况：无选项（自由作答）、多选、或已选「其他」需先填内容
+const askNeedConfirm = computed(() => {
+  const q = props.askCurrent
+  return !!q && (!askOptions(q).length || !!q.multiple || isPicked(q, ASK_OTHER_KEY))
+})
+// 单题分支：多选或已选「其他」时需要「完成」按钮
+const singleNeedConfirm = computed(() => askQuestions.value.some((q) => !!q.multiple || isPicked(q, ASK_OTHER_KEY)))
+// 分页分支当前题：单选、有选项且尚未选择 → 显示「跳过」
+const askSkipMode = computed(() => {
+  const q = props.askCurrent
+  return _isSingleUnpicked(q)
+})
+// 单题分支：该题单选、有选项且尚未选择 → 显示「跳过」
+const singleSkipMode = computed(() => {
+  const qs = askQuestions.value
+  return qs.length === 1 && _isSingleUnpicked(qs[0])
+})
+// 权限菜单定位：fixed 坐标由按钮 rect 推出，底边贴在按钮上方 6px 处
+const permMenuStyle = computed(() => {
+  const r = permBtnRect.value
+  if (!r) return { display: 'none' }
+  return { position: 'fixed', left: `${r.left}px`, top: `${r.top - 6}px`, transform: 'translateY(-100%)' }
+})
+// 技能候选：排除已选，按「/」后的关键词做大小写不敏感的子串匹配
+const skillList = computed(() => {
+  const q = (skillQuery.value || '').toLowerCase()
+  const sel = props.selectedSkills || []
+  return (props.skillOptions || [])
+    .filter((s) => s && !sel.includes(s))
+    .filter((s) => (q ? String(s).toLowerCase().includes(q) : true))
+    .slice(0, 50)
+})
+
+onMounted(() => {
+  // 点击输入区以外的任意位置关闭浮窗：提问浮窗（ask）、技能候选、权限挡位菜单。
+  // 权限菜单被 Teleport 到 body，并不在组件根节点里，所以必须用 permMenuRef 单独判断：
+  // 既要在点击菜单内部时放行（否则 mousedown 先把菜单关掉，随后的 click 落不到选项上），
+  // 也要排除「权限」按钮本身（它自己用 @click 开合，否则会先关再开、点了没反应）。
+  _onDocMouseDown = (e) => {
+    const t = e.target
+    const root = inst.proxy.$el
+    const inRoot = !!(root && root.contains(t))
+    const menu = permMenuRef.value
+    const inMenu = !!(menu && menu.contains(t))
+    const btn = permBtn.value
+    const inBtn = !!(btn && btn.contains(t))
+    if (permMenuOpen.value && !inMenu && !inBtn) permMenuOpen.value = false
+    if (skillMenuOpen.value && !inRoot) skillMenuOpen.value = false
+    if (!props.pendingAsk) return
+    if (inRoot || inMenu) return
+    emit('dismiss')
+  }
+  // Esc 也收起权限菜单（焦点通常停在输入框里，此时也要能关）
+  _onDocKeyDown = (e) => {
+    if (e.key === 'Escape' && permMenuOpen.value) permMenuOpen.value = false
+  }
+  document.addEventListener('mousedown', _onDocMouseDown, true)
+  document.addEventListener('keydown', _onDocKeyDown, true)
+})
+onBeforeUnmount(() => {
+  if (_onDocMouseDown) document.removeEventListener('mousedown', _onDocMouseDown, true)
+  if (_onDocKeyDown) document.removeEventListener('keydown', _onDocKeyDown, true)
+  _onDocMouseDown = null
+  _onDocKeyDown = null
+})
+
+// 待确认提案的说明文案（顶层 import 直接供模板调用）
+// 纯逻辑函数抽在同目录 ./AiComposer.skill.js 与 ./AiComposer.ask.js（原样搬运，命名与逻辑不变）
+
+// 开合权限挡位菜单：打开时按「权限」按钮的位置定位，保证菜单贴在按钮正上方
+function togglePermMenu() {
+  if (permMenuOpen.value) { permMenuOpen.value = false; return }
+  const r = permBtn.value && permBtn.value.getBoundingClientRect()
+  if (!r || !r.width) return
+  permBtnRect.value = { left: r.left, top: r.top }
+  permMenuOpen.value = true
 }
+// 选中某个权限挡位：收起菜单并交给父侧处理（切到完全权限前父侧会先弹确认框）
+function pickPermission(mode) {
+  permMenuOpen.value = false
+  emit('pick-permission', mode)
+}
+// 输入变化：命中「/触发词」则展开技能候选菜单，否则收起
+function onComposerInput(e) {
+  const el = e.target
+  const t = _slashToken(el.value, el.selectionStart)
+  if (t) {
+    skillQuery.value = t.query
+    skillIdx.value = 0
+    skillMenuOpen.value = true
+  } else {
+    skillMenuOpen.value = false
+  }
+}
+// 键盘：技能候选展开时接管上下键/回车/ESC；否则回车照常发送（Shift+Enter 换行）
+function onComposerKeydown(e) {
+  if (skillMenuOpen.value) {
+    if (e.key === 'Escape') { e.preventDefault(); skillMenuOpen.value = false; return }
+    if (skillList.value.length) {
+      if (e.key === 'ArrowDown') { e.preventDefault(); skillIdx.value = (skillIdx.value + 1) % skillList.value.length; return }
+      if (e.key === 'ArrowUp') { e.preventDefault(); skillIdx.value = (skillIdx.value - 1 + skillList.value.length) % skillList.value.length; return }
+      if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); applySkill(skillList.value[skillIdx.value]); return }
+    }
+  }
+  if (e.key === 'Enter' && !e.shiftKey && !e.ctrlKey && !e.altKey && !e.metaKey) {
+    e.preventDefault()
+    emit('send')
+  }
+}
+// 选中技能：去掉输入框里的「/触发词」，把技能名交给父侧加入已选，并保持焦点
+function applySkill(name) {
+  if (!name) return
+  skillMenuOpen.value = false
+  const el = textareaRef.value
+  if (el) {
+    const t = _slashToken(el.value, el.selectionStart)
+    if (t) {
+      const caret = el.selectionStart
+      emit('update:input', el.value.slice(0, t.start) + el.value.slice(caret))
+      nextTick(() => {
+        try { el.focus(); el.setSelectionRange(t.start, t.start) } catch (_) { /* 忽略 */ }
+      })
+    }
+  }
+  emit('select-skill', name)
+}
+// 某题的选项数组（缺失/非数组时按空数组）：模板里的 v-for / v-if 统一走这里，
+// 避免畸形 ask_user 结构让 q.options.length 直接抛 TypeError
+function askOptions(q) {
+  return q && Array.isArray(q.options) ? q.options : []
+}
+// 「其他」输入框回车：分页分支按当前位置前进，单题分支直接提交
+function onOtherEnter() {
+  const a = props.pendingAsk
+  if (!a) return
+  const n = askQuestions.value.length
+  if (n > 1 && props.askPage < n - 1) {
+    if (props.askCanAdvance) emit('next')
+  } else {
+    emit('submit')
+  }
+}
+// 触发隐藏的 file input（供父侧 / 内部封装的按钮调用）
+function openFilePicker() {
+  fileInput.value.click()
+}
+// 聚焦输入框（回退到本轮提问前时把原提问带回并聚焦）
+function focusInput() {
+  if (textareaRef.value) textareaRef.value.focus()
+}
+async function onFileSelected(e) {
+  const file = e.target.files && e.target.files[0]
+  if (!file) return
+  e.target.value = ''
+  emit('attach', await readFile(file))
+}
+// 粘贴：剪贴板里的图片/文件都作为附件（图片直出 dataURL，其余文件复用既有上传解析链路）
+async function onPaste(e) {
+  const cd = e.clipboardData
+  if (!cd) return
+  // 先取 files（Chromium 直接给出 FileList），为空时再从 items 兜底（部分环境只暴露 items）
+  const files = []
+  if (cd.files && cd.files.length) {
+    for (const f of cd.files) files.push(f)
+  }
+  if (!files.length && cd.items) {
+    for (const it of cd.items) {
+      if (it.kind === 'file') {
+        const f = it.getAsFile()
+        if (f) files.push(f)
+      }
+    }
+  }
+  // 非文件（纯文本等）→ 不拦截，走默认粘贴
+  const file = files[0]
+  if (!file) return
+  e.preventDefault()
+  // 一次只携带一个附件（多文件粘贴以第一个为准）
+  if ((file.type || '').startsWith('image/')) {
+    // readAsDataURL 在读盘失败时会 reject：不接住就会变成未处理的 Promise 拒绝
+    try {
+      const dataUrl = await readAsDataURL(file)
+      const sizeLabel = file.size > 1048576
+        ? (file.size / 1048576).toFixed(1) + ' MB'
+        : (file.size / 1024).toFixed(0) + ' KB'
+      emit('attach', { name: file.name || '粘贴图片.png', isImage: true, dataUrl, textContent: '', sizeLabel })
+    } catch (err) {
+      console.error('[composer] 读取粘贴图片失败', err)
+      useNotification().error('读取剪贴板图片失败，请重试')
+    }
+  } else {
+    emit('attach', await readFile(file))
+  }
+}
+
+// 与原 expose 一致：只对外暴露这两个方法
+defineExpose({ openFilePicker, focusInput })
 </script>

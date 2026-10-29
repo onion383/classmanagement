@@ -29,7 +29,7 @@ const { unpackMode } = require('../../../../services/dutyMode');
 const aiParseJson = safeJson;
 const DUTY_MODE_LABELS = { daily: '日常值日', big: '大扫除' };
 function dutyModeLabel(m) { return DUTY_MODE_LABELS[m] || m; }
-// 解包「按模式分键」的值日数据：旧版整块归入日常（判定规则见 services/dutyMode.js）
+// 解包「按模式分键」的值日数据（判定规则见 services/dutyMode.js）
 function unpackDutyModeCol(field, mode) { return unpackMode(field, mode); }
 function studentIdNameMap() {
   const map = {};

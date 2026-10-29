@@ -20,9 +20,8 @@ function listOrders() {
   return db.prepare('SELECT * FROM leave_records ORDER BY position, id').all();
 }
 
-// GET /api/leaves 全量列表
+// GET /api/leaves 全量列表（不设 HTTP 缓存：安全模式下响应是会话绑定的密文，且请假增删后要立刻可见）
 router.get('/', (req, res) => {
-    res.set('Cache-Control', 'private, max-age=30');
   res.json({ data: listOrders() });
 });
 

@@ -68,23 +68,18 @@ contextBridge.exposeInMainWorld('electron', {
     return wrapper
   },
 
-  // 取消监听。兼容两种调用：传入 on() 返回的 wrapper，或传入原始 callback。
-  off: (channel, callback) => {
+  // 取消监听。只接受 on() 返回的 wrapper（上层把 on 的返回值存下来当订阅句柄）。
+  off: (channel, wrapper) => {
     if (!validReceiveChannels.includes(channel)) return
     const m = listenerMap.get(channel)
     if (!m) return
-    let orig = callback
-    let wrapper = m.get(callback)
-    if (!wrapper) {
-      // 上层传入的可能是 wrapper 本身，换算回原始 callback
-      for (const [o, w] of m) {
-        if (w === callback) { orig = o; wrapper = w; break }
+    for (const [orig, w] of m) {
+      if (w === wrapper) {
+        ipcRenderer.removeListener(channel, w)
+        m.delete(orig)
+        if (m.size === 0) listenerMap.delete(channel)
+        return
       }
-    }
-    if (wrapper) {
-      ipcRenderer.removeListener(channel, wrapper)
-      m.delete(orig)
-      if (m.size === 0) listenerMap.delete(channel)
     }
   },
 
@@ -104,7 +99,7 @@ contextBridge.exposeInMainWorld('electron', {
   },
 
   // 取拖入文件的真实路径（Electron 32 起 File.path 已移除，必须走 webUtils）。
-  // 失败返回空串，调用方回退旧字段 file.path。
+  // 失败返回空串，调用方按「取不到路径」处理。
   getPathForFile: (file) => {
     try {
       return webUtils.getPathForFile(file) || ''

@@ -11,16 +11,10 @@ let ready = false
 const waiters = new Set()
 let subscribed = false
 
-function electronApi() {
-  return typeof window !== 'undefined' ? window.electron : null
-}
-
 function subscribe() {
   if (subscribed) return
   subscribed = true
-  const api = electronApi()
-  if (!api || typeof api.on !== 'function') return
-  api.on(RECEIVE.FROM_MAIN, (msg) => {
+  window.electron.on(RECEIVE.FROM_MAIN, (msg) => {
     if (!msg) return
     if (msg.type === 'backend-ready') {
       ready = true
@@ -51,11 +45,7 @@ export function isBackendUnreachable(error) {
 
 export function waitForBackendReady(timeoutMs = 4000) {
   if (ready) return Promise.resolve(true)
-  const api = electronApi()
-  // 无就绪信号通道（纯浏览器调试）：退化为普通退避等待，交由请求重试兜底
-  if (!api || typeof api.invoke !== 'function') {
-    return new Promise((resolve) => setTimeout(() => resolve(false), timeoutMs))
-  }
+  const api = window.electron
   subscribe()
   return new Promise((resolve) => {
     let done = false

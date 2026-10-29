@@ -1,6 +1,7 @@
 const express = require('express');
 const router = express.Router();
 const { db } = require('../db');
+const { ensureProvisionalStudent } = require('../services/provisionalStudents');
 
 // ============ 上限常量（与前端一致） ============
 const MAX_MEMBERS_PER_GROUP = 99; // 每组最大人数
@@ -270,16 +271,30 @@ router.post('/groups/:groupId/members', (req, res) => {
     const g = db.prepare('SELECT * FROM groups WHERE id = ?').get(groupId);
     if (!g) return res.status(404).json({ error: '小组不存在' });
     const { member_name = '', remark = '' } = req.body;
+    const name = String(member_name).trim();
+    if (!name) return res.status(400).json({ error: '成员姓名不能为空' });
     const dim = db.prepare('SELECT * FROM group_dimensions WHERE id = ?').get(g.dimension_id);
     const count = db.prepare('SELECT COUNT(*) AS c FROM group_members WHERE group_id = ?').get(groupId).c;
     const perGroupLimit = dim && dim.members_per_group > 0 ? dim.members_per_group : MAX_MEMBERS_PER_GROUP;
     const effectiveLimit = Math.min(perGroupLimit, MAX_MEMBERS_PER_GROUP);
     if (count >= effectiveLimit) return res.status(400).json({ error: `该组人数已达上限 ${effectiveLimit} 人` });
     const maxSort = db.prepare('SELECT MAX(sort_order) AS max FROM group_members WHERE group_id = ?').get(groupId).max || 0;
-    const result = db.prepare(
-      `INSERT INTO group_members (group_id, member_name, remark, sort_order) VALUES (?, ?, ?, ?)`
-    ).run(groupId, String(member_name).trim(), String(remark).trim(), maxSort + 1);
-    res.json({ id: result.lastInsertRowid, message: '添加成功' });
+    // 直接输入的新名字也要有稳定身份：解析/建档与写成员放在同一事务里，
+    // 避免「建了临时学生但成员没插进去」的半截状态。
+    let result;
+    let student = null;
+    db.transaction(() => {
+      student = ensureProvisionalStudent(name);
+      result = db.prepare(
+        `INSERT INTO group_members (group_id, member_name, remark, sort_order) VALUES (?, ?, ?, ?)`
+      ).run(groupId, name, String(remark).trim(), maxSort + 1);
+    })();
+    res.json({
+      id: result.lastInsertRowid,
+      // 回传解析结果，供前端以后把成员绑定到 student_id；现在先只用于提示/调试
+      student: student && student.id ? { id: student.id, 姓名: name, is_provisional: !!student.is_provisional } : null,
+      message: '添加成功',
+    });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -291,11 +306,16 @@ router.put('/group-members/:id', (req, res) => {
   const { member_name, remark } = req.body;
   const m = db.prepare('SELECT * FROM group_members WHERE id = ?').get(id);
   if (!m) return res.status(404).json({ error: '成员不存在' });
-  db.prepare('UPDATE group_members SET member_name = ?, remark = ? WHERE id = ?').run(
-    member_name !== undefined ? String(member_name).trim() : m.member_name,
-    remark !== undefined ? String(remark).trim() : m.remark,
-    id
-  );
+  const nextName = member_name !== undefined ? String(member_name).trim() : m.member_name;
+  db.transaction(() => {
+    // 改成新名字时同样解析/建档：成员名与名册保持一致，下次候选框就能直接选到
+    if (member_name !== undefined && nextName) ensureProvisionalStudent(nextName);
+    db.prepare('UPDATE group_members SET member_name = ?, remark = ? WHERE id = ?').run(
+      nextName,
+      remark !== undefined ? String(remark).trim() : m.remark,
+      id
+    );
+  })();
   res.json({ message: '保存成功' });
 });
 

@@ -28,7 +28,9 @@ export async function apiFetch(path, options = {}) {
         if (!already) body = JSON.stringify(await encryptBody(parsed))
       } catch (_) { /* 非 JSON 或加密失败：按明文发送，后端透明兼容 */ }
     }
-    return fetch(apiUrl(path), { ...options, headers, body })
+    // 加密响应与会话密钥绑定：安全模式下不能让浏览器缓存，否则换会话后
+    // 命中旧密文必然解不开（apiFetch 没有 axios 那层重试，会直接把 { d } 交给调用方）。
+    return fetch(apiUrl(path), { ...options, headers, body, ...(safe() ? { cache: 'no-store' } : {}) })
   }
 
   let res = await send(false)
@@ -38,12 +40,7 @@ export async function apiFetch(path, options = {}) {
   }
 
   // 滑动续期：后端在 token 快到期时随响应下发新凭据（流式接口也是从响应头取）
-  const renewed = res.headers.get('x-renewed-token')
-  if (renewed) {
-    try { localStorage.setItem('token', renewed) } catch (_) {}
-  }
-  const renewedMedia = res.headers.get('x-renewed-media')
-  if (renewedMedia) storeMediaToken(renewedMedia)
+  absorbRenewal(res.headers)
 
   // 携带密文凭据的请求，后端会把 JSON 响应包成 { d }；调用方仍是 r.json()，在这里透明解密。
   // 二进制/SSE 响应不受影响（后端只包装 res.json）。
@@ -73,6 +70,21 @@ export function storeMediaToken(token) {
 
 export function clearMediaToken() {
   try { localStorage.removeItem(MEDIA_KEY) } catch (_) {}
+}
+
+// 滑动续期：后端在 token 快到期时随响应下发新凭据（30 天 token / 媒体凭据），落盘后生效。
+// fetch 的 Headers 与 axios 的 AxiosHeaders 都支持 .get()（大小写不敏感），裸对象走括号取值。
+// 两条 HTTP 路径（apiFetch / axios 拦截器）共用这一份落盘逻辑，续期规则改一处即可全覆盖。
+export function absorbRenewal(headers, { onTokenRenewed } = {}) {
+  if (!headers) return
+  const get = typeof headers.get === 'function' ? (n) => headers.get(n) : (n) => headers[n]
+  const renewed = get('x-renewed-token')
+  if (renewed) {
+    try { localStorage.setItem('token', renewed) } catch (_) {}
+    onTokenRenewed?.(renewed)
+  }
+  const renewedMedia = get('x-renewed-media')
+  if (renewedMedia) storeMediaToken(renewedMedia)
 }
 
 // 读 JWT 的 exp（毫秒）；解析失败返回 0，视为已过期。

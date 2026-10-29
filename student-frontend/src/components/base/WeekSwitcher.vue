@@ -31,51 +31,47 @@
   </div>
 </template>
 
-<script>
+<script setup>
+import { computed } from 'vue'
 import AppSelect from './AppSelect.vue'
 import { shiftDateStr } from '../../utils/dateTime.js'
 
-export default {
-  name: 'WeekSwitcher',
-  components: { AppSelect },
-  props: {
-    currentWeek: { type: String, required: true },
-    weeks: { type: Array, default: () => [] }
-  },
-  emits: ['update:currentWeek', 'direction'],
-  computed: {
-    weekOptions() {
-      return this.weeks.map(w => ({ value: w.week_start, label: this.formatWeek(w.week_start) }));
-    },
-    hasPrev() {
-      const idx = this.weeks.findIndex(w => w.week_start === this.currentWeek);
-      return idx > 0;
-    },
-    hasNext() {
-      const idx = this.weeks.findIndex(w => w.week_start === this.currentWeek);
-      return idx !== -1 && idx < this.weeks.length - 1;
-    }
-  },
-  methods: {
-    goPrev() {
-      const idx = this.weeks.findIndex(w => w.week_start === this.currentWeek);
-      if (idx > 0) { this.$emit('direction', 'prev'); this.$emit('update:currentWeek', this.weeks[idx - 1].week_start); }
-    },
-    goNext() {
-      const idx = this.weeks.findIndex(w => w.week_start === this.currentWeek);
-      if (idx !== -1 && idx < this.weeks.length - 1) {
-        this.$emit('direction', 'next'); this.$emit('update:currentWeek', this.weeks[idx + 1].week_start);
-      }
-    },
-    formatWeek(weekStart) {
-      if (!weekStart) return '';
-      // week_start 本身就是 YYYY-MM-DD：直接做字符串级日期偏移。
-      // 不要绕 new Date + toISOString —— 那是 UTC 口径，在 UTC 以西的时区会差一天，
-      // 而且这种写法被复制到「new Date() 取今天」的场景就会变成真 bug。
-      return `${String(weekStart).slice(0, 10)} ~ ${shiftDateStr(weekStart, 6)}`;
-    }
+defineOptions({ name: 'WeekSwitcher' })
+const props = defineProps({
+  currentWeek: { type: String, required: true },
+  weeks: { type: Array, default: () => [] }
+})
+const emit = defineEmits(['update:currentWeek', 'direction'])
+
+const weekOptions = computed(() => {
+  return props.weeks.map(w => ({ value: w.week_start, label: formatWeek(w.week_start) }));
+})
+const hasPrev = computed(() => {
+  const idx = props.weeks.findIndex(w => w.week_start === props.currentWeek);
+  return idx > 0;
+})
+const hasNext = computed(() => {
+  const idx = props.weeks.findIndex(w => w.week_start === props.currentWeek);
+  return idx !== -1 && idx < props.weeks.length - 1;
+})
+
+function goPrev() {
+  const idx = props.weeks.findIndex(w => w.week_start === props.currentWeek);
+  if (idx > 0) { emit('direction', 'prev'); emit('update:currentWeek', props.weeks[idx - 1].week_start); }
+}
+function goNext() {
+  const idx = props.weeks.findIndex(w => w.week_start === props.currentWeek);
+  if (idx !== -1 && idx < props.weeks.length - 1) {
+    emit('direction', 'next'); emit('update:currentWeek', props.weeks[idx + 1].week_start);
   }
-};
+}
+function formatWeek(weekStart) {
+  if (!weekStart) return '';
+  // week_start 本身就是 YYYY-MM-DD：直接做字符串级日期偏移。
+  // 不要绕 new Date + toISOString —— 那是 UTC 口径，在 UTC 以西的时区会差一天，
+  // 而且这种写法被复制到「new Date() 取今天」的场景就会变成真 bug。
+  return `${String(weekStart).slice(0, 10)} ~ ${shiftDateStr(weekStart, 6)}`;
+}
 </script>
 
 <style scoped>

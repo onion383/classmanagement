@@ -68,147 +68,141 @@
   </div>
 </template>
 
-<script>
+<script setup>
 import { SEND, INVOKE, RECEIVE } from '../../electronChannels.js'
 import { apiUrl } from '../../utils/apiUrl'
 import { applyAuthHeader } from '../../composables/secureChannel'
-export default {
-  name: 'Migration',
-  data() {
-    return {
-      state: 'running', // running | done | error
-      mode: 'move', // move=数据目录搬迁 | crypt=数据库加密转换
-      encrypt: true, // crypt 模式下的目标状态：true=启用加密 / false=关闭加密
-      phase: '',
-      detail: '',
-      filesDone: 0,
-      filesTotal: 0,
-      percent: 0,
-      errorMessage: '',
-      targetDir: '',
-      _onMain: null,
-    }
-  },
-  computed: {
-    title() {
-      if (this.mode === 'crypt') return this.encrypt ? '启用数据库加密' : '关闭数据库加密'
-      return '迁移数据库'
-    },
-    runningWarn() {
-      if (this.mode === 'crypt') return '正在转换数据库加密方式，请不要强行停止程序，否则可能会导致数据损坏'
-      return '正在迁移数据库，请不要强行停止程序，否则可能会导致数据损坏'
-    },
-    doneText() {
-      return this.mode === 'crypt' ? '转换完成，正在重新打开主界面…' : '迁移完成，正在重新打开主界面…'
-    },
-  },
-  mounted() {
-    const api = window.electron
-    if (!api) return
-    this._onMain = (payload) => this.onMain(payload)
-    api.on(RECEIVE.FROM_MAIN, this._onMain)
-    // 通知主进程渲染层已就绪，可以开始推送进度
-    api.send(SEND.MIGRATION_READY)
-  },
-  beforeUnmount() {
-    const api = window.electron
-    if (api && this._onMain) api.off(RECEIVE.FROM_MAIN, this._onMain)
-  },
-  methods: {
-    onMain(payload) {
-      if (!payload || typeof payload !== 'object') return
-      if (payload.type === 'crypt-start') {
-        // 主进程已完成关窗准备，开始执行加密转换（由本窗口直接调用后端流式接口）
-        this.mode = 'crypt'
-        this.encrypt = !!payload.encrypt
-        this.startCrypt(payload.token)
-      } else if (payload.type === 'migration-progress') {
-        if (typeof payload.phase === 'string') this.phase = payload.phase
-        if (typeof payload.detail === 'string') this.detail = payload.detail
-        if (typeof payload.filesDone === 'number') this.filesDone = payload.filesDone
-        if (typeof payload.filesTotal === 'number') this.filesTotal = payload.filesTotal
-        if (typeof payload.percent === 'number') this.percent = payload.percent
-      } else if (payload.type === 'migration-done') {
-        this.state = 'done'
-        this.percent = 100
-      } else if (payload.type === 'migration-error') {
-        this.state = 'error'
-        this.errorMessage = payload.message || ''
-        this.targetDir = payload.target || ''
-      }
-    },
-    // 调用后端加密转换接口（NDJSON 流）：逐步读取进度并刷新界面；结束后回报主进程
-    async startCrypt(token) {
-      try {
-        // 凭据统一走信道：安全模式下明文 Authorization 会被后端拒绝（NDJSON 流式响应不受响应加密影响）
-        const headers = { 'Content-Type': 'application/json' }
-        await applyAuthHeader(headers, token)
-        const resp = await fetch(apiUrl('/api/account/db-encryption'), {
-          method: 'POST',
-          headers,
-          body: JSON.stringify({ encrypt: this.encrypt }),
-        })
-        if (!resp.ok || !resp.body) throw new Error(`请求后端失败（${resp.status}）`)
-        const reader = resp.body.getReader()
-        const decoder = new TextDecoder()
-        let buf = ''
-        let ok = false
-        let failMsg = ''
-        for (;;) {
-          const { done, value } = await reader.read()
-          if (done) break
-          buf += decoder.decode(value, { stream: true })
-          let idx
-          while ((idx = buf.indexOf('\n')) >= 0) {
-            const line = buf.slice(0, idx).trim()
-            buf = buf.slice(idx + 1)
-            if (!line) continue
-            let msg
-            try { msg = JSON.parse(line) } catch (_) { continue }
-            if (msg.type === 'progress') {
-              if (msg.phase) this.phase = msg.phase
-              if (msg.detail) this.detail = msg.detail
-              if (typeof msg.percent === 'number') this.percent = msg.percent
-            } else if (msg.type === 'done') {
-              if (msg.ok) ok = true
-              else failMsg = msg.message || '转换失败'
-            }
-          }
-        }
-        // 流结束后缓冲区可能还剩最后一帧（对端未以换行结尾）：补解析一次
-        if (buf.trim()) {
-          let tailMsg
-          try { tailMsg = JSON.parse(buf.trim()) } catch (_) { tailMsg = null }
-          if (tailMsg?.type === 'done') {
-            if (tailMsg.ok) ok = true
-            else failMsg = tailMsg.message || '转换失败'
-          }
-        }
-        if (ok) {
-          this.state = 'done'
-          this.percent = 100
-          // 短暂停留展示「完成」后回报主进程，由其设置提示条并重开主窗口
-          setTimeout(() => window.electron?.send(SEND.MIGRATION_DISMISS, { ok: true }), 700)
-        } else {
-          this.state = 'error'
-          // 没收到 done（进程提前退出/输出被截断）时 failMsg 为空，必须给可读兜底文案
-          this.errorMessage = failMsg || '转换未完成：未收到完成消息，请重试或查看日志'
-        }
-      } catch (err) {
-        this.state = 'error'
-        this.errorMessage = err?.message || String(err)
-      }
-    },
-    // 打开已复制内容所在的目标文件夹，供用户自行确认
-    openTarget() {
-      if (this.targetDir) window.electron?.invoke(INVOKE.OPEN_FOLDER, this.targetDir)
-    },
-    // clean=true：「确定」按用户确认清除已复制内容；clean=false：「取消」原样保留
-    finish(clean) {
-      window.electron?.send(SEND.MIGRATION_DISMISS, { clean: !!clean })
-    },
-  },
+import { ref, computed, onMounted, onBeforeUnmount } from 'vue'
+
+defineOptions({ name: 'Migration' })
+
+const state = ref('running') // running | done | error
+const mode = ref('move') // move=数据目录搬迁 | crypt=数据库加密转换
+const encrypt = ref(true) // crypt 模式下的目标状态：true=启用加密 / false=关闭加密
+const phase = ref('')
+const detail = ref('')
+const filesDone = ref(0)
+const filesTotal = ref(0)
+const percent = ref(0)
+const errorMessage = ref('')
+const targetDir = ref('')
+let _onMain = null
+
+const title = computed(() => {
+  if (mode.value === 'crypt') return encrypt.value ? '启用数据库加密' : '关闭数据库加密'
+  return '迁移数据库'
+})
+const runningWarn = computed(() => {
+  if (mode.value === 'crypt') return '正在转换数据库加密方式，请不要强行停止程序，否则可能会导致数据损坏'
+  return '正在迁移数据库，请不要强行停止程序，否则可能会导致数据损坏'
+})
+const doneText = computed(() => {
+  return mode.value === 'crypt' ? '转换完成，正在重新打开主界面…' : '迁移完成，正在重新打开主界面…'
+})
+
+function onMain(payload) {
+  if (!payload || typeof payload !== 'object') return
+  if (payload.type === 'crypt-start') {
+    // 主进程已完成关窗准备，开始执行加密转换（由本窗口直接调用后端流式接口）
+    mode.value = 'crypt'
+    encrypt.value = !!payload.encrypt
+    startCrypt(payload.token)
+  } else if (payload.type === 'migration-progress') {
+    if (typeof payload.phase === 'string') phase.value = payload.phase
+    if (typeof payload.detail === 'string') detail.value = payload.detail
+    if (typeof payload.filesDone === 'number') filesDone.value = payload.filesDone
+    if (typeof payload.filesTotal === 'number') filesTotal.value = payload.filesTotal
+    if (typeof payload.percent === 'number') percent.value = payload.percent
+  } else if (payload.type === 'migration-done') {
+    state.value = 'done'
+    percent.value = 100
+  } else if (payload.type === 'migration-error') {
+    state.value = 'error'
+    errorMessage.value = payload.message || ''
+    targetDir.value = payload.target || ''
+  }
 }
+// 调用后端加密转换接口（NDJSON 流）：逐步读取进度并刷新界面；结束后回报主进程
+async function startCrypt(token) {
+  try {
+    // 凭据统一走信道：安全模式下明文 Authorization 会被后端拒绝（NDJSON 流式响应不受响应加密影响）
+    const headers = { 'Content-Type': 'application/json' }
+    await applyAuthHeader(headers, token)
+    const resp = await fetch(apiUrl('/api/account/db-encryption'), {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({ encrypt: encrypt.value }),
+    })
+    if (!resp.ok || !resp.body) throw new Error(`请求后端失败（${resp.status}）`)
+    const reader = resp.body.getReader()
+    const decoder = new TextDecoder()
+    let buf = ''
+    let ok = false
+    let failMsg = ''
+    for (;;) {
+      const { done, value } = await reader.read()
+      if (done) break
+      buf += decoder.decode(value, { stream: true })
+      let idx
+      while ((idx = buf.indexOf('\n')) >= 0) {
+        const line = buf.slice(0, idx).trim()
+        buf = buf.slice(idx + 1)
+        if (!line) continue
+        let msg
+        try { msg = JSON.parse(line) } catch (_) { continue }
+        if (msg.type === 'progress') {
+          if (msg.phase) phase.value = msg.phase
+          if (msg.detail) detail.value = msg.detail
+          if (typeof msg.percent === 'number') percent.value = msg.percent
+        } else if (msg.type === 'done') {
+          if (msg.ok) ok = true
+          else failMsg = msg.message || '转换失败'
+        }
+      }
+    }
+    // 流结束后缓冲区可能还剩最后一帧（对端未以换行结尾）：补解析一次
+    if (buf.trim()) {
+      let tailMsg
+      try { tailMsg = JSON.parse(buf.trim()) } catch (_) { tailMsg = null }
+      if (tailMsg?.type === 'done') {
+        if (tailMsg.ok) ok = true
+        else failMsg = tailMsg.message || '转换失败'
+      }
+    }
+    if (ok) {
+      state.value = 'done'
+      percent.value = 100
+      // 短暂停留展示「完成」后回报主进程，由其设置提示条并重开主窗口
+      setTimeout(() => window.electron?.send(SEND.MIGRATION_DISMISS, { ok: true }), 700)
+    } else {
+      state.value = 'error'
+      // 没收到 done（进程提前退出/输出被截断）时 failMsg 为空，必须给可读兜底文案
+      errorMessage.value = failMsg || '转换未完成：未收到完成消息，请重试或查看日志'
+    }
+  } catch (err) {
+    state.value = 'error'
+    errorMessage.value = err?.message || String(err)
+  }
+}
+// 打开已复制内容所在的目标文件夹，供用户自行确认
+function openTarget() {
+  if (targetDir.value) window.electron?.invoke(INVOKE.OPEN_FOLDER, targetDir.value)
+}
+// clean=true：「确定」按用户确认清除已复制内容；clean=false：「取消」原样保留
+function finish(clean) {
+  window.electron?.send(SEND.MIGRATION_DISMISS, { clean: !!clean })
+}
+
+onMounted(() => {
+  const api = window.electron
+  // 存下 on() 返回的 wrapper 作为订阅句柄，卸载时按句柄退订
+  _onMain = api.on(RECEIVE.FROM_MAIN, (payload) => onMain(payload))
+  // 通知主进程渲染层已就绪，可以开始推送进度
+  api.send(SEND.MIGRATION_READY)
+})
+onBeforeUnmount(() => {
+  if (_onMain) window.electron.off(RECEIVE.FROM_MAIN, _onMain)
+})
 </script>
 
 <style scoped>

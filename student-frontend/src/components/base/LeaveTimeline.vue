@@ -60,91 +60,85 @@
   </div>
 </template>
 
-<script>
+<script setup>
 import AppSelect from './AppSelect.vue'
 import { zhCollator } from '../../utils/collator.js'
+import { ref, computed } from 'vue'
 
-export default {
-  name: 'LeaveTimeline',
-  components: { AppSelect },
-  props: {
-    // 节点结构：{ type, time, text, category, key }，type 对应 nodeTypes 里的 value
-    nodes: { type: Array, default: () => [] },
-    // 请假类型选项（用于筛选）
-    typeOptions: { type: Array, default: () => [] },
-    // 标题
-    title: { type: String, default: '🗓️ 请假时间轴' },
-    // 右侧对齐：把类型标签与操作按钮放到右侧（业务时间轴如加分/扣分使用）
-    alignRight: { type: Boolean, default: false },
-    // 时间轴列表最大高度（px），默认 420，业务方可按需调高
-    maxHeight: { type: Number, default: 420 },
-    // 撑满外层容器高度：外层给固定高度时，卡片与时间轴区域一起填满（用于和表格同高切换）
-    fillHeight: { type: Boolean, default: false },
-    // 节点类型配置：{ value, label, colorKey: 'info'|'success'|'danger', color: hex }
-    nodeTypes: {
-      type: Array,
-      default: () => [
-        { value: 'apply', label: '已申请', colorKey: 'info', color: '#3b82f6' },
-        { value: 'leave', label: '离开校园', colorKey: 'danger', color: '#dc2626' },
-        { value: 'return', label: '返校', colorKey: 'success', color: '#16a34a' }
-      ]
-    }
-  },
-  data() {
-    return {
-      keyword: '',
-      filterType: '',
-      filterNode: ''
-    };
-  },
-  computed: {
-    filterTypeOptions() {
-      return [{ value: '', label: '全部类型' }, ...this.typeOptions];
-    },
-    filterNodeOptions() {
-      return [{ value: '', label: '全部事件' }, ...this.nodeTypes];
-    },
-    visibleNodes() {
-      const kw = this.keyword.toLowerCase();
-      const type = this.filterType;
-      const node = this.filterNode;
-      return this.nodes
-        .filter(n => {
-          if (kw) {
-            const haystack = Object.values(n).map(v => String(v || '')).join(' ').toLowerCase();
-            if (!haystack.includes(kw)) return false;
-          }
-          if (type && n.category !== type) return false;
-          if (node && n.type !== node) return false;
-          return true;
-        })
-        .slice()
-        .sort((a, b) => zhCollator.compare(String(b.time), String(a.time)));
-    }
-  },
-  methods: {
-    nodeTypeLabel(type) {
-      const t = this.nodeTypes.find(n => n.value === type);
-      return t ? t.label : type;
-    },
-    nodeColor(node) {
-      const t = this.nodeTypes.find(n => n.value === node.type);
-      return t ? t.color : '#9ca3af';
-    },
-    markerStyle(node) {
-      const c = this.nodeColor(node);
-      return { color: c, background: c };
-    },
-    itemStyle(node) {
-      return { borderLeftColor: this.nodeColor(node) };
-    },
-    badgeClass(node) {
-      const t = this.nodeTypes.find(n => n.value === node.type);
-      const map = { info: 'bg-info/10 text-info', success: 'bg-success/10 text-success', danger: 'bg-danger/10 text-danger', muted: 'bg-surface-hover text-text-secondary border border-border' };
-      return map[t && t.colorKey] || map.info;
-    }
+defineOptions({ name: 'LeaveTimeline' })
+
+const props = defineProps({
+  // 节点结构：{ type, time, text, category, key }，type 对应 nodeTypes 里的 value
+  nodes: { type: Array, default: () => [] },
+  // 请假类型选项（用于筛选）
+  typeOptions: { type: Array, default: () => [] },
+  // 标题
+  title: { type: String, default: '🗓️ 请假时间轴' },
+  // 右侧对齐：把类型标签与操作按钮放到右侧（业务时间轴如加分/扣分使用）
+  alignRight: { type: Boolean, default: false },
+  // 时间轴列表最大高度（px），默认 420，业务方可按需调高
+  maxHeight: { type: Number, default: 420 },
+  // 撑满外层容器高度：外层给固定高度时，卡片与时间轴区域一起填满（用于和表格同高切换）
+  fillHeight: { type: Boolean, default: false },
+  // 节点类型配置：{ value, label, colorKey: 'info'|'success'|'danger', color: hex }
+  nodeTypes: {
+    type: Array,
+    default: () => [
+      { value: 'apply', label: '已申请', colorKey: 'info', color: '#3b82f6' },
+      { value: 'leave', label: '离开校园', colorKey: 'danger', color: '#dc2626' },
+      { value: 'return', label: '返校', colorKey: 'success', color: '#16a34a' }
+    ]
   }
-};
+})
+
+const keyword = ref('');
+const filterType = ref('');
+const filterNode = ref('');
+
+const filterTypeOptions = computed(() => {
+  return [{ value: '', label: '全部类型' }, ...props.typeOptions];
+});
+const filterNodeOptions = computed(() => {
+  return [{ value: '', label: '全部事件' }, ...props.nodeTypes];
+});
+const visibleNodes = computed(() => {
+  const kw = keyword.value.toLowerCase();
+  const type = filterType.value;
+  const node = filterNode.value;
+  return props.nodes
+    .filter(n => {
+      if (kw) {
+        const haystack = Object.values(n).map(v => String(v || '')).join(' ').toLowerCase();
+        if (!haystack.includes(kw)) return false;
+      }
+      if (type && n.category !== type) return false;
+      if (node && n.type !== node) return false;
+      return true;
+    })
+    .slice()
+    .sort((a, b) => zhCollator.compare(String(b.time), String(a.time)));
+});
+
+function nodeTypeLabel(type) {
+  const t = props.nodeTypes.find(n => n.value === type);
+  return t ? t.label : type;
+}
+function nodeColor(node) {
+  const t = props.nodeTypes.find(n => n.value === node.type);
+  return t ? t.color : '#9ca3af';
+}
+function markerStyle(node) {
+  const c = nodeColor(node);
+  return { color: c, background: c };
+}
+function itemStyle(node) {
+  return { borderLeftColor: nodeColor(node) };
+}
+function badgeClass(node) {
+  const t = props.nodeTypes.find(n => n.value === node.type);
+  const map = { info: 'bg-info/10 text-info', success: 'bg-success/10 text-success', danger: 'bg-danger/10 text-danger', muted: 'bg-surface-hover text-text-secondary border border-border' };
+  return map[t && t.colorKey] || map.info;
+}
 </script>
 
 <style scoped>

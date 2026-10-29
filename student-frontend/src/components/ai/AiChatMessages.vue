@@ -260,7 +260,7 @@
 }
 </style>
 
-<script>
+<script setup>
 import AiChart from '../AiChart.vue'
 import AiRecordTable from '../tables/AiRecordTable.vue'
 import AiStreamTail from './AiStreamTail.vue'
@@ -270,44 +270,30 @@ import {
 } from '../../composables/ai/aiMessages.js'
 import { TABLE_ROUTE } from '../../composables/ai/aiConstants.js'
 
-export default {
-  name: 'AiChatMessages',
-  components: { AiChart, AiRecordTable, AiStreamTail },
-  props: {
-    messages: { type: Array, default: () => [] },
-    busy: { type: Boolean, default: false },
-    activeReasoningOn: { type: Boolean, default: false },
-    // 浮窗（窗口）模式：精简掉用时 / token 统计与改动明细抽屉入口
-    floating: { type: Boolean, default: false },
-    // 父预计算的判定函数（保持与原渲染判定一致）
-    isRetryable: { type: Function, required: true },
-    isRollbackable: { type: Function, required: true },
-    canUndo: { type: Function, required: true },
-  },
-  emits: ['new', 'copy', 'retry', 'undo', 'rollback', 'open-changes', 'goto'],
-  methods: {
-    hasProcess,
-    processTitle,
-    stepIcon,
-    stepClass,
-    stepSeconds,
-    toggleStepDetail,
-    hasReasonStep,
-    tokenSpeed,
-    extractFileName,
-    extractUserText,
-    // 本轮数据/文件改动的汇总：仅在提案已执行且未撤回时返回非空（空则整条不渲染）。
-    // 结果缓存到消息上，避免长列表滚动时每帧重算；撤回后由 reverted 判断直接返回 null。
-    changeSummary(m) {
-      const p = m && m.proposal
-      if (!p || !p.executed || p.reverted) return null
-      if (!m._changeSummary) m._changeSummary = summarizeProposalChanges(p)
-      return m._changeSummary.total ? m._changeSummary : null
-    },
-    toggleChangeOpen(m) { m._changeOpen = !m._changeOpen },
-    // 项的 key 形如 grid:schedule / table:students / skill:xxx，取回原始表名（技能 md 无对应表）
-    tableOfItem(it) { return (it.key || '').split(':')[1] || '' },
-    canJumpItem(it) { return !!TABLE_ROUTE[this.tableOfItem(it)] },
-  },
+defineOptions({ name: 'AiChatMessages' })
+defineProps({
+  messages: { type: Array, default: () => [] },
+  busy: { type: Boolean, default: false },
+  activeReasoningOn: { type: Boolean, default: false },
+  // 浮窗（窗口）模式：精简掉用时 / token 统计与改动明细抽屉入口
+  floating: { type: Boolean, default: false },
+  // 父预计算的判定函数（保持与原渲染判定一致）
+  isRetryable: { type: Function, required: true },
+  isRollbackable: { type: Function, required: true },
+  canUndo: { type: Function, required: true },
+})
+defineEmits(['new', 'copy', 'retry', 'undo', 'rollback', 'open-changes', 'goto'])
+
+// 本轮数据/文件改动的汇总：仅在提案已执行且未撤回时返回非空（空则整条不渲染）。
+// 结果缓存到消息上，避免长列表滚动时每帧重算；撤回后由 reverted 判断直接返回 null。
+function changeSummary(m) {
+  const p = m && m.proposal
+  if (!p || !p.executed || p.reverted) return null
+  if (!m._changeSummary) m._changeSummary = summarizeProposalChanges(p)
+  return m._changeSummary.total ? m._changeSummary : null
 }
+function toggleChangeOpen(m) { m._changeOpen = !m._changeOpen }
+// 项的 key 形如 grid:schedule / table:students / skill:xxx，取回原始表名（技能 md 无对应表）
+function tableOfItem(it) { return (it.key || '').split(':')[1] || '' }
+function canJumpItem(it) { return !!TABLE_ROUTE[tableOfItem(it)] }
 </script>

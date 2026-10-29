@@ -36,77 +36,67 @@
   </DialogShell>
 </template>
 
-<script>
+<script setup>
+import { ref, watch } from 'vue'
 import { useNotification } from '../../composables/useNotification.js'
 import '../../styles/dialog-transition.css'
 import AppHelp from '../base/AppHelp.vue'
 import AppSwitch from '../base/AppSwitch.vue'
 import DialogShell from '../base/DialogShell.vue'
 
-export default {
-  name: 'SeatSettingsDialog',
-  components: { AppHelp, AppSwitch, DialogShell },
-  props: {
-    visible: Boolean,
-    rows: { type: Number, required: true },
-    cols: { type: Number, required: true },
-    mode: { type: String, default: 'single' },
-    showAisle: { type: Boolean, default: true }
-  },
-  emits: ['save', 'cancel'],
-  setup() {
-    const { error: notifyError } = useNotification()
-    return { notifyError }
-  },
-  data() {
-    return {
-      localRows: this.rows,
-      localCols: this.cols,
-      localMode: this.mode,
-      localShowAisle: this.showAisle
-    }
-  },
-  watch: {
-    visible(val) {
-      if (val) {
-        this.localRows = this.rows
-        this.localCols = this.cols
-        this.localMode = this.mode
-        this.localShowAisle = this.showAisle
-      }
-    },
-    // 同桌模式下列数必须为偶数（每两列为一组）；切到同桌时自动把奇数取整为偶数
-    localMode(val) {
-      if (val === 'double' && this.localCols % 2 !== 0) {
-        this.localCols = Math.max(2, Math.min(30, this.localCols + 1))
-      }
-    }
-  },
-  methods: {
-    save() {
-      if (!Number.isInteger(this.localRows) || !Number.isInteger(this.localCols)) {
-        this.notifyError('行数和列数必须是整数')
-        return
-      }
-      if (this.localRows < 1 || this.localRows > 50) {
-        this.notifyError('设置的行/列过大\n过大的行和列会引起显示问题和程序卡顿')
-        return
-      }
-      if (this.localCols < 1 || this.localCols > 30) {
-        this.notifyError('设置的行/列过大\n过大的行和列会引起显示问题和程序卡顿')
-        return
-      }
-      if (this.localMode === 'double' && this.localCols % 2 !== 0) {
-        this.notifyError('同桌模式下列数必须为偶数\n如需单桌，请自行留空该座位')
-        return
-      }
-      this.$emit('save', {
-        rows: this.localRows,
-        cols: this.localCols,
-        mode: this.localMode,
-        showAisle: this.localShowAisle
-      })
-    }
+defineOptions({ name: 'SeatSettingsDialog' })
+const props = defineProps({
+  visible: Boolean,
+  rows: { type: Number, required: true },
+  cols: { type: Number, required: true },
+  mode: { type: String, default: 'single' },
+  showAisle: { type: Boolean, default: true }
+})
+const emit = defineEmits(['save', 'cancel'])
+const { error: notifyError } = useNotification()
+
+const localRows = ref(props.rows)
+const localCols = ref(props.cols)
+const localMode = ref(props.mode)
+const localShowAisle = ref(props.showAisle)
+
+watch(() => props.visible, (val) => {
+  if (val) {
+    localRows.value = props.rows
+    localCols.value = props.cols
+    localMode.value = props.mode
+    localShowAisle.value = props.showAisle
   }
+})
+// 同桌模式下列数必须为偶数（每两列为一组）；切到同桌时自动把奇数取整为偶数
+watch(localMode, (val) => {
+  if (val === 'double' && localCols.value % 2 !== 0) {
+    localCols.value = Math.max(2, Math.min(30, localCols.value + 1))
+  }
+})
+
+function save() {
+  if (!Number.isInteger(localRows.value) || !Number.isInteger(localCols.value)) {
+    notifyError('行数和列数必须是整数')
+    return
+  }
+  if (localRows.value < 1 || localRows.value > 50) {
+    notifyError('设置的行/列过大\n过大的行和列会引起显示问题和程序卡顿')
+    return
+  }
+  if (localCols.value < 1 || localCols.value > 30) {
+    notifyError('设置的行/列过大\n过大的行和列会引起显示问题和程序卡顿')
+    return
+  }
+  if (localMode.value === 'double' && localCols.value % 2 !== 0) {
+    notifyError('同桌模式下列数必须为偶数\n如需单桌，请自行留空该座位')
+    return
+  }
+  emit('save', {
+    rows: localRows.value,
+    cols: localCols.value,
+    mode: localMode.value,
+    showAisle: localShowAisle.value
+  })
 }
 </script>

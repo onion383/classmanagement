@@ -130,209 +130,207 @@
   </div>
 </template>
 
-<script>
+<script setup>
 import { useNotification } from '../composables/useNotification.js'
+import { ref, computed, nextTick } from 'vue'
 
-export default {
-  name: 'CadreTreeList',
-  props: {
-    node: { type: Object, required: true },
-    allStudents: { type: Array, default: () => [] },
-    level: { type: Number, default: 0 },
-    selectedId: { type: [Number, String], default: null }
-  },
-  emits: ['add-child', 'edit', 'remove', 'remove-member', 'drop-move', 'select', 'add-student'],
-  data() {
-    return {
-      collapsed: false,
-      // 行内添加学生的输入内容
-      addKeyword: '',
-      // 候选下拉状态（定位方式与座位表一致）
-      suggest: { visible: false, index: 0, left: 0, top: 0, width: 0 }
-    }
-  },
-  computed: {
-    hasChildren() {
-      return !!(this.node.children && this.node.children.length)
-    },
-    // 本职务直接担任的学生数（不含下级职务）
-    memberCount() {
-      return (this.node.members || []).length
-    },
-    // 展开区里是否有内容（本级学生或下级职务）：有内容即可折叠，空职务才禁用箭头
-    hasContent() {
-      return this.hasChildren || this.memberCount > 0
-    },
-    // 候选学生：排除本职务已担任的学生，按姓名过滤（逻辑与座位表一致）
-    candidates() {
-      const kw = String(this.addKeyword || '').toLowerCase().trim()
-      const existing = new Set((this.node.members || []).map(m => String(m.student_name || '').trim()))
-      const lower = this.studentNameLower
-      return this.allStudents.filter(s => {
-        const name = String(s.姓名 ?? '')
-        return !existing.has(name.trim()) && (!kw || (lower.get(s) || '').includes(kw))
-      })
-    },
-    // 学生姓名小写缓存：只在名单变更时重建一次，编辑框每次按键不必逐项构造小写字符串
-    studentNameLower() {
-      const map = new Map()
-      for (const s of this.allStudents) map.set(s, String(s.姓名 ?? '').toLowerCase())
-      return map
-    }
-  },
-  methods: {
-    toggle() {
-      if (this.hasContent) this.collapsed = !this.collapsed
-    },
-    // 选中：按下即选中（不用等 click 的抬起时机），响应更跟手
-    onRowMouseDown(e) {
-      // 行内输入框有自己的交互（原 @click.stop 亦不选中），其余区域按下即选中
-      if (e.target.closest('input, select, textarea, .add-inline')) return
-      this.$emit('select', this.node.id)
-    },
-    // 标记最近的滚动容器「正在做展开/折叠动画」：期间隐藏滚动条，结束后恢复。
-    // 用计数兼容动画重叠/取消，避免类名被提前摘掉。
-    markScroller(el, on) {
-      const scroller = el && el.closest && el.closest('.tree-scroll')
-      if (!scroller) return
-      const n = Math.max(0, Number(scroller.dataset.animCount || 0) + (on ? 1 : -1))
-      scroller.dataset.animCount = String(n)
-      scroller.classList.toggle('is-animating', n > 0)
-    },
-    // ============ 展开/折叠：auto 高度过渡（height:auto 无法用纯 CSS 过渡，故用 JS 量取实际高度） ============
-    onCollapseEnter(el) {
-      this.markScroller(el, true)
-      el.style.overflow = 'hidden'
-      el.style.height = '0px'
-      void el.offsetHeight // 强制回流，保证确实从 0 开始过渡
-      el.style.height = el.scrollHeight + 'px'
-    },
-    onCollapseAfterEnter(el) {
-      // 过渡结束后还原自适应高度，之后再添加/移除学生也能自然撑开
-      el.style.height = ''
-      el.style.overflow = ''
-      this.markScroller(el, false)
-    },
-    onCollapseLeave(el) {
-      this.markScroller(el, true)
-      el.style.overflow = 'hidden'
-      el.style.height = el.scrollHeight + 'px'
-      void el.offsetHeight
-      el.style.height = '0px'
-    },
-    onCollapseAfterLeave(el) {
-      el.style.height = ''
-      el.style.overflow = ''
-      this.markScroller(el, false)
-    },
-    // 过渡被快速切换打断时不会触发 after-*，这里补一次归还，避免滚动条一直被隐藏
-    onCollapseCancel(el) {
-      this.markScroller(el, false)
-    },
-    // 候选弹窗定位：输入框视口坐标，越界时左移/上翻（同座位表）
-    positionSuggest(el) {
-      if (!el) return
-      const r = el.getBoundingClientRect()
-      const w = Math.max(180, r.width)
-      const h = 200
-      let x = r.left
-      let y = r.bottom + 2
-      if (x + w > window.innerWidth) x = Math.max(0, window.innerWidth - w - 8)
-      if (y + h > window.innerHeight) y = Math.max(0, r.top - h - 2)
-      this.suggest.left = x
-      this.suggest.top = y
-      this.suggest.width = w
-    },
-    onInputFocus(e) {
-      this.activeInputEl = e.currentTarget
-      this.suggest.index = 0
-      this.$nextTick(() => {
-        this.positionSuggest(this.activeInputEl)
-        this.suggest.visible = this.candidates.length > 0
-      })
-    },
-    onInputChange(e) {
-      this.activeInputEl = e.currentTarget
-      this.suggest.index = 0
-      this.$nextTick(() => {
-        this.positionSuggest(this.activeInputEl)
-        this.suggest.visible = this.candidates.length > 0
-      })
-    },
-    onInputKeydown(e) {
-      const list = this.candidates
-      if (e.key === 'Tab' || e.key === 'Enter') {
-        if (list.length > 0) { e.preventDefault(); this.pickCandidate(list[this.suggest.index]) }
-        return
-      }
-      if (e.key === 'ArrowDown') {
-        if (list.length > 0) { e.preventDefault(); this.suggest.index = (this.suggest.index + 1) % list.length }
-        return
-      }
-      if (e.key === 'ArrowUp') {
-        if (list.length > 0) { e.preventDefault(); this.suggest.index = (this.suggest.index - 1 + list.length) % list.length }
-        return
-      }
-      if (e.key === 'Escape') this.closeSuggest()
-    },
-    // 选中候选项：填入输入框
-    pickCandidate(s) {
-      this.addKeyword = String(s.姓名 ?? '')
-      this.closeSuggest()
-    },
-    closeSuggest() {
-      this.suggest.visible = false
-    },
-    // 确认添加：添加到当前职务后清空输入框
-    confirmAdd() {
-      const name = String(this.addKeyword || '').trim()
-      if (!name) return
-      const student = this.allStudents.find(s => String(s.姓名 || '').trim() === name)
-      // 找不到对应学生时不能发 id:null（后端/父组件会当成合法成员写入），必须先提示
-      if (!student) {
-        useNotification().error(`未找到学生「${name}」，请从候选列表中选择`)
-        return
-      }
-      this.closeSuggest()
-      this.addKeyword = ''
-      this.$emit('add-student', { nodeId: this.node.id, student })
-    },
-    // 拖拽数据：JSON 携带类型与 id
-    onDragStart(e, type, id) {
-      e.dataTransfer.setData('text/plain', JSON.stringify({ type, id }))
-      e.dataTransfer.effectAllowed = 'move'
-    },
-    // 拖到职务行上：职务→同级重排（按指针上下分为前/后）；成员→追加到该职务
-    onDropRow(e) {
-      const dragged = this.readDrag(e)
-      if (!dragged) return
-      if (dragged.type === 'member') {
-        this.$emit('drop-move', { dragged, target: { kind: 'append', nodeId: this.node.id } })
-        return
-      }
-      const rect = e.currentTarget.getBoundingClientRect()
-      const pos = e.clientY - rect.top < rect.height / 2 ? 'before' : 'after'
-      this.$emit('drop-move', { dragged, target: { kind: 'node', nodeId: this.node.id, position: pos } })
-    },
-    // 拖到子容器上：职务→追加为该职务下级；成员→追加到该职务
-    onDropChild(e) {
-      const dragged = this.readDrag(e)
-      if (!dragged) return
-      this.$emit('drop-move', { dragged, target: { kind: 'child', nodeId: this.node.id } })
-    },
-    // 拖到成员行上：成员→在所在职务内排序；职务→忽略
-    onDropMember(e, m) {
-      const dragged = this.readDrag(e)
-      if (!dragged || dragged.type !== 'member') return
-      this.$emit('drop-move', { dragged, target: { kind: 'member', nodeId: this.node.id, memberId: m.id } })
-    },
-    onDropBubble(payload) {
-      this.$emit('drop-move', payload)
-    },
-    readDrag(e) {
-      try { return JSON.parse(e.dataTransfer.getData('text/plain')) } catch (err) { return null }
-    }
+defineOptions({ name: 'CadreTreeList' })
+
+const props = defineProps({
+  node: { type: Object, required: true },
+  allStudents: { type: Array, default: () => [] },
+  level: { type: Number, default: 0 },
+  selectedId: { type: [Number, String], default: null }
+})
+
+const emit = defineEmits(['add-child', 'edit', 'remove', 'remove-member', 'drop-move', 'select', 'add-student'])
+
+const collapsed = ref(false)
+// 行内添加学生的输入内容
+const addKeyword = ref('')
+// 候选下拉状态（定位方式与座位表一致）
+const suggest = ref({ visible: false, index: 0, left: 0, top: 0, width: 0 })
+
+let activeInputEl = null
+
+const hasChildren = computed(() => {
+  return !!(props.node.children && props.node.children.length)
+})
+// 本职务直接担任的学生数（不含下级职务）
+const memberCount = computed(() => {
+  return (props.node.members || []).length
+})
+// 展开区里是否有内容（本级学生或下级职务）：有内容即可折叠，空职务才禁用箭头
+const hasContent = computed(() => {
+  return hasChildren.value || memberCount.value > 0
+})
+// 候选学生：排除本职务已担任的学生，按姓名过滤（逻辑与座位表一致）
+const candidates = computed(() => {
+  const kw = String(addKeyword.value || '').toLowerCase().trim()
+  const existing = new Set((props.node.members || []).map(m => String(m.student_name || '').trim()))
+  const lower = studentNameLower.value
+  return props.allStudents.filter(s => {
+    const name = String(s.姓名 ?? '')
+    return !existing.has(name.trim()) && (!kw || (lower.get(s) || '').includes(kw))
+  })
+})
+// 学生姓名小写缓存：只在名单变更时重建一次，编辑框每次按键不必逐项构造小写字符串
+const studentNameLower = computed(() => {
+  const map = new Map()
+  for (const s of props.allStudents) map.set(s, String(s.姓名 ?? '').toLowerCase())
+  return map
+})
+
+function toggle() {
+  if (hasContent.value) collapsed.value = !collapsed.value
+}
+// 选中：按下即选中（不用等 click 的抬起时机），响应更跟手
+function onRowMouseDown(e) {
+  // 行内输入框有自己的交互（原 @click.stop 亦不选中），其余区域按下即选中
+  if (e.target.closest('input, select, textarea, .add-inline')) return
+  emit('select', props.node.id)
+}
+// 标记最近的滚动容器「正在做展开/折叠动画」：期间隐藏滚动条，结束后恢复。
+// 用计数兼容动画重叠/取消，避免类名被提前摘掉。
+function markScroller(el, on) {
+  const scroller = el && el.closest && el.closest('.tree-scroll')
+  if (!scroller) return
+  const n = Math.max(0, Number(scroller.dataset.animCount || 0) + (on ? 1 : -1))
+  scroller.dataset.animCount = String(n)
+  scroller.classList.toggle('is-animating', n > 0)
+}
+// ============ 展开/折叠：auto 高度过渡（height:auto 无法用纯 CSS 过渡，故用 JS 量取实际高度） ============
+function onCollapseEnter(el) {
+  markScroller(el, true)
+  el.style.overflow = 'hidden'
+  el.style.height = '0px'
+  void el.offsetHeight // 强制回流，保证确实从 0 开始过渡
+  el.style.height = el.scrollHeight + 'px'
+}
+function onCollapseAfterEnter(el) {
+  // 过渡结束后还原自适应高度，之后再添加/移除学生也能自然撑开
+  el.style.height = ''
+  el.style.overflow = ''
+  markScroller(el, false)
+}
+function onCollapseLeave(el) {
+  markScroller(el, true)
+  el.style.overflow = 'hidden'
+  el.style.height = el.scrollHeight + 'px'
+  void el.offsetHeight
+  el.style.height = '0px'
+}
+function onCollapseAfterLeave(el) {
+  el.style.height = ''
+  el.style.overflow = ''
+  markScroller(el, false)
+}
+// 过渡被快速切换打断时不会触发 after-*，这里补一次归还，避免滚动条一直被隐藏
+function onCollapseCancel(el) {
+  markScroller(el, false)
+}
+// 候选弹窗定位：输入框视口坐标，越界时左移/上翻（同座位表）
+function positionSuggest(el) {
+  if (!el) return
+  const r = el.getBoundingClientRect()
+  const w = Math.max(180, r.width)
+  const h = 200
+  let x = r.left
+  let y = r.bottom + 2
+  if (x + w > window.innerWidth) x = Math.max(0, window.innerWidth - w - 8)
+  if (y + h > window.innerHeight) y = Math.max(0, r.top - h - 2)
+  suggest.value.left = x
+  suggest.value.top = y
+  suggest.value.width = w
+}
+function onInputFocus(e) {
+  activeInputEl = e.currentTarget
+  suggest.value.index = 0
+  nextTick(() => {
+    positionSuggest(activeInputEl)
+    suggest.value.visible = candidates.value.length > 0
+  })
+}
+function onInputChange(e) {
+  activeInputEl = e.currentTarget
+  suggest.value.index = 0
+  nextTick(() => {
+    positionSuggest(activeInputEl)
+    suggest.value.visible = candidates.value.length > 0
+  })
+}
+function onInputKeydown(e) {
+  const list = candidates.value
+  if (e.key === 'Tab' || e.key === 'Enter') {
+    if (list.length > 0) { e.preventDefault(); pickCandidate(list[suggest.value.index]) }
+    return
   }
+  if (e.key === 'ArrowDown') {
+    if (list.length > 0) { e.preventDefault(); suggest.value.index = (suggest.value.index + 1) % list.length }
+    return
+  }
+  if (e.key === 'ArrowUp') {
+    if (list.length > 0) { e.preventDefault(); suggest.value.index = (suggest.value.index - 1 + list.length) % list.length }
+    return
+  }
+  if (e.key === 'Escape') closeSuggest()
+}
+// 选中候选项：填入输入框
+function pickCandidate(s) {
+  addKeyword.value = String(s.姓名 ?? '')
+  closeSuggest()
+}
+function closeSuggest() {
+  suggest.value.visible = false
+}
+// 确认添加：添加到当前职务后清空输入框
+function confirmAdd() {
+  const name = String(addKeyword.value || '').trim()
+  if (!name) return
+  const student = props.allStudents.find(s => String(s.姓名 || '').trim() === name)
+  // 找不到对应学生时不能发 id:null（后端/父组件会当成合法成员写入），必须先提示
+  if (!student) {
+    useNotification().error(`未找到学生「${name}」，请从候选列表中选择`)
+    return
+  }
+  closeSuggest()
+  addKeyword.value = ''
+  emit('add-student', { nodeId: props.node.id, student })
+}
+// 拖拽数据：JSON 携带类型与 id
+function onDragStart(e, type, id) {
+  e.dataTransfer.setData('text/plain', JSON.stringify({ type, id }))
+  e.dataTransfer.effectAllowed = 'move'
+}
+// 拖到职务行上：职务→同级重排（按指针上下分为前/后）；成员→追加到该职务
+function onDropRow(e) {
+  const dragged = readDrag(e)
+  if (!dragged) return
+  if (dragged.type === 'member') {
+    emit('drop-move', { dragged, target: { kind: 'append', nodeId: props.node.id } })
+    return
+  }
+  const rect = e.currentTarget.getBoundingClientRect()
+  const pos = e.clientY - rect.top < rect.height / 2 ? 'before' : 'after'
+  emit('drop-move', { dragged, target: { kind: 'node', nodeId: props.node.id, position: pos } })
+}
+// 拖到子容器上：职务→追加为该职务下级；成员→追加到该职务
+function onDropChild(e) {
+  const dragged = readDrag(e)
+  if (!dragged) return
+  emit('drop-move', { dragged, target: { kind: 'child', nodeId: props.node.id } })
+}
+// 拖到成员行上：成员→在所在职务内排序；职务→忽略
+function onDropMember(e, m) {
+  const dragged = readDrag(e)
+  if (!dragged || dragged.type !== 'member') return
+  emit('drop-move', { dragged, target: { kind: 'member', nodeId: props.node.id, memberId: m.id } })
+}
+function onDropBubble(payload) {
+  emit('drop-move', payload)
+}
+function readDrag(e) {
+  try { return JSON.parse(e.dataTransfer.getData('text/plain')) } catch (err) { return null }
 }
 </script>
 

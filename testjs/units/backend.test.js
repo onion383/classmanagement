@@ -102,6 +102,29 @@ test('播种：槽位行数与默认配置正确', () => {
   conn.close()
 })
 
+test('students：is_provisional 列 + 临时同名唯一索引', () => {
+  const conn = fresh()
+  const cols = conn.prepare('PRAGMA table_info(students)').all().map((c) => c.name)
+  assert.ok(cols.includes('is_provisional'), '缺少 is_provisional 列')
+
+  // 正式学生允许重名（真实班级里可能就有同名）
+  conn.prepare('INSERT INTO students (姓名) VALUES (?)').run('张三')
+  conn.prepare('INSERT INTO students (姓名) VALUES (?)').run('张三')
+  assert.equal(count(conn, "SELECT COUNT(*) c FROM students WHERE 姓名 = '张三'"), 2)
+
+  // 临时学生同名只允许一条：这是「多处同时输入同一个名字」不产生重复记录的硬保证
+  conn.prepare('INSERT INTO students (姓名, is_provisional) VALUES (?, 1)').run('李四')
+  assert.throws(
+    () => conn.prepare('INSERT INTO students (姓名, is_provisional) VALUES (?, 1)').run('李四'),
+    /UNIQUE/i
+  )
+
+  // 正式与临时同名是允许的（临时只是「还没转正的同名学生」）
+  conn.prepare('INSERT INTO students (姓名) VALUES (?)').run('李四')
+  assert.equal(count(conn, "SELECT COUNT(*) c FROM students WHERE 姓名 = '李四'"), 2)
+  conn.close()
+})
+
 test('写入走物理表、读取走视图；视图本身不可写', () => {
   const conn = fresh()
   const cells = JSON.stringify([[{ course: '数学' }]])
@@ -287,8 +310,10 @@ test('sanitizeField：课表/座位/值日等逻辑表名规则仍然生效', ()
   assert.doesNotThrow(() => s.sanitizeField([[1, '张三'], [null, 2]], 'seat_layout', 'seats'))
   assert.throws(() => s.sanitizeField([1, 2, 3], 'seat_layout', 'seats'))
 
-  assert.doesNotThrow(() => s.sanitizeField({ 扫地: { 周一: ['张三'] } }, 'duty_layout', 'cells'))
+  assert.doesNotThrow(() => s.sanitizeField({ daily: { 扫地: { 周一: ['张三'] } }, big: {} }, 'duty_layout', 'cells'))
   assert.throws(() => s.sanitizeField('[]', 'duty_layout', 'cells')) // 值日 cells 必须是对象
+  // 单模式/旧版整块不再接受：读取侧只认 {daily,big} 打包结构
+  assert.throws(() => s.sanitizeField({ 扫地: { 周一: ['张三'] } }, 'duty_layout', 'cells'))
 
   assert.doesNotThrow(() => s.sanitizeField({ days: ['周一'], items: [] }, 'duty_weight', 'weights'))
   assert.throws(() => s.sanitizeField([], 'duty_weight', 'weights'))
@@ -507,14 +532,8 @@ test('pendingRegs：草稿超过容量淘汰最旧，不再无上限堆积', () 
 // =========================================================================
 // dutyCells：值日表结构遍历（P1-07 / B04-07）
 // =========================================================================
-test('dutyCells：旧版整块与 daily/big 打包结构都能统计与清理', () => {
+test('dutyCells：daily/big 打包结构的统计与清理', () => {
   const { countDutyRefs, removeDutyName } = require('../../student-backend/services/dutyCells')
-
-  const legacy = { 扫地: { 周一: ['张三', '李四'] }, 拖地: { 周二: ['王五'] } }
-  assert.equal(countDutyRefs(legacy, '张三'), 1)
-  assert.equal(countDutyRefs(legacy, '李四'), 1)
-  assert.equal(removeDutyName(legacy, '张三'), 1)
-  assert.deepEqual(legacy, { 扫地: { 周一: ['李四'] }, 拖地: { 周二: ['王五'] } })
 
   const packed = {
     daily: { 扫地: { 周一: ['张三', '李四'] } },
@@ -528,36 +547,26 @@ test('dutyCells：旧版整块与 daily/big 打包结构都能统计与清理', 
   })
 })
 
-test('dutyCells：空/数组/畸形输入不抛错，混合键不误判为模式打包', () => {
+test('dutyCells：空/数组/畸形输入不抛错', () => {
   const { dutyRoots, countDutyRefs, removeDutyName } = require('../../student-backend/services/dutyCells')
   assert.deepEqual(dutyRoots(null), [])
   assert.deepEqual(dutyRoots([]), [])
-  assert.deepEqual(dutyRoots({}), [{}])
+  assert.deepEqual(dutyRoots({}), [])
   assert.equal(countDutyRefs(null, '张三'), 0)
   assert.equal(countDutyRefs({}, '张三'), 0)
   assert.equal(countDutyRefs({ daily: 'oops' }, '张三'), 0)
   assert.equal(removeDutyName({ daily: 'oops' }, '张三'), 0)
-  // 顶层混有非 daily/big 键 → 按旧版整块处理（项目名恰好不叫 daily 的情况）
-  const legacyLike = { 扫地: { 周一: ['张三'] }, daily: {} }
-  assert.equal(countDutyRefs(legacyLike, '张三'), 1)
+  // 非打包结构不再识别（不做旧版兼容）：统计与清理都命中不了
+  const notPacked = { 扫地: { 周一: ['张三'] }, daily: {} }
+  assert.equal(countDutyRefs(notPacked, '张三'), 0)
 })
 
-test('dutyMode/dutyCells：旧版整块里项目名恰为 daily/big 不得误判为模式打包', () => {
-  const { toModeMap, looksLikeDutyRoot } = require('../../student-backend/services/dutyMode')
-  const { countDutyRefs, removeDutyName, dutyRoots } = require('../../student-backend/services/dutyCells')
+test('dutyMode/dutyCells：打包结构的解包与宽容度', () => {
+  const { toModeMap } = require('../../student-backend/services/dutyMode')
+  const { countDutyRefs, removeDutyName } = require('../../student-backend/services/dutyCells')
 
-  // 旧版结构（没有模式概念），项目名恰好叫 daily：下一层是「星期 → 姓名数组」
-  const legacy = { daily: { 周一: ['张三'] } }
-  assert.equal(looksLikeDutyRoot(legacy.daily), false, '星期映射不是模式根')
-  // 必须整块归入日常，而不是把 legacy.daily 当成「日常模式的内容」
-  assert.deepEqual(toModeMap(legacy), { daily: legacy, big: {} })
-  assert.deepEqual(dutyRoots(legacy), [legacy])
-  assert.equal(countDutyRefs(legacy, '张三'), 1, '误判会导致统计恒为 0、删人名删不掉')
-  assert.equal(removeDutyName(legacy, '张三'), 1)
-
-  // 真正的模式打包结构不受影响（下一层是「项目 → 对象」）
+  // 按模式打包：逐模式解包
   const packed = { daily: { 扫地: { 周一: ['李四'] } }, big: {} }
-  assert.equal(looksLikeDutyRoot(packed.daily), true)
   assert.deepEqual(toModeMap(packed), { daily: { 扫地: { 周一: ['李四'] } }, big: {} })
   assert.equal(countDutyRefs(packed, '李四'), 1)
 
@@ -566,8 +575,28 @@ test('dutyMode/dutyCells：旧版整块里项目名恰为 daily/big 不得误判
   assert.deepEqual(toModeMap(halfBroken).daily, { 扫地: { 周一: ['王五'] } })
   assert.equal(countDutyRefs(halfBroken, '王五'), 1)
 
-  // 空对象算「像模式根」：刚切到该模式还没填内容
-  assert.equal(looksLikeDutyRoot({}), true)
+  // 非打包结构（旧版整块）不再兼容：解包为空，统计/清理落空
+  const legacy = { 扫地: { 周一: ['张三'] } }
+  assert.deepEqual(toModeMap(legacy), { daily: {}, big: {} })
+  assert.equal(countDutyRefs(legacy, '张三'), 0)
+  assert.equal(removeDutyName(legacy, '张三'), 0)
+})
+
+test('dutyMode.unpackMode：空值形态随字段契约（items 回 []、cells 回 {}）', () => {
+  const { unpackMode } = require('../../student-backend/services/dutyMode')
+  // items 的模式值是数组：缺失/旧结构/畸形都必须回 [] —— 回 {} 会让前端 items.forEach 崩掉
+  const packedItems = { daily: [{ name: '扫地', count: 1 }], big: [] }
+  assert.deepEqual(unpackMode(packedItems, 'daily', []), [{ name: '扫地', count: 1 }])
+  assert.deepEqual(unpackMode(packedItems, 'big', []), [])
+  assert.deepEqual(unpackMode(null, 'daily', []), []) // 缺失
+  assert.deepEqual(unpackMode('[{"name":"旧结构"}]', 'daily', []), []) // 旧版整块（数组）不识别，读为空
+  assert.deepEqual(unpackMode('{"daily":{}}', 'daily', []), []) // 模式值形态不对（对象冒充数组）
+  // cells 的模式值是对象：默认空形态 {} 行为不变
+  const packedCells = { daily: { 扫地: { 周一: ['李四'] } }, big: {} }
+  assert.deepEqual(unpackMode(packedCells, 'daily'), { 扫地: { 周一: ['李四'] } })
+  assert.deepEqual(unpackMode(packedCells, 'big'), {})
+  assert.deepEqual(unpackMode(null, 'daily'), {})
+  assert.deepEqual(unpackMode('[1,2]', 'daily'), {}) // 数组冒充对象也回 {}
 })
 
 test.after(() => { try { fs.rmSync(tmpDir, { recursive: true, force: true }) } catch (_) {} })

@@ -141,206 +141,201 @@
   </DialogShell>
 </template>
 
-<script>
+<script setup>
 import axios from 'axios'
+import { ref, computed, watch, onBeforeUnmount } from 'vue'
 import AppSelect from '../base/AppSelect.vue'
 import DialogShell from '../base/DialogShell.vue'
 import '../../styles/dialog-transition.css'
 import { useNotification } from '../../composables/useNotification.js'
 import { formatDateTimeLocal } from '../../utils/dateTime.js'
 
-export default {
-  name: 'AddScoreDialog',
-  components: { AppSelect, DialogShell },
-  props: {
-    visible: { type: Boolean, default: false },
-    students: { type: Array, default: () => [] },
-    // 加分目标：personal 个人加分 / group 小组加分（由页眉下拉控制，完全独立）
-    mode: { type: String, default: 'personal' },
-    // 加分项目的常用快速选项（扣分与加分共用，可自行扩展）
-    editingRecord: { type: Object, default: null }
-  },
-  data() {
-    return {
-      keyword: '',
-      listVisible: false,
-      selected: null,
-      hideTimer: null,
-      // 小组加分所需的分组数据
-      dims: [],
-      activeDimId: 0,
-      selectedGroupId: 0,
-      activeDimGroups: [],
-      commonProjects: ['卫生', '纪律', '学习', '助人', '劳动', '进步'],
-      form: {
-        type: '加分',
-        project: '',
-        score: 1,
-        reason: '',
-        time: formatDateTimeLocal(new Date())
-      }
-    };
-  },
-  computed: {
-    filteredStudents() {
-      const kw = this.keyword.toLowerCase();
-      return this.students.filter(s => !kw || String(s.姓名 || '').toLowerCase().includes(kw));
-    },
-    isEdit() {
-      return !!(this.editingRecord && this.editingRecord.id != null)
-    },
-    title() {
-      const group = this.mode === 'group'
-      if (this.isEdit) return group ? '编辑小组加分' : '编辑加分'
-      return group ? '小组加分登记' : '加分登记'
-    },
-    currentGroups() {
-      return this.activeDimGroups
-    },
-    selectedGroup() {
-      return this.dims.some(d => d.id === this.activeDimId) && this.selectedGroupId
-        ? this.activeDimGroups.find(g => g.id === this.selectedGroupId) || null
-        : null
-    },
-    dimOptions() {
-      return [
-        { value: 0, label: '先选择分组', disabled: true },
-        ...this.dims.map(d => ({ value: d.id, label: d.name }))
-      ]
-    },
-    groupOptions() {
-      return [
-        { value: 0, label: '再选择小组', disabled: true },
-        ...this.currentGroups.map((g, i) => ({ value: g.id, label: this.groupLabel(g, i) }))
-      ]
-    }
-  },
-  watch: {
-    visible(v) {
-      if (v) {
-        if (this.isEdit) this.presetFromRecord(this.editingRecord)
-        else this.reset()
-      }
-    }
-  },
-  // 下拉延迟收起定时器：弹窗关掉（组件卸载）后仍在跑就会往已销毁的实例上写状态
-  beforeUnmount() { clearTimeout(this.hideTimer) },
-  methods: {
-    reset() {
-      this.keyword = '';
-      this.selected = null;
-      this.listVisible = false;
-      this.dims = [];
-      this.activeDimId = 0;
-      this.selectedGroupId = 0;
-      this.activeDimGroups = [];
-      this.loadDims();
-      this.form = {
-        type: '加分',
-        project: '',
-        score: 1,
-        reason: '',
-        time: formatDateTimeLocal(new Date())
-      };
-    },
-    // 加载分组维度列表
-    async loadDims() {
-      try {
-        const res = await axios.get('/api/group-manage/bootstrap')
-        this.dims = res.data.dimensions || []
-      } catch (err) {
-        // 分组数据不可用时，仅个人加分可用
-        this.dims = []
-      }
-    },
-    // 切换分组维度 → 加载该维度下的小组与成员
-    async onDimChange() {
-      this.selectedGroupId = 0
-      this.activeDimGroups = []
-      if (this.activeDimId) {
-        try {
-          const res = await axios.get(`/api/group-manage/${this.activeDimId}`)
-          this.activeDimGroups = (res.data.groups) || []
-        } catch (err) {
-          this.activeDimGroups = []
-        }
-      }
-    },
-    groupLabel(g, i) {
-      return g.name || '第' + (i + 1) + '小组'
-    },
-    presetFromRecord(r) {
-      const d = r.加分时间 ? new Date(r.加分时间.replace(' ', 'T')) : new Date();
-      this.form = {
-        type: r.类型 === '扣分' ? '扣分' : '加分',
-        project: r.项目 || '',
-        score: r.分值 || 0,
-        reason: r.原因 || '',
-        time: isNaN(d.getTime()) ? '' : formatDateTimeLocal(d)
-      };
-    },
-    selectStudent(s) {
-      this.selected = s;
-      this.keyword = s.姓名 || '';
-      this.listVisible = false;
-    },
-    delayHide() {
-      clearTimeout(this.hideTimer);
-      this.hideTimer = setTimeout(() => { this.listVisible = false; }, 150);
-    },
-    submit() {
-      if (!this.isEdit) {
-        if (this.mode === 'personal' && !this.selected) {
-          useNotification().warning('请选择学生');
-          return;
-        }
-        if (this.mode === 'group' && !this.selectedGroup) {
-          useNotification().warning('请选择小组');
-          return;
-        }
-      }
-      if (!this.form.project.trim()) {
-        useNotification().warning('请填写或选择项目');
-        return;
-      }
-      const score = Number(this.form.score);
-      if (!this.form.time) {
-        useNotification().warning('请选择加分时间');
-        return;
-      }
-      if (!score || score <= 0) {
-        useNotification().warning('分值需大于 0');
-        return;
-      }
-      const timeStr = this.form.time.replace('T', ' ');
-      const common = {
-        类型: this.form.type,
-        项目: this.form.project.trim(),
-        分值: score,
-        原因: this.form.reason.trim(),
-        加分时间: timeStr
-      };
-      if (this.isEdit) {
-        this.$emit('update', { id: this.editingRecord.id, ...common });
-        return;
-      }
-      // 小组加分：独立成一条记录
-      if (this.mode === 'group') {
-        this.$emit('confirm', {
-          source: 'group',
-          group_name: this.groupLabel(this.selectedGroup, this.currentGroups.indexOf(this.selectedGroup)),
-          成员数: this.selectedGroup.members.length,
-          ...common
-        });
-        return;
-      }
-      this.$emit('confirm', {
-        studentId: this.selected.id,
-        姓名: this.selected.姓名,
-        学号: this.selected.学号 || '',
-        ...common
-      });
+defineOptions({ name: 'AddScoreDialog' })
+
+const props = defineProps({
+  visible: { type: Boolean, default: false },
+  students: { type: Array, default: () => [] },
+  // 加分目标：personal 个人加分 / group 小组加分（由页眉下拉控制，完全独立）
+  mode: { type: String, default: 'personal' },
+  // 加分项目的常用快速选项（扣分与加分共用，可自行扩展）
+  editingRecord: { type: Object, default: null }
+})
+const emit = defineEmits(['cancel', 'delete', 'update', 'confirm'])
+
+const keyword = ref('');
+const listVisible = ref(false);
+const selected = ref(null);
+const hideTimer = ref(null);
+// 小组加分所需的分组数据
+const dims = ref([]);
+const activeDimId = ref(0);
+const selectedGroupId = ref(0);
+const activeDimGroups = ref([]);
+const commonProjects = ref(['卫生', '纪律', '学习', '助人', '劳动', '进步']);
+const form = ref({
+  type: '加分',
+  project: '',
+  score: 1,
+  reason: '',
+  time: formatDateTimeLocal(new Date())
+});
+
+const filteredStudents = computed(() => {
+  const kw = keyword.value.toLowerCase();
+  return props.students.filter(s => !kw || String(s.姓名 || '').toLowerCase().includes(kw));
+})
+const isEdit = computed(() => {
+  return !!(props.editingRecord && props.editingRecord.id != null)
+})
+const title = computed(() => {
+  const group = props.mode === 'group'
+  if (isEdit.value) return group ? '编辑小组加分' : '编辑加分'
+  return group ? '小组加分登记' : '加分登记'
+})
+const currentGroups = computed(() => {
+  return activeDimGroups.value
+})
+const selectedGroup = computed(() => {
+  return dims.value.some(d => d.id === activeDimId.value) && selectedGroupId.value
+    ? activeDimGroups.value.find(g => g.id === selectedGroupId.value) || null
+    : null
+})
+const dimOptions = computed(() => {
+  return [
+    { value: 0, label: '先选择分组', disabled: true },
+    ...dims.value.map(d => ({ value: d.id, label: d.name }))
+  ]
+})
+const groupOptions = computed(() => {
+  return [
+    { value: 0, label: '再选择小组', disabled: true },
+    ...currentGroups.value.map((g, i) => ({ value: g.id, label: groupLabel(g, i) }))
+  ]
+})
+
+watch(() => props.visible, (v) => {
+  if (v) {
+    if (isEdit.value) presetFromRecord(props.editingRecord)
+    else reset()
+  }
+})
+
+// 下拉延迟收起定时器：弹窗关掉（组件卸载）后仍在跑就会往已销毁的实例上写状态
+onBeforeUnmount(() => clearTimeout(hideTimer.value))
+
+function reset() {
+  keyword.value = '';
+  selected.value = null;
+  listVisible.value = false;
+  dims.value = [];
+  activeDimId.value = 0;
+  selectedGroupId.value = 0;
+  activeDimGroups.value = [];
+  loadDims();
+  form.value = {
+    type: '加分',
+    project: '',
+    score: 1,
+    reason: '',
+    time: formatDateTimeLocal(new Date())
+  };
+}
+// 加载分组维度列表
+async function loadDims() {
+  try {
+    const res = await axios.get('/api/group-manage/bootstrap')
+    dims.value = res.data.dimensions || []
+  } catch (err) {
+    // 分组数据不可用时，仅个人加分可用
+    dims.value = []
+  }
+}
+// 切换分组维度 → 加载该维度下的小组与成员
+async function onDimChange() {
+  selectedGroupId.value = 0
+  activeDimGroups.value = []
+  if (activeDimId.value) {
+    try {
+      const res = await axios.get(`/api/group-manage/${activeDimId.value}`)
+      activeDimGroups.value = (res.data.groups) || []
+    } catch (err) {
+      activeDimGroups.value = []
     }
   }
-};
+}
+function groupLabel(g, i) {
+  return g.name || '第' + (i + 1) + '小组'
+}
+function presetFromRecord(r) {
+  const d = r.加分时间 ? new Date(r.加分时间.replace(' ', 'T')) : new Date();
+  form.value = {
+    type: r.类型 === '扣分' ? '扣分' : '加分',
+    project: r.项目 || '',
+    score: r.分值 || 0,
+    reason: r.原因 || '',
+    time: isNaN(d.getTime()) ? '' : formatDateTimeLocal(d)
+  };
+}
+function selectStudent(s) {
+  selected.value = s;
+  keyword.value = s.姓名 || '';
+  listVisible.value = false;
+}
+function delayHide() {
+  clearTimeout(hideTimer.value);
+  hideTimer.value = setTimeout(() => { listVisible.value = false; }, 150);
+}
+function submit() {
+  if (!isEdit.value) {
+    if (props.mode === 'personal' && !selected.value) {
+      useNotification().warning('请选择学生');
+      return;
+    }
+    if (props.mode === 'group' && !selectedGroup.value) {
+      useNotification().warning('请选择小组');
+      return;
+    }
+  }
+  if (!form.value.project.trim()) {
+    useNotification().warning('请填写或选择项目');
+    return;
+  }
+  const score = Number(form.value.score);
+  if (!form.value.time) {
+    useNotification().warning('请选择加分时间');
+    return;
+  }
+  if (!score || score <= 0) {
+    useNotification().warning('分值需大于 0');
+    return;
+  }
+  const timeStr = form.value.time.replace('T', ' ');
+  const common = {
+    类型: form.value.type,
+    项目: form.value.project.trim(),
+    分值: score,
+    原因: form.value.reason.trim(),
+    加分时间: timeStr
+  };
+  if (isEdit.value) {
+    emit('update', { id: props.editingRecord.id, ...common });
+    return;
+  }
+  // 小组加分：独立成一条记录
+  if (props.mode === 'group') {
+    emit('confirm', {
+      source: 'group',
+      group_name: groupLabel(selectedGroup.value, currentGroups.value.indexOf(selectedGroup.value)),
+      成员数: selectedGroup.value.members.length,
+      ...common
+    });
+    return;
+  }
+  emit('confirm', {
+    studentId: selected.value.id,
+    姓名: selected.value.姓名,
+    学号: selected.value.学号 || '',
+    ...common
+  });
+}
 </script>

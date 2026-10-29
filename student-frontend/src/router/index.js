@@ -84,10 +84,7 @@ export function prefetchRoutes(options = {}) {
     if (record.meta && record.meta.deferPrefetch) deferred.push(comp)
     else loaders.push(comp)
   }
-  const idle = (fn, timeout) => {
-    if (typeof window.requestIdleCallback === 'function') window.requestIdleCallback(fn, { timeout })
-    else setTimeout(fn, 80)
-  }
+  const idle = (fn, timeout) => window.requestIdleCallback(fn, { timeout })
   let j = 0
   const nextDeferred = () => {
     if (j >= deferred.length) return

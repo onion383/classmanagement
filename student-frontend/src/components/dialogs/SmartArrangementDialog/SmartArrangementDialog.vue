@@ -118,7 +118,8 @@
   </DialogShell>
 </template>
 
-<script>
+<script setup>
+import { ref, computed, watch, nextTick, toRef } from 'vue';
 import GridView from '../../tables/GridView/GridView.vue';
 import NewComerConfirm from '../NewComerConfirm.vue';
 import ConfirmDialog from '../../base/ConfirmDialog.vue';
@@ -129,6 +130,22 @@ import { useSmartArrangementBlocks } from './SmartArrangementDialog.blocks.js'
 import { useSmartArrangementOptions } from './SmartArrangementDialog.options.js'
 import '../../../styles/dialog-transition.css'
 import DialogShell from '../../base/DialogShell.vue'
+
+defineOptions({ name: 'SmartArrangementDialog' })
+const props = defineProps({
+  visible: Boolean,
+  rows: { type: Number, default: 6 },
+  cols: { type: Number, default: 7 },
+  mode: { type: String, default: 'single' },
+  showAisle: { type: Boolean, default: true },
+  students: { type: Array, default: () => [] },
+  // 当前未改动的座位表（二维数组，元素为学生 id 或 null），用于初始/条件变更时预览
+  initialSeats: { type: Array, default: () => [] },
+  // 位置权重矩阵（rows×cols）与「座位指数账本」（学生 id → 截至今日之前累计的座位权重），供「位置公平」使用
+  weights: { type: Array, default: () => [] },
+  ledger: { type: Object, default: () => ({}) }
+})
+const emit = defineEmits(['cancel', 'confirm'])
 
 // 条件注册表：每类条件在此登记 —— 执行函数名(apply) + 语义句段(segments) + 初始参数(defaults)。
 // 模板里的条件行 UI 与流水线的条件分发都由本表驱动：
@@ -213,132 +230,116 @@ const CONDITION_REGISTRY = {
 // 底部按钮顺序（与六句语义条件一一对应）
 const CONDITION_ORDER = ['relation', 'group', 'random', 'lock-deskmate', 'gender', 'fair']
 
-export default {
-  name: 'SmartArrangementDialog',
-  components: { GridView, NewComerConfirm, ConfirmDialog, AppSelect, DialogShell },
-  props: {
-    visible: Boolean,
-    rows: { type: Number, default: 6 },
-    cols: { type: Number, default: 7 },
-    mode: { type: String, default: 'single' },
-    showAisle: { type: Boolean, default: true },
-    students: { type: Array, default: () => [] },
-    // 当前未改动的座位表（二维数组，元素为学生 id 或 null），用于初始/条件变更时预览
-    initialSeats: { type: Array, default: () => [] },
-    // 位置权重矩阵（rows×cols）与「座位指数账本」（学生 id → 截至今日之前累计的座位权重），供「位置公平」使用
-    weights: { type: Array, default: () => [] },
-    ledger: { type: Object, default: () => ({}) }
-  },
-  emits: ['cancel', 'confirm'],
-  data() {
-    return {
-      // 排表条件：一层平铺，一行一条件（可拖拽排序、可重复添加、不限数量）
-      conditions: [{ uid: 0, key: 'random', label: '随机选项', scope: 'whole', unit: 'six' }],
-      nextUid: 1,
-      previewSeats: [],
-      previewVersion: 0,
-      // 是否已排表：false 显示"开始排表"，true 显示"换一换"
-      arranged: false,
-      // 每个条件的满足率统计：uid -> { done, total }
-      satisfaction: {},
-      // 新同学校验：座位表里有名字不在班级学生信息表中，参与排表前弹窗确认
-      showNewPrompt: false,
-      excludeNew: false,
-      // 恢复的草稿座位（二维数组，学生 id / 新同学名字 / null）；为空表示没有草稿，
-      // 预览与后续排表都以它优先于 props.initialSeats 作为基准
-      draftSeats: null,
-      // 保存草稿中：按钮置灰防重复点击
-      savingDraft: false,
-      // 本次结果是否来自草稿（打开时恢复了草稿，或刚点过保存草稿）：为真时「确定」前先弹确认框
-      draftInUse: false,
-      // 草稿确认弹窗：标题「确认应用草稿」，取消则留在弹窗内继续调整
-      draftConfirmVisible: false,
-      // 恢复草稿的过程中暂缓条件变更监听，避免恢复动作本身把 arranged 重置掉
-      restoring: false
+// 排表条件：一层平铺，一行一条件（可拖拽排序、可重复添加、不限数量）
+const conditions = ref([{ uid: 0, key: 'random', label: '随机选项', scope: 'whole', unit: 'six' }])
+const nextUid = ref(1)
+const previewSeats = ref([])
+const previewVersion = ref(0)
+// 是否已排表：false 显示"开始排表"，true 显示"换一换"
+const arranged = ref(false)
+// 每个条件的满足率统计：uid -> { done, total }
+const satisfaction = ref({})
+// 新同学校验：座位表里有名字不在班级学生信息表中，参与排表前弹窗确认
+const showNewPrompt = ref(false)
+const excludeNew = ref(false)
+// 恢复的草稿座位（二维数组，学生 id / 新同学名字 / null）；为空表示没有草稿，
+// 预览与后续排表都以它优先于 props.initialSeats 作为基准
+const draftSeats = ref(null)
+// 保存草稿中：按钮置灰防重复点击
+const savingDraft = ref(false)
+// 本次结果是否来自草稿（打开时恢复了草稿，或刚点过保存草稿）：为真时「确定」前先弹确认框
+const draftInUse = ref(false)
+// 草稿确认弹窗：标题「确认应用草稿」，取消则留在弹窗内继续调整
+const draftConfirmVisible = ref(false)
+// 恢复草稿的过程中暂缓条件变更监听，避免恢复动作本身把 arranged 重置掉
+const restoring = ref(false)
+
+// 排表基准座位：有草稿用草稿，否则用父组件传入的当前座位表
+const baseSeats = computed(() => draftSeats.value || props.initialSeats)
+// 座位表里有名字但班级学生信息表里不存在的名字集合
+// 座位表数据：班级学生存 id(数字)，未被识别的自由文本名字(新同学)以字符串形式存储
+const strangerNames = computed(() => {
+  const known = new Set(props.students.map(s => String(s.姓名 || '').trim()).filter(Boolean))
+  const out = new Set()
+  for (const row of baseSeats.value || [])
+    for (const val of row || []) {
+      let n = ''
+      if (typeof val === 'string') n = val.trim()
+      else if (val && typeof val === 'object') n = String(val.姓名 || '').trim()
+      if (n && !known.has(n)) out.add(n)
     }
-  },
-  computed: {
-    // 排表基准座位：有草稿用草稿，否则用父组件传入的当前座位表
-    baseSeats() {
-      return this.draftSeats || this.initialSeats
-    },
-    // 座位表里有名字但班级学生信息表里不存在的名字集合
-    // 座位表数据：班级学生存 id(数字)，未被识别的自由文本名字(新同学)以字符串形式存储
-    strangerNames() {
-      const known = new Set(this.students.map(s => String(s.姓名 || '').trim()).filter(Boolean))
-      const out = new Set()
-      for (const row of this.baseSeats || [])
-        for (const val of row || []) {
-          let n = ''
-          if (typeof val === 'string') n = val.trim()
-          else if (val && typeof val === 'object') n = String(val.姓名 || '').trim()
-          if (n && !known.has(n)) out.add(n)
-        }
-      return out
-    },
-    strangers() {
-      return [...this.strangerNames]
-    },
-    previewKey() {
-      const sig = this.conditions.map(c => c.key + ':' + c.uid).join('-') || 'empty'
-      return this.visible ? `arrange-${this.rows}-${this.cols}-${sig}-${this.previewVersion}` : 'closed'
-    },
-    previewColHeaders() {
-      return this.generateColHeaders(this.cols, this.mode, this.showAisle)
-    },
-    previewRows() {
-      return this.buildPreviewRows(this.previewSeats)
-    },
-    // 底部条件按钮（六类条件，拖到上方即添加，可重复添加）
-    conditionButtons() {
-      return CONDITION_ORDER.map(k => ({ key: k, label: CONDITION_REGISTRY[k].label }))
-    },
-    // 特殊关系可选学生（转为 { value: id, label: 姓名 }）
-    studentOptions() {
-      return this.students.map(s => ({ value: s.id, label: s.姓名 }))
-    }
-  },
-  watch: {
-    async visible(v) {
-      if (!v) return
-      this.showNewPrompt = false
-      this.excludeNew = false
-      this.arranged = false
-      this.draftConfirmVisible = false
-      // 有草稿则恢复上次草稿（座位结果 + 排表条件）；没有则显示未改动的当前座位表，不自动排表
-      const { draft, fetchDraft } = useSeatDraft()
-      if (!draft.loaded) await fetchDraft()
-      if (draft.exists) {
-        // restoring 期间暂缓 conditions 监听，避免恢复条件本身把 arranged 重置为未排表
-        this.restoring = true
-        this.draftSeats = draft.seats
-        this.draftInUse = true
-        this.restoreConditions(draft.conditions)
-        await this.$nextTick()
-        this.restoring = false
-        this.arranged = true
-      } else {
-        this.draftSeats = null
-        this.draftInUse = false
-      }
-      this.previewSeats = this.buildInitialSeats()
-      this.previewVersion++
-    },
-    // 任一条件（含下拉选项、顺序）变更：重置为"开始排表"
-    conditions: {
-      deep: true,
-      handler() {
-        if (this.restoring) return
-        this.arranged = false
-      }
-    }
-  },
-  methods: {
-    ...useSmartArrangementPipeline(CONDITION_REGISTRY),
-    ...useSmartArrangementBlocks(),
-    ...useSmartArrangementOptions(CONDITION_REGISTRY),
-  }
+  return out
+})
+const strangers = computed(() => [...strangerNames.value])
+const previewKey = computed(() => {
+  const sig = conditions.value.map(c => c.key + ':' + c.uid).join('-') || 'empty'
+  return props.visible ? `arrange-${props.rows}-${props.cols}-${sig}-${previewVersion.value}` : 'closed'
+})
+const previewColHeaders = computed(() =>
+  ctx.generateColHeaders(props.cols, props.mode, props.showAisle))
+const previewRows = computed(() => ctx.buildPreviewRows(previewSeats.value))
+// 底部条件按钮（六类条件，拖到上方即添加，可重复添加）
+const conditionButtons = computed(() =>
+  CONDITION_ORDER.map(k => ({ key: k, label: CONDITION_REGISTRY[k].label })))
+
+// 跨模块共享的上下文：状态为 ref（模块内 .value 访问），临时字段与方法直接挂上；
+// 三个 useXxx 的返回方法在下方 Object.assign 回填，模块间经 ctx 互相调用（运行时解析）
+const ctx = {
+  conditions, nextUid, previewSeats, previewVersion, arranged, satisfaction,
+  showNewPrompt, excludeNew, draftSeats, savingDraft, draftInUse, draftConfirmVisible, restoring,
+  baseSeats, strangerNames, strangers,
+  rows: toRef(props, 'rows'),
+  cols: toRef(props, 'cols'),
+  mode: toRef(props, 'mode'),
+  showAisle: toRef(props, 'showAisle'),
+  students: toRef(props, 'students'),
+  initialSeats: toRef(props, 'initialSeats'),
+  weights: toRef(props, 'weights'),
+  ledger: toRef(props, 'ledger'),
+  emit,
 }
+const pipeline = useSmartArrangementPipeline(ctx, CONDITION_REGISTRY)
+const blocks = useSmartArrangementBlocks(ctx)
+const options = useSmartArrangementOptions(ctx, CONDITION_REGISTRY)
+Object.assign(ctx, pipeline, blocks, options)
+
+// 供模板调用的顶层绑定
+const {
+  segmentsOf, getField, setField, satisfactionOf, removeCondition,
+  onDropOnRow, onDropZone, onOptionDragStart, onRowDragStart,
+  startArrange, onParticipate, onNot, saveDraft, cancel, confirm, applyConfirm,
+} = { ...pipeline, ...blocks, ...options }
+
+watch(() => props.visible, async (v) => {
+  if (!v) return
+  showNewPrompt.value = false
+  excludeNew.value = false
+  arranged.value = false
+  draftConfirmVisible.value = false
+  // 有草稿则恢复上次草稿（座位结果 + 排表条件）；没有则显示未改动的当前座位表，不自动排表
+  const { draft, fetchDraft } = useSeatDraft()
+  if (!draft.loaded) await fetchDraft()
+  if (draft.exists) {
+    // restoring 期间暂缓 conditions 监听，避免恢复条件本身把 arranged 重置为未排表
+    restoring.value = true
+    draftSeats.value = draft.seats
+    draftInUse.value = true
+    ctx.restoreConditions(draft.conditions)
+    await nextTick()
+    restoring.value = false
+    arranged.value = true
+  } else {
+    draftSeats.value = null
+    draftInUse.value = false
+  }
+  previewSeats.value = ctx.buildInitialSeats()
+  previewVersion.value++
+})
+// 任一条件（含下拉选项、顺序）变更：重置为"开始排表"
+watch(conditions, () => {
+  if (restoring.value) return
+  arranged.value = false
+}, { deep: true })
 </script>
 
 <style scoped>

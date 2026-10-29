@@ -58,6 +58,14 @@ export function setupSecureAxios(axios) {
         const cfg = res.config
         if (cfg && cfg.__retryDecrypt !== true) {
           cfg.__retryDecrypt = true
+          // 加密响应与会话密钥绑定：换会话后旧密文必然解不开。
+          // 若同一 URL 的响应已被浏览器缓存（旧版本或中间层留下的强缓存），
+          // 直接 axios(cfg) 会再次命中同一段旧密文，重试等于没做。
+          // 加一个一次性查询参数绕开缓存；服务端忽略未知参数。
+          try {
+            const sep = String(cfg.url || '').includes('?') ? '&' : '?'
+            cfg.url = String(cfg.url || '') + sep + '_r=' + Date.now()
+          } catch (_) { /* url 不可写时退回原样重试 */ }
           if (cfg.__origData) {
             try {
               cfg.__retrySecure = true

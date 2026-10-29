@@ -1,10 +1,7 @@
 // 日/夜切换的过渡编排：把「可见的过渡」交给浏览器快照，把「逐元素过渡」瞬时化。
 //
-// ⚠️ 当前状态：**预备方案，尚未上线**。全项目没有任何 import（主题切换走的是
-// themeLoader.js 的动态 import + CSS 过渡）；不是因为效果不行被否决，而是留着等
-// 「表格页切主题卡顿」真正要治时再接。下面这套性能分析结论依然成立，启用方式：
-//   用 performThemeSwap(swap) 包住「改 data-mode」的那一下（swap 里同步改状态与 DOM），
-//   它会自动瞬时化元素过渡并做快照淡入。启用前务必在表格页实测对比。
+// 使用方：stores/theme.js 的 performThemeSwap(swap) 包住「改 data-mode」的那一下
+// （swap 里同步改状态与 DOM），它会自动瞬时化元素过渡并做快照淡入。
 //
 // 背景（见 styles/theme-night.css / styles/themeLoader.js）：
 //   theme-night.css 里近 200 条规则全部以 :root[data-mode="night"] 限定作用域，而
@@ -72,20 +69,14 @@ export function withInstantStyles(fn) {
         root.classList.remove(SWITCHING_CLASS)
       }
     }
-    if (typeof requestAnimationFrame === 'function') {
-      requestAnimationFrame(() => requestAnimationFrame(release))
-    } else {
-      setTimeout(release, 32)
-    }
+    requestAnimationFrame(() => requestAnimationFrame(release))
   }
 }
 
 // 是否可以用快照做过渡：
-//   - Electron 44（Chromium 140+）已支持 startViewTransition
 //   - 用户关掉「动画效果」时（html.no-animations）明确要求静态化，不做淡入
 function snapshotTransitionAllowed() {
   if (!SNAPSHOT_ENABLED) return false
-  if (typeof document.startViewTransition !== 'function') return false
   if (document.documentElement.classList.contains('no-animations')) return false
   return true
 }
@@ -116,7 +107,7 @@ function readInflightOpacity() {
 function readInflightElapsed() {
   if (!inflight) return null
   try {
-    const animations = typeof document.getAnimations === 'function' ? document.getAnimations() : []
+    const animations = document.getAnimations()
     for (const animation of animations) {
       const pseudo = animation.effect && animation.effect.pseudoElement
       if (!pseudo || pseudo.indexOf('view-transition-new') === -1) continue
@@ -209,16 +200,8 @@ export function performThemeSwap(swap) {
   }
   // 被后续切换打断（自动 skip）或快照失败都不影响最终状态：
   // swap 已在回调里同步执行完毕，DOM 只会落在正确的那一态。
-  if (transition.finished && typeof transition.finished.then === 'function') {
-    transition.finished.then(done, done)
-  } else {
-    done()
-  }
-  if (transition.ready && typeof transition.ready.catch === 'function') {
-    transition.ready.catch(() => {})
-  }
-  if (transition.updateCallbackDone && typeof transition.updateCallbackDone.catch === 'function') {
-    // swap 内部若抛错，别留下未处理的 rejection
-    transition.updateCallbackDone.catch(() => {})
-  }
+  transition.finished.then(done, done)
+  transition.ready.catch(() => {})
+  // swap 内部若抛错，别留下未处理的 rejection
+  transition.updateCallbackDone.catch(() => {})
 }

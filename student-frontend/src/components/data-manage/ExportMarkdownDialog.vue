@@ -26,70 +26,62 @@
   </Teleport>
 </template>
 
-<script>
+<script setup>
+import { ref, watch } from 'vue'
 import AppSelect from '../base/AppSelect.vue'
 import { useNotification } from '../../composables/useNotification'
-import { runTableExport, saveFileWithDialog, FORMAT_OPTIONS, FORMAT_LABELS } from '../../composables/exportFormats.js'
+import { runTableExport, FORMAT_OPTIONS, FORMAT_LABELS } from '../../composables/exportFormats.js'
+import { saveBlobWithDialog } from '../../utils/saveFile.js'
 import '../../styles/dialog-transition.css'
 
-export default {
-  name: 'ExportMarkdownDialog',
-  components: { AppSelect },
-  props: {
-    visible: { type: Boolean, default: false },
-    // 待导出的 Markdown 原文 + 默认文件名（不含扩展名）
-    content: { type: String, default: '' },
-    defaultFilename: { type: String, default: 'Markdown文件' },
-  },
-  emits: ['update:visible'],
-  setup() {
-    const { success, error } = useNotification()
-    return { notifySuccess: success, notifyError: error }
-  },
-  data() {
-    return { exportFormat: 'md', filename: '', exporting: false, FORMAT_OPTIONS }
-  },
-  watch: {
-    visible: {
-      immediate: true,
-      handler(v) {
-        if (v) {
-          this.exportFormat = 'md'
-          this.filename = this.defaultFilename || 'Markdown文件'
-          this.exporting = false
-        }
-      },
-    },
-  },
-  methods: {
-    cancel() { this.$emit('update:visible', false) },
-    async doExport() {
-      if (this.exporting) return
-      const name = (this.filename || '').trim() || 'Markdown文件'
-      this.exporting = true
-      try {
-        let saved = true
-        // 纯文本格式：直接落原文（Markdown 文件本身即 md/txt 内容），不再包成表格
-        if (this.exportFormat === 'md' || this.exportFormat === 'txt') {
-          const blob = new Blob([this.content || ''], {
-            type: this.exportFormat === 'md' ? 'text/markdown;charset=utf-8;' : 'text/plain;charset=utf-8;',
-          })
-          saved = await saveFileWithDialog(`${name}.${this.exportFormat}`, blob)
-        } else {
-          // 其余格式：按「内容」单列逐行导出
-          const rows = (this.content || '').split(/\r?\n/).map((line) => [line])
-          saved = await runTableExport({ format: this.exportFormat, columns: ['内容'], rows, filename: name, title: name })
-        }
-        if (saved) this.notifySuccess(`已成功导出 ${FORMAT_LABELS[this.exportFormat] || '文件'}`)
-      } catch (err) {
-        console.error('导出失败:', err)
-        this.notifyError('导出失败，请重试')
-      } finally {
-        this.exporting = false
-        this.$emit('update:visible', false)
-      }
-    },
-  },
+defineOptions({ name: 'ExportMarkdownDialog' })
+const props = defineProps({
+  visible: { type: Boolean, default: false },
+  // 待导出的 Markdown 原文 + 默认文件名（不含扩展名）
+  content: { type: String, default: '' },
+  defaultFilename: { type: String, default: 'Markdown文件' },
+})
+const emit = defineEmits(['update:visible'])
+const { success: notifySuccess, error: notifyError } = useNotification()
+
+const exportFormat = ref('md')
+const filename = ref('')
+const exporting = ref(false)
+
+watch(() => props.visible, (v) => {
+  if (v) {
+    exportFormat.value = 'md'
+    filename.value = props.defaultFilename || 'Markdown文件'
+    exporting.value = false
+  }
+}, { immediate: true })
+
+function cancel() { emit('update:visible', false) }
+async function doExport() {
+  if (exporting.value) return
+  const name = (filename.value || '').trim() || 'Markdown文件'
+  exporting.value = true
+  try {
+    let saved = true
+    // 纯文本格式：直接落原文（Markdown 文件本身即 md/txt 内容），不再包成表格
+    if (exportFormat.value === 'md' || exportFormat.value === 'txt') {
+      const blob = new Blob([props.content || ''], {
+        type: exportFormat.value === 'md' ? 'text/markdown;charset=utf-8;' : 'text/plain;charset=utf-8;',
+      })
+      saved = await saveBlobWithDialog(`${name}.${exportFormat.value}`, blob)
+    } else {
+      // 其余格式：按「内容」单列逐行导出
+      const rows = (props.content || '').split(/\r?\n/).map((line) => [line])
+      saved = await runTableExport({ format: exportFormat.value, columns: ['内容'], rows, filename: name, title: name })
+    }
+    if (saved) notifySuccess(`已成功导出 ${FORMAT_LABELS[exportFormat.value] || '文件'}`)
+  } catch (err) {
+    console.error('导出失败:', err)
+    notifyError('导出失败，请重试')
+  } finally {
+    exporting.value = false
+    emit('update:visible', false)
+  }
 }
 </script>
 

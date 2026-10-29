@@ -70,8 +70,7 @@ function studentRelations(student) {
   const seat = refs.ids.filter((v) => v === id).length + refs.names.filter((v) => v === name).length;
 
   const cells = readDutyCells();
-  // cells 可能是旧版整块，也可能是新版 {daily,big} 打包：统一交给 dutyCells 认结构，
-  // 否则打包结构会被按旧版遍历而「一条都对不上」，统计恒为 0。
+  // cells 是 {daily,big} 打包结构，统计交给 dutyCells 逐模式遍历
   const duty = countDutyRefs(cells, name);
   return { leave, score, seat, duty, group, cadre, total: leave + score + seat + duty + group + cadre };
 }
@@ -98,7 +97,7 @@ function purgeSeatRelation(student) {
 // 移除值日表里该生的姓名，返回清理数量
 function purgeDutyRelation(student) {
   const cells = readDutyCells();
-  // 同上：daily/big 打包结构与旧版整块都要清；只在真的清掉时才回写
+  // daily/big 两个模式都清；只在真的清掉时才回写
   const removed = removeDutyName(cells, student['姓名']);
   if (removed) store.setDoc('duty_layout', { cells: JSON.stringify(cells) });
   return removed;

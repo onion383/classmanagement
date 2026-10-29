@@ -100,138 +100,131 @@
   </DialogShell>
 </template>
 
-<script>
+<script setup>
 import '../../styles/dialog-transition.css'
 import DialogShell from '../base/DialogShell.vue'
 import AppSelect from '../base/AppSelect.vue'
+import { ref, computed, watch } from 'vue'
 
-export default {
-  name: 'DutyWeightAlgorithmDialog',
-  components: { AppSelect, DialogShell },
-  props: {
-    visible: Boolean,
-    days: { type: Array, default: () => [] },
-    items: { type: Array, default: () => [] },
-  },
-  emits: ['cancel', 'apply'],
-  data() {
-    return {
-      centerTypeOptions: [
-        { value: 'point', label: '一个位置' },
-        { value: 'rect', label: '矩形区域' },
-      ],
-      centerType: 'point',
-      pointItem: '',
-      pointDay: '',
-      itemStart: '',
-      itemEnd: '',
-      dayStart: '',
-      dayEnd: '',
-      rateUp: 0.1,
-      rateDown: 0.1,
-      rateLeft: 0.1,
-      rateRight: 0.1,
-      minValue: 0,
-    }
-  },
-  computed: {
-    dayCount() { return this.days.length },
-    itemCount() { return this.items.length },
-    itemOptions() { return this.items.map(it => ({ value: it.name, label: it.name })) },
-    dayOptions() { return this.days.map(d => ({ value: d, label: d })) },
-    // 中心矩形（0-based 索引，已夹到边界）
-    centerRect() {
-      const items = this.items.map(it => it.name)
-      const days = this.days
-      const clamp = (v, arr) => Math.max(0, Math.min(arr.length - 1, arr.indexOf(v) < 0 ? 0 : arr.indexOf(v)))
-      let r1, r2, c1, c2
-      if (this.centerType === 'point') {
-        r1 = r2 = clamp(this.pointItem, items)
-        c1 = c2 = clamp(this.pointDay, days)
-      } else {
-        const s = clamp(this.itemStart, items), e = clamp(this.itemEnd, items)
-        r1 = Math.min(s, e); r2 = Math.max(s, e)
-        const ds = clamp(this.dayStart, days), de = clamp(this.dayEnd, days)
-        c1 = Math.min(ds, de); c2 = Math.max(ds, de)
-      }
-      return { r1, r2, c1, c2 }
-    },
-    // 权重矩阵：{项目名: {星期: 数值}}
-    result() {
-      const { r1, r2, c1, c2 } = this.centerRect
-      const ru = this._rate(this.rateUp), rd = this._rate(this.rateDown)
-      const rl = this._rate(this.rateLeft), rr = this._rate(this.rateRight)
-      const dist = (r, c) => {
-        const up = Math.max(0, r1 - r)
-        const down = Math.max(0, r - r2)
-        const left = Math.max(0, c1 - c)
-        const right = Math.max(0, c - c2)
-        return up * ru + down * rd + left * rl + right * rr
-      }
-      let maxDist = 0
-      for (let r = 0; r < this.itemCount; r++) {
-        for (let c = 0; c < this.dayCount; c++) maxDist = Math.max(maxDist, dist(r, c))
-      }
-      const min = this._rate(this.minValue)
-      const overflow = maxDist > (1 - min) + 1e-9
-      const gradient = overflow ? (1 - min) / (maxDist || 1) : 1
-      const matrix = {}
-      this.items.forEach((it, r) => {
-        matrix[it.name] = {}
-        this.days.forEach((d, c) => {
-          let w = 1 - dist(r, c) * gradient
-          w = Math.max(min, Math.min(1, w))
-          matrix[it.name][d] = Math.round(w * 1000) / 1000
-        })
-      })
-      return { matrix, overflow }
-    },
-    overflow() { return this.result.overflow },
-    // 预览行：[{label, cells:[{text, bg, fg}]}]
-    previewRows() {
-      const m = this.result.matrix
-      return this.items.map(it => ({
-        label: it.name,
-        cells: this.days.map(d => {
-          const w = m[it.name]?.[d] ?? 0
-          return { text: w.toFixed(2), ...this.heat(w) }
-        })
-      }))
-    },
-  },
-  watch: {
-    visible(v) { if (v) this.resetDefaults() },
-  },
-  methods: {
-    _rate(v) {
-      const n = Number(v)
-      return Number.isFinite(n) ? Math.max(0, Math.min(1, n)) : 0
-    },
-    // 打开时默认中心落在正中
-    resetDefaults() {
-      const items = this.items, days = this.days
-      const ci = Math.max(0, Math.floor(items.length / 2))
-      const cd = Math.max(0, Math.floor(days.length / 2))
-      const midItem = items[ci]?.name || ''
-      const midDay = days[cd] || ''
-      this.pointItem = midItem
-      this.pointDay = midDay
-      this.itemStart = midItem
-      this.itemEnd = midItem
-      this.dayStart = midDay
-      this.dayEnd = midDay
-    },
-    heat(w) {
-      const k = Math.max(0, Math.min(1, w))
-      const from = [239, 246, 255], to = [30, 58, 138]
-      const rgb = from.map((f, i) => Math.round(f + (to[i] - f) * k))
-      const lin = v => (v <= 0.03928 ? v / 12.92 : Math.pow((v + 0.055) / 1.055, 2.4))
-      const L = 0.2126 * lin(rgb[0] / 255) + 0.7152 * lin(rgb[1] / 255) + 0.0722 * lin(rgb[2] / 255)
-      return { bg: `rgb(${rgb.join(', ')})`, fg: L < 0.45 ? '#FFFFFF' : '#1E293B' }
-    },
-    apply() {
-      this.$emit('apply', this.result.matrix)
-    },
-  },
+defineOptions({ name: 'DutyWeightAlgorithmDialog' })
+
+const props = defineProps({
+  visible: Boolean,
+  days: { type: Array, default: () => [] },
+  items: { type: Array, default: () => [] },
+})
+const emit = defineEmits(['cancel', 'apply'])
+
+const centerTypeOptions = ref([
+  { value: 'point', label: '一个位置' },
+  { value: 'rect', label: '矩形区域' },
+])
+const centerType = ref('point')
+const pointItem = ref('')
+const pointDay = ref('')
+const itemStart = ref('')
+const itemEnd = ref('')
+const dayStart = ref('')
+const dayEnd = ref('')
+const rateUp = ref(0.1)
+const rateDown = ref(0.1)
+const rateLeft = ref(0.1)
+const rateRight = ref(0.1)
+const minValue = ref(0)
+
+const dayCount = computed(() => props.days.length)
+const itemCount = computed(() => props.items.length)
+const itemOptions = computed(() => props.items.map(it => ({ value: it.name, label: it.name })))
+const dayOptions = computed(() => props.days.map(d => ({ value: d, label: d })))
+// 中心矩形（0-based 索引，已夹到边界）
+const centerRect = computed(() => {
+  const items = props.items.map(it => it.name)
+  const days = props.days
+  const clamp = (v, arr) => Math.max(0, Math.min(arr.length - 1, arr.indexOf(v) < 0 ? 0 : arr.indexOf(v)))
+  let r1, r2, c1, c2
+  if (centerType.value === 'point') {
+    r1 = r2 = clamp(pointItem.value, items)
+    c1 = c2 = clamp(pointDay.value, days)
+  } else {
+    const s = clamp(itemStart.value, items), e = clamp(itemEnd.value, items)
+    r1 = Math.min(s, e); r2 = Math.max(s, e)
+    const ds = clamp(dayStart.value, days), de = clamp(dayEnd.value, days)
+    c1 = Math.min(ds, de); c2 = Math.max(ds, de)
+  }
+  return { r1, r2, c1, c2 }
+})
+// 权重矩阵：{项目名: {星期: 数值}}
+const result = computed(() => {
+  const { r1, r2, c1, c2 } = centerRect.value
+  const ru = _rate(rateUp.value), rd = _rate(rateDown.value)
+  const rl = _rate(rateLeft.value), rr = _rate(rateRight.value)
+  const dist = (r, c) => {
+    const up = Math.max(0, r1 - r)
+    const down = Math.max(0, r - r2)
+    const left = Math.max(0, c1 - c)
+    const right = Math.max(0, c - c2)
+    return up * ru + down * rd + left * rl + right * rr
+  }
+  let maxDist = 0
+  for (let r = 0; r < itemCount.value; r++) {
+    for (let c = 0; c < dayCount.value; c++) maxDist = Math.max(maxDist, dist(r, c))
+  }
+  const min = _rate(minValue.value)
+  const overflow = maxDist > (1 - min) + 1e-9
+  const gradient = overflow ? (1 - min) / (maxDist || 1) : 1
+  const matrix = {}
+  props.items.forEach((it, r) => {
+    matrix[it.name] = {}
+    props.days.forEach((d, c) => {
+      let w = 1 - dist(r, c) * gradient
+      w = Math.max(min, Math.min(1, w))
+      matrix[it.name][d] = Math.round(w * 1000) / 1000
+    })
+  })
+  return { matrix, overflow }
+})
+const overflow = computed(() => result.value.overflow)
+// 预览行：[{label, cells:[{text, bg, fg}]}]
+const previewRows = computed(() => {
+  const m = result.value.matrix
+  return props.items.map(it => ({
+    label: it.name,
+    cells: props.days.map(d => {
+      const w = m[it.name]?.[d] ?? 0
+      return { text: w.toFixed(2), ...heat(w) }
+    })
+  }))
+})
+
+watch(() => props.visible, (v) => { if (v) resetDefaults() })
+
+function _rate(v) {
+  const n = Number(v)
+  return Number.isFinite(n) ? Math.max(0, Math.min(1, n)) : 0
+}
+// 打开时默认中心落在正中
+function resetDefaults() {
+  const items = props.items, days = props.days
+  const ci = Math.max(0, Math.floor(items.length / 2))
+  const cd = Math.max(0, Math.floor(days.length / 2))
+  const midItem = items[ci]?.name || ''
+  const midDay = days[cd] || ''
+  pointItem.value = midItem
+  pointDay.value = midDay
+  itemStart.value = midItem
+  itemEnd.value = midItem
+  dayStart.value = midDay
+  dayEnd.value = midDay
+}
+function heat(w) {
+  const k = Math.max(0, Math.min(1, w))
+  const from = [239, 246, 255], to = [30, 58, 138]
+  const rgb = from.map((f, i) => Math.round(f + (to[i] - f) * k))
+  const lin = v => (v <= 0.03928 ? v / 12.92 : Math.pow((v + 0.055) / 1.055, 2.4))
+  const L = 0.2126 * lin(rgb[0] / 255) + 0.7152 * lin(rgb[1] / 255) + 0.0722 * lin(rgb[2] / 255)
+  return { bg: `rgb(${rgb.join(', ')})`, fg: L < 0.45 ? '#FFFFFF' : '#1E293B' }
+}
+function apply() {
+  emit('apply', result.value.matrix)
 }
 </script>

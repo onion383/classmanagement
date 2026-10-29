@@ -14,18 +14,15 @@
   </DialogShell>
 </template>
 
-<script>
+<script setup>
 import '../../styles/dialog-transition.css'
 import DialogShell from '../base/DialogShell.vue'
 
-export default {
-  name: 'NewComerConfirm',
-  components: { DialogShell },
-  props: {
-    visible: Boolean,
-    names: { type: Array, default: () => [] },
-    action: { type: String, default: '排表' }
-  },
-  emits: ['participate', 'not']
-}
+defineOptions({ name: 'NewComerConfirm' })
+defineProps({
+  visible: Boolean,
+  names: { type: Array, default: () => [] },
+  action: { type: String, default: '排表' }
+})
+defineEmits(['participate', 'not'])
 </script>

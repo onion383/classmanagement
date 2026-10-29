@@ -75,7 +75,8 @@
   </Teleport>
 </template>
 
-<script>
+<script setup>
+import { ref, computed, watch } from 'vue'
 import axios from 'axios'
 import AppSelect from '../base/AppSelect.vue'
 import { useNotification } from '../../composables/useNotification'
@@ -86,148 +87,133 @@ import '../../styles/dialog-transition.css'
 // 单条消息正文超过该长度即提供「展开」按钮（预览只显示一行，展开看全文）
 const PREVIEW_MAX = 60
 
-export default {
-  name: 'ExportChatDialog',
-  components: { AppSelect },
-  props: {
-    visible: { type: Boolean, default: false },
-    conversationId: { type: [Number, String], default: null },
-    conversationName: { type: String, default: '' },
-  },
-  emits: ['update:visible'],
-  setup() {
-    const { success, error, info } = useNotification()
-    return { notifySuccess: success, notifyError: error, notifyInfo: info }
-  },
-  data() {
-    return {
-      FORMAT_OPTIONS,
-      FILTERS: [
-        { value: 'all', label: '全部' },
-        { value: 'user', label: '仅用户' },
-        { value: 'ai', label: '仅AI回复' },
-      ],
-      RANGES: [
-        { value: 'content', label: '仅最后输出内容' },
-        { value: 'reasoning', label: '仅思维链' },
-        { value: 'all', label: '全部' },
-      ],
-      loading: false,
-      msgs: [],
-      selectedIds: [],
-      expandedIds: [],
-      filter: 'all',
-      range: 'content',
-      exportFormat: 'md',
-      filename: '',
-      exporting: false,
-    }
-  },
-  computed: {
-    visibleMsgs() {
-      if (this.filter === 'user') return this.msgs.filter((m) => m.role === 'user')
-      if (this.filter === 'ai') return this.msgs.filter((m) => m.role === 'assistant')
-      return this.msgs
-    },
-    allSelected() {
-      const vis = this.visibleMsgs
-      return !!vis.length && vis.every((m) => this.selectedIds.includes(m.id))
-    },
-  },
-  watch: {
-    visible: {
-      immediate: true,
-      handler(v) { if (v) this.onOpen() },
-    },
-  },
-  methods: {
-    isSelected(id) { return this.selectedIds.includes(id) },
-    isExpanded(id) { return this.expandedIds.includes(id) },
-    isLong(m) { return (m.content || '').length > PREVIEW_MAX || /[\r\n]/.test(m.content || '') },
-    toggle(id) {
-      const i = this.selectedIds.indexOf(id)
-      if (i >= 0) this.selectedIds.splice(i, 1)
-      else this.selectedIds.push(id)
-    },
-    toggleExpand(id) {
-      const i = this.expandedIds.indexOf(id)
-      if (i >= 0) this.expandedIds.splice(i, 1)
-      else this.expandedIds.push(id)
-    },
-    toggleAll() {
-      const vis = this.visibleMsgs
-      if (this.allSelected) {
-        this.selectedIds = this.selectedIds.filter((id) => !vis.some((m) => m.id === id))
-      } else {
-        for (const m of vis) { if (!this.selectedIds.includes(m.id)) this.selectedIds.push(m.id) }
-      }
-    },
-    // 消息里承载的思维链：优先取 process.reasoning，其次从「思考」步骤拼接
-    reasoningOf(m) {
-      if (m.reasoning && String(m.reasoning).trim()) return String(m.reasoning).trim()
-      const steps = Array.isArray(m.steps) ? m.steps : []
-      return steps.filter((s) => s.kind === 'reason' && s.text).map((s) => s.text).join('\n\n').trim()
-    },
-    onOpen() {
-      this.filter = 'all'
-      this.range = 'content'
-      this.exportFormat = 'md'
-      this.filename = this.conversationName || '聊天记录'
-      this.expandedIds = []
-      this.selectedIds = []
-      this.exporting = false
-      this.loadMessages()
-    },
-    async loadMessages() {
-      this.msgs = []
-      if (this.conversationId == null) return
-      this.loading = true
-      try {
-        const { data } = await axios.get(`/api/ai/conversations/${this.conversationId}/messages`)
-        let seq = 0
-        this.msgs = parseMessages(data.data)
-          .map((m) => ({
-            id: m._id != null ? m._id : `x${seq++}`,
-            role: m.role,
-            content: (m.content || '').trim(),
-            reasoning: this.reasoningOf(m),
-          }))
-          .filter((m) => m.content || m.reasoning)
-        this.selectedIds = this.msgs.map((m) => m.id)
-      } catch (_) { this.msgs = [] }
-      finally { this.loading = false }
-    },
-    // 依据导出范围拼出二维数据（列 + 行）
-    buildTable() {
-      const sel = this.msgs.filter((m) => this.selectedIds.includes(m.id))
-      const role = (m) => (m.role === 'user' ? '用户' : 'AI回复')
-      if (this.range === 'reasoning') return { columns: ['角色', '思维链'], rows: sel.map((m) => [role(m), m.reasoning]) }
-      if (this.range === 'all') return { columns: ['角色', '内容', '思维链'], rows: sel.map((m) => [role(m), m.content, m.reasoning]) }
-      return { columns: ['角色', '内容'], rows: sel.map((m) => [role(m), m.content]) }
-    },
-    cancel() { this.$emit('update:visible', false) },
-    async doExport() {
-      if (this.exporting) return
-      const sel = this.msgs.filter((m) => this.selectedIds.includes(m.id))
-      if (!sel.length) { this.notifyInfo('请至少选择一条聊天记录'); return }
-      if (this.range === 'reasoning' && !sel.some((m) => m.reasoning)) {
-        this.notifyInfo('所选聊天记录中没有思维链内容'); return
-      }
-      const name = (this.filename || '').trim() || '聊天记录'
-      this.exporting = true
-      try {
-        const { columns, rows } = this.buildTable()
-        const saved = await runTableExport({ format: this.exportFormat, columns, rows, filename: name, title: name })
-        if (saved) this.notifySuccess(`已成功导出 ${FORMAT_LABELS[this.exportFormat] || '文件'}`)
-      } catch (err) {
-        console.error('导出失败:', err)
-        this.notifyError('导出失败，请重试')
-      } finally {
-        this.exporting = false
-        this.$emit('update:visible', false)
-      }
-    },
-  },
+defineOptions({ name: 'ExportChatDialog' })
+const props = defineProps({
+  visible: { type: Boolean, default: false },
+  conversationId: { type: [Number, String], default: null },
+  conversationName: { type: String, default: '' },
+})
+const emit = defineEmits(['update:visible'])
+const { success: notifySuccess, error: notifyError, info: notifyInfo } = useNotification()
+
+const FILTERS = [
+  { value: 'all', label: '全部' },
+  { value: 'user', label: '仅用户' },
+  { value: 'ai', label: '仅AI回复' },
+]
+const RANGES = [
+  { value: 'content', label: '仅最后输出内容' },
+  { value: 'reasoning', label: '仅思维链' },
+  { value: 'all', label: '全部' },
+]
+
+const loading = ref(false)
+const msgs = ref([])
+const selectedIds = ref([])
+const expandedIds = ref([])
+const filter = ref('all')
+const range = ref('content')
+const exportFormat = ref('md')
+const filename = ref('')
+const exporting = ref(false)
+
+const visibleMsgs = computed(() => {
+  if (filter.value === 'user') return msgs.value.filter((m) => m.role === 'user')
+  if (filter.value === 'ai') return msgs.value.filter((m) => m.role === 'assistant')
+  return msgs.value
+})
+const allSelected = computed(() => {
+  const vis = visibleMsgs.value
+  return !!vis.length && vis.every((m) => selectedIds.value.includes(m.id))
+})
+
+watch(() => props.visible, (v) => { if (v) onOpen() }, { immediate: true })
+
+function isSelected(id) { return selectedIds.value.includes(id) }
+function isExpanded(id) { return expandedIds.value.includes(id) }
+function isLong(m) { return (m.content || '').length > PREVIEW_MAX || /[\r\n]/.test(m.content || '') }
+function toggle(id) {
+  const i = selectedIds.value.indexOf(id)
+  if (i >= 0) selectedIds.value.splice(i, 1)
+  else selectedIds.value.push(id)
+}
+function toggleExpand(id) {
+  const i = expandedIds.value.indexOf(id)
+  if (i >= 0) expandedIds.value.splice(i, 1)
+  else expandedIds.value.push(id)
+}
+function toggleAll() {
+  const vis = visibleMsgs.value
+  if (allSelected.value) {
+    selectedIds.value = selectedIds.value.filter((id) => !vis.some((m) => m.id === id))
+  } else {
+    for (const m of vis) { if (!selectedIds.value.includes(m.id)) selectedIds.value.push(m.id) }
+  }
+}
+// 消息里承载的思维链：优先取 process.reasoning，其次从「思考」步骤拼接
+function reasoningOf(m) {
+  if (m.reasoning && String(m.reasoning).trim()) return String(m.reasoning).trim()
+  const steps = Array.isArray(m.steps) ? m.steps : []
+  return steps.filter((s) => s.kind === 'reason' && s.text).map((s) => s.text).join('\n\n').trim()
+}
+function onOpen() {
+  filter.value = 'all'
+  range.value = 'content'
+  exportFormat.value = 'md'
+  filename.value = props.conversationName || '聊天记录'
+  expandedIds.value = []
+  selectedIds.value = []
+  exporting.value = false
+  loadMessages()
+}
+async function loadMessages() {
+  msgs.value = []
+  if (props.conversationId == null) return
+  loading.value = true
+  try {
+    const { data } = await axios.get(`/api/ai/conversations/${props.conversationId}/messages`)
+    let seq = 0
+    msgs.value = parseMessages(data.data)
+      .map((m) => ({
+        id: m._id != null ? m._id : `x${seq++}`,
+        role: m.role,
+        content: (m.content || '').trim(),
+        reasoning: reasoningOf(m),
+      }))
+      .filter((m) => m.content || m.reasoning)
+    selectedIds.value = msgs.value.map((m) => m.id)
+  } catch (_) { msgs.value = [] }
+  finally { loading.value = false }
+}
+// 依据导出范围拼出二维数据（列 + 行）
+function buildTable() {
+  const sel = msgs.value.filter((m) => selectedIds.value.includes(m.id))
+  const role = (m) => (m.role === 'user' ? '用户' : 'AI回复')
+  if (range.value === 'reasoning') return { columns: ['角色', '思维链'], rows: sel.map((m) => [role(m), m.reasoning]) }
+  if (range.value === 'all') return { columns: ['角色', '内容', '思维链'], rows: sel.map((m) => [role(m), m.content, m.reasoning]) }
+  return { columns: ['角色', '内容'], rows: sel.map((m) => [role(m), m.content]) }
+}
+function cancel() { emit('update:visible', false) }
+async function doExport() {
+  if (exporting.value) return
+  const sel = msgs.value.filter((m) => selectedIds.value.includes(m.id))
+  if (!sel.length) { notifyInfo('请至少选择一条聊天记录'); return }
+  if (range.value === 'reasoning' && !sel.some((m) => m.reasoning)) {
+    notifyInfo('所选聊天记录中没有思维链内容'); return
+  }
+  const name = (filename.value || '').trim() || '聊天记录'
+  exporting.value = true
+  try {
+    const { columns, rows } = buildTable()
+    const saved = await runTableExport({ format: exportFormat.value, columns, rows, filename: name, title: name })
+    if (saved) notifySuccess(`已成功导出 ${FORMAT_LABELS[exportFormat.value] || '文件'}`)
+  } catch (err) {
+    console.error('导出失败:', err)
+    notifyError('导出失败，请重试')
+  } finally {
+    exporting.value = false
+    emit('update:visible', false)
+  }
 }
 </script>
 

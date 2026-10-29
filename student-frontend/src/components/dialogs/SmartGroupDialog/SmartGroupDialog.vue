@@ -112,7 +112,8 @@
   </Teleport>
 </template>
 
-<script>
+<script setup>
+import { ref, computed, watch, onBeforeUnmount, toRef } from 'vue'
 import '../../../styles/dialog-transition.css'
 import NewComerConfirm from '../NewComerConfirm.vue'
 import AppSelect from '../../base/AppSelect.vue'
@@ -120,107 +121,104 @@ import { useSmartGroupPipeline } from './SmartGroupDialog.pipeline.js'
 import { useSmartGroupConditions } from './SmartGroupDialog.conditions.js'
 import { useSmartGroupPreview } from './SmartGroupDialog.preview.js'
 
+defineOptions({ name: 'SmartGroupDialog' })
+const props = defineProps({
+  visible: Boolean,
+  students: { type: Array, default: () => [] },
+  groups: { type: Array, default: () => [] },
+  leaderTitle: { type: String, default: '组长' }
+})
+const emit = defineEmits(['cancel', 'confirm'])
+
 let keySeq = 0
 const nextKey = () => `st-${++keySeq}`
 
-export default {
-  name: 'SmartGroupDialog',
-  components: { NewComerConfirm, AppSelect },
-  props: {
-    visible: Boolean,
-    students: { type: Array, default: () => [] },
-    groups: { type: Array, default: () => [] },
-    leaderTitle: { type: String, default: '组长' }
-  },
-  emits: ['cancel', 'confirm'],
-  data() {
-    return {
-      // 流水线：按顺序依次应用，越靠后越重要（可部分覆盖前面）
-      stages: [{ type: 'gender', mode: 'balanced', key: nextKey() }],
-      previewGroups: [],
-      rejectText: '',
-      arranged: false,
-      satisfaction: {},
-      lastResult: null,
-      // 拖拽交互状态：stage 拖动排序 / chip 拖入添加
-      _dragIdx: null,
-      _overIdx: null,
-      _pendingType: null,
-      // 新同学校验：小组中有名字不在班级学生信息表中，参与分组前弹窗确认
-      showNewPrompt: false,
-      includeNew: false
+// 流水线：按顺序依次应用，越靠后越重要（可部分覆盖前面）
+const stages = ref([{ type: 'gender', mode: 'balanced', key: nextKey() }])
+const previewGroups = ref([])
+const rejectText = ref('')
+const arranged = ref(false)
+const satisfaction = ref({})
+const lastResult = ref(null)
+// 新同学校验：小组中有名字不在班级学生信息表中，参与分组前弹窗确认
+const showNewPrompt = ref(false)
+const includeNew = ref(false)
+
+// 小组里出现但班级学生信息表里不存在的名字集合
+const strangerNames = computed(() => {
+  const known = new Set(props.students.map(s => String(s.姓名 || '').trim()).filter(Boolean))
+  const out = new Set()
+  for (const g of props.groups)
+    for (const m of (g.members || [])) {
+      const n = String(m.member_name || '').trim()
+      if (n && !known.has(n)) out.add(n)
     }
-  },
-  computed: {
-    // 小组里出现但班级学生信息表里不存在的名字集合
-    strangerNames() {
-      const known = new Set(this.students.map(s => String(s.姓名 || '').trim()).filter(Boolean))
-      const out = new Set()
-      for (const g of this.groups)
-        for (const m of (g.members || [])) {
-          const n = String(m.member_name || '').trim()
-          if (n && !known.has(n)) out.add(n)
-        }
-      return out
-    },
-    strangers() {
-      return [...this.strangerNames]
-    },
-    // 参与分组的班级学生（去掉无名）；若用户选择「参与」，附上小组里的新同学一起分组
-    roster() {
-      const base = this.students.filter(s => String(s.姓名 || '').trim())
-      if (!this.includeNew) return base
-      const named = new Set(base.map(s => String(s.姓名).trim()))
-      const extras = [...this.strangerNames].filter(n => !named.has(n)).map(n => ({ 姓名: n }))
-      return extras.length ? base.concat(extras) : base
-    },
-    // 可选条件（可拖入上方，可复用）
-    conditionChips() {
-      return [
-        { type: 'relation', label: '特殊关系' },
-        { type: 'identity', label: '指定身份' },
-        { type: 'gender', label: '性别比例' }
-      ]
-    }
-  },
-  watch: {
-    visible(v) {
-      if (v) {
-        this.rejectText = ''
-        // 打开时先显示当前已有的分组结果（尚未排表时作为初始预览）
-        this.previewGroups = this.buildGroupsPreview()
-        this.arranged = false
-        this.satisfaction = {}
-        this.lastResult = null
-        this.showNewPrompt = false
-        this.includeNew = false
-      }
-    },
-    stages: {
-      deep: true,
-      handler() {
-        this.arranged = false
-        this.previewGroups = []
-        this.lastResult = null
-      }
-    }
-  },
-  // 提示条自动消失的定时器：弹窗关闭后仍在跑会往已销毁的实例写 rejectText
-  beforeUnmount() { clearTimeout(this._rejectTimer) },
-  methods: {
-    studentById(id) {
-      return this.students.find(s => String(s.id) === String(id)) || null
-    },
-    leaderTitleLabel() {
-      return this.leaderTitle || '组长'
-    },
-    groupLabel(gi) {
-      const g = this.groups[gi]
-      return (g && g.name) || `第${gi + 1}组`
-    },
-    ...useSmartGroupPipeline(),
-    ...useSmartGroupConditions(nextKey),
-    ...useSmartGroupPreview(),
-  }
+  return out
+})
+const strangers = computed(() => [...strangerNames.value])
+// 参与分组的班级学生（去掉无名）；若用户选择「参与」，附上小组里的新同学一起分组
+const roster = computed(() => {
+  const base = props.students.filter(s => String(s.姓名 || '').trim())
+  if (!includeNew.value) return base
+  const named = new Set(base.map(s => String(s.姓名).trim()))
+  const extras = [...strangerNames.value].filter(n => !named.has(n)).map(n => ({ 姓名: n }))
+  return extras.length ? base.concat(extras) : base
+})
+// 可选条件（可拖入上方，可复用）
+const conditionChips = computed(() => [
+  { type: 'relation', label: '特殊关系' },
+  { type: 'identity', label: '指定身份' },
+  { type: 'gender', label: '性别比例' }
+])
+
+// 跨模块共享的上下文：状态为 ref（模块内 .value 访问），临时字段与方法直接挂上；
+// 三个 useXxx 的返回方法在下方 Object.assign 回填，模块间经 ctx 互相调用（运行时解析）
+const ctx = {
+  stages, previewGroups, rejectText, arranged, satisfaction, lastResult,
+  showNewPrompt, includeNew, strangers, roster,
+  students: toRef(props, 'students'),
+  groups: toRef(props, 'groups'),
+  leaderTitle: toRef(props, 'leaderTitle'),
+  // 拖拽交互状态：stage 拖动排序 / chip 拖入添加（非响应式）
+  _dragIdx: null,
+  _overIdx: null,
+  _pendingType: null,
+  // 提示条自动消失的定时器
+  _rejectTimer: null,
+  emit,
 }
+const { buildAssignment } = useSmartGroupPipeline(ctx)
+const conditions = useSmartGroupConditions(ctx, nextKey)
+const preview = useSmartGroupPreview(ctx)
+Object.assign(ctx, { buildAssignment }, conditions, preview)
+
+// 供模板调用的顶层绑定
+const { satisfactionOf, removeStage, onChipDragStart, onStageDragStart, rowDragover, boxDrop } = conditions
+const { startArrange, onParticipate, onNot, cancel, confirm, buildGroupsPreview } = preview
+
+function groupLabel(gi) {
+  const g = props.groups[gi]
+  return (g && g.name) || `第${gi + 1}组`
+}
+
+watch(() => props.visible, (v) => {
+  if (v) {
+    rejectText.value = ''
+    // 打开时先显示当前已有的分组结果（尚未排表时作为初始预览）
+    previewGroups.value = buildGroupsPreview()
+    arranged.value = false
+    satisfaction.value = {}
+    lastResult.value = null
+    showNewPrompt.value = false
+    includeNew.value = false
+  }
+})
+watch(stages, () => {
+  arranged.value = false
+  previewGroups.value = []
+  lastResult.value = null
+}, { deep: true })
+
+// 提示条自动消失的定时器：弹窗关闭后仍在跑会往已销毁的实例写 rejectText
+onBeforeUnmount(() => { clearTimeout(ctx._rejectTimer) })
 </script>

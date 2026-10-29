@@ -23,12 +23,7 @@ function resolveSecret() {
     return process.env.JWT_SECRET;
   }
   const secretFile = path.join(dbManager.dataDir, '.jwt-secret');
-  const legacyFile = path.join(__dirname, '..', '.jwt-secret');
   try {
-    // 兼容旧位置：若旧文件存在且新位置没有，沿用旧密钥并迁移，避免已签发 Token 失效
-    if (!fs.existsSync(secretFile) && fs.existsSync(legacyFile)) {
-      fs.copyFileSync(legacyFile, secretFile);
-    }
     const existing = fs.readFileSync(secretFile, 'utf8').trim();
     if (existing) return existing;
   } catch (_) { /* 文件不存在则生成 */ }

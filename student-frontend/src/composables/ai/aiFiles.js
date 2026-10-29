@@ -1,7 +1,6 @@
 import axios from 'axios'
 import { useNotification } from '../useNotification.js'
-import { INVOKE } from '../../electronChannels.js'
-import { sanitizeFileName } from '../../utils/fileName.js'
+import { saveBlobWithDialog } from '../../utils/saveFile.js'
 import { csvCell } from '../../utils/csvCell.js'
 
 export function readAsDataURL(file) {
@@ -84,27 +83,7 @@ async function readFileInner(file) {
 }
 
 // ===== AI 导出文件：由 export_file 工具下发规格，前端生成字节并弹系统保存对话框 =====
-// 保存走 Electron 的 save-file 通道（浏览器环境退回直接下载）
-async function saveExportWithDialog(defaultName, blob) {
-  // 文件名由 AI 生成 / 用户输入，落盘前统一清洗（非法字符 / 末尾点空格 / 超长）
-  const safeName = sanitizeFileName(defaultName)
-  if (window.electron && typeof window.electron.invoke === 'function') {
-    const arrayBuffer = await blob.arrayBuffer()
-    const result = await window.electron.invoke(INVOKE.SAVE_FILE, { defaultName: safeName, data: arrayBuffer })
-    if (result && !result.canceled && result.filePath) {
-      // 保存成功后用系统默认应用打开文件
-      window.electron.invoke(INVOKE.OPEN_FILE, { filePath: result.filePath }).catch(() => {})
-    }
-    return result && !result.canceled ? result.filePath : ''
-  }
-  const url = URL.createObjectURL(blob)
-  const a = document.createElement('a')
-  a.href = url
-  a.download = safeName
-  a.click()
-  URL.revokeObjectURL(url)
-  return safeName
-}
+// 保存走 utils/saveFile 的统一出口（saveBlobWithDialog），返回保存到的路径（取消/失败为空串）
 
 // 按规格生成文件并保存：xlsx 用 ExcelJS，其余为纯文本序列化
 async function saveAiExport(spec) {
@@ -159,7 +138,7 @@ async function saveAiExport(spec) {
       const line = (cells) => cells.map((c) => String(c == null ? '' : c).replace(/\t/g, ' ').replace(/\r?\n/g, ' ')).join('\t')
       blob = new Blob([line(columns) + '\r\n' + dataRows.map(line).join('\r\n') + '\r\n'], { type: 'text/plain;charset=utf-8;' })
     }
-    const savedPath = await saveExportWithDialog(`${name}.${ext}`, blob)
+    const savedPath = await saveBlobWithDialog(`${name}.${ext}`, blob)
     if (savedPath) notify(`已导出文件：${name}.${ext}`)
   } catch (err) {
     notifyError('导出失败：' + (err.message || '未知错误'))
@@ -207,7 +186,7 @@ async function saveAiImage(spec) {
     const blob = await new Promise((resolve) => canvas.toBlob(resolve, 'image/png'))
     if (!blob) throw new Error('生成图片失败')
     const name = spec.filename || 'AI导出'
-    const savedPath = await saveExportWithDialog(`${name}.png`, blob)
+    const savedPath = await saveBlobWithDialog(`${name}.png`, blob)
     if (savedPath) notify(`已导出图片：${name}.png`)
   } catch (err) {
     notifyError('导出图片失败：' + (err.message || '未知错误'))
