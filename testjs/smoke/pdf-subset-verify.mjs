@@ -6,7 +6,7 @@
  *   2. 产出的子集喂给 jsPDF 后，PDF 体积/耗时符合探针预期；
  *      —— 这里不只是打印指标：子集必须明显小于全量字体、子集 PDF 必须小于全量 PDF，否则以失败退出；
  *   3. `utils/pdfFont.js` 的 collectPdfText 是否把「实际绘制字符」收集齐 —— 漏一个字就是 PDF 里一块空白。
- *      子集会另存到 testjs/tmp/subset-out.ttf，由 font-subset-verify.py 用 fontTools 逐字核对 cmap（本脚本必须跑在前）；
+ *      子集会另存到 testjs/tmp/subset-out.ttf，由 font-subset-verify.mjs 逐字核对 cmap（本脚本必须跑在前）；
  *   4. 两次调用的文本与子集文件都真实落盘，供 Python 端核对。
  *
  * 跑法：node testjs/pdf-subset-verify.mjs
@@ -146,7 +146,7 @@ for (const ch of ['张', '龘', '玥', '喆', '犇', '燚']) {
   console.log(`  「${ch}」子集 ${one.byteLength}B → PDF ${kb(doc.output('arraybuffer').byteLength)}`)
 }
 
-console.log('\n子集已写入', OUT, '（交给 font-subset-verify.py 逐字核对 cmap）')
+console.log('\n子集已写入', OUT, '（交给 font-subset-verify.mjs 逐字核对 cmap）')
 console.log(`wasm 线性内存: 跑完子集后 ${kb(hb.memory.buffer.byteLength)}（只增不减，属导出后的常驻成本）`)
 
 // 退出码：任何一条断言失败都让 run-smoke 记 FAIL（原先本脚本永远以 0 结束）

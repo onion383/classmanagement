@@ -21,8 +21,7 @@
 //     启动后端：npm run electron:dev，或 node student-backend/app.js。
 //     注意：**安全模式的后端不能用来跑这类脚本**（只认 X-Auth-Proof，Bearer 会被判 401），
 //     所以需要后端的脚本应自己起隔离后端（参考 smoke/auth-smoke.js）。
-//   · .py 脚本用 `python` 跑；找不到 python 则 SKIP（字体校验那类依赖 fontTools）。
-//   · **退出码 3 = 脚本自己判定「环境不具备，跳过」**（如缺 fontTools），不计失败。
+//   · 退出码 3 = 脚本自己判定「环境不具备，跳过」（如缺产物文件），不计失败。
 // =========================================================================
 
 const fs = require('node:fs')
@@ -41,10 +40,10 @@ const NEEDS_BACKEND = new Set()
 const BACKEND_PORT = Number(process.env.PORT) || 3000
 const BACKEND_HOST = '127.0.0.1'
 // 有产物依赖的脚本必须按顺序跑：pdf-subset-verify.mjs 先生成 subset-out*.ttf，
-// font-subset-verify.py 再读取产物校验。只按文件名字典序会反过来，干净检出必假失败。
+// font-subset-verify.mjs 再读取产物校验。只按文件名字典序会反过来，干净检出必假失败。
 const ORDER_HINT = new Map([
   ['pdf-subset-verify.mjs', 0],
-  ['font-subset-verify.py', 1],
+  ['font-subset-verify.mjs', 1],
 ])
 
 // ---------- 参数 ----------
@@ -74,7 +73,7 @@ function collect() {
     .readdirSync(SMOKE_DIR)
     .filter((f) => {
       const ext = path.extname(f).toLowerCase()
-      return NODE_EXT.has(ext) || ext === '.py'
+      return NODE_EXT.has(ext)
     })
     .filter((f) => !f.startsWith('_') && !f.startsWith('.'))
     .filter((f) => (opt.only.length ? opt.only.some((k) => f.includes(k)) : true))
@@ -100,28 +99,11 @@ function backendAlive() {
   })
 }
 
-function which(cmd) {
-  const exts = process.platform === 'win32' ? ['.exe', '.cmd', '.bat', ''] : ['']
-  for (const dir of (process.env.PATH || '').split(path.delimiter)) {
-    for (const ext of exts) {
-      const p = path.join(dir, cmd + ext)
-      try {
-        if (fs.statSync(p).isFile()) return p
-      } catch (_) {}
-    }
-  }
-  return null
-}
-
 function runOne(file) {
   const full = path.join(SMOKE_DIR, file)
-  const isPy = path.extname(file).toLowerCase() === '.py'
-  const python = isPy ? which('python') || which('python3') : null
-  const cmd = isPy ? python : process.execPath
-  const argv = isPy ? [full] : [full]
   return new Promise((resolve) => {
     const t0 = Date.now()
-    const child = spawn(cmd, argv, {
+    const child = spawn(process.execPath, [full], {
       cwd: path.join(__dirname, '..'),
       stdio: 'inherit',
       env: { ...process.env, PORT: String(BACKEND_PORT) },
@@ -154,12 +136,6 @@ function runOne(file) {
   for (const f of files) {
     if (NEEDS_BACKEND.has(f) && !alive) {
       console.log(`\n── SKIP  ${f}（后端未启动）`)
-      results.push({ file: f, code: null, ms: 0 })
-      continue
-    }
-    const isPy = path.extname(f).toLowerCase() === '.py'
-    if (isPy && !which('python') && !which('python3')) {
-      console.log(`\n── SKIP  ${f}（未找到 python）`)
       results.push({ file: f, code: null, ms: 0 })
       continue
     }

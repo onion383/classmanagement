@@ -705,7 +705,13 @@ export function useTableCRUD(apiBase, defaultFields, options = {}) {
   function saveCurrentOrder() {
     const display = displayRows.value.filter(r => !r._isNew)
     const ids = display.map(r => r.id)
-    if (ids.length > 0) axios.post(`${apiBase}/reorder`, { ids }).catch(() => {})
+    if (ids.length > 0) {
+      // 排序保存失败必须可感知：界面已按新顺序显示，库里没改，静默会让用户以为已保存
+      axios.post(`${apiBase}/reorder`, { ids }).catch((e) => {
+        console.error(e)
+        notifyError('排序保存失败，改动未保存')
+      })
+    }
   }
 
   // ==================== 事件监听（修复内存泄漏） ====================

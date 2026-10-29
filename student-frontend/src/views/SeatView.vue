@@ -27,7 +27,6 @@
                  行数据 activeLoaded 后再填——未就绪时不给行，避免空格子被误编辑后覆盖真实座位 -->
             <template v-if="seatView === 'active'">
               <GridView
-                ref="activeGridRef"
                 :anchorPrefix="'seat'"
                 :colHeaders="activeColHeaders"
                 :rows="activeLoaded ? activeDisplayRows : []"
@@ -55,7 +54,6 @@
             <!-- 模板表（座位模板）：同临时表，表头先行、行后填 -->
             <template v-else>
               <GridView
-                ref="masterGridRef"
                 :anchorPrefix="'seatt'"
                 :colHeaders="masterColHeaders"
                 :rows="masterLoaded ? masterDisplayRows : []"

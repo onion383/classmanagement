@@ -170,7 +170,6 @@
       <div class="records-panel h-[400px] min-h-0">
         <div v-show="recordsView === 'table'" class="h-full">
           <DynamicTable
-            ref="dynamicTable"
             :fields="leaveFields"
             :rows="displayLeaves"
             :newRow="newRow"

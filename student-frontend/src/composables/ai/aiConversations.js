@@ -246,7 +246,9 @@ export function useAiConversations(ctx) {
           ctx.messages.value = []
         }
         await ctx.loadConversationList()
-      } catch (_) { /* 忽略 */ }
+      } catch (err) {
+        reportError(err, { action: '删除会话' })
+      }
     },
   }
 }

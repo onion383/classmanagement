@@ -327,7 +327,7 @@ async function onRemoveConfirm() {
     await refreshModelsOnly()
     emit('saved')
   } catch (err) {
-    console.error('删除失败:', err)
+    reportError(err, { action: '删除模型' })
   }
   removeTarget.value = null
 }

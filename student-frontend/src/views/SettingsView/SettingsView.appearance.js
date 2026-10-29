@@ -125,7 +125,9 @@ export function useSettingsAppearance(ctx) {
         })
         window.electron?.send(SEND.TO_WIDGET, { type: 'settings-changed' })
       } catch (err) {
+        // 工具箱开关/保存路径失败必须可感知：界面已切换、库里没改，静默会在重启后"设置回滚"
         console.error('保存工具箱设置失败:', err)
+        ctx.notifyError('工具箱设置保存失败，改动未保存')
       }
     },
     onToolboxChange(value) {
